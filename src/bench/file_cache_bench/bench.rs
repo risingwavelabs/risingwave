@@ -21,7 +21,7 @@ use clap::Parser;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions};
-use risingwave_storage::hummock::TieredCacheKey;
+use risingwave_storage::hummock::{TieredCacheKey, TieredCacheValue};
 use tokio::sync::oneshot;
 
 use crate::analyze::{analyze, monitor, Hook, Metrics};
@@ -94,7 +94,7 @@ pub async fn run() {
         flush_buffer_hooks: vec![hook],
     };
 
-    let cache: FileCache<Index> = FileCache::open(options).await.unwrap();
+    let cache: FileCache<Index, CacheValue> = FileCache::open(options).await.unwrap();
 
     let iostat_path = dev_stat_path(&args.path);
 
@@ -165,10 +165,31 @@ pub async fn run() {
     tokio::time::sleep(Duration::from_millis(300)).await;
 }
 
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct CacheValue(Vec<u8>);
+
+impl TieredCacheValue for CacheValue {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.len()
+    }
+
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_slice(&self.0)
+    }
+
+    fn decode(buf: Vec<u8>) -> Self {
+        Self(buf)
+    }
+}
+
 async fn bench(
     id: usize,
     args: Args,
-    cache: FileCache<Index>,
+    cache: FileCache<Index, CacheValue>,
     time: u64,
     metrics: Metrics,
     mut stop: oneshot::Receiver<()>,
@@ -194,7 +215,7 @@ async fn bench(
         for _ in 0..args.write {
             idx += 1;
             let key = Index { sst, idx };
-            let value = vec![b'x'; args.bs];
+            let value = CacheValue(vec![b'x'; args.bs]);
 
             let start = Instant::now();
             cache.insert(key, value).unwrap();

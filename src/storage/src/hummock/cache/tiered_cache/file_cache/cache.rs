@@ -14,7 +14,6 @@
 
 use std::collections::hash_map::RandomState;
 use std::sync::Arc;
-use std::u8;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -22,12 +21,11 @@ use risingwave_common::cache::LruCache;
 use tokio::sync::Notify;
 
 use super::buffer::TwoLevelBuffer;
-use super::coding::HashBuilder;
 use super::error::Result;
 use super::meta::SlotId;
 use super::store::{Store, StoreOptions, StoreRef};
 use super::{utils, LRU_SHARD_BITS};
-use crate::hummock::TieredCacheKey;
+use crate::hummock::{HashBuilder, TieredCacheEntryHolder, TieredCacheKey, TieredCacheValue};
 
 pub struct FileCacheOptions {
     pub dir: String,
@@ -49,13 +47,14 @@ pub trait FlushBufferHook: Send + Sync + 'static {
     }
 }
 
-struct BufferFlusher<K, S>
+struct BufferFlusher<K, V, S>
 where
     K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
-    buffer: TwoLevelBuffer<K>,
-    store: StoreRef<K>,
+    buffer: TwoLevelBuffer<K, V>,
+    store: StoreRef<K, V>,
     indices: Arc<LruCache<K, SlotId>>,
     notifier: Arc<Notify>,
 
@@ -64,9 +63,10 @@ where
     hooks: Vec<Arc<dyn FlushBufferHook>>,
 }
 
-impl<K, S> BufferFlusher<K, S>
+impl<K, V, S> BufferFlusher<K, V, S>
 where
     K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
     async fn run(&self) -> Result<()> {
@@ -79,28 +79,35 @@ where
 
             let frozen = self.buffer.frozen();
 
-            let mut batch = Vec::new();
-            // TODO(MrCroxx): Avoid clone here?
-            frozen.for_all(|key, value| batch.push((key.clone(), value.clone())));
+            let mut encoded_value_lens = Vec::with_capacity(64);
+            let mut batch = self.store.batch(64);
+
+            frozen.for_all(|key, value| {
+                batch.append(key.clone(), value);
+                encoded_value_lens.push(value.encoded_len());
+            });
 
             let mut bytes = 0;
             if batch.is_empty() {
                 // Avoid allocate a new buffer.
                 self.buffer.swap();
             } else {
-                let slots = self.store.insert(&batch).await?;
+                let (keys, slots) = self.store.insert(batch).await?;
 
-                for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
+                for ((key, encoded_value_len), slot) in keys
+                    .into_iter()
+                    .zip_eq(encoded_value_lens.into_iter())
+                    .zip_eq(slots.into_iter())
+                {
                     let hash = self.hash_builder.hash_one(&key);
                     self.indices.insert(
                         key,
                         hash,
-                        utils::align_up(self.store.block_size(), value.len()),
+                        utils::align_up(self.store.block_size(), encoded_value_len),
                         slot,
                     );
-                    bytes += value.len();
+                    bytes += utils::align_up(self.store.block_size(), encoded_value_len);
                 }
-
                 self.buffer.rotate();
             }
 
@@ -111,25 +118,43 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct FileCache<K, S = RandomState>
+pub struct FileCache<K, V, S = RandomState>
 where
     K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
     hash_builder: S,
 
     indices: Arc<LruCache<K, SlotId>>,
 
-    store: StoreRef<K>,
+    store: StoreRef<K, V>,
 
-    buffer: TwoLevelBuffer<K>,
+    buffer: TwoLevelBuffer<K, V>,
     buffer_flusher_notifier: Arc<Notify>,
 }
 
-impl<K> FileCache<K, RandomState>
+impl<K, V, S> Clone for FileCache<K, V, S>
 where
     K: TieredCacheKey,
+    V: TieredCacheValue,
+    S: HashBuilder,
+{
+    fn clone(&self) -> Self {
+        Self {
+            hash_builder: self.hash_builder.clone(),
+            indices: self.indices.clone(),
+            store: self.store.clone(),
+            buffer: self.buffer.clone(),
+            buffer_flusher_notifier: self.buffer_flusher_notifier.clone(),
+        }
+    }
+}
+
+impl<K, V> FileCache<K, V, RandomState>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
 {
     pub async fn open(options: FileCacheOptions) -> Result<Self> {
         let hash_builder = RandomState::new();
@@ -137,9 +162,10 @@ where
     }
 }
 
-impl<K, S> FileCache<K, S>
+impl<K, V, S> FileCache<K, V, S>
 where
     K: TieredCacheKey,
+    V: TieredCacheValue,
     S: HashBuilder,
 {
     pub async fn open_with_hasher(options: FileCacheOptions, hash_builder: S) -> Result<Self> {
@@ -193,7 +219,7 @@ where
         })
     }
 
-    pub fn insert(&self, key: K, value: Vec<u8>) -> Result<()> {
+    pub fn insert(&self, key: K, value: V) -> Result<()> {
         let hash = self.hash_builder.hash_one(&key);
         self.buffer.insert(hash, key, value.len(), value);
 
@@ -201,16 +227,17 @@ where
         Ok(())
     }
 
-    pub async fn get(&self, key: &K) -> Result<Option<Vec<u8>>> {
+    pub async fn get(&self, key: &K) -> Result<Option<TieredCacheEntryHolder<K, V>>> {
         let hash = self.hash_builder.hash_one(key);
-        if let Some(value) = self.buffer.get(hash, key) {
-            return Ok(Some(value));
+        if let Some(holder) = self.buffer.get(hash, key) {
+            return Ok(Some(holder));
         }
 
         if let Some(entry) = self.indices.lookup(hash, key) {
             let slot = *entry.value();
-            let value = self.store.get(slot).await?;
-            return Ok(Some(value));
+            let raw = self.store.get(slot).await?;
+            let value = V::decode(raw);
+            return Ok(Some(TieredCacheEntryHolder::from_owned_value(value)));
         }
 
         Ok(None)
@@ -239,6 +266,8 @@ mod tests {
     use super::super::test_utils::{datasize, key, FlushHolder, ModuloHasherBuilder, TestCacheKey};
     use super::super::utils;
     use super::*;
+    use crate::hummock::file_cache::test_utils::TestCacheValue;
+    use crate::hummock::Block;
 
     const SHARDS: usize = 1 << LRU_SHARD_BITS;
     const SHARDSU8: u8 = SHARDS as u8;
@@ -255,7 +284,7 @@ mod tests {
 
     #[test]
     fn ensure_send_sync_clone() {
-        is_send_sync_clone::<FileCache<TestCacheKey>>();
+        is_send_sync_clone::<FileCache<TestCacheKey, Box<Block>>>();
     }
 
     fn tempdir() -> tempfile::TempDir {
@@ -274,7 +303,7 @@ mod tests {
     async fn create_file_cache_manager_for_test(
         dir: impl AsRef<Path>,
         flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
-    ) -> FileCache<TestCacheKey, ModuloHasherBuilder<SHARDSU8>> {
+    ) -> FileCache<TestCacheKey, TestCacheValue, ModuloHasherBuilder<SHARDSU8>> {
         let options = FileCacheOptions {
             dir: dir.as_ref().to_str().unwrap().to_string(),
             capacity: CAPACITY,
@@ -298,19 +327,30 @@ mod tests {
         cache.insert(key(1), vec![b'1'; 1234]).unwrap();
 
         // active
-        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        assert_eq!(
+            cache.get(&key(1)).await.unwrap().as_deref(),
+            Some(&vec![b'1'; 1234])
+        );
+
         // frozen
         holder.trigger();
         holder.wait().await;
-        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        assert_eq!(
+            cache.get(&key(1)).await.unwrap().as_deref(),
+            Some(&vec![b'1'; 1234])
+        );
+
         // cache file
         cache.buffer_flusher_notifier.notify_one();
         holder.trigger();
         holder.wait().await;
-        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        assert_eq!(
+            cache.get(&key(1)).await.unwrap().as_deref(),
+            Some(&vec![b'1'; 1234])
+        );
 
         cache.erase(&key(1)).unwrap();
-        assert_eq!(cache.get(&key(1)).await.unwrap(), None);
+        assert_eq!(cache.get(&key(1)).await.unwrap().as_deref(), None);
     }
 
     #[tokio::test]
@@ -322,16 +362,24 @@ mod tests {
 
         for i in 0..SHARDSU64 * 2 {
             cache.insert(key(i), vec![b'x'; BS]).unwrap();
-            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                Some(&vec![b'x'; BS])
+            );
         }
 
         for i in 0..SHARDSU64 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                None,
+                "i: {}",
+                i
+            );
         }
         for i in SHARDSU64..SHARDSU64 * 2 {
             assert_eq!(
-                cache.get(&key(i)).await.unwrap(),
-                Some(vec![b'x'; BS]),
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                Some(&vec![b'x'; BS]),
                 "i: {}",
                 i
             );
@@ -352,16 +400,22 @@ mod tests {
         );
 
         for i in 0..SHARDSU64 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), None);
+            assert_eq!(cache.get(&key(i)).await.unwrap().as_deref(), None);
         }
         for i in SHARDSU64..SHARDSU64 * 2 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap().as_deref(),
+                Some(&vec![b'x'; BS])
+            );
         }
 
         for l in 0..LOOPS as u64 {
             for i in (l + 2) * SHARDSU64..(l + 3) * SHARDSU64 {
                 cache.insert(key(i), vec![b'x'; BS]).unwrap();
-                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    Some(&vec![b'x'; BS])
+                );
             }
             holder.trigger();
             holder.wait().await;
@@ -381,13 +435,21 @@ mod tests {
 
         for l in 0..2 + LOOPS as u64 - 4 {
             for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
-                assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    None,
+                    "i: {}",
+                    i
+                );
             }
         }
 
         for l in 2 + LOOPS as u64 - 4..2 + LOOPS as u64 {
             for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
-                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    Some(&vec![b'x'; BS])
+                );
             }
         }
     }
@@ -402,7 +464,10 @@ mod tests {
         for l in 0..LOOPS as u64 {
             for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
                 cache.insert(key(i), vec![b'x'; BS]).unwrap();
-                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+                assert_eq!(
+                    cache.get(&key(i)).await.unwrap().as_deref(),
+                    Some(&vec![b'x'; BS])
+                );
             }
             holder.trigger();
             holder.wait().await;
@@ -422,7 +487,7 @@ mod tests {
 
         let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
         for (key, slot) in map {
-            assert_eq!(cache.get(&key).await.unwrap(), slot);
+            assert_eq!(cache.get(&key).await.unwrap().as_deref(), slot.as_deref());
         }
     }
 }

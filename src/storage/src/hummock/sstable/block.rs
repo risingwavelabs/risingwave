@@ -28,6 +28,7 @@ pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 16;
 
+#[derive(Clone)]
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
@@ -38,14 +39,6 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn new(data: Bytes, data_len: usize, restart_points: Vec<u32>) -> Self {
-        Block {
-            data,
-            data_len,
-            restart_points,
-        }
-    }
-
     pub fn decode(buf: Bytes) -> HummockResult<Self> {
         // Verify checksum.
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
@@ -76,6 +69,10 @@ impl Block {
             }
         };
 
+        Ok(Self::decode_from_raw(buf))
+    }
+
+    pub fn decode_from_raw(buf: Bytes) -> Self {
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -85,11 +82,11 @@ impl Block {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
-        Ok(Block {
+        Block {
             data: buf,
             data_len,
             restart_points,
-        })
+        }
     }
 
     /// Entries data len.
@@ -127,6 +124,10 @@ impl Block {
 
     pub fn data(&self) -> &[u8] {
         &self.data[..self.data_len]
+    }
+
+    pub fn raw_data(&self) -> &[u8] {
+        &self.data[..]
     }
 }
 

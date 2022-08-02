@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::Hash;
+use std::hash::{BuildHasher, Hash};
+
+pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
 
 pub trait TieredCacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
     fn encoded_len() -> usize;
@@ -23,18 +25,87 @@ pub trait TieredCacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::
 }
 
 #[expect(clippy::len_without_is_empty)]
-pub trait TieredCacheValue: Send + Sync + 'static {
+pub trait TieredCacheValue: Send + Sync + Clone + 'static {
     fn len(&self) -> usize;
+
+    fn encoded_len(&self) -> usize;
 
     fn encode(&self, buf: &mut [u8]);
 
-    fn decode(buf: &[u8]) -> Self;
+    fn decode(buf: Vec<u8>) -> Self;
+}
+
+pub enum TieredCacheEntry<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    Cache(CachableEntry<K, V>),
+    Owned(Box<V>),
+}
+
+pub struct TieredCacheEntryHolder<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    handle: TieredCacheEntry<K, V>,
+    value: *const V,
+}
+
+impl<K, V> TieredCacheEntryHolder<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    pub fn from_cached_value(entry: CachableEntry<K, V>) -> Self {
+        let ptr = entry.value() as *const _;
+        Self {
+            handle: TieredCacheEntry::Cache(entry),
+            value: ptr,
+        }
+    }
+
+    pub fn from_owned_value(value: V) -> Self {
+        let value = Box::new(value);
+        let ptr = value.as_ref() as *const _;
+        Self {
+            handle: TieredCacheEntry::Owned(value),
+            value: ptr,
+        }
+    }
+
+    pub fn into_inner(self) -> TieredCacheEntry<K, V> {
+        self.handle
+    }
+
+    pub fn into_owned(self) -> V {
+        match self.handle {
+            // TODO(MrCroxx): There is a copy here, eliminate it by erase the entry later.
+            TieredCacheEntry::Cache(entry) => entry.value().clone(),
+            TieredCacheEntry::Owned(value) => *value,
+        }
+    }
+}
+
+impl<K, V> std::ops::Deref for TieredCacheEntryHolder<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &(*self.value) }
+    }
 }
 
 #[cfg(target_os = "linux")]
 pub mod file_cache;
 
 use std::marker::PhantomData;
+
+use risingwave_common::cache::CachableEntry;
 
 #[derive(thiserror::Error, Debug)]
 pub enum TieredCacheError {
@@ -51,14 +122,34 @@ pub enum TieredCacheOptions {
     FileCache(file_cache::cache::FileCacheOptions),
 }
 
-#[derive(Clone)]
-pub enum TieredCache<K: TieredCacheKey> {
-    NoneCache(PhantomData<K>),
+pub enum TieredCache<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    NoneCache(PhantomData<(K, V)>),
     #[cfg(target_os = "linux")]
-    FileCache(file_cache::cache::FileCache<K>),
+    FileCache(file_cache::cache::FileCache<K, V>),
 }
 
-impl<K: TieredCacheKey> TieredCache<K> {
+impl<K, V> Clone for TieredCache<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    fn clone(&self) -> Self {
+        match self {
+            TieredCache::NoneCache(_) => TieredCache::NoneCache(PhantomData::default()),
+            TieredCache::FileCache(file_cache) => TieredCache::FileCache(file_cache.clone()),
+        }
+    }
+}
+
+impl<K, V> TieredCache<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
     #[allow(clippy::unused_async)]
     pub async fn open(options: TieredCacheOptions) -> Result<Self> {
         match options {
@@ -72,7 +163,7 @@ impl<K: TieredCacheKey> TieredCache<K> {
     }
 
     #[allow(unused_variables)]
-    pub fn insert(&self, key: K, value: Vec<u8>) -> Result<()> {
+    pub fn insert(&self, key: K, value: V) -> Result<()> {
         match self {
             TieredCache::NoneCache(_) => Ok(()),
             #[cfg(target_os = "linux")]
@@ -96,13 +187,13 @@ impl<K: TieredCacheKey> TieredCache<K> {
     }
 
     #[allow(unused_variables, clippy::unused_async)]
-    pub async fn get(&self, key: &K) -> Result<Option<Vec<u8>>> {
+    pub async fn get(&self, key: &K) -> Result<Option<TieredCacheEntryHolder<K, V>>> {
         match self {
             TieredCache::NoneCache(_) => Ok(None),
             #[cfg(target_os = "linux")]
             TieredCache::FileCache(file_cache) => {
-                let value = file_cache.get(key).await?;
-                Ok(value)
+                let holder = file_cache.get(key).await?;
+                Ok(holder)
             }
         }
     }

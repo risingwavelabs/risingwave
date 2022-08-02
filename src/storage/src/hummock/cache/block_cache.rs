@@ -17,15 +17,15 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache, LruCacheEventListener};
 use risingwave_common::config::FileCacheConfig;
 use risingwave_hummock_sdk::HummockSstableId;
 
 use crate::hummock::{
-    Block, HummockError, HummockResult, TieredCache, TieredCacheKey, TieredCacheOptions,
-    TieredCacheValue,
+    Block, HummockError, HummockResult, TieredCache, TieredCacheEntry, TieredCacheKey,
+    TieredCacheOptions, TieredCacheValue,
 };
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
@@ -65,6 +65,13 @@ impl BlockHolder {
             block: ptr,
         }
     }
+
+    pub fn from_tiered_cache(entry: TieredCacheEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
+        match entry {
+            TieredCacheEntry::Cache(entry) => Self::from_cached_block(entry),
+            TieredCacheEntry::Owned(block) => Self::from_owned_block(*block),
+        }
+    }
 }
 
 impl Deref for BlockHolder {
@@ -77,6 +84,12 @@ impl Deref for BlockHolder {
 
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
+
+impl AsRef<Self> for Box<Block> {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
 
 impl TieredCacheKey for (HummockSstableId, u64) {
     fn encoded_len() -> usize {
@@ -100,26 +113,21 @@ impl TieredCacheValue for Box<Block> {
         Block::len(self)
     }
 
-    fn encode(&self, _buf: &mut [u8]) {
-        todo!()
+    fn encoded_len(&self) -> usize {
+        self.len()
     }
 
-    fn decode(_buf: &[u8]) -> Self {
-        todo!()
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_slice(self.raw_data());
     }
-}
 
-// N (4B) + N * restart point len (N * 4B) + data len
-fn encode_block(_block: &Block) -> Vec<u8> {
-    todo!()
-}
-
-fn decode_block(_buf: &[u8]) -> Block {
-    todo!()
+    fn decode(buf: Vec<u8>) -> Self {
+        Box::new(Block::decode_from_raw(Bytes::from(buf)))
+    }
 }
 
 pub struct MemoryBlockCacheEventListener {
-    tiered_cache: TieredCache<(HummockSstableId, u64)>,
+    tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
 }
 
 impl LruCacheEventListener for MemoryBlockCacheEventListener {
@@ -127,9 +135,8 @@ impl LruCacheEventListener for MemoryBlockCacheEventListener {
     type T = Box<Block>;
 
     fn on_release(&self, key: Self::K, value: Self::T) {
-        let tiered_cache_value = encode_block(&value);
         // TODO(MrCroxx): handle error?
-        self.tiered_cache.insert(key, tiered_cache_value).unwrap();
+        self.tiered_cache.insert(key, value).unwrap();
     }
 }
 
@@ -138,7 +145,7 @@ pub struct BlockCache {
     // TODO: replace `(HummockSstableId, u64)` with CacheKey.
     inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
 
-    tiered_cache: TieredCache<(HummockSstableId, u64)>,
+    tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
 }
 
 impl BlockCache {
@@ -211,9 +218,8 @@ impl BlockCache {
         }
 
         // TODO(MrCroxx): handle error
-        if let Some(data) = self.tiered_cache.get(&(sst_id, block_idx)).await.unwrap() {
-            let block = Box::new(decode_block(&data));
-            return Some(BlockHolder::from_owned_block(block));
+        if let Some(holder) = self.tiered_cache.get(&(sst_id, block_idx)).await.unwrap() {
+            return Some(BlockHolder::from_tiered_cache(holder.into_inner()));
         }
 
         None
@@ -251,12 +257,14 @@ impl BlockCache {
                 let tiered_cache = self.tiered_cache.clone();
                 let f = f();
                 async move {
-                    if let Some(data) = tiered_cache
+                    if let Some(holder) = tiered_cache
                         .get(&key)
                         .await
                         .map_err(HummockError::tiered_cache)?
                     {
-                        let block = Box::new(decode_block(&data));
+                        // TODO(MrCroxx): `TieredCacheEntryHolder::into_owned()` may perform copy,
+                        // eliminate it later.
+                        let block = holder.into_owned();
                         let len = block.len();
                         return Ok((block, len));
                     }
