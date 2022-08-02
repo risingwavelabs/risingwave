@@ -36,7 +36,7 @@ services:
 
   mysql:
     image: mysql/mysql-server:latest
-    # container_name: mysql
+    container_name: mysql
     # ports:
     #   - '3306:3306'
     volumes:
@@ -47,6 +47,7 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
+    userns: "host"
     network_mode: "host"
     # networks:
     #   nw:
