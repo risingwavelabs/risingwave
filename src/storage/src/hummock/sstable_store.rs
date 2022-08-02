@@ -309,8 +309,8 @@ impl SstableStore {
                         } else {
                             Sstable::new(sst_id, meta)
                         };
-                        let add = (now.elapsed().as_secs_f64() * 1000.0) as u64;
-                        stats_ptr.fetch_add(add, Ordering::Relaxed);
+                        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                         Ok((Box::new(sst), size))
                     }
                 })
