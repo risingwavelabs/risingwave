@@ -160,7 +160,7 @@ impl ToBatchProst for BatchLookupJoin {
                 .eq_join_predicate
                 .left_eq_indexes()
                 .into_iter()
-                .map(|a| a as i32)
+                .map(|a| a as _)
                 .collect(),
             probe_side_table_desc: Some(self.right_table_desc.to_protobuf()),
             probe_side_vnode_mapping: self

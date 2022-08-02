@@ -142,7 +142,9 @@ pub async fn compute_node_serve(
         let memory_limiter = Arc::new(MemoryLimiter::new(
             storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
         ));
-        if opts.state_store.starts_with("hummock+memory")
+        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
+        // compactor along with compute node.
+        if opts.state_store == "hummock+memory"
             || opts.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
@@ -156,6 +158,7 @@ pub async fn compute_node_serve(
                 Some(Arc::new(CompactionExecutor::new(Some(1)))),
                 table_id_to_slice_transform.clone(),
                 memory_limiter.clone(),
+                storage.sstable_id_manager(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
