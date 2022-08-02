@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
     Table as ProstTable,
@@ -461,13 +461,17 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
-        Ok(resp.table_id)
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+        let resp = self
+            .inner
+            .get_new_sst_ids(GetNewSstIdsRequest { number })
+            .await?;
+        Ok(SstIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         let req = ReportCompactionTasksRequest {
+            context_id: self.worker_id(),
             compact_task: Some(compact_task),
         };
         self.inner.report_compaction_tasks(req).await?;
@@ -634,7 +638,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
-            ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
+            ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }

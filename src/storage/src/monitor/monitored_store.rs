@@ -24,7 +24,7 @@ use super::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::HummockStorage;
+use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -227,12 +227,16 @@ where
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            self.inner
+            let size = self
+                .inner
                 .sync(epoch)
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
-            Ok(())
+            if size != 0 {
+                self.stats.write_l0_size_per_epoch.observe(size as _);
+            }
+            Ok(size)
         }
     }
 
@@ -274,6 +278,10 @@ impl MonitoredStateStore<HummockStorage> {
 
     pub fn local_version_manager(&self) -> Arc<LocalVersionManager> {
         self.inner.local_version_manager().clone()
+    }
+
+    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
+        self.inner.sstable_id_manager().clone()
     }
 }
 

@@ -17,8 +17,10 @@ use std::fmt::{Debug, Formatter};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use log::debug;
+use rand::seq::SliceRandom;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{
     ExchangeInfo, PlanFragment, PlanNode as BatchPlanProst, TaskId, TaskOutputId,
@@ -72,8 +74,23 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         plan: BatchPlanProst,
+        vnodes: Option<Vec<ParallelUnitId>>,
     ) -> SchedulerResult<impl DataChunkStream> {
-        let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
+        let worker_node_addr = match vnodes {
+            Some(mut parallel_unit_ids) => {
+                parallel_unit_ids.dedup();
+                let candidates = self
+                    .worker_node_manager
+                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                candidates
+                    .choose(&mut rand::thread_rng())
+                    .unwrap()
+                    .clone()
+                    .host
+                    .unwrap()
+            }
+            None => self.worker_node_manager.next_random()?.host.unwrap(),
+        };
 
         let compute_client = self
             .compute_client_pool
