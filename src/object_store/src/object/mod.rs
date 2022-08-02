@@ -330,13 +330,17 @@ pub async fn parse_remote_object_store(
         disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
             DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
         ),
-        memory if memory.starts_with("memory") => {
+        "memory" => {
             tracing::warn!("You're using Hummock in-memory remote object store. This should never be used in benchmarks and production environment.");
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
+        "memory-shared" => {
+            tracing::warn!("You're using Hummock shared in-memory remote object store. This should never be used in benchmarks and production environment.");
+            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
+        }
         other => {
             unimplemented!(
-                "{} hummock remote object store only supports s3, minio, disk, and memory for now.",
+                "{} hummock remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
                 other
             )
         }
@@ -360,13 +364,13 @@ pub async fn parse_local_object_store(
                 .to_owned();
             ObjectStoreImpl::Disk(DiskObjectStore::new(path.as_str()).monitored(metrics))
         }
-        memory if memory.starts_with("memory") => {
+        "memory" => {
             tracing::warn!("You're using Hummock in-memory local object store. This should never be used in benchmarks and production environment.");
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         other => {
             unimplemented!(
-                "{} Hummock only supports s3, minio, disk, and  memory for now.",
+                "{} Hummock only supports s3, minio, disk, and memory for now.",
                 other
             )
         }
