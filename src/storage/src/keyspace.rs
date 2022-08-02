@@ -151,7 +151,7 @@ impl<S: StateStore> Keyspace<S> {
     /// **Note**: the `range` should not be prepended with the prefix of this keyspace.
     pub async fn iter_with_range<R, B>(
         &self,
-        filter_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Vec<u8>>,
         range: R,
         read_options: ReadOptions,
     ) -> StorageResult<StripPrefixIterator<S::Iter>>
@@ -161,7 +161,7 @@ impl<S: StateStore> Keyspace<S> {
     {
         let range = prefixed_range(range, &self.prefix);
         let prefix_hint =
-            filter_hint.map(|filter_hint| [self.prefix.to_vec(), filter_hint].concat());
+            prefix_hint.map(|prefix_hint| [self.prefix.to_vec(), prefix_hint].concat());
 
         let iter = self.store.iter(prefix_hint, range, read_options).await?;
         let strip_prefix_iterator = StripPrefixIterator {

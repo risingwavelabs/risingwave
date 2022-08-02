@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::{end_bound_of_prefix, key_with_epoch, next_key};
+use risingwave_hummock_sdk::key::{key_with_epoch, next_key};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::LevelType;
 
@@ -75,11 +75,11 @@ impl HummockIteratorType for BackwardIter {
 }
 
 impl HummockStorage {
-    /// `iter_inner` impletements the `bloom_filter` filtering of sstable by `filter_key` (iff when
+    /// `iter_inner` impletements the `bloom_filter` filtering of sstable by `prefix_hint` (iff when
     /// its Some), and builds iterator by `key_range`
     async fn iter_inner<R, B, T>(
         &self,
-        filter_key: Option<Vec<u8>>,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
@@ -159,7 +159,7 @@ impl HummockStorage {
 
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
-                    if let Some(bloom_filter_key) = filter_key.as_ref() {
+                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info.id, &mut stats)
@@ -186,7 +186,7 @@ impl HummockStorage {
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
-                    if let Some(bloom_filter_key) = filter_key.as_ref() {
+                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
                         if sstable.value().surely_not_have_user_key(bloom_filter_key) {
                             continue;
                         }
@@ -478,6 +478,8 @@ impl StateStore for HummockStorage {
         B: AsRef<[u8]> + Send,
     {
         if let Some(prefix_hint) = prefix_hint.as_ref() {
+            let next_key = next_key(prefix_hint);
+
             // learn more detail about start_bound with storage_table.rs.
             match key_range.start_bound() {
                 // it guarantees that the start bound must be included (some different case)
@@ -492,45 +494,33 @@ impl StateStore for HummockStorage {
                 // col_bound)) => prefix_hint <= start_bound <= next_key(prefix_hint)
                 //
                 // 3. Include(pk) => prefix_hint <= start_bound < next_key(prefix_hint)
-                Included(range_start) => {
-                    let next_key = next_key(prefix_hint);
+                Included(range_start) | Excluded(range_start) => {
                     assert!(range_start.as_ref() >= prefix_hint.as_slice());
-                    assert!(range_start.as_ref() < next_key.as_slice());
+                    assert!(range_start.as_ref() < next_key.as_slice() || next_key.is_empty());
                 }
 
                 _ => unreachable!(),
             }
 
             match key_range.end_bound() {
-                Included(_) => {
-                    // it guarantees that the end bound must be excluded or unbounded
-                    unreachable!()
+                Included(range_end) => {
+                    assert!(range_end.as_ref() >= prefix_hint.as_slice());
+                    assert!(range_end.as_ref() < next_key.as_slice() || next_key.is_empty());
                 }
 
-                // for case 1, Should use excluded next key for end bound so need
-                // end_bound_of_prefix
-                //
                 // 1. Excluded(end_bound_of_prefix(pk + col)) => prefix_hint < end_bound <=
-                // end_bound_of_prefix(prefix_hint)
+                // next_key(prefix_hint)
                 //
                 // 2. Excluded(pk + bound) => prefix_hint < end_bound <=
-                // end_bound_of_prefix(prefix_hint)
-                //
-                // 3. Unbound => do not check
+                // next_key(prefix_hint)
                 Excluded(range_end) => {
-                    let prefix_end_bound = end_bound_of_prefix(prefix_hint.as_slice());
                     assert!(range_end.as_ref() > prefix_hint.as_slice());
-                    match prefix_end_bound {
-                        Included(_) => unreachable!(),
-                        Excluded(prefix_end_bound_key) => {
-                            assert!(range_end.as_ref() <= prefix_end_bound_key.as_slice());
-                        }
-
-                        std::ops::Bound::Unbounded => {}
-                    }
+                    assert!(range_end.as_ref() <= next_key.as_slice() || next_key.is_empty());
                 }
 
-                std::ops::Bound::Unbounded => {}
+                std::ops::Bound::Unbounded => {
+                    assert!(next_key.is_empty());
+                }
             }
         } else {
             // not check
