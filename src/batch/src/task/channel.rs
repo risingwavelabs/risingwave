@@ -37,6 +37,7 @@ pub(super) trait ChanSender: Send {
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_>;
 }
 
+#[derive(Debug)]
 pub enum ChanSenderImpl {
     HashShuffle(HashShuffleSender),
     Fifo(FifoSender),
