@@ -146,7 +146,7 @@ fn get_acl_items(
                 });
             res.push('/');
             // should be able to query grantor's name
-            res.push_str(username_map.get(key).as_ref().unwrap()); 
+            res.push_str(username_map.get(key).as_ref().unwrap());
         }
     }
     res
