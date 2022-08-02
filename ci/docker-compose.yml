@@ -20,9 +20,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-    pid: host
-    userns_mode: host
-    network_mode: host
     volumes:
       - ..:/risingwave
     networks:
