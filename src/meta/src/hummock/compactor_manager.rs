@@ -149,9 +149,13 @@ mod tests {
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
-    use crate::hummock::test_utils::{commit_from_meta_node, generate_test_tables, get_sst_ids, register_sstable_infos_to_compaction_group, setup_compute_env_with_config, to_local_sstable_info};
-    use crate::hummock::{CompactorManager, HummockManager};
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::test_utils::{
+        commit_from_meta_node, generate_test_tables, get_sst_ids,
+        register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
+        to_local_sstable_info,
+    };
+    use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)

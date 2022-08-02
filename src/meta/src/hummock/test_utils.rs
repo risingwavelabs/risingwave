@@ -243,8 +243,8 @@ pub async fn setup_compute_env_with_config(
             compaction_group_manager,
             compactor_manager,
         )
-            .await
-            .unwrap(),
+        .await
+        .unwrap(),
     );
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
