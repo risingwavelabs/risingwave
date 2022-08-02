@@ -48,7 +48,7 @@ services:
       timeout: 40s
       retries: 5
     userns_mode: "host"
-    network_mode: "host"
+    # network_mode: "host"
     # networks:
     #   nw:
     #     ipv4_address: 172.24.2.1
