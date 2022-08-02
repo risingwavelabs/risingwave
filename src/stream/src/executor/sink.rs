@@ -130,7 +130,7 @@ impl<S: StateStore> SinkExecutor<S> {
                                 .sink_commit_duration
                                 .with_label_values(&[
                                     self.identity.as_str(),
-                                    sink_config.get_connector().as_str(),
+                                    sink_config.get_connector(),
                                 ])
                                 .observe(start_time.elapsed().as_millis() as f64);
                         }

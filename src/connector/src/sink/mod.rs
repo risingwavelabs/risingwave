@@ -76,11 +76,11 @@ impl SinkConfig {
         }
     }
 
-    pub fn get_connector(&self) -> String {
+    pub fn get_connector(&self) -> &'static str {
         match self {
-            SinkConfig::Mysql(_) => "mysql".to_string(),
-            SinkConfig::Kafka(_) => "kafka".to_string(),
-            SinkConfig::Redis(_) => "redis".to_string(),
+            SinkConfig::Mysql(_) => "mysql",
+            SinkConfig::Kafka(_) => "kafka",
+            SinkConfig::Redis(_) => "redis",
         }
     }
 }
