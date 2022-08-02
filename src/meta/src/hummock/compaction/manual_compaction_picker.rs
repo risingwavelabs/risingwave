@@ -107,6 +107,10 @@ impl ManualCompactionPicker {
             select_input_ssts.push(table.clone());
         }
 
+        if select_level == target_level {
+            return (select_input_ssts, vec![]);
+        }
+
         let target_input_ssts = self
             .overlap_strategy
             .check_base_level_overlap(&select_input_ssts, target_tables);
@@ -158,8 +162,8 @@ impl CompactionPicker for ManualCompactionPicker {
             level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         }
 
-        Some(CompactionInput {
-            input_levels: vec![
+        let input_levels = if level != target_level {
+            vec![
                 InputLevel {
                     level_idx: level as u32,
                     level_type: levels[level].level_type,
@@ -170,7 +174,17 @@ impl CompactionPicker for ManualCompactionPicker {
                     level_type: levels[target_level].level_type,
                     table_infos: target_input_ssts,
                 },
-            ],
+            ]
+        } else {
+            vec![InputLevel {
+                level_idx: level as u32,
+                level_type: levels[level].level_type,
+                table_infos: select_input_ssts,
+            }]
+        };
+
+        Some(CompactionInput {
+            input_levels,
             target_level,
             target_sub_level_id: 0,
         })
