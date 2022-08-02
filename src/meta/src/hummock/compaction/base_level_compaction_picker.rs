@@ -48,7 +48,8 @@ impl CompactionPicker for LevelCompactionPicker {
 
         let l0 = levels.l0.as_ref().unwrap();
         if l0.sub_levels.is_empty()
-            || l0.sub_levels[0].level_type != LevelType::Nonoverlapping as i32
+            || (l0.sub_levels[0].level_type != LevelType::Nonoverlapping as i32
+                && l0.sub_levels[0].table_infos.len() > 1)
         {
             return None;
         }
