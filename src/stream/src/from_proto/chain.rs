@@ -28,10 +28,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let snapshot = params.input.remove(1);
         let mview = params.input.remove(0);
 
-        // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
-        // column_ids. Now simply treat column_id as column_idx.
-        // TODO(bugen): how can we know the way of mapping?
-        let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
+        let upstream_indices: Vec<usize> = node
+            .upstream_column_indices
+            .iter()
+            .map(|&i| i as usize)
+            .collect();
 
         // For reporting the progress.
         let progress = stream
@@ -43,11 +44,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let schema = snapshot.schema().clone();
 
         if node.disable_rearrange {
-            let executor = ChainExecutor::new(snapshot, mview, column_idxs, progress, schema);
+            let executor = ChainExecutor::new(snapshot, mview, upstream_indices, progress, schema);
             Ok(executor.boxed())
         } else {
             let executor =
-                RearrangedChainExecutor::new(snapshot, mview, column_idxs, progress, schema);
+                RearrangedChainExecutor::new(snapshot, mview, upstream_indices, progress, schema);
             Ok(executor.boxed())
         }
     }

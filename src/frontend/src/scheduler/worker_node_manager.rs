@@ -14,7 +14,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use rand::distributions::{Distribution as RandDistribution, Uniform};
+use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
@@ -67,14 +67,15 @@ impl WorkerNodeManager {
     /// Get a random worker node.
     pub fn next_random(&self) -> SchedulerResult<WorkerNode> {
         let current_nodes = self.worker_nodes.read().unwrap();
-        let mut rng = rand::thread_rng();
         if current_nodes.is_empty() {
             tracing::error!("No worker node available.");
             bail!("No worker node available");
         }
 
-        let die = Uniform::from(0..current_nodes.len());
-        Ok(current_nodes.get(die.sample(&mut rng)).unwrap().clone())
+        Ok(current_nodes
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .clone())
     }
 
     pub fn worker_node_count(&self) -> usize {

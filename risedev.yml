@@ -121,6 +121,23 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  playground-3cn:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+      max-idle-secs-to-exit: 1800
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+    - use: frontend
+    - use: compactor
+
   docker-playground:
     - use: meta-node
       enable-dashboard-v2: false

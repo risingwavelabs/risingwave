@@ -23,5 +23,6 @@ pub const PG_NAMESPACE_TABLE_NAME: &str = "pg_namespace";
 pub const PG_NAMESPACE_COLUMNS: &[PgCatalogColumnsDef] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "nspname"),
-    (DataType::Int32, "nspowner"), // TODO: support ACL here.
+    (DataType::Int32, "nspowner"),
+    (DataType::Varchar, "nspacl"),
 ];

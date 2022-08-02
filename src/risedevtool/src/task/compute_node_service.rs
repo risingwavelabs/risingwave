@@ -20,7 +20,7 @@ use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_storage_backend, ComputeNodeConfig};
+use crate::{add_meta_node, add_storage_backend, ComputeNodeConfig, HummockInMemoryStrategy};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -42,7 +42,11 @@ impl ComputeNodeService {
     }
 
     /// Apply command args accroding to config
-    pub fn apply_command_args(cmd: &mut Command, config: &ComputeNodeConfig) -> Result<()> {
+    pub fn apply_command_args(
+        cmd: &mut Command,
+        config: &ComputeNodeConfig,
+        hummock_in_memory_strategy: HummockInMemoryStrategy,
+    ) -> Result<()> {
         let prefix_data = env::var("PREFIX_DATA")?;
 
         cmd.arg("--host")
@@ -83,8 +87,13 @@ impl ComputeNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
-        let is_shared_backend =
-            add_storage_backend(&config.id, provide_minio, provide_aws_s3, true, cmd)?;
+        let is_shared_backend = add_storage_backend(
+            &config.id,
+            provide_minio,
+            provide_aws_s3,
+            hummock_in_memory_strategy,
+            cmd,
+        )?;
         if provide_compute_node.len() > 1 && !is_shared_backend {
             return Err(anyhow!(
                 "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
@@ -97,7 +106,7 @@ impl ComputeNodeService {
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
         if is_shared_backend && provide_compactor.is_empty() {
             return Err(anyhow!(
-                "When minio or aws-s3 is enabled, at least one compactor is required. Consider adding `use: compactor` in risedev config."
+                "When using a shared backend (minio, aws-s3, or shared in-memory with `risedev playground`), at least one compactor is required. Consider adding `use: compactor` in risedev config."
             ));
         }
 
@@ -126,7 +135,7 @@ impl Task for ComputeNodeService {
         }
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
-        Self::apply_command_args(&mut cmd, &self.config)?;
+        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

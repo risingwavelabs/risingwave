@@ -189,7 +189,7 @@ impl BackwardUserIterator {
                         self.last_val.extend_from_slice(val);
                         self.last_delete = false;
                     }
-                    HummockValue::Delete() => {
+                    HummockValue::Delete => {
                         self.last_delete = true;
                     }
                 }
@@ -910,7 +910,7 @@ mod tests {
                 }
                 match inserts.first_key_value().unwrap().1 {
                     HummockValue::Put(_) => 1,
-                    HummockValue::Delete() => 0,
+                    HummockValue::Delete => 0,
                 }
             })
             .reduce(|accum, item| accum + item)
@@ -922,7 +922,7 @@ mod tests {
                 continue;
             }
             let (time, value) = value.first_key_value().unwrap();
-            if let HummockValue::Delete() = value {
+            if let HummockValue::Delete = value {
                 continue;
             }
             assert!(bui.is_valid(), "num_kvs:{}", num_kvs);
