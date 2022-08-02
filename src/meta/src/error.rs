@@ -82,7 +82,7 @@ impl MetaError {
         MetaErrorInner::TransactionError(e).into()
     }
 
-    /// PermissionDenied
+    /// Permission denied error.
     pub fn permission_denied(s: String) -> Self {
         MetaErrorInner::PermissionDenied(s).into()
     }
