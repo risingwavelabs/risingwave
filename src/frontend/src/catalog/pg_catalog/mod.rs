@@ -102,9 +102,10 @@ fn get_acl_items(
     users: &Vec<UserInfo>,
     username_map: &HashMap<UserId, String>,
 ) -> String {
-    let mut res = String::new();
+    let mut res = String::from("{");
+    let mut empty_flag = true;
+    let super_privilege = available_prost_privilege(object.clone());
     for user in users {
-        let super_privilege = available_prost_privilege(object.clone());
         let privileges = if user.get_is_supper() {
             vec![&super_privilege]
         } else {
@@ -116,9 +117,6 @@ fn get_acl_items(
         if privileges.is_empty() {
             continue;
         };
-        if !res.is_empty() {
-            res.push('\n');
-        }
         let mut grantor_map = HashMap::new();
         privileges.iter().for_each(|&privilege| {
             privilege.action_with_opts.iter().for_each(|ao| {
@@ -130,6 +128,13 @@ fn get_acl_items(
             })
         });
         for key in grantor_map.keys() {
+            if empty_flag {
+                empty_flag = false;
+            } else {
+                res.push(',');
+            }
+            res.push_str(user.get_name());
+            res.push('=');
             grantor_map
                 .get(key)
                 .unwrap()
@@ -142,7 +147,7 @@ fn get_acl_items(
                         Action::Delete => "d",
                         Action::Create => "C",
                         Action::Connect => "c",
-                        _ => "",
+                        _ => unreachable!(),
                     };
                     res.push_str(str);
                     if *option {
@@ -154,14 +159,17 @@ fn get_acl_items(
             res.push_str(username_map.get(key).as_ref().unwrap());
         }
     }
+    res.push('}');
     res
 }
 impl SysCatalogReaderImpl {
     fn read_namespace(&self) -> Result<Vec<Row>> {
-        let reader = self.catalog_reader.read_guard();
-        let schemas = reader.get_all_schema_info(&self.auth_context.database)?;
+        let schemas = self
+            .catalog_reader
+            .read_guard()
+            .get_all_schema_info(&self.auth_context.database)?;
         let user_reader = self.user_info_reader.read_guard();
-        let users = &user_reader.get_all_users();
+        let users = user_reader.get_all_users();
         let username_map = user_reader.get_user_name_map();
         Ok(schemas
             .iter()
@@ -172,7 +180,7 @@ impl SysCatalogReaderImpl {
                     Some(ScalarImpl::Int32(schema.owner as i32)),
                     Some(ScalarImpl::Utf8(get_acl_items(
                         &Object::SchemaId(schema.id),
-                        users,
+                        &users,
                         username_map,
                     ))),
                 ])
