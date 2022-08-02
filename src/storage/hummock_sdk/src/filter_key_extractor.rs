@@ -217,7 +217,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
 }
 
 #[derive(Default)]
-pub struct FilterKeyExtractorManagerInner {
+struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
     version: AtomicU64,
     notify: Notify,
@@ -272,28 +272,39 @@ impl FilterKeyExtractorManagerInner {
     }
 }
 
+/// FilterKeyExtractorManager is a wrapper for inner, and provide a protected read and write
+/// interface, its thread safe
 #[derive(Default)]
 pub struct FilterKeyExtractorManager {
     inner: FilterKeyExtractorManagerInner,
 }
 
 impl FilterKeyExtractorManager {
+    /// Insert (`table_id`, `filter_key_extractor`) as mapping to `HashMap` for `acquire`
     pub fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
         self.inner.update(table_id, filter_key_extractor);
     }
 
+    /// Remove a mapping by table_id
     pub fn remove(&self, table_id: u32) {
         self.inner.remove(table_id);
     }
 
-    pub async fn acquire(&self, remaining_table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
-        self.inner.acquire(remaining_table_id_set).await
+    /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
+    /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
+    /// table_id does not util version update (notify), and retry to get
+    pub async fn acquire(&self, table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
+        self.inner.acquire(table_id_set).await
     }
 
+    /// Update `version` of `FilterKeyExtractorManager`, the input `version` must be greater than
+    /// the local `version`
     pub fn set_version(&self, version: u64) {
+        assert!(version > self.version());
         self.inner.set_version(version);
     }
 
+    /// Get the local `vession` of `FilterKeyExtractorManager`
     pub fn version(&self) -> u64 {
         self.inner.version()
     }
