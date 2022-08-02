@@ -268,7 +268,6 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
         let mut meta_data = None;
-        tracing::warn!("load table start");
         loop {
             stats.cache_meta_block_total += 1;
             let entry = self
