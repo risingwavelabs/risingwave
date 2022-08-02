@@ -2,8 +2,8 @@
 - sql: |
     create table t1 (v1 int, v2 float);
     create table t2 (v3 int, v4 numeric, v5 bigint);
-    create index t1_v1 on t1(v1);
-    create index t2_v3 on t2(v3);
+    create index t1_v1 on t1(v1) include(v2);
+    create index t2_v3 on t2(v3) include(v4, v5);
     /* should generate delta join plan, and stream index scan */
     select * from t1, t2 where t1.v1 = t2.v3;
   stream_plan: |
@@ -18,8 +18,8 @@
     create table iii_t2 (v3 int, v4 int);
     create table iii_t3 (v5 int, v6 int);
     create materialized view iii_mv1 as select * from iii_t1, iii_t2, iii_t3 where iii_t1.v1 = iii_t2.v3 and iii_t1.v1 = iii_t3.v5;
-    create index iii_index_1 on iii_t1(v1);
-    create index iii_index_2 on iii_t2(v3);
+    create index iii_index_1 on iii_t1(v1) include(v2);
+    create index iii_index_2 on iii_t2(v3) include(v4);
 - before:
   - index_slt
   sql: |

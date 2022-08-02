@@ -238,19 +238,20 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_index(
         &self,
         mut index: ProstIndex,
-        mut table: ProstTable,
+        mut index_table: ProstTable,
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
-        table.id = self.gen_id();
-        table.mapping = Some(ParallelUnitMapping {
-            table_id: table.id,
+        index_table.id = self.gen_id();
+        index_table.mapping = Some(ParallelUnitMapping {
+            table_id: index_table.id,
             original_indices: [0, 10, 20].to_vec(),
             data: [1, 2, 3].to_vec(),
         });
-        self.catalog.write().create_table(&table);
-        self.add_table_or_index_id(table.id, table.schema_id, table.database_id);
+        self.catalog.write().create_table(&index_table);
+        self.add_table_or_index_id(index_table.id, index_table.schema_id, index_table.database_id);
 
-        index.id = table.id;
+        index.id = index_table.id;
+        index.table_id = index_table.id;
         self.catalog.write().create_index(&index);
         Ok(())
     }

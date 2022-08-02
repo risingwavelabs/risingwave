@@ -209,6 +209,7 @@ pub(crate) fn gen_create_index_plan(
         schema_id: index_schema_id,
         database_id: index_database_id,
         name: index_table_name,
+        owner: index_table.owner,
         table_id: TableId::placeholder(),
         indexed_table_id: table.id,
         index_columns: index_columns
@@ -234,8 +235,8 @@ pub async fn handle_create_index(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (graph, table, index) = {
-        let (plan, table, index) = gen_create_index_plan(
+    let (graph, index_table, index) = {
+        let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),
             name.clone(),
@@ -246,17 +247,17 @@ pub async fn handle_create_index(
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);
 
-        (graph, table, index)
+        (graph, index_table, index)
     };
 
     log::trace!(
         "name={}, graph=\n{}",
-        table_name,
+        name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_index(index, table, graph).await?;
+    catalog_writer.create_index(index, index_table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))
 }

@@ -149,11 +149,16 @@ impl SchemaCatalog {
     }
 
     /// Iterate all indexs, excluding the materialized views.
-    pub fn iter_index(&self) -> impl Iterator<Item = &TableCatalog> {
-        self.table_by_name
-            .iter()
-            .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_some())
-            .map(|(_, v)| v)
+    // pub fn iter_index(&self) -> impl Iterator<Item = &TableCatalog> {
+    //     self.table_by_name
+    //         .iter()
+    //         .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_some())
+    //         .map(|(_, v)| v)
+    // }
+
+    /// Iterate all indexs
+    pub fn iter_index(&self) -> impl Iterator<Item = &IndexCatalog> {
+        self.index_by_name.iter().map(|(_, v)| v)
     }
 
     /// Iterate all sources, including the materialized sources.
@@ -181,6 +186,10 @@ impl SchemaCatalog {
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
         self.table_by_name.get(table_name)
+    }
+
+    pub fn get_table_by_id(&self, table_id: &TableId) -> Option<&TableCatalog> {
+        self.table_by_name.get(self.table_name_by_id.get(table_id)?)
     }
 
     pub fn get_source_by_name(&self, source_name: &str) -> Option<&SourceCatalog> {

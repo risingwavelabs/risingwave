@@ -27,6 +27,7 @@ pub struct IndexCatalog {
     pub schema_id: SchemaId,
     pub database_id: DatabaseId,
     pub name: String,
+    pub owner: u32,
     pub table_id: TableId,
     pub indexed_table_id: TableId,
     // Only InputRef type index is supported.
@@ -41,6 +42,7 @@ impl From<&ProstIndex> for IndexCatalog {
             schema_id: index.schema_id,
             database_id: index.database_id,
             name: index.name.clone(),
+            owner: index.owner,
             table_id: index.table_id.into(),
             indexed_table_id: index.indexed_table_id.into(),
             index_columns: index
@@ -77,6 +79,7 @@ impl IndexCatalog {
             schema_id,
             database_id,
             name: self.name.clone(),
+            owner: self.owner,
             table_id: self.table_id.table_id,
             indexed_table_id: self.indexed_table_id.table_id,
             index_item: self

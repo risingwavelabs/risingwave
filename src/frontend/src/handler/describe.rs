@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use crate::binder::Binder;
-use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::IndexCatalog;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
@@ -32,7 +32,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, indices): (Vec<ColumnDesc>, Vec<TableCatalog>) = {
+    let (columns, indices): (Vec<ColumnDesc>, Vec<IndexCatalog>) = {
         let (catalogs, indices) = match catalog_reader
             .get_schema_by_name(session.database(), &schema_name)?
             .get_table_by_name(&table_name)
@@ -42,7 +42,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
                 catalog_reader
                     .get_schema_by_name(session.database(), &schema_name)?
                     .iter_index()
-                    .filter(|x| x.is_index_on == Some(table.id))
+                    .filter(|index| index.indexed_table_id == table.id)
                     .cloned()
                     .collect_vec(),
             ),
@@ -67,16 +67,23 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     let mut rows = col_descs_to_rows(columns);
 
     // Convert all indexs to rows
-    rows.extend(indices.iter().map(|i| {
-        let s = i
+    rows.extend(indices.iter().filter_map(|index| {
+        let table_result =
+            catalog_reader.get_table_by_id(session.database(), &schema_name, &index.table_id);
+        if table_result.is_err() {
+            return None;
+        }
+        let table = table_result.unwrap();
+
+        let s = table
             .distribution_key
             .iter()
-            .map(|c| i.columns[*c].name().to_string())
+            .map(|c| table.columns[*c].name().to_string())
             .collect_vec();
-        Row::new(vec![
-            Some(i.name.clone().into()),
+        Some(Row::new(vec![
+            Some(index.name.clone().into()),
             Some(format!("index({})", display_comma_separated(&s)).into()),
-        ])
+        ]))
     }));
 
     // TODO: recover the original user statement

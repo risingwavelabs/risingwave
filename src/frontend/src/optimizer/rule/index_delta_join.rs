@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -55,48 +55,74 @@ impl Rule for IndexDeltaJoinRule {
             if table_scan.logical().indexes().is_empty() {
                 return None;
             }
-            let column_descs = table_scan.logical().column_descs();
-            // We assume column id of create index's MV is exactly the same as corresponding columns
-            // in the original table. We generate a list of column ids, and match them against
-            // prefixes of indexes.
-            let columns_to_match = join_indices
-                .iter()
-                .map(|idx| column_descs[*idx].column_id)
-                .collect_vec();
 
-            for (name, index) in table_scan.logical().indexes() {
+            for index in table_scan.logical().indexes() {
                 // 1. Check if distribution keys are the same.
                 // We don't assume the hash function we are using satisfies commutativity
                 // `Hash(A, B) == Hash(B, A)`, so we consider order of each item in distribution
                 // keys here.
-                if index
-                    .distribution_key
+                let join_indices_ref_to_table_desc = join_indices
                     .iter()
-                    .map(|x| index.columns[*x].column_id)
-                    .collect_vec()
-                    != columns_to_match
-                {
+                    .map(|&i| *table_scan.logical().output_col_idx().get(i).unwrap())
+                    .collect_vec();
+
+                let index_column = index.index_columns.iter().map(|x| x.index).collect_vec();
+                if index_column != join_indices_ref_to_table_desc {
                     continue;
                 }
 
-                // 2. Check if the join keys are prefix of order keys
-
-                // A HashSet containing remaining columns to match
-                let mut remaining_to_match =
-                    columns_to_match.iter().copied().collect::<HashSet<_>>();
-
-                // Begin match join columns with index prefix. e.g., if the join columns are `a, b,
-                // c`, and the index has `a, b, c` or `a, c, b` or any combination as prefix, then
-                // we can use this index.
-                for column_id in &index.order_column_ids() {
-                    match remaining_to_match.remove(column_id) {
-                        true => continue, // matched
-                        false => break,   // not matched
+                let (index_table_name, index_table_desc) = {
+                    let reader = table_scan
+                        .base
+                        .ctx
+                        .inner()
+                        .session_ctx
+                        .env()
+                        .catalog_reader()
+                        .read_guard();
+                    let index_table_result = reader.get_table_by_index_catalog(index);
+                    if index_table_result.is_err() {
+                        // maybe concurrent ddl happen.
+                        continue;
                     }
-                }
+                    let index_table = index_table_result.unwrap();
+                    (index_table.name.clone(), index_table.table_desc())
+                };
 
-                if remaining_to_match.is_empty() {
-                    return Some(table_scan.to_index_scan(name, index).into());
+                let primary_table_desc = table_scan.logical().table_desc();
+                // check index is a fully covering index
+                let mut primary_to_secondary: HashMap<usize, usize> = HashMap::new();
+                index
+                    .index_columns
+                    .iter()
+                    .chain(index.include_columns.iter())
+                    .enumerate()
+                    .for_each(|(i, input_ref)| {
+                        primary_to_secondary.insert(input_ref.index, i);
+                    });
+                primary_table_desc
+                    .pk
+                    .iter()
+                    .zip_eq(index_table_desc.pk.iter())
+                    .for_each(|(&i, &j)| {
+                        primary_to_secondary.insert(i, j);
+                    });
+
+                if primary_to_secondary.len() == primary_table_desc.columns.len() {
+                    let len = primary_table_desc.columns.len();
+                    let mut index_mapping = Vec::with_capacity(len);
+                    for i in 0..len {
+                        index_mapping.push(*primary_to_secondary.get(&i).unwrap());
+                    }
+                    return Some(
+                        table_scan
+                            .to_index_scan(
+                                index_table_name.as_str(),
+                                index_table_desc.into(),
+                                index_mapping,
+                            )
+                            .into(),
+                    );
                 }
             }
 

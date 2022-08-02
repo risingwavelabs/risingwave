@@ -162,12 +162,12 @@ impl SysCatalogReaderImpl {
 
                 let indexes = schema
                     .iter_index()
-                    .map(|mv| {
+                    .map(|index| {
                         Row::new(vec![
-                            Some(ScalarImpl::Int32(mv.id.table_id() as i32)),
-                            Some(ScalarImpl::Utf8(mv.name.clone())),
+                            Some(ScalarImpl::Int32(index.table_id.table_id as i32)),
+                            Some(ScalarImpl::Utf8(index.name.clone())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
-                            Some(ScalarImpl::Int32(mv.owner as i32)),
+                            Some(ScalarImpl::Int32(index.owner as i32)),
                             Some(ScalarImpl::Utf8("index".to_string())),
                         ])
                     })

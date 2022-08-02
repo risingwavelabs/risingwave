@@ -50,14 +50,15 @@ message Index {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
+  uint32 owner = 5;
   // the id of the table which stores the index's data
-  uint32 table_id = 5;
+  uint32 table_id = 6;
   // the indexed table's id
-  uint32 indexed_table_id = 6;
+  uint32 indexed_table_id = 7;
   // index columns
-  repeated expr.ExprNode index_item = 7;
+  repeated expr.ExprNode index_item = 8;
   // include columns
-  repeated expr.ExprNode include_item = 8;
+  repeated expr.ExprNode include_item = 9;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.

@@ -184,6 +184,16 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
     }
 
+    pub fn get_database_by_id(&self, db_id: &DatabaseId) -> Result<&DatabaseCatalog> {
+        let db_name = self
+            .db_name_by_id
+            .get(db_id)
+            .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
+        self.database_by_name
+            .get(db_name)
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
+    }
+
     pub fn get_all_schema_names(&self, db_name: &str) -> Result<Vec<String>> {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
     }
@@ -206,6 +216,16 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
     }
 
+    pub fn get_schema_by_id(
+        &self,
+        db_id: &DatabaseId,
+        schema_id: &SchemaId,
+    ) -> Result<&SchemaCatalog> {
+        self.get_database_by_id(db_id)?
+            .get_schema_by_id(schema_id)
+            .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()).into())
+    }
+
     pub fn get_table_by_name(
         &self,
         db_name: &str,
@@ -221,11 +241,17 @@ impl Catalog {
         &self,
         db_name: &str,
         schema_name: &str,
-        table_name: &str,
+        table_id: &TableId,
     ) -> Result<&TableCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
-            .get_table_by_name(table_name)
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
+            .get_table_by_id(table_id)
+            .ok_or_else(|| CatalogError::NotFound("table_id", table_id.to_string()).into())
+    }
+
+    pub fn get_table_by_index_catalog(&self, index: &IndexCatalog) -> Result<&TableCatalog> {
+        self.get_schema_by_id(&index.database_id, &index.schema_id)?
+            .get_table_by_id(&index.table_id)
+            .ok_or_else(|| CatalogError::NotFound("table_id", index.table_id.to_string()).into())
     }
 
     pub fn get_sys_table_by_name(
