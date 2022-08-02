@@ -854,19 +854,29 @@ where
         let assignee_context_id = compact_task_assignment
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
-        // The task is not found.
-        if assignee_context_id.is_none() && !trivial_move {
-            tracing::warn!("Compaction task {} not found", compact_task.task_id);
-            return Ok(false);
-        }
-        if *assignee_context_id.as_ref().unwrap() != context_id {
-            tracing::warn!(
-                "Wrong reporter {}. Compaction task {} is assigned to {}",
-                context_id,
-                compact_task.task_id,
-                *assignee_context_id.as_ref().unwrap(),
-            );
-            return Ok(false);
+
+        // For trivial_move task, there is no need to check the task assignment because
+        // we won't populate compact_task_assignment for it.
+        if !trivial_move {
+            match assignee_context_id {
+                Some(id) => {
+                    // Assignee id mismatch.
+                    if id != context_id {
+                        tracing::warn!(
+                            "Wrong reporter {}. Compaction task {} is assigned to {}",
+                            context_id,
+                            compact_task.task_id,
+                            *assignee_context_id.as_ref().unwrap(),
+                        );
+                        return Ok(false);
+                    }
+                }
+                None => {
+                    // The task is not found.
+                    tracing::warn!("Compaction task {} not found", compact_task.task_id);
+                    return Ok(false);
+                }
+            }
         }
         compact_status.report_compact_task(compact_task);
         if compact_task.task_status {
