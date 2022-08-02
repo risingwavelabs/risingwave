@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 
 use risingwave_common::array::DataChunk;
@@ -31,6 +32,14 @@ use crate::task::BOUNDED_BUFFER_SIZE;
 pub struct BroadcastSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     broadcast_info: BroadcastInfo,
+}
+
+impl Debug for BroadcastSender {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BroadcastSender")
+            .field("broadcast_info", &self.broadcast_info)
+            .finish()
+    }
 }
 
 impl ChanSender for BroadcastSender {
