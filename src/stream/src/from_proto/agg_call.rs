@@ -27,16 +27,26 @@ pub fn build_agg_call_from_prost(
     append_only: bool,
     agg_call_proto: &risingwave_pb::expr::AggCall,
 ) -> Result<AggCall> {
+    let agg_kind = AggKind::try_from(agg_call_proto.get_type()?)?;
     let args = match &agg_call_proto.get_args()[..] {
         [] => AggArgs::None,
-        [arg] => AggArgs::Unary(
+        [arg] if agg_kind != AggKind::StringAgg => AggArgs::Unary(
             DataType::from(arg.get_type()?),
             arg.get_input()?.column_idx as usize,
         ),
+        [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => AggArgs::Binary(
+            [
+                DataType::from(agg_arg.get_type()?),
+                DataType::from(extra_arg.get_type()?),
+            ],
+            [
+                agg_arg.get_input()?.column_idx as usize,
+                extra_arg.get_input()?.column_idx as usize,
+            ],
+        ),
         _ => {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "multiple aggregation args".to_string(),
-                None.into(),
+            return Err(RwError::from(ErrorCode::ExprError(
+                format!("Too many/few arguments for {:?}", agg_kind).into(),
             )))
         }
     };
@@ -60,7 +70,7 @@ pub fn build_agg_call_from_prost(
         None => None,
     };
     Ok(AggCall {
-        kind: AggKind::try_from(agg_call_proto.get_type()?)?,
+        kind: agg_kind,
         args,
         return_type: DataType::from(agg_call_proto.get_return_type()?),
         order_pairs,
