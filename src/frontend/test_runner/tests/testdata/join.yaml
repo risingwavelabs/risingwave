@@ -402,6 +402,13 @@
           LogicalScan { table: a, columns: [_row_id, x, y] }
           LogicalScan { table: b, columns: [_row_id, x, z] }
         LogicalScan { table: c, columns: [_row_id, x, a] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
+      LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x) }
+        LogicalJoin { type: FullOuter, on: (a.x = b.x) }
+          LogicalScan { table: a, columns: [x] }
+          LogicalScan { table: b, columns: [x] }
+        LogicalScan { table: c, columns: [x] }
 - sql: |
     /* Ensure that nested natural joins bind and disambiguate columns */
     create table a(a int, y int);
