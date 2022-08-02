@@ -18,13 +18,13 @@ use std::mem::take;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use log::debug;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
@@ -54,6 +54,7 @@ use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
+use crate::{MetaError, MetaResult};
 
 mod command;
 mod info;
@@ -159,9 +160,7 @@ impl ScheduledBarriers {
         let mut buffer = self.buffer.write().await;
         while let Some((_, notifiers)) = buffer.pop_front() {
             notifiers.into_iter().for_each(|notify| {
-                notify.notify_collection_failed(RwError::from(ErrorCode::InternalError(
-                    "Scheduled barrier abort.".to_string(),
-                )))
+                notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
             })
         }
     }
@@ -348,7 +347,7 @@ where
     fn complete(
         &mut self,
         prev_epoch: u64,
-        result: Result<Vec<BarrierCompleteResponse>>,
+        result: MetaResult<Vec<BarrierCompleteResponse>>,
     ) -> Vec<EpochNode<S>> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
@@ -445,13 +444,12 @@ pub struct EpochNode<S: MetaStore> {
 }
 
 /// The state of barrier.
-#[derive(PartialEq)]
 enum BarrierEpochState {
     /// This barrier is current in-flight on the stream graph of compute nodes.
     InFlight,
 
     /// This barrier is completed or failed.
-    Completed(Result<Vec<BarrierCompleteResponse>>),
+    Completed(MetaResult<Vec<BarrierCompleteResponse>>),
 }
 
 impl<S> GlobalBarrierManager<S>
@@ -494,7 +492,7 @@ where
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self) -> Result<()> {
+    pub async fn flush(&self) -> MetaResult<()> {
         let start = Instant::now();
 
         debug!("start barrier flush");
@@ -623,7 +621,7 @@ where
     async fn inject_and_send_err(
         &self,
         command_context: Arc<CommandContext<S>>,
-        barrier_complete_tx: UnboundedSender<(u64, Result<Vec<BarrierCompleteResponse>>)>,
+        barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
     ) {
         let result = self
             .inject_barrier(command_context.clone(), barrier_complete_tx.clone())
@@ -640,11 +638,11 @@ where
     async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext<S>>,
-        barrier_complete_tx: UnboundedSender<(u64, Result<Vec<BarrierCompleteResponse>>)>,
-    ) -> Result<()> {
-        fail_point!("inject_barrier_err", |_| Err(RwError::from(
-            ErrorCode::InternalError("inject_barrier_err".to_string(),)
-        )));
+        barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
+    ) -> MetaResult<()> {
+        fail_point!("inject_barrier_err", |_| Err(
+            anyhow!("inject_barrier_err").into()
+        ));
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info.clone();
         let mut node_need_collect = HashMap::new();
@@ -688,7 +686,7 @@ where
                         .inject_barrier(request)
                         .await
                         .map(tonic::Response::<_>::into_inner)
-                        .map_err(RwError::from)
+                        .map_err(MetaError::from)
                 }
                 .into()
             }
@@ -720,14 +718,16 @@ where
                             .barrier_complete(request)
                             .await
                             .map(tonic::Response::<_>::into_inner)
-                            .map_err(RwError::from)
+                            .map_err(MetaError::from)
                     }
                     .into()
                 }
             });
 
             let result = try_join_all(collect_futures).await;
-            barrier_complete_tx.send((prev_epoch, result)).unwrap();
+            barrier_complete_tx
+                .send((prev_epoch, result.map_err(Into::into)))
+                .unwrap();
         });
         Ok(())
     }
@@ -737,7 +737,7 @@ where
     async fn barrier_complete_and_commit(
         &self,
         prev_epoch: u64,
-        result: Result<Vec<BarrierCompleteResponse>>,
+        result: MetaResult<Vec<BarrierCompleteResponse>>,
         state: &mut BarrierManagerState,
         tracker: &mut CreateMviewProgressTracker,
         checkpoint_control: &mut CheckpointControl<S>,
@@ -798,7 +798,7 @@ where
         &self,
         node: &mut EpochNode<S>,
         tracker: &mut CreateMviewProgressTracker,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
 
         match &node.state {
@@ -889,9 +889,9 @@ where
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that
     /// multiple commands is executed continuously and atomically.
-    pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> Result<()> {
+    pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
         struct Context {
-            collect_rx: Receiver<Result<()>>,
+            collect_rx: Receiver<MetaResult<()>>,
             finish_rx: Receiver<()>,
             is_create_mv: bool,
         }
@@ -946,13 +946,13 @@ where
     }
 
     /// Run a command and return when it's completely finished.
-    pub async fn run_command(&self, command: Command) -> Result<()> {
+    pub async fn run_command(&self, command: Command) -> MetaResult<()> {
         self.run_multiple_commands(vec![command]).await
     }
 
     /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
     /// ignored, if exists.
-    pub async fn wait_for_next_barrier_to_collect(&self) -> Result<()> {
+    pub async fn wait_for_next_barrier_to_collect(&self) -> MetaResult<()> {
         let (tx, rx) = oneshot::channel();
         let notifier = Notifier {
             collected: Some(tx),

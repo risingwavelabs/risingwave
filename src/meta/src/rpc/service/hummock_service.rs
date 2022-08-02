@@ -16,15 +16,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{tonic_err, ErrorCode};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
+use crate::error::meta_error_to_tonic;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
-use crate::rpc::service::RwReceiverStream;
+use crate::rpc::service::MetaErrorReceiverStream;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -65,7 +65,7 @@ impl<S> HummockManagerService for HummockServiceImpl<S>
 where
     S: MetaStore,
 {
-    type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
+    type SubscribeCompactTasksStream = MetaErrorReceiverStream<SubscribeCompactTasksResponse>;
 
     async fn pin_version(
         &self,
@@ -85,7 +85,7 @@ where
                     pinned_version,
                 }))
             }
-            Err(e) => Err(tonic_err(e)),
+            Err(e) => Err(meta_error_to_tonic(e)),
         }
     }
 
@@ -97,7 +97,7 @@ where
         let result = self.hummock_manager.unpin_version(req.context_id).await;
         match result {
             Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
-            Err(e) => Err(tonic_err(e)),
+            Err(e) => Err(meta_error_to_tonic(e)),
         }
     }
 
@@ -112,7 +112,7 @@ where
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinVersionBeforeResponse { status: None })),
-            Err(e) => Err(tonic_err(e)),
+            Err(e) => Err(meta_error_to_tonic(e)),
         }
     }
 
@@ -134,7 +134,7 @@ where
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
                         status: None,
                     })),
-                    Err(e) => Err(tonic_err(e)),
+                    Err(e) => Err(meta_error_to_tonic(e)),
                 }
             }
         }
@@ -151,7 +151,7 @@ where
                 status: None,
                 snapshot: Some(hummock_snapshot),
             })),
-            Err(e) => Err(tonic_err(e)),
+            Err(e) => Err(meta_error_to_tonic(e)),
         }
     }
 
@@ -161,7 +161,7 @@ where
     ) -> Result<Response<UnpinSnapshotResponse>, Status> {
         let req = request.into_inner();
         if let Err(e) = self.hummock_manager.unpin_snapshot(req.context_id).await {
-            return Err(tonic_err(e));
+            return Err(meta_error_to_tonic(e));
         }
         Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }
@@ -176,7 +176,7 @@ where
             .unpin_snapshot_before(req.context_id, req.min_snapshot.unwrap())
             .await
         {
-            return Err(tonic_err(e));
+            return Err(meta_error_to_tonic(e));
         }
         Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
     }
@@ -191,7 +191,7 @@ where
                 status: None,
                 table_id,
             })),
-            Err(e) => Err(tonic_err(e)),
+            Err(e) => Err(meta_error_to_tonic(e)),
         }
     }
 
@@ -203,13 +203,11 @@ where
         // check_context and add_compactor as a whole is not atomic, but compactor_manager will
         // remove invalid compactor eventually.
         if !self.hummock_manager.check_context(context_id).await {
-            return Err(tonic_err(ErrorCode::MetaError(format!(
-                "invalid hummock context {}",
-                context_id
-            ))));
+            return Err(anyhow::anyhow!("invalid hummock context {}", context_id))
+                .map_err(meta_error_to_tonic);
         }
         let rx = self.compactor_manager.add_compactor(context_id);
-        Ok(Response::new(RwReceiverStream::new(rx)))
+        Ok(Response::new(MetaErrorReceiverStream::new(rx)))
     }
 
     async fn report_vacuum_task(
@@ -220,7 +218,7 @@ where
             self.vacuum_trigger
                 .report_vacuum_task(vacuum_task)
                 .await
-                .map_err(tonic_err)?;
+                .map_err(meta_error_to_tonic)?;
         }
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
@@ -292,7 +290,7 @@ where
             Ok(_) => None,
 
             Err(error) => {
-                return Err(tonic_err(error));
+                return Err(meta_error_to_tonic(error));
             }
         };
 
@@ -312,7 +310,7 @@ where
                 status: None,
                 snapshot: Some(hummock_snapshot),
             })),
-            Err(e) => Err(tonic_err(e)),
+            Err(e) => Err(meta_error_to_tonic(e)),
         }
     }
 }

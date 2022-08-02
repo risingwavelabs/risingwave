@@ -15,12 +15,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::catalog::{
     DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
     DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
-use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -30,6 +29,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use crate::manager::{MetaSrvEnv, NotificationVersion};
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
+use crate::{MetaError, MetaResult};
 
 type UserId = u32;
 
@@ -117,7 +117,7 @@ impl UserManagerInner {
 pub type UserInfoManagerRef<S> = Arc<UserManager<S>>;
 
 impl<S: MetaStore> UserManager<S> {
-    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let users = UserInfo::list(env.meta_store()).await?;
         let inner = UserManagerInner::new(users);
         let user_manager = Self {
@@ -128,7 +128,7 @@ impl<S: MetaStore> UserManager<S> {
         Ok(user_manager)
     }
 
-    async fn init(&self) -> Result<()> {
+    async fn init(&self) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         for (user, id) in [
             (DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID),
@@ -158,18 +158,15 @@ impl<S: MetaStore> UserManager<S> {
         self.core.lock().await
     }
 
-    pub async fn list_users(&self) -> Result<Vec<UserInfo>> {
+    pub async fn list_users(&self) -> MetaResult<Vec<UserInfo>> {
         let core = self.core.lock().await;
         Ok(core.user_info.values().cloned().collect())
     }
 
-    pub async fn create_user(&self, user: &UserInfo) -> Result<NotificationVersion> {
+    pub async fn create_user(&self, user: &UserInfo) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         if core.all_users.contains(&user.name) {
-            return Err(RwError::from(PermissionDenied(format!(
-                "User {} already exists",
-                user.name
-            ))));
+            return Err(anyhow!("user {} already exists", user.name).into());
         }
         user.insert(self.env.meta_store()).await?;
         core.create_user(user.clone());
@@ -186,16 +183,13 @@ impl<S: MetaStore> UserManager<S> {
         &self,
         user: &UserInfo,
         update_fields: &[UpdateField],
-    ) -> Result<NotificationVersion> {
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let rename_flag = update_fields
             .iter()
             .any(|&field| field == UpdateField::Rename);
         if rename_flag && core.all_users.contains(&user.name) {
-            return Err(RwError::from(PermissionDenied(format!(
-                "User {} already exists",
-                user.name
-            ))));
+            return Err(anyhow!("User {} already exists", user.name).into());
         }
         user.insert(self.env.meta_store()).await?;
         let new_user = core.update_user(user, update_fields);
@@ -208,44 +202,34 @@ impl<S: MetaStore> UserManager<S> {
         Ok(version)
     }
 
-    pub async fn get_user(&self, id: UserId) -> Result<UserInfo> {
+    pub async fn get_user(&self, id: UserId) -> MetaResult<UserInfo> {
         let core = self.core.lock().await;
 
         core.user_info
             .get(&id)
             .cloned()
-            .ok_or_else(|| RwError::from(InternalError(format!("User {} not found", id))))
+            .ok_or_else(|| anyhow!("User {} not found", id).into())
     }
 
-    pub async fn drop_user(&self, id: UserId) -> Result<NotificationVersion> {
+    pub async fn drop_user(&self, id: UserId) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.user_info.contains_key(&id) {
-            return Err(RwError::from(InternalError(format!(
-                "User {} does not exist",
-                id
-            ))));
+            return Err(anyhow!("User {} not found", id).into());
         }
         let user = core.user_info.get(&id).cloned().unwrap();
 
         if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
-            return Err(RwError::from(PermissionDenied(format!(
-                "Cannot drop default super user {}",
-                id
-            ))));
+            return Err(anyhow!("Cannot drop default super user {}", id).into());
         }
         if !core.user_info.get(&id).unwrap().grant_privileges.is_empty() {
-            return Err(RwError::from(PermissionDenied(format!(
-                "Cannot drop user {} with privileges",
-                id
-            ))));
+            return Err(anyhow!("Cannot drop user {} with privileges", id).into());
         }
         if core.user_grant_relation.contains_key(&id)
             && !core.user_grant_relation.get(&id).unwrap().is_empty()
         {
-            return Err(RwError::from(PermissionDenied(format!(
-                "Cannot drop user {} with privileges granted to others",
-                id
-            ))));
+            return Err(
+                anyhow!("Cannot drop user {} with privileges granted to others", id).into(),
+            );
         }
         UserInfo::delete(self.env.meta_store(), &id).await?;
         core.drop_user(id);
@@ -324,20 +308,20 @@ impl<S: MetaStore> UserManager<S> {
         users: &[UserId],
         new_grant_privileges: &[GrantPrivilege],
         grantor: UserId,
-    ) -> Result<NotificationVersion> {
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut user_updated = Vec::with_capacity(users.len());
         let grantor_info = core
             .user_info
             .get(&grantor)
-            .ok_or_else(|| InternalError(format!("User {} does not exist", &grantor)))
+            .ok_or_else(|| anyhow!("User {} does not exist", &grantor))
             .cloned()?;
         for user_id in users {
             let mut user = core
                 .user_info
                 .get(user_id)
-                .ok_or_else(|| InternalError(format!("User {} does not exist", user_id)))
+                .ok_or_else(|| anyhow!("User {} does not exist", user_id))
                 .cloned()?;
 
             core.user_grant_relation
@@ -346,10 +330,7 @@ impl<S: MetaStore> UserManager<S> {
             let grant_user = core.user_grant_relation.get_mut(&grantor).unwrap();
 
             if user.is_supper {
-                return Err(RwError::from(PermissionDenied(format!(
-                    "Cannot grant privilege to supper user {}",
-                    user_id
-                ))));
+                return Err(anyhow!("Cannot grant privilege to super user {}", user_id).into());
             }
             if !grantor_info.is_supper {
                 for new_grant_privilege in new_grant_privileges {
@@ -359,16 +340,18 @@ impl<S: MetaStore> UserManager<S> {
                         .find(|p| p.object == new_grant_privilege.object)
                     {
                         if !Self::check_privilege(privilege, new_grant_privilege, true) {
-                            return Err(RwError::from(PermissionDenied(format!(
+                            return Err(anyhow!(
                                 "Cannot grant privilege without grant permission for user {}",
                                 grantor
-                            ))));
+                            )
+                            .into());
                         }
                     } else {
-                        return Err(RwError::from(PermissionDenied(format!(
-                            "Grantor {} do not have one of the privileges",
+                        return Err(anyhow!(
+                            "Grantor {} does not have one of the privileges",
                             grantor
-                        ))));
+                        )
+                        .into());
                     }
                 }
             }
@@ -388,7 +371,11 @@ impl<S: MetaStore> UserManager<S> {
             user_updated.push(user);
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        self.env
+            .meta_store()
+            .txn(transaction)
+            .await
+            .map_err(MetaError::transaction_error)?;
         let mut version = 0;
         for user in user_updated {
             core.user_info.insert(user.id, user.clone());
@@ -445,7 +432,7 @@ impl<S: MetaStore> UserManager<S> {
         revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
-    ) -> Result<NotificationVersion> {
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut user_updated = HashMap::new();
@@ -455,7 +442,7 @@ impl<S: MetaStore> UserManager<S> {
         let revoke_by = core
             .user_info
             .get(&revoke_by)
-            .ok_or_else(|| InternalError(format!("User {} does not exist", &revoke_by)))
+            .ok_or_else(|| anyhow!("User {} does not exist", &revoke_by))
             .cloned()?;
         let same_user = granted_by == revoke_by.id;
         if !revoke_by.is_supper {
@@ -466,16 +453,18 @@ impl<S: MetaStore> UserManager<S> {
                     .find(|p| p.object == privilege.object)
                 {
                     if !Self::check_privilege(user_privilege, privilege, same_user) {
-                        return Err(RwError::from(PermissionDenied(format!(
+                        return Err(anyhow!(
                             "Cannot revoke privilege without permission for user {}",
                             &revoke_by.name
-                        ))));
+                        )
+                        .into());
                     }
                 } else {
-                    return Err(RwError::from(PermissionDenied(format!(
-                        "User {} do not have one of the privileges",
+                    return Err(anyhow!(
+                        "User {} does not have one of the privileges",
                         &revoke_by.name
-                    ))));
+                    )
+                    .into());
                 }
             }
         }
@@ -484,13 +473,10 @@ impl<S: MetaStore> UserManager<S> {
             let user = core
                 .user_info
                 .get(user_id)
-                .ok_or_else(|| InternalError(format!("User {} does not exist", user_id)))
+                .ok_or_else(|| anyhow!("User {} does not exist", user_id))
                 .cloned()?;
             if user.is_supper {
-                return Err(RwError::from(PermissionDenied(format!(
-                    "Cannot revoke privilege from supper user {}",
-                    user_id
-                ))));
+                return Err(anyhow!("Cannot revoke privilege from supper user {}", user_id).into());
             }
             users_info.push_back(user);
         }
@@ -523,10 +509,11 @@ impl<S: MetaStore> UserManager<S> {
             if recursive_flag {
                 // check with cascade/restrict strategy
                 if !cascade && !users.contains(&now_user.id) {
-                    return Err(RwError::from(PermissionDenied(format!(
+                    return Err(anyhow!(
                         "Cannot revoke privilege from user {} for restrict",
                         &now_user.name
-                    ))));
+                    )
+                    .into());
                 }
                 for next_user_id in now_relations {
                     if core.user_info.contains_key(&next_user_id)
@@ -549,7 +536,11 @@ impl<S: MetaStore> UserManager<S> {
             }
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        self.env
+            .meta_store()
+            .txn(transaction)
+            .await
+            .map_err(MetaError::transaction_error)?;
         let mut version = 0;
         for (user_id, user_info) in user_updated {
             core.user_info.insert(user_id, user_info.clone());
@@ -565,7 +556,7 @@ impl<S: MetaStore> UserManager<S> {
 
     /// `release_privileges` removes the privileges with given object from all users, it will be
     /// called when a database/schema/table/source is dropped.
-    pub async fn release_privileges(&self, object: &Object) -> Result<()> {
+    pub async fn release_privileges(&self, object: &Object) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut users_need_update = vec![];
@@ -580,7 +571,11 @@ impl<S: MetaStore> UserManager<S> {
             }
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        self.env
+            .meta_store()
+            .txn(transaction)
+            .await
+            .map_err(MetaError::transaction_error)?;
         for user in users_need_update {
             core.user_info.insert(user.id, user.clone());
             self.env
@@ -626,7 +621,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_user_manager() -> Result<()> {
+    async fn test_user_manager() -> MetaResult<()> {
         let user_manager = UserManager::new(MetaSrvEnv::for_test().await).await?;
         let (test_user_id, test_user) = (10, "test_user");
 
