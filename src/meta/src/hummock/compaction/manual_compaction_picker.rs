@@ -46,23 +46,22 @@ impl ManualCompactionPicker {
     }
 }
 
-impl CompactionPicker for ManualCompactionPicker {
-    fn pick_compaction(
+impl ManualCompactionPicker {
+    fn pick_tables(
         &self,
-        levels: &[Level],
-        level_handlers: &mut [LevelHandler],
-    ) -> Option<CompactionInput> {
-        let level = self.option.level;
-        let target_level = self.target_level;
-
+        select_level: usize,
+        target_level: usize,
+        select_tables: &[SstableInfo],
+        target_tables: &[SstableInfo],
+        level_handlers: &[LevelHandler],
+    ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut select_input_ssts = vec![];
         let mut tmp_sst_info = SstableInfo::default();
         let mut range_overlap_info = RangeOverlapInfo::default();
         tmp_sst_info.key_range = Some(self.option.key_range.clone());
         range_overlap_info.update(&tmp_sst_info);
 
-        let level_table_infos: Vec<SstableInfo> = levels[level]
-            .table_infos
+        let level_table_infos: Vec<SstableInfo> = select_tables
             .iter()
             .filter(|sst_info| range_overlap_info.check_overlap(sst_info))
             .filter(|sst_info| {
@@ -87,31 +86,69 @@ impl CompactionPicker for ManualCompactionPicker {
             .collect();
 
         for table in &level_table_infos {
-            if level_handlers[level].is_pending_compact(&table.id) {
+            if level_handlers[select_level].is_pending_compact(&table.id) {
                 continue;
             }
 
-            let overlap_files = self
-                .overlap_strategy
-                .check_base_level_overlap(&[table.clone()], &levels[target_level].table_infos);
+            if select_level != target_level {
+                // to handle L0 sub-compaction
+                let overlap_files = self
+                    .overlap_strategy
+                    .check_base_level_overlap(&[table.clone()], target_tables);
 
-            if overlap_files
-                .iter()
-                .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
-            {
-                continue;
+                if overlap_files
+                    .iter()
+                    .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
+                {
+                    continue;
+                }
             }
 
             select_input_ssts.push(table.clone());
         }
 
-        if select_input_ssts.is_empty() {
-            return None;
+        if select_level == target_level {
+            return (select_input_ssts, vec![]);
         }
 
         let target_input_ssts = self
             .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos);
+            .check_base_level_overlap(&select_input_ssts, target_tables);
+
+        if target_input_ssts
+            .iter()
+            .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
+        {
+            return (vec![], vec![]);
+        }
+
+        (select_input_ssts, target_input_ssts)
+    }
+}
+
+impl CompactionPicker for ManualCompactionPicker {
+    fn pick_compaction(
+        &self,
+        levels: &[Level],
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<CompactionInput> {
+        let level = self.option.level;
+        let target_level = self.target_level;
+        if level != 0 {
+            assert_ne!(level, target_level);
+        }
+
+        let (select_input_ssts, target_input_ssts) = self.pick_tables(
+            level,
+            target_level,
+            &levels[level].table_infos,
+            &levels[target_level].table_infos,
+            level_handlers,
+        );
+
+        if select_input_ssts.is_empty() {
+            return None;
+        }
 
         if target_input_ssts
             .iter()
@@ -125,8 +162,8 @@ impl CompactionPicker for ManualCompactionPicker {
             level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         }
 
-        Some(CompactionInput {
-            input_levels: vec![
+        let input_levels = if level != target_level {
+            vec![
                 InputLevel {
                     level_idx: level as u32,
                     level_type: levels[level].level_type,
@@ -137,7 +174,17 @@ impl CompactionPicker for ManualCompactionPicker {
                     level_type: levels[target_level].level_type,
                     table_infos: target_input_ssts,
                 },
-            ],
+            ]
+        } else {
+            vec![InputLevel {
+                level_idx: level as u32,
+                level_type: levels[level].level_type,
+                table_infos: select_input_ssts,
+            }]
+        };
+
+        Some(CompactionInput {
+            input_levels,
             target_level,
             target_sub_level_id: 0,
         })
