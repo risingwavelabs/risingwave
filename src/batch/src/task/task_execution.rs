@@ -288,51 +288,51 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         mut shutdown_rx: Receiver<u64>,
     ) -> Result<()> {
         let mut data_chunk_stream = root.execute();
+        let mut state = TaskStatus::Unspecified;
         loop {
             tokio::select! {
                 // We prioritize abort signal over normal data chunks.
                 biased;
                 _ = &mut shutdown_rx => {
-                    if let Err(e) = sender.send(None).await {
-                        match e {
-                            BatchError::SenderError => {
-                                // This is possible since when we have limit executor in parent
-                                // stage, it may early stop receiving data from downstream, which
-                                // leads to close of channel.
-                                warn!("Task receiver closed!");
-                                break;
-                            },
-                            x => {
-                                return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
-                            }
-                        }
-                    }
-                    *self.state.lock() = TaskStatus::Aborted;
+                    state = TaskStatus::Aborted;
                     break;
                 }
                 res = data_chunk_stream.next() => {
-                    let data_chunk = match res {
-                        Some(data_chunk) => Some(data_chunk?),
-                        None => {
-                            trace!("data chunk stream shuts down");
-                            None
-                        }
-                    };
-
-                    if let Err(e) = sender.send(data_chunk).await {
-                        match e {
-                            BatchError::SenderError => {
-                                // This is possible since when we have limit executor in parent
-                                // stage, it may early stop receiving data from downstream, which
-                                // leads to close of channel.
-                                warn!("Task receiver closed!");
-                                break;
-                            },
-                            x => {
-                                return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
+                    if let Some(data_chunk) = res {
+                    if let Err(e) = sender.send(Some(data_chunk?)).await {
+                            match e {
+                                BatchError::SenderError => {
+                                    // This is possible since when we have limit executor in parent
+                                    // stage, it may early stop receiving data from downstream, which
+                                    // leads to close of channel.
+                                    warn!("Task receiver closed!");
+                                    break;
+                                },
+                                x => {
+                                    return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
+                                }
                             }
                         }
+                    } else {
+                        state = TaskStatus::Finished;
+                        break;
                     }
+                }
+            }
+        }
+
+        info!("Task finished with status: {:?}", state);
+        *self.state.lock() = state;
+        if let Err(e) = sender.send(None).await {
+            match e {
+                BatchError::SenderError => {
+                    // This is possible since when we have limit executor in parent
+                    // stage, it may early stop receiving data from downstream, which
+                    // leads to close of channel.
+                    warn!("Task receiver closed when sending None!");
+                }
+                x => {
+                    return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
                 }
             }
         }
