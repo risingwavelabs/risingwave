@@ -42,7 +42,7 @@ pub mod sstable_store;
 mod state_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-mod utils;
+pub mod utils;
 pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
@@ -86,6 +86,8 @@ pub struct HummockStorage {
     stats: Arc<StateStoreMetrics>,
 
     compaction_group_client: Arc<dyn CompactionGroupClient>,
+
+    sstable_id_manager: SstableIdManagerRef,
 }
 
 impl HummockStorage {
@@ -121,7 +123,10 @@ impl HummockStorage {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
         let write_conflict_detector = ConflictDetector::new_from_config(options.clone());
-
+        let sstable_id_manager = Arc::new(SstableIdManager::new(
+            hummock_meta_client.clone(),
+            options.sstable_id_remote_fetch_number,
+        ));
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
             sstable_store.clone(),
@@ -129,6 +134,7 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             write_conflict_detector,
             table_id_to_slice_transform,
+            sstable_id_manager.clone(),
         )
         .await;
 
@@ -139,6 +145,7 @@ impl HummockStorage {
             sstable_store,
             stats,
             compaction_group_client,
+            sstable_id_manager,
         };
         Ok(instance)
     }
@@ -210,6 +217,10 @@ impl HummockStorage {
             ))),
             Ok(resp) => resp,
         }
+    }
+
+    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        &self.sstable_id_manager
     }
 }
 

@@ -578,7 +578,6 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::Arrange(node) => {
-                        node.table_id += table_id_offset;
                         if let Some(table) = &mut node.table {
                             table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
@@ -1011,7 +1010,7 @@ impl ActorGraphBuilder {
                         dispatch_edge.same_worker_node,
                     );
                 }
-                DispatcherType::Invalid => unreachable!(),
+                DispatcherType::Unspecified => unreachable!(),
             }
         }
 

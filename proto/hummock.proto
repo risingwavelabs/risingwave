@@ -14,8 +14,9 @@ message SstableInfo {
 }
 
 enum LevelType {
-  NONOVERLAPPING = 0;
-  OVERLAPPING = 1;
+  UNSPECIFIED = 0;
+  NONOVERLAPPING = 1;
+  OVERLAPPING = 2;
 }
 
 message OverlappingLevel {
@@ -219,7 +220,8 @@ message GetCompactionTasksResponse {
 }
 
 message ReportCompactionTasksRequest {
-  CompactTask compact_task = 1;
+  uint32 context_id = 1;
+  CompactTask compact_task = 2;
 }
 
 message ReportCompactionTasksResponse {
@@ -236,11 +238,16 @@ message HummockPinnedSnapshot {
   uint64 minimal_pinned_snapshot = 2;
 }
 
-message GetNewTableIdRequest {}
+message GetNewSstIdsRequest {
+  uint32 number = 1;
+}
 
-message GetNewTableIdResponse {
+message GetNewSstIdsResponse {
   common.Status status = 1;
-  uint64 table_id = 2;
+  // inclusive
+  uint64 start_id = 2;
+  // exclusive
+  uint64 end_id = 3;
 }
 
 message SubscribeCompactTasksRequest {
@@ -291,7 +298,7 @@ service HummockManagerService {
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
-  rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
+  rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
@@ -302,8 +309,9 @@ service CompactorService {}
 
 message CompactionConfig {
   enum CompactionMode {
-    RANGE = 0;
-    CONSISTENT_HASH = 1;
+    UNSPECIFIED = 0;
+    RANGE = 1;
+    CONSISTENT_HASH = 2;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;

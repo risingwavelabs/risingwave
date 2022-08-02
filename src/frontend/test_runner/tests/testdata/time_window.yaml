@@ -18,28 +18,29 @@
     row_format: protobuf
     name: s
     file: |
-        syntax = "proto3";
-        package test;
-        message TestRecord {
-          int32 id = 1;
-          Country country = 3;
-          int64 zipcode = 4;
-          float rate = 5;
-        }
-        message Country {
-          string address = 1;
-          City city = 2;
-          string zipcode = 3;
-          string created_at = 4;
-        }
-        message City {
-          string address = 1;
-          string zipcode = 2;
-        }
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        Country country = 3;
+        int64 zipcode = 4;
+        float rate = 5;
+      }
+      message Country {
+        string address = 1;
+        City city = 2;
+        string zipcode = 3;
+        string created_at = 4;
+      }
+      message City {
+        string address = 1;
+        string zipcode = 2;
+      }
 - sql: |
     create table t1 (id int, created_at date);
     select * from hop(t1, created_at, interval '2' day, interval '3' day);
-  planner_error: 'Bind error: Invalid arguments for HOP window function: window_size 3 days 00:00:00 cannot be divided by window_slide 2 days 00:00:00'
+  planner_error: 'Bind error: Invalid arguments for HOP window function: window_size
+    3 days 00:00:00 cannot be divided by window_slide 2 days 00:00:00'
 - sql: |
     create table t1 (id int, created_at date);
     select * from hop(t1, created_at, interval '1' day, interval '3' day);

@@ -37,6 +37,7 @@
 #![feature(lint_reasons)]
 #![feature(type_alias_impl_trait)]
 #![feature(generators)]
+#![feature(iterator_try_collect)]
 
 pub mod error;
 pub mod expr;
