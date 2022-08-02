@@ -72,10 +72,11 @@ pub struct BindContext {
     pub range_of: HashMap<String, (usize, usize)>,
     // `clause` identifies in what clause we are binding.
     pub clause: Option<Clause>,
-    //
+    // The `BindContext`'s data on its column groups
     pub column_group_context: ColumnGroupContext,
 }
 
+/// Holds the context for the `BindContext`'s `ColumnGroup`s.
 #[derive(Default, Debug, Clone)]
 pub struct ColumnGroupContext {
     // Maps naturally-joined/USING columns to their column group id
@@ -87,16 +88,16 @@ pub struct ColumnGroupContext {
     next_group_id: u32,
 }
 
+/// When binding a natural join or a join with USING, a `ColumnGroup` contains the columns with the
+/// same name.
 #[derive(Default, Debug, Clone)]
 pub struct ColumnGroup {
     /// Indices of the columns in the group
     pub indices: HashSet<usize>,
-    /// A min-nullable column is one that is never NULL if any other column in the group is not
-    /// NULL.
-    ///
+    /// A non-nullable column is never NULL.
     /// If `None`, ambiguous references to the column name will be resolved to a `COALESCE(col1,
     /// col2, ..., coln)` over each column in the group
-    pub min_nullable_column: Option<usize>,
+    pub non_nullable_column: Option<usize>,
 
     pub column_name: Option<String>,
 }
@@ -131,8 +132,6 @@ impl BindContext {
             .indexs_of
             .get(column_name) && columns.len() > 1
         {
-            // If there is some group containing the columns and the ambiguous columns are all in
-            // the group
             if let Some(group_id) = self.column_group_context.mapping.get(&columns[0]) {
                 let group = self.column_group_context.groups.get(group_id).unwrap();
                 if columns.iter().all(|idx| group.indices.contains(idx)) {
@@ -148,8 +147,8 @@ impl BindContext {
         if let Some(name) = &group.column_name {
             debug_assert_eq!(name, column_name);
         }
-        if let Some(min_nullable) = &group.min_nullable_column {
-            Ok(vec![*min_nullable])
+        if let Some(non_nullable) = &group.non_nullable_column {
+            Ok(vec![*non_nullable])
         } else {
             // These will be converted to a `COALESCE(col1, col2, ..., coln)`
             let mut indices: Vec<_> = group.indices.iter().copied().collect();
@@ -169,8 +168,8 @@ impl BindContext {
             if let Some(group_id) = self.column_group_context.mapping.get(&columns[0]) {
                 let group = self.column_group_context.groups.get(group_id).unwrap();
                 if columns.iter().all(|idx| group.indices.contains(idx)) {
-                    if let Some(min_nullable) = &group.min_nullable_column {
-                        return Ok(vec![*min_nullable]);
+                    if let Some(non_nullable) = &group.non_nullable_column {
+                        return Ok(vec![*non_nullable]);
                     } else {
                         // These will be converted to a `COALESCE(col1, col2, ..., coln)`
                         return Ok(columns.to_vec());
@@ -184,50 +183,47 @@ impl BindContext {
     }
 
     /// Identifies two columns as being in the same group. Additionally, possibly provides one of
-    /// the columns as being `min_nullable`
+    /// the columns as being `non_nullable`
     pub fn add_natural_columns(
         &mut self,
         left: usize,
         right: usize,
-        min_nullable_column: Option<usize>,
+        non_nullable_column: Option<usize>,
     ) {
-        let l_ref = self.column_group_context.mapping.get(&left).is_some();
-        let r_ref = self.column_group_context.mapping.get(&right).is_some();
-        match (l_ref, r_ref) {
-            (false, false) => {
+        match (
+            self.column_group_context.mapping.get(&left).map(|v| *v),
+            self.column_group_context.mapping.get(&right).map(|v| *v),
+        ) {
+            (None, None) => {
                 let group_id = self.column_group_context.next_group_id;
                 self.column_group_context.next_group_id += 1;
 
                 let group = ColumnGroup {
                     indices: HashSet::from([left, right]),
-                    min_nullable_column,
+                    non_nullable_column,
                     column_name: Some(self.columns[left].field.name.clone()),
                 };
                 self.column_group_context.groups.insert(group_id, group);
                 self.column_group_context.mapping.insert(left, group_id);
                 self.column_group_context.mapping.insert(right, group_id);
             }
-            (true, false) => {
-                let group_id = *self.column_group_context.mapping.get(&left).unwrap();
+            (Some(group_id), None) => {
                 let group = self.column_group_context.groups.get_mut(&group_id).unwrap();
                 group.indices.insert(right);
-                if group.min_nullable_column.is_none() {
-                    group.min_nullable_column = min_nullable_column;
+                if group.non_nullable_column.is_none() {
+                    group.non_nullable_column = non_nullable_column;
                 }
                 self.column_group_context.mapping.insert(right, group_id);
             }
-            (false, true) => {
-                let group_id = *self.column_group_context.mapping.get(&right).unwrap();
+            (None, Some(group_id)) => {
                 let group = self.column_group_context.groups.get_mut(&group_id).unwrap();
                 group.indices.insert(left);
-                if group.min_nullable_column.is_none() {
-                    group.min_nullable_column = min_nullable_column;
+                if group.non_nullable_column.is_none() {
+                    group.non_nullable_column = non_nullable_column;
                 }
                 self.column_group_context.mapping.insert(right, group_id);
             }
-            (true, true) => {
-                let r_group_id = *self.column_group_context.mapping.get(&right).unwrap();
-                let l_group_id = *self.column_group_context.mapping.get(&right).unwrap();
+            (Some(l_group_id), Some(r_group_id)) => {
                 if r_group_id == l_group_id {
                     return;
                 }
@@ -247,11 +243,11 @@ impl BindContext {
                     *self.column_group_context.mapping.get_mut(idx).unwrap() = l_group_id;
                     l_group.indices.insert(*idx);
                 }
-                if l_group.min_nullable_column.is_none() {
-                    l_group.min_nullable_column = if r_group.min_nullable_column.is_none() {
-                        min_nullable_column
+                if l_group.non_nullable_column.is_none() {
+                    l_group.non_nullable_column = if r_group.non_nullable_column.is_none() {
+                        non_nullable_column
                     } else {
-                        r_group.min_nullable_column
+                        r_group.non_nullable_column
                     };
                 }
             }
@@ -322,7 +318,7 @@ impl BindContext {
         }
         for (group_id, mut group) in groups {
             group.indices = group.indices.into_iter().map(|idx| idx + begin).collect();
-            if let Some(col) = &mut group.min_nullable_column {
+            if let Some(col) = &mut group.non_nullable_column {
                 *col += begin;
             }
             self.column_group_context

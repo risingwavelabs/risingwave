@@ -192,6 +192,13 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
+                    // Bind the column groups
+                    // In psql, the USING and NATURAL columns come before the rest of the columns in
+                    // a SELECT * statement
+                    let (exprs, names) = self.iter_column_groups();
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+
                     // Bind columns that are not in groups
                     let (exprs, names) =
                         Self::iter_bound_columns(self.context.columns[..].iter().filter(|c| {
@@ -204,14 +211,14 @@ impl Binder {
                         }));
                     select_list.extend(exprs);
                     aliases.extend(names);
-                    // Bind the column groups
-                    let (exprs, names) = self.iter_column_groups();
-                    select_list.extend(exprs);
-                    aliases.extend(names);
+
                     // TODO: we will need to be able to handle wildcard expressions bound to aliases
-                    // in the future We'd then need a `NaturalGroupContext`
+                    // in the future. We'd then need a `NaturalGroupContext`
                     // bound to each alias to correctly disambiguate column
                     // references
+                    //
+                    // We may need to refactor `NaturalGroupContext` to become span aware in that
+                    // case.
                 }
             }
         }
@@ -236,8 +243,9 @@ impl Binder {
             .column_group_context
             .groups
             .values()
+            .rev() // ensure that the outermost col group gets put first in the list
             .map(|g| {
-                if let Some(col) = &g.min_nullable_column {
+                if let Some(col) = &g.non_nullable_column {
                     let c = &self.context.columns[*col];
                     (
                         InputRef::new(c.index, c.field.data_type.clone()).into(),

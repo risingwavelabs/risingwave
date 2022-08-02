@@ -118,10 +118,10 @@ impl Binder {
                         // sanity check
                         for col in &cols {
                             if old_context.indexs_of.get(&col.value).is_none() {
-                                return Err(ErrorCode::ItemNotFound(format!("column \"{:?}\" specified in USING clause does not exist in left table", col.value)).into());
+                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.value)).into());
                             }
                             if self.context.indexs_of.get(&col.value).is_none() {
-                                return Err(ErrorCode::ItemNotFound(format!("column \"{:?}\" specified in USING clause does not exist in right table", col.value)).into());
+                                return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.value)).into());
                             }
                         }
                         Some(cols)
@@ -136,12 +136,12 @@ impl Binder {
                     .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
                     .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
-                columns.sort_by(|a, b| a.0.value.partial_cmp(&b.0.value).unwrap());
+                columns.sort_by(|a, b| a.0.value.cmp(&b.0.value));
 
                 let mut col_indices = Vec::new();
                 let mut binary_expr = Expr::Value(Value::Boolean(true));
 
-                // Walk the LHS cols, checking to see if any share a name with the RHS cols
+                // Walk the RHS cols, checking to see if any share a name with any LHS cols
                 for (column, idxes) in columns {
                     // TODO: is it ok to ignore quote style?
                     // If we have a `USING` constraint, we only bind the columns appearing in the
@@ -194,7 +194,6 @@ impl Binder {
                             column.clone(),
                         ])
                     };
-                    // We manually bind the expression since the left and right
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
                         op: BinaryOperator::And,

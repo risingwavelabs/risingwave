@@ -46,21 +46,28 @@ impl Binder {
                     1 => {
                         let index = indices[0];
                         let column = &self.context.columns[index];
-                        return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+                        return Ok(
+                            InputRef::new(column.index, column.field.data_type.clone()).into()
+                        );
                     }
                     _ => {
                         indices.sort(); // make sure we have a consistent result
-                        let inputs = indices.iter().map(|index| {
-                            let column = &self.context.columns[*index];
-                            InputRef::new(column.index, column.field.data_type.clone()).into()
-                        }).collect::<Vec<_>>();
-                        return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
+                        let inputs = indices
+                            .iter()
+                            .map(|index| {
+                                let column = &self.context.columns[*index];
+                                InputRef::new(column.index, column.field.data_type.clone()).into()
+                            })
+                            .collect::<Vec<_>>();
+                        return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into());
                     }
                 }
             }
             Err(e) => {
-                if let ErrorCode::InternalError(s) = e.inner() && s.starts_with("Ambiguous column name:") {
-                    return Err(e)
+                // If the error message is not that the column is not found, throw the error
+                if let ErrorCode::ItemNotFound(_) = e.inner() {
+                } else {
+                    return Err(e);
                 }
             }
         }

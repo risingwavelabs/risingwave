@@ -140,12 +140,11 @@
     select * from t1 join t2 using(v1);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [t1.v2, t2.v3, t1.v1] }
-        BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v1 }
-          BatchExchange { order: [], dist: HashShard(t1.v1) }
-            BatchScan { table: t1, columns: [v1, v2] }
-          BatchExchange { order: [], dist: HashShard(t2.v1) }
-            BatchScan { table: t2, columns: [v1, v3] }
+      BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v1 }
+        BatchExchange { order: [], dist: HashShard(t1.v1) }
+          BatchScan { table: t1, columns: [v1, v2] }
+        BatchExchange { order: [], dist: HashShard(t2.v1) }
+          BatchScan { table: t2, columns: [v1, v3] }
 - sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -153,7 +152,7 @@
     select * from ab join bc using(b) join ca using(c);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [ab.a, ca.a, ab.b, bc.c] }
+      BatchProject { exprs: [bc.c, ab.b, ab.a, ca.a] }
         BatchHashJoin { type: Inner, predicate: bc.c = ca.c }
           BatchExchange { order: [], dist: HashShard(bc.c) }
             BatchHashJoin { type: Inner, predicate: ab.b = bc.b }
@@ -220,7 +219,7 @@
     create table t3(v2 varchar);
     select * from t3, t1 join t2 using (v1);
   logical_plan: |
-    LogicalProject { exprs: [t3.v2, t1.v1] }
+    LogicalProject { exprs: [t1.v1, t3.v2] }
       LogicalJoin { type: Inner, on: true }
         LogicalScan { table: t3, columns: [_row_id, v2] }
         LogicalJoin { type: Inner, on: (t1.v1 = t2.v1) }
@@ -246,7 +245,7 @@
     create table t3(v2 varchar);
     select * from t3, t1 left join t2 using (v1);
   logical_plan: |
-    LogicalProject { exprs: [t3.v2, t1.v1] }
+    LogicalProject { exprs: [t1.v1, t3.v2] }
       LogicalJoin { type: Inner, on: true }
         LogicalScan { table: t3, columns: [_row_id, v2] }
         LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1) }
@@ -285,7 +284,7 @@
     create table c(y int);
     select * from a natural join b natural join c;
   logical_plan: |
-    LogicalProject { exprs: [c.y, a.x] }
+    LogicalProject { exprs: [a.x, c.y] }
       LogicalJoin { type: Inner, on: true }
         LogicalJoin { type: Inner, on: (a.x = b.x) }
           LogicalScan { table: a, columns: [_row_id, x] }
@@ -308,7 +307,7 @@
     create table c(y int);
     select * from a natural join b natural join c;
   logical_plan: |
-    LogicalProject { exprs: [c.y, a.x] }
+    LogicalProject { exprs: [a.x, c.y] }
       LogicalJoin { type: Inner, on: true }
         LogicalJoin { type: Inner, on: (a.x = b.x) }
           LogicalScan { table: a, columns: [_row_id, x] }
@@ -331,7 +330,7 @@
     create table c(y int);
     select * from a natural join b natural join c;
   logical_plan: |
-    LogicalProject { exprs: [c.y, a.x] }
+    LogicalProject { exprs: [a.x, c.y] }
       LogicalJoin { type: Inner, on: true }
         LogicalJoin { type: Inner, on: (a.x = b.x) }
           LogicalScan { table: a, columns: [_row_id, x] }
@@ -416,3 +415,17 @@
           LogicalScan { table: a, columns: [_row_id, a, y] }
           LogicalScan { table: b, columns: [_row_id, x, z] }
         LogicalScan { table: c, columns: [_row_id, x, a] }
+- sql: |
+    /* Ensure error on non-existent USING col */
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v3 int);
+    select * from t1 join t2 using (v2);
+  binder_error: 'Item not found: column "v2" specified in USING clause does not exist
+    in right table'
+- sql: |
+    /* Ensure error on non-existent USING col */
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v3 int);
+    select * from t1 join t2 using (v3);
+  binder_error: 'Item not found: column "v3" specified in USING clause does not exist
+    in left table'
