@@ -64,6 +64,10 @@ impl DatabaseCatalog {
             .collect_vec()
     }
 
+    pub fn iter_schemas(&self) -> impl Iterator<Item = &SchemaCatalog> {
+        self.schema_by_name.values()
+    }
+
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
         self.schema_by_name.get(name)
     }

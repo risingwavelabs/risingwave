@@ -176,6 +176,10 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
     }
 
+    pub fn iter_schemas(&self, db_name: &str) -> Result<impl Iterator<Item = &SchemaCatalog>> {
+        Ok(self.get_database_by_name(db_name)?.iter_schemas())
+    }
+
     pub fn get_all_database_names(&self) -> Vec<String> {
         self.database_by_name.keys().cloned().collect_vec()
     }
