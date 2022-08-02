@@ -443,26 +443,6 @@
                   - orderType: ASCENDING
                   distKeyIndices:
                   - 0
-              pkIndices:
-              - 1
-              appendOnly: true
-              batchPlan:
-                tableDesc:
-                  tableId: 4
-                  columns:
-                  - columnType:
-                      typeName: INT64
-                      isNullable: true
-                    name: _row_id
-                  - columnType:
-                      typeName: INT32
-                      isNullable: true
-                    columnId: 1
-                    name: v1
-                  orderKey:
-                  - orderType: ASCENDING
-                  distKeyIndices:
-                  - 0
                 columnIds:
                 - 1001
                 - 1000
@@ -679,25 +659,26 @@
                         - columnType:
                             typeName: INT64
                             isNullable: true
+                          columnId: 1000
                           name: _row_id
                         - columnType:
                             typeName: INT32
                             isNullable: true
-                          columnId: 1
+                          columnId: 1001
                           name: v1
                         - columnType:
                             typeName: INT32
                             isNullable: true
-                          columnId: 2
+                          columnId: 1002
                           name: v2
                         orderKey:
                         - orderType: ASCENDING
                         distKeyIndices:
                         - 0
                       columnIds:
-                      - 1
-                      - 2
-                      - 0
+                      - 1001
+                      - 1002
+                      - 1000
                   pkIndices:
                   - 2
                   fields:
@@ -719,26 +700,53 @@
                     - dataType:
                         typeName: INT64
                         isNullable: true
-                      columnId: 1000
                       name: _row_id
                     - dataType:
                         typeName: INT32
                         isNullable: true
-                      columnId: 1001
                       name: v1
                     - dataType:
                         typeName: INT32
                         isNullable: true
-                      columnId: 1002
                       name: v2
-                    columnIds:
+                    upstreamColumnIndices:
                     - 1
                     - 2
                     - 0
-                  columnIds:
-                  - 1001
-                  - 1002
-                  - 1000
+                pkIndices:
+                - 2
+                fields:
+                - dataType:
+                    typeName: INT32
+                    isNullable: true
+                  name: t.v2
+                - dataType:
+                    typeName: INT32
+                    isNullable: true
+                  name: t.v1
+                - dataType:
+                    typeName: INT64
+                    isNullable: true
+                  name: t._row_id
+                project:
+                  selectList:
+                  - exprType: INPUT_REF
+                    returnType:
+                      typeName: INT32
+                      isNullable: true
+                    inputRef:
+                      columnIdx: 1
+                  - exprType: INPUT_REF
+                    returnType:
+                      typeName: INT32
+                      isNullable: true
+                    inputRef: {}
+                  - exprType: INPUT_REF
+                    returnType:
+                      typeName: INT64
+                      isNullable: true
+                    inputRef:
+                      columnIdx: 2
               pkIndices:
               - 2
               fields:
@@ -769,11 +777,26 @@
                   returnType:
                     typeName: INT32
                     isNullable: true
-                  name: v2
-                upstreamColumnIndices:
-                - 1
-                - 2
-                - 0
+                  inputRef:
+                    columnIdx: 1
+                - exprType: INPUT_REF
+                  returnType:
+                    typeName: INT64
+                    isNullable: true
+                  inputRef:
+                    columnIdx: 2
+                - exprType: VNODE
+                  returnType:
+                    typeName: INT16
+                    isNullable: true
+                  funcCall:
+                    children:
+                    - exprType: INPUT_REF
+                      returnType:
+                        typeName: INT64
+                        isNullable: true
+                      inputRef:
+                        columnIdx: 2
             pkIndices:
             - 0
             - 1
