@@ -33,7 +33,7 @@ pub use forward_merge::*;
 pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
-pub use merge_inner::{MergeIteratorNext, OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
+pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
 mod compact_concat_iterator;
 pub use compact_concat_iterator::ConcatSstableIterator;
