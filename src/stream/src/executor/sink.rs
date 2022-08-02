@@ -14,6 +14,8 @@
 
 use core::default::Default;
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -23,11 +25,13 @@ use risingwave_storage::StateStore;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::PkIndices;
 
 pub struct SinkExecutor<S: StateStore> {
     input: BoxedExecutor,
     _store: S,
+    metrics: Arc<StreamingMetrics>,
     properties: HashMap<String, String>,
     identity: String,
     pk_indices: PkIndices,
@@ -45,6 +49,7 @@ impl<S: StateStore> SinkExecutor<S> {
     pub fn new(
         materialize_executor: BoxedExecutor,
         _store: S,
+        metrics: Arc<StreamingMetrics>,
         mut properties: HashMap<String, String>,
         executor_id: u64,
     ) -> Self {
@@ -54,6 +59,7 @@ impl<S: StateStore> SinkExecutor<S> {
         Self {
             input: materialize_executor,
             _store,
+            metrics,
             properties,
             identity: format!("SinkExecutor_{:?}", executor_id),
             pk_indices: Default::default(), // todo
@@ -65,7 +71,7 @@ impl<S: StateStore> SinkExecutor<S> {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())
             .map_err(StreamExecutorError::sink_error)?;
 
-        let mut sink = build_sink(sink_config)
+        let mut sink = build_sink(sink_config.clone())
             .await
             .map_err(StreamExecutorError::sink_error)?;
 
@@ -116,9 +122,17 @@ impl<S: StateStore> SinkExecutor<S> {
                                 epoch
                             );
                         } else {
+                            let start_time = Instant::now();
                             sink.commit()
                                 .await
                                 .map_err(StreamExecutorError::sink_error)?;
+                            self.metrics
+                                .sink_commit_duration
+                                .with_label_values(&[
+                                    self.identity.as_str(),
+                                    sink_config.get_connector(),
+                                ])
+                                .observe(start_time.elapsed().as_millis() as f64);
                         }
                     }
                     in_transaction = false;
