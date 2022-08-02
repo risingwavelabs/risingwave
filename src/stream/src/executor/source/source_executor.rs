@@ -684,10 +684,15 @@ mod tests {
         }
     }
 
-    fn drop_row_id(chunk: StreamChunk) -> StreamChunk {
-        let (ops, mut columns, bitmap) = chunk.into_inner();
-        columns.remove(0);
-        StreamChunk::new(ops, columns, bitmap)
+    trait StreamChunkExt {
+        fn drop_row_id(self) -> Self;
+    }
+    impl StreamChunkExt for StreamChunk {
+        fn drop_row_id(self) -> StreamChunk {
+            let (ops, mut columns, bitmap) = self.into_inner();
+            columns.remove(0);
+            StreamChunk::new(ops, columns, bitmap)
+        }
     }
 
     #[tokio::test]
@@ -769,7 +774,10 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let chunk_1 = materialize.next().await.unwrap().unwrap().into_chunk();
+        let chunk_1 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
 
         let chunk_1_truth = StreamChunk::from_pretty(
             " I i
@@ -777,9 +785,10 @@ mod tests {
             + 0 833
             + 0 738
             + 0 344",
-        );
+        )
+        .drop_row_id();
 
-        assert_eq!(drop_row_id(chunk_1.unwrap()), drop_row_id(chunk_1_truth));
+        assert_eq!(chunk_1, chunk_1_truth);
 
         let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(
             Mutation::SourceChangeSplit(hashmap! {
@@ -804,7 +813,14 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let chunk_2 = materialize.next().await.unwrap().unwrap().into_chunk();
+        let chunk_2 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
+        let chunk_3 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
 
         let chunk_2_truth = StreamChunk::from_pretty(
             " I i
@@ -812,18 +828,19 @@ mod tests {
             + 0 425
             + 0 29
             + 0 201",
-        );
-        assert_eq!(drop_row_id(chunk_2.unwrap()), drop_row_id(chunk_2_truth));
-
-        let chunk_3 = materialize.next().await.unwrap().unwrap().into_chunk();
-
+        )
+        .drop_row_id();
         let chunk_3_truth = StreamChunk::from_pretty(
             " I i
             + 0 833
             + 0 533
             + 0 344",
+        )
+        .drop_row_id();
+        assert!(
+            chunk_2 == chunk_2_truth && chunk_3 == chunk_3_truth
+                || chunk_3 == chunk_2_truth && chunk_2 == chunk_3_truth
         );
-        assert_eq!(drop_row_id(chunk_3.unwrap()), drop_row_id(chunk_3_truth));
 
         let pause_barrier =
             Barrier::new_test_barrier(curr_epoch + 2).with_mutation(Mutation::Pause);
