@@ -101,6 +101,7 @@ impl RowIdGenerator {
         ret
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> RowId {
         self.try_update_duration();
         if self.sequence < SEQUENCE_UPPER_BOUND {
