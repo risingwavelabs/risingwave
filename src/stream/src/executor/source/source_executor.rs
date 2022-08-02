@@ -496,34 +496,28 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let source = source.clone();
-            tokio::spawn(async move {
-                let table_source = source.as_table_v2().unwrap();
-                table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            let table_source = source.as_table_v2().unwrap();
+            table_source.write_chunk(chunk).unwrap();
         };
 
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
+        let msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(msg.into_barrier().unwrap().epoch, Epoch::new_test_epoch(1));
+
         // Write 1st chunk
         write_chunk(chunk1);
 
-        for _ in 0..2 {
-            match executor.next().await.unwrap().unwrap() {
-                Message::Chunk(chunk) => assert_eq!(
-                    chunk,
-                    StreamChunk::from_pretty(
-                        " I i T
-                        U+ 1 1 foo
-                        U+ 2 2 bar
-                        U+ 3 3 baz",
-                    )
-                ),
-                Message::Barrier(barrier) => {
-                    assert_eq!(barrier.epoch, Epoch::new_test_epoch(1))
-                }
-            }
-        }
+        let msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I i T
+                U+ 1 1 foo
+                U+ 2 2 bar
+                U+ 3 3 baz",
+            )
+        );
 
         // Write 2nd chunk
         write_chunk(chunk2);
@@ -620,20 +614,16 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let source = source.clone();
-            tokio::spawn(async move {
-                let table_source = source.as_table_v2().unwrap();
-                table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            let table_source = source.as_table_v2().unwrap();
+            table_source.write_chunk(chunk).unwrap();
         };
-
-        write_chunk(chunk.clone());
 
         barrier_sender
             .send(Barrier::new_test_barrier(1).with_stop())
             .unwrap();
-
         executor.next().await.unwrap().unwrap();
+
+        write_chunk(chunk.clone());
         executor.next().await.unwrap().unwrap();
         write_chunk(chunk);
 
