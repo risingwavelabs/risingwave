@@ -355,14 +355,8 @@ impl ToBatch for LogicalHopWindow {
 }
 
 impl ToStream for LogicalHopWindow {
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(StreamHopWindow::new(new_logical).into())
-    }
-
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+    fn to_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.to_stream()?;
         let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let (input, time_col, window_slide, window_size, mut output_indices) = hop.into_parts();
         if !output_indices.contains(&input.schema().len())
@@ -387,7 +381,8 @@ impl ToStream for LogicalHopWindow {
             window_size,
             Some(output_indices),
         );
-        Ok((new_hop.into(), out_col_change))
+
+        Ok(StreamHopWindow::new(new_hop).into())
     }
 }
 
