@@ -142,7 +142,9 @@ pub async fn compute_node_serve(
         let memory_limiter = Arc::new(MemoryLimiter::new(
             storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
         ));
-        if opts.state_store.starts_with("hummock+memory")
+        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
+        // compactor along with compute node.
+        if opts.state_store == "hummock+memory"
             || opts.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
