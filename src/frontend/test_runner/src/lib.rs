@@ -18,8 +18,8 @@
 mod resolve_id;
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
