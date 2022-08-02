@@ -133,7 +133,7 @@
           StreamExchange { dist: HashShard(t2.v3) }
             StreamTableScan { table: t2, columns: [v3, v4, v5, _row_id] }
   with_config_map:
-    RW_FORCE_DELTA_JOIN: "true"
+    RW_FORCE_DELTA_JOIN: 'true'
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v3 int);
@@ -210,7 +210,7 @@
         BatchScan { table: t1, columns: [v1, v2] }
   with_config_map:
     QUERY_MODE: local
-    RW_BATCH_ENABLE_LOOKUP_JOIN: "true"
+    RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
 - sql: |
     /* Ensure correct binding of join with USING clause */
     create table t1(v1 varchar);
@@ -274,4 +274,5 @@
     create table a(a1 int);
     create table b(b1 int);
     select * from a join lateral (select * from b where a1 = b1);
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
+  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported,
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'

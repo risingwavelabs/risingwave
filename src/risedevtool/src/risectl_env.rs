@@ -17,7 +17,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use crate::{add_storage_backend, ServiceConfig};
+use crate::{add_storage_backend, HummockInMemoryStrategy, ServiceConfig};
 
 pub fn compute_risectl_env(services: &HashMap<String, ServiceConfig>) -> Result<String> {
     // Pick one of the compute node and generate risectl config
@@ -28,7 +28,7 @@ pub fn compute_risectl_env(services: &HashMap<String, ServiceConfig>) -> Result<
                 "risectl",
                 c.provide_minio.as_ref().unwrap(),
                 c.provide_aws_s3.as_ref().unwrap(),
-                false,
+                HummockInMemoryStrategy::Disallowed,
                 &mut cmd,
             )?;
             let meta_node = &c.provide_meta_node.as_ref().unwrap()[0];

@@ -26,7 +26,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::table_fragments::ActorState;
@@ -47,7 +47,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
-use crate::cluster::{ClusterManagerRef, META_NODE_ID};
+use crate::cluster::{ClusterManagerRef, WorkerId, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, BarrierManagerState};
@@ -222,19 +222,22 @@ struct CheckpointControl<S: MetaStore> {
     adding_actors: HashSet<ActorId>,
     /// The barrier does not send or collect these actors, even if they are `Running`.
     removing_actors: HashSet<ActorId>,
+
+    metrics: Arc<MetaMetrics>,
 }
 
 impl<S> CheckpointControl<S>
 where
     S: MetaStore,
 {
-    fn new() -> Self {
+    fn new(metrics: Arc<MetaMetrics>) -> Self {
         Self {
             command_ctx_queue: Default::default(),
             creating_tables: Default::default(),
             dropping_tables: Default::default(),
             adding_actors: Default::default(),
             removing_actors: Default::default(),
+            metrics,
         }
     }
 
@@ -315,26 +318,25 @@ where
         }
     }
 
-    /// Return the nums of barrier (the nums of in-flight-barrier, the nums of all-barrier).
-    fn get_barrier_len(&self) -> (usize, usize) {
-        (
+    /// Update the metrics of barrier nums.
+    fn update_barrier_nums_metrics(&self) {
+        self.metrics.in_flight_barrier_nums.set(
             self.command_ctx_queue
                 .iter()
                 .filter(|x| matches!(x.state, InFlight))
-                .count(),
-            self.command_ctx_queue.len(),
-        )
+                .count() as i64,
+        );
+        self.metrics
+            .all_barrier_nums
+            .set(self.command_ctx_queue.len() as i64);
     }
 
     /// Inject a `command_ctx` in `command_ctx_queue`, and its state is `InFlight`.
-    fn inject(
-        &mut self,
-        command_ctx: Arc<CommandContext<S>>,
-        notifiers: SmallVec<[Notifier; 1]>,
-        timer: HistogramTimer,
-    ) {
+    fn inject(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: SmallVec<[Notifier; 1]>) {
+        let timer = self.metrics.barrier_latency.start_timer();
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
+            wait_commit_timer: None,
             state: InFlight,
             command_ctx,
             notifiers,
@@ -349,12 +351,14 @@ where
         result: Result<Vec<BarrierCompleteResponse>>,
     ) -> Vec<EpochNode<S>> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
+        let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         if let Some(node) = self
             .command_ctx_queue
             .iter_mut()
             .find(|x| x.command_ctx.prev_epoch.0 == prev_epoch)
         {
             assert!(matches!(node.state, InFlight));
+            node.wait_commit_timer = Some(wait_commit_timer);
             node.state = Completed(result);
         };
         // Find all continuous nodes with 'Complete' starting from first node
@@ -430,6 +434,8 @@ where
 pub struct EpochNode<S: MetaStore> {
     /// Timer for recording barrier latency, taken after `complete_barriers`.
     timer: Option<HistogramTimer>,
+    /// The timer of `barrier_wait_commit_latency`
+    wait_commit_timer: Option<HistogramTimer>,
     /// Whether this barrier is in-flight or completed.
     state: BarrierEpochState,
     /// Context of this command to generate barrier and do some post jobs.
@@ -536,7 +542,7 @@ where
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut checkpoint_control = CheckpointControl::new();
+        let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
         loop {
             tokio::select! {
                 biased;
@@ -546,11 +552,7 @@ where
                     return;
                 }
                 result = barrier_complete_rx.recv() => {
-                    let (in_flight_nums, all_nums) = checkpoint_control.get_barrier_len();
-                    self.metrics
-                        .in_flight_barrier_nums
-                        .set(in_flight_nums as i64);
-                    self.metrics.all_barrier_nums.set(all_nums as i64);
+                    checkpoint_control.update_barrier_nums_metrics();
 
                     let (prev_epoch, result) = result.unwrap();
                     self.barrier_complete_and_commit(
@@ -610,8 +612,7 @@ where
             ));
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-            let timer = self.metrics.barrier_latency.start_timer();
-            checkpoint_control.inject(command_ctx.clone(), notifiers, timer);
+            checkpoint_control.inject(command_ctx.clone(), notifiers);
 
             self.inject_and_send_err(command_ctx, barrier_complete_tx.clone())
                 .await;
@@ -764,6 +765,9 @@ where
                 if let Some(timer) = node.timer {
                     timer.observe_duration();
                 }
+                if let Some(wait_commit_timer) = node.wait_commit_timer {
+                    wait_commit_timer.observe_duration();
+                }
                 node.notifiers
                     .into_iter()
                     .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
@@ -803,16 +807,21 @@ where
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
                 // See https://github.com/singularity-data/risingwave/issues/1251
-                let synced_ssts: Vec<LocalSstableInfo> = resps
-                    .iter()
-                    .flat_map(|resp| resp.synced_sstables.clone())
-                    .map(|grouped| {
-                        (
-                            grouped.compaction_group_id,
-                            grouped.sst.expect("field not None"),
-                        )
-                    })
-                    .collect_vec();
+                let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
+                let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
+                for resp in resps {
+                    let mut t: Vec<LocalSstableInfo> = resp
+                        .synced_sstables
+                        .iter()
+                        .cloned()
+                        .map(|grouped| {
+                            let sst = grouped.sst.expect("field not None");
+                            sst_to_worker.insert(sst.id, resp.worker_id);
+                            (grouped.compaction_group_id, sst)
+                        })
+                        .collect_vec();
+                    synced_ssts.append(&mut t);
+                }
 
                 if prev_epoch == INVALID_EPOCH {
                     assert!(
@@ -821,11 +830,12 @@ where
                     );
                 } else {
                     self.hummock_manager
-                        .commit_epoch(prev_epoch, synced_ssts)
+                        .commit_epoch(prev_epoch, synced_ssts, sst_to_worker)
                         .await?;
                 }
 
                 node.timer.take().unwrap().observe_duration();
+                node.wait_commit_timer.take().unwrap().observe_duration();
                 node.command_ctx.post_collect().await?;
 
                 // Notify about collected first.

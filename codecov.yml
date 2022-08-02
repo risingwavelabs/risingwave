@@ -15,3 +15,4 @@ coverage:
         threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
 ignore:
   - "src/risedevtooltool"
+  - "src/bench/s3_bench"
