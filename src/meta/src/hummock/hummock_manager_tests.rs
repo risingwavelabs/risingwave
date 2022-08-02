@@ -166,10 +166,7 @@ async fn test_hummock_compaction_task() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(
-        epoch,
-        hummock_manager.get_new_sst_ids(sst_num).await.unwrap(),
-    );
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &original_tables,
@@ -244,8 +241,7 @@ async fn test_hummock_table() {
     let context_id = worker_node.id;
 
     let epoch: u64 = 1;
-    let original_tables =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(2).await.unwrap());
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &original_tables,
@@ -293,8 +289,7 @@ async fn test_hummock_transaction() {
     let epoch1: u64 = 1;
     {
         // Add tables in epoch1
-        let tables_in_epoch1 =
-            generate_test_tables(epoch1, hummock_manager.get_new_sst_ids(2).await.unwrap());
+        let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
             hummock_manager.compaction_group_manager_ref_for_test(),
             &tables_in_epoch1,
@@ -342,8 +337,7 @@ async fn test_hummock_transaction() {
     let epoch2 = epoch1 + 1;
     {
         // Add tables in epoch2
-        let tables_in_epoch2 =
-            generate_test_tables(epoch2, hummock_manager.get_new_sst_ids(2).await.unwrap());
+        let tables_in_epoch2 = generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
             hummock_manager.compaction_group_manager_ref_for_test(),
             &tables_in_epoch2,
@@ -517,8 +511,7 @@ async fn test_hummock_manager_basic() {
 
     let mut epoch = 1;
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef<MemStore>| async move {
-        let original_tables =
-            generate_test_tables(epoch, hummock_manager.get_new_sst_ids(2).await.unwrap());
+        let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
             hummock_manager.compaction_group_manager_ref_for_test(),
             &original_tables,
@@ -651,8 +644,7 @@ async fn test_pin_snapshot_response_lost() {
     let context_id = worker_node.id;
 
     let mut epoch: u64 = 1;
-    let test_tables =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(2).await.unwrap());
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -675,8 +667,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(2).await.unwrap());
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -708,8 +699,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(2).await.unwrap());
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -732,8 +722,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(2).await.unwrap());
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -762,8 +751,7 @@ async fn test_print_compact_task() {
     let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(2).await.unwrap());
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &original_tables,
@@ -855,10 +843,7 @@ async fn test_trigger_manual_compaction() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(
-        epoch,
-        hummock_manager.get_new_sst_ids(sst_num).await.unwrap(),
-    );
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &original_tables,

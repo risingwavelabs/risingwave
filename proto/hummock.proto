@@ -233,7 +233,10 @@ message GetNewSstIdsRequest {
 
 message GetNewSstIdsResponse {
   common.Status status = 1;
-  repeated uint64 table_id = 2;
+  // inclusive
+  uint64 start_id = 2;
+  // exclusive
+  uint64 end_id = 3;
 }
 
 message SubscribeCompactTasksRequest {

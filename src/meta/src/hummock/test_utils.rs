@@ -51,7 +51,7 @@ where
 {
     // Increase version by 2.
     let mut epoch: u64 = 1;
-    let table_ids = hummock_manager.get_new_sst_ids(3).await.unwrap();
+    let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
@@ -75,8 +75,7 @@ where
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
         .unwrap();
-    let test_tables_2 =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(1).await.unwrap());
+    let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables_2,
@@ -93,8 +92,7 @@ where
 
     // Increase version by 1.
     epoch += 1;
-    let test_tables_3 =
-        generate_test_tables(epoch, hummock_manager.get_new_sst_ids(1).await.unwrap());
+    let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables_3,
@@ -255,4 +253,15 @@ pub async fn setup_compute_env(
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
+}
+
+pub async fn get_sst_ids<S>(
+    hummock_manager: &HummockManager<S>,
+    number: u32,
+) -> Vec<HummockSstableId>
+where
+    S: MetaStore,
+{
+    let range = hummock_manager.get_new_sst_ids(number).await.unwrap();
+    (range.start_id..range.end_id).collect_vec()
 }

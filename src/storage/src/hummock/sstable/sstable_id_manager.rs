@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
 use std::collections::VecDeque;
 use std::ops::DerefMut;
 use std::sync::Arc;
@@ -27,7 +28,12 @@ pub type SstableIdManagerRef = Arc<SstableIdManager>;
 /// 1. Caches SST ids fetched from meta.
 /// 2. TODO #4037: Maintains watermark SST ids. It will be used by SST full GC.
 pub struct SstableIdManager {
+    // Lock order: `unused_sst_ids` before `max_fetched_sst_id`
+    // TODO: optimization https://github.com/singularity-data/risingwave/pull/4308#discussion_r934411543
     unused_sst_ids: Mutex<VecDeque<HummockSstableId>>,
+    // Newly fetched SST id should >= `max_fetched_sst_id`,
+    // in order to ensure SST id served locally is monotonic increasing.
+    max_fetched_sst_id: parking_lot::Mutex<HummockSstableId>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
@@ -38,6 +44,7 @@ impl SstableIdManager {
             unused_sst_ids: Default::default(),
             remote_fetch_number,
             hummock_meta_client,
+            max_fetched_sst_id: parking_lot::Mutex::new(HummockSstableId::MIN),
         }
     }
 
@@ -45,12 +52,22 @@ impl SstableIdManager {
         let mut guard = self.unused_sst_ids.lock().await;
         let unused_sst_ids = guard.deref_mut();
         if unused_sst_ids.is_empty() {
-            let new_sst_ids = self
+            let sst_id_range = self
                 .hummock_meta_client
                 .get_new_sst_ids(self.remote_fetch_number)
                 .await
                 .map_err(HummockError::meta_error)?;
-            unused_sst_ids.append(&mut new_sst_ids.into());
+
+            {
+                let mut max_fetched_sst_id = self.max_fetched_sst_id.lock();
+                assert!(
+                    *max_fetched_sst_id <= sst_id_range.start_id,
+                    "SST id moves backwards"
+                );
+                *max_fetched_sst_id = cmp::max(*max_fetched_sst_id, sst_id_range.end_id);
+            }
+
+            unused_sst_ids.append(&mut (sst_id_range.start_id..sst_id_range.end_id).collect());
         }
         unused_sst_ids
             .pop_front()

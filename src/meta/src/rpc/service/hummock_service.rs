@@ -190,9 +190,10 @@ where
             .get_new_sst_ids(request.into_inner().number)
             .await;
         match result {
-            Ok(sst_ids) => Ok(Response::new(GetNewSstIdsResponse {
+            Ok(sst_id_range) => Ok(Response::new(GetNewSstIdsResponse {
                 status: None,
-                table_id: sst_ids,
+                start_id: sst_id_range.start_id,
+                end_id: sst_id_range.end_id,
             })),
             Err(e) => Err(tonic_err(e)),
         }

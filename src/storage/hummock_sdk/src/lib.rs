@@ -54,3 +54,16 @@ pub fn get_local_sst_id(id: HummockSstableId) -> HummockSstableId {
 pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
     id & LOCAL_SST_ID_MASK == 0
 }
+
+pub struct SstIdRange {
+    // inclusive
+    pub start_id: HummockSstableId,
+    // exclusive
+    pub end_id: HummockSstableId,
+}
+
+impl SstIdRange {
+    pub fn new(start_id: HummockSstableId, end_id: HummockSstableId) -> Self {
+        Self { start_id, end_id }
+    }
+}

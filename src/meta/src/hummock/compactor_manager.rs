@@ -150,8 +150,8 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::test_utils::{
-        generate_test_tables, register_sstable_infos_to_compaction_group, setup_compute_env,
-        to_local_sstable_info,
+        generate_test_tables, get_sst_ids, register_sstable_infos_to_compaction_group,
+        setup_compute_env, to_local_sstable_info,
     };
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
@@ -160,8 +160,7 @@ mod tests {
     where
         S: MetaStore,
     {
-        let original_tables =
-            generate_test_tables(epoch, hummock_manager.get_new_sst_ids(1).await.unwrap());
+        let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
         register_sstable_infos_to_compaction_group(
             hummock_manager.compaction_group_manager_ref_for_test(),
             &original_tables,
