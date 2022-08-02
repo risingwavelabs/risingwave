@@ -20,6 +20,7 @@ services:
     depends_on:
       - mysql
         # condition: service_healthy
+    pid: host
     userns_mode: host
     network_mode: host
     volumes:
@@ -49,6 +50,7 @@ services:
     #   test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
     #   timeout: 40s
     #   retries: 5
+    pid: host
     userns_mode: host
     network_mode: host
     # networks:
