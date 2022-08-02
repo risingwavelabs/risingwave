@@ -31,7 +31,7 @@ pub struct CompactionExecutor {
 impl CompactionExecutor {
     #[cfg(not(madsim))]
     pub fn new(worker_threads_num: Option<usize>) -> Self {
-        use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
+        use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
