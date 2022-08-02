@@ -25,9 +25,13 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
+
+/// The first column id to allocate for a new materialized view.
+///
+/// Note: not starting from 0 helps us to debug misusing of the column id and the index.
+const COLUMN_ID_BASE: i32 = 1000;
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -108,7 +112,10 @@ impl StreamMaterialize {
             .enumerate()
             .map(|(i, field)| {
                 let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(field, i as i32),
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        field,
+                        i as i32 + COLUMN_ID_BASE,
+                    ),
                     is_hidden: !user_cols.contains(i),
                 };
                 c.column_desc.name = if !c.is_hidden {
@@ -175,13 +182,6 @@ impl StreamMaterialize {
 
     pub fn name(&self) -> &str {
         self.table.name()
-    }
-
-    /// XXX(st1page): this function is used for potential DDL demand in future, and please try your
-    /// best not convert `ColumnId` to `usize(col_index`)
-    #[expect(dead_code)]
-    fn col_id_to_idx(&self, id: ColumnId) -> usize {
-        id.get_id() as usize
     }
 }
 

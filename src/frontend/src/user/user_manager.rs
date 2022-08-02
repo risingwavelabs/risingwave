@@ -55,6 +55,10 @@ impl UserInfoManager {
         self.user_name_by_id.get(&id).cloned()
     }
 
+    pub fn get_user_name_map(&self) -> &HashMap<UserId, String> {
+        &self.user_name_by_id
+    }
+
     pub fn create_user(&mut self, user_info: UserInfo) {
         let id = user_info.id;
         let name = user_info.name.clone();
