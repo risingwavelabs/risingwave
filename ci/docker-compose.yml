@@ -17,13 +17,8 @@ services:
 
   rw-build-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
-    depends_on:
-      mysql:
-        condition: service_healthy
     volumes:
       - ..:/risingwave
-    networks:
-      nw:
         ipv4_address: 172.24.2.2
 
   regress-test-env:
@@ -33,6 +28,17 @@ services:
         condition: service_healthy
     volumes:
       - ..:/risingwave
+
+  sink-build-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ..:/risingwave
+    networks:
+      nw:
+        ipv4_address: 172.24.2.1
 
   mysql:
     image: mysql/mysql-server:latest
@@ -49,7 +55,7 @@ services:
       retries: 5
     networks:
       nw:
-        ipv4_address: 172.24.2.1
+        ipv4_address: 172.24.2.2
 
 networks:
   nw:
