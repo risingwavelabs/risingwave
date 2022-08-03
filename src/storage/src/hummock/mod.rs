@@ -25,6 +25,13 @@ use risingwave_rpc_client::HummockMetaClient;
 
 mod block_cache;
 pub use block_cache::*;
+
+#[cfg(target_os = "linux")]
+pub mod file_cache;
+
+mod tiered_cache;
+pub use tiered_cache::*;
+
 pub mod sstable;
 pub use sstable::*;
 
@@ -47,8 +54,6 @@ pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
 
-#[cfg(target_os = "linux")]
-pub mod file_cache;
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;

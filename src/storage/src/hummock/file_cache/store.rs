@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -20,11 +21,11 @@ use nix::sys::statfs::{statfs, FsType as NixFsType, EXT4_SUPER_MAGIC};
 use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
 
-use super::coding::{CacheKey, HashBuilder};
 use super::error::{Error, Result};
 use super::file::{CacheFile, CacheFileOptions};
 use super::meta::{BlockLoc, MetaFile, SlotId};
 use super::{utils, DioBuffer, DIO_BUFFER_ALLOCATOR};
+use crate::hummock::{HashBuilder, TieredCacheKey, TieredCacheValue};
 
 const META_FILE_FILENAME: &str = "meta";
 const CACHE_FILE_FILENAME: &str = "cache";
@@ -35,6 +36,70 @@ pub enum FsType {
     Xfs,
 }
 
+pub struct WriteBatch<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    keys: Vec<K>,
+    buffer: DioBuffer,
+    blocs: Vec<BlockLoc>,
+
+    block_size: usize,
+
+    _phantom: PhantomData<(K, V)>,
+}
+
+impl<K, V> WriteBatch<K, V>
+where
+    K: TieredCacheKey,
+    V: TieredCacheValue,
+{
+    fn new(block_size: usize, buffer_capacity: usize, item_capacity: usize) -> Self {
+        Self {
+            keys: Vec::with_capacity(item_capacity),
+            buffer: DioBuffer::with_capacity_in(buffer_capacity, &DIO_BUFFER_ALLOCATOR),
+            blocs: Vec::with_capacity(item_capacity),
+
+            block_size,
+
+            _phantom: PhantomData::default(),
+        }
+    }
+
+    pub fn append(&mut self, key: K, value: &V) {
+        let offset = self.buffer.len();
+        let len = value.encoded_len();
+        let bloc = BlockLoc {
+            bidx: offset as u32 / self.block_size as u32,
+            len: len as u32,
+        };
+        self.blocs.push(bloc);
+
+        self.buffer.resize(offset + len, 0);
+        value.encode(&mut self.buffer[offset..offset + len]);
+        self.buffer
+            .resize(utils::align_up(self.block_size, self.buffer.len()), 0);
+
+        self.keys.push(key);
+    }
+
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.blocs.len()
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn finish(self) -> (DioBuffer, Vec<BlockLoc>, Vec<K>) {
+        debug_assert!(!self.buffer.is_empty());
+        (self.buffer, self.blocs, self.keys)
+    }
+}
+
 pub struct StoreOptions {
     pub dir: String,
     pub capacity: usize,
@@ -42,9 +107,10 @@ pub struct StoreOptions {
     pub cache_file_fallocate_unit: usize,
 }
 
-pub struct Store<K>
+pub struct Store<K, V>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
 {
     dir: String,
     _capacity: usize,
@@ -56,11 +122,14 @@ where
 
     meta_file: Arc<RwLock<MetaFile<K>>>,
     cache_file: CacheFile,
+
+    _phantom: PhantomData<V>,
 }
 
-impl<K> Store<K>
+impl<K, V> Store<K, V>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
 {
     pub async fn open(options: StoreOptions) -> Result<Self> {
         if !PathBuf::from(options.dir.as_str()).exists() {
@@ -103,6 +172,8 @@ where
 
             meta_file: Arc::new(RwLock::new(mf)),
             cache_file: cf,
+
+            _phantom: PhantomData::default(),
         })
     }
 
@@ -157,22 +228,13 @@ where
         Ok(())
     }
 
-    pub async fn insert(&self, batch: &[(K, Vec<u8>)]) -> Result<Vec<SlotId>> {
-        debug_assert!(!batch.is_empty());
-        let mut buf = DioBuffer::with_capacity_in(self.buffer_capacity, &DIO_BUFFER_ALLOCATOR);
-        let mut blocs = Vec::with_capacity(batch.len());
-        let mut slots = Vec::with_capacity(batch.len());
+    pub fn batch(&self, item_capacity: usize) -> WriteBatch<K, V> {
+        WriteBatch::new(self.block_size, self.buffer_capacity, item_capacity)
+    }
 
-        for (_key, value) in batch {
-            debug_assert!(!value.is_empty());
-            let bloc = BlockLoc {
-                bidx: buf.len() as u32 / self.block_size as u32,
-                len: value.len() as u32,
-            };
-            blocs.push(bloc);
-            buf.extend_from_slice(value);
-            buf.resize(utils::align_up(self.block_size, buf.len()), 0);
-        }
+    pub async fn insert(&self, batch: WriteBatch<K, V>) -> Result<(Vec<K>, Vec<SlotId>)> {
+        let (buf, mut blocs, keys) = batch.finish();
+        let mut slots = Vec::with_capacity(blocs.len());
 
         let boff = self.cache_file.append(buf).await? as u32 / self.block_size as u32;
 
@@ -181,11 +243,12 @@ where
         }
 
         let mut mf = self.meta_file.write();
-        for ((key, _value), bloc) in batch.iter().zip_eq(blocs.iter()) {
+
+        for (key, bloc) in keys.iter().zip_eq(blocs.iter()) {
             slots.push(mf.insert(key, bloc)?);
         }
 
-        Ok(slots)
+        Ok((keys, slots))
     }
 
     pub async fn get(&self, slot: SlotId) -> Result<Vec<u8>> {
@@ -215,9 +278,10 @@ where
     }
 }
 
-impl<K> LruCacheEventListener for Store<K>
+impl<K, V> LruCacheEventListener for Store<K, V>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
+    V: TieredCacheValue,
 {
     type K = K;
     type T = SlotId;
@@ -228,18 +292,27 @@ where
     }
 }
 
-pub type StoreRef<K> = Arc<Store<K>>;
+pub type StoreRef<K, V> = Arc<Store<K, V>>;
 
 #[cfg(test)]
 mod tests {
 
-    use super::super::test_utils::TestCacheKey;
     use super::*;
+    use crate::hummock::file_cache::test_utils::{key, TestCacheKey, TestCacheValue};
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
 
     #[test]
     fn ensure_send_sync_clone() {
-        is_send_sync_clone::<StoreRef<TestCacheKey>>();
+        is_send_sync_clone::<StoreRef<TestCacheKey, TestCacheValue>>();
+    }
+
+    #[test]
+    fn test_write_batch() {
+        let mut batch: WriteBatch<TestCacheKey, TestCacheValue> = WriteBatch::new(4096, 0, 0);
+        batch.append(key(1), &vec![b'x'; 1024]);
+        batch.append(key(2), &vec![b'y'; 1024]);
+        batch.append(key(3), &vec![b'z'; 1024]);
+        assert_eq!(batch.buffer.len(), 4096 * 3);
     }
 }
