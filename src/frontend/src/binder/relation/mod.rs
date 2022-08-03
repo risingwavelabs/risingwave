@@ -16,13 +16,13 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{Expr, TableFunction, TableFunctionType};
+use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
 
 mod join;
 mod subquery;
@@ -256,6 +256,16 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_relation_by_id(
+        &mut self,
+        table_id: TableId,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
+        let table_name = self.catalog.get_table_name_by_id(TableId::from(table_id))?;
+        let schema_name = DEFAULT_SCHEMA_NAME;
+        self.bind_table_or_source(schema_name, &table_name, alias)
+    }
+
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
@@ -264,12 +274,21 @@ impl Binder {
                 } else {
                     let func_name = &name.0[0].value;
                     if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                        let args = args
+                        let args: Vec<ExprImpl> = args
                             .into_iter()
                             .map(|arg| self.bind_function_arg(arg))
                             .flatten_ok()
                             .try_collect()?;
-
+                        if table_function_type == TableFunctionType::RawTable {
+                            if args.len() != 1 {
+                                return Err(ErrorCode::BindError("should give only table id when using debug function __rw_table".to_string()).into());
+                            }
+                            if let ExprImpl::Literal(literal) = &args[0] {
+                                let table_id =
+                                    literal.get_data().clone().unwrap().into_int32() as u32;
+                                return self.bind_relation_by_id(TableId::from(table_id), alias);
+                            }
+                        }
                         let tf = TableFunction::new(table_function_type, args)?;
                         let columns = [(
                             false,

@@ -177,6 +177,14 @@ impl SchemaCatalog {
         self.system_table_by_name.get(table_name)
     }
 
+    pub fn get_table_name_by_id(&self, table_id: TableId) -> Option<String> {
+        if let Some(name) = self.table_name_by_id.get(&table_id) {
+            Some(name.clone())
+        } else {
+            None
+        }
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }

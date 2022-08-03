@@ -39,6 +39,7 @@ pub enum TableFunctionType {
     Generate,
     Unnest,
     RegexpMatches,
+    RawTable,
 }
 
 impl TableFunctionType {
@@ -47,6 +48,7 @@ impl TableFunctionType {
             TableFunctionType::Generate => Type::Generate,
             TableFunctionType::Unnest => Type::Unnest,
             TableFunctionType::RegexpMatches => Type::RegexpMatches,
+            TableFunctionType::RawTable => Type::RawTable,
         }
     }
 }
@@ -57,6 +59,7 @@ impl TableFunctionType {
             TableFunctionType::Generate => "generate_series",
             TableFunctionType::Unnest => "unnest",
             TableFunctionType::RegexpMatches => "regexp_matches",
+            TableFunctionType::RawTable => "__rw_table",
         }
     }
 }
@@ -71,6 +74,8 @@ impl FromStr for TableFunctionType {
             Ok(TableFunctionType::Unnest)
         } else if s.eq_ignore_ascii_case("regexp_matches") {
             Ok(TableFunctionType::RegexpMatches)
+        } else if s.eq_ignore_ascii_case("__rw_table") {
+            Ok(TableFunctionType::RawTable)
         } else {
             Err(())
         }
@@ -149,6 +154,11 @@ impl TableFunction {
                     datatype: Box::new(DataType::Varchar),
                 },
                 function_type: TableFunctionType::RegexpMatches,
+            }),
+            TableFunctionType::RawTable => Ok(TableFunction {
+                args,
+                return_type: DataType::Int32,
+                function_type: TableFunctionType::RawTable,
             }),
         }
     }

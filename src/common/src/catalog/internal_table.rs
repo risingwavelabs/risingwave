@@ -20,12 +20,13 @@ pub fn generate_intertable_name_with_type(
     table_id: u32,
     table_type: &str,
 ) -> String {
-    format!("__INTERNAL_{}_{}_{}", mview_name, table_type, table_id)
+    format!("__internal_{}_{}_{}", mview_name, table_type, table_id)
 }
 
 pub fn valid_table_name(table_name: &str) -> bool {
+    // "also can use __RW_TABLE(table_id)"
     lazy_static! {
-        static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__INTERNAL_.*_\d+").unwrap();
+        static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__internal_.*_\d+").unwrap();
     }
     !INTERNAL_TABLE_NAME.is_match(table_name)
 }
