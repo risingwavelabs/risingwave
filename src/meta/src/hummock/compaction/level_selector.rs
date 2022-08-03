@@ -353,6 +353,9 @@ impl LevelSelector for DynamicLevelSelector {
         } else {
             option.level + 1
         };
+        if option.level > 0 && option.level < ctx.base_level {
+            return None;
+        }
 
         let picker = ManualCompactionPicker::new(
             task_id,
