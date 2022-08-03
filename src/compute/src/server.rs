@@ -172,7 +172,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
     ));
-    let source_mgr = Arc::new(MemSourceManager::new(worker_id, source_metrics));
+    let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
