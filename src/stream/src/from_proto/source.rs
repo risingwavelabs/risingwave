@@ -53,11 +53,15 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         }));
         let schema = Schema::new(fields);
         let keyspace = Keyspace::table_root(store, &source_id);
+        let vnodes = params
+            .vnode_bitmap
+            .expect("vnodes not set for source executor");
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_id,
             source_id,
             source_desc,
+            vnodes,
             keyspace,
             column_ids,
             schema,

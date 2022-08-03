@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -61,8 +62,12 @@ impl ManualCompactionPicker {
         tmp_sst_info.key_range = Some(self.option.key_range.clone());
         range_overlap_info.update(&tmp_sst_info);
 
+        let mut hint_sst_ids: HashSet<u64> = HashSet::new();
+        hint_sst_ids.extend(self.option.sst_ids.iter());
+
         let level_table_infos: Vec<SstableInfo> = select_tables
             .iter()
+            .filter(|sst_info| hint_sst_ids.is_empty() || hint_sst_ids.contains(&sst_info.id))
             .filter(|sst_info| range_overlap_info.check_overlap(sst_info))
             .filter(|sst_info| {
                 if self.option.internal_table_id.is_empty() {
@@ -341,6 +346,7 @@ pub mod tests {
 
             // test key range filter first
             let option = ManualCompactionOption {
+                sst_ids: vec![],
                 level: 1,
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 101, 1),

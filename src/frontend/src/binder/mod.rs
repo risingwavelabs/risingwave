@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
@@ -47,6 +48,7 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::session::{AuthContext, SessionImpl};
 
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
@@ -54,6 +56,7 @@ pub struct Binder {
     catalog: CatalogReadGuard,
     db_name: String,
     context: BindContext,
+    auth_context: Arc<AuthContext>,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -73,11 +76,12 @@ pub struct Binder {
 }
 
 impl Binder {
-    pub fn new(catalog: CatalogReadGuard, db_name: String) -> Binder {
+    pub fn new(session: &SessionImpl) -> Binder {
         Binder {
-            catalog,
-            db_name,
+            catalog: session.env().catalog_reader().read_guard(),
+            db_name: session.database().to_string(),
             context: BindContext::new(),
+            auth_context: session.auth_context(),
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
@@ -149,23 +153,12 @@ impl Binder {
 
 #[cfg(test)]
 pub mod test_utils {
-    use std::sync::Arc;
-
-    use parking_lot::RwLock;
-
     use super::Binder;
-    use crate::catalog::catalog_service::CatalogReader;
-    use crate::catalog::root_catalog::Catalog;
+    use crate::session::SessionImpl;
 
-    #[cfg(test)]
-    pub fn mock_binder_with_catalog(catalog: Catalog, db_name: String) -> Binder {
-        let catalog = Arc::new(RwLock::new(catalog));
-        let catalog_reader = CatalogReader::new(catalog);
-        Binder::new(catalog_reader.read_guard(), db_name)
-    }
     #[cfg(test)]
     pub fn mock_binder() -> Binder {
-        mock_binder_with_catalog(Catalog::default(), "".to_string())
+        Binder::new(&SessionImpl::mock())
     }
 }
 
@@ -173,3 +166,5 @@ pub mod test_utils {
 pub const UNNAMED_COLUMN: &str = "?column?";
 /// The table name stored in [`BindContext`] for a subquery without an alias.
 const UNNAMED_SUBQUERY: &str = "?subquery?";
+/// The table name stored in [`BindContext`] for a column group.
+const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";

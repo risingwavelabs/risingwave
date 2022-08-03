@@ -15,10 +15,11 @@
 use std::sync::Arc;
 
 use rand::Rng;
-use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
 use tokio::sync::mpsc::{Receiver, Sender};
+
+use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
 
@@ -26,7 +27,7 @@ pub type CompactorManagerRef = Arc<CompactorManager>;
 
 pub struct Compactor {
     context_id: HummockContextId,
-    sender: Sender<Result<SubscribeCompactTasksResponse>>,
+    sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
 }
 
 impl Compactor {
@@ -34,7 +35,7 @@ impl Compactor {
         &self,
         compact_task: Option<CompactTask>,
         vacuum_task: Option<VacuumTask>,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         // TODO: compactor node backpressure
         self.sender
             .send(Ok(SubscribeCompactTasksResponse {
@@ -42,7 +43,7 @@ impl Compactor {
                 vacuum_task,
             }))
             .await
-            .map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
+            .map_err(|e| anyhow::anyhow!(e).into())
     }
 
     pub fn context_id(&self) -> HummockContextId {
@@ -120,7 +121,7 @@ impl CompactorManager {
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
-    ) -> Receiver<Result<SubscribeCompactTasksResponse>> {
+    ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         let mut guard = self.inner.write();
         guard.compactors.retain(|c| c.context_id != context_id);
