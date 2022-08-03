@@ -1611,6 +1611,19 @@ pub struct Function {
     pub filter: Option<Box<Expr>>,
 }
 
+impl Function {
+    pub fn no_arg(name: ObjectName) -> Self {
+        Self {
+            name,
+            args: vec![],
+            over: None,
+            distinct: false,
+            order_by: vec![],
+            filter: None,
+        }
+    }
+}
+
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

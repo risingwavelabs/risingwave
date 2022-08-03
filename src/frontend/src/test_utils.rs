@@ -117,10 +117,7 @@ impl LocalFrontend {
             let session = self.session_ref();
 
             let bound = {
-                let mut binder = Binder::new(
-                    session.env().catalog_reader().read_guard(),
-                    session.database().to_string(),
-                );
+                let mut binder = Binder::new(&session);
                 binder.bind(Statement::Query(query.clone()))?
             };
             Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())

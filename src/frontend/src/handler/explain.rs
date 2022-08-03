@@ -86,10 +86,7 @@ pub(super) fn handle_explain(
 
         stmt => {
             let bound = {
-                let mut binder = Binder::new(
-                    session.env().catalog_reader().read_guard(),
-                    session.database().to_string(),
-                );
+                let mut binder = Binder::new(&session);
                 binder.bind(stmt)?
             };
 

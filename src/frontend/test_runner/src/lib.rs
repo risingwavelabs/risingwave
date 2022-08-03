@@ -332,10 +332,7 @@ impl TestCase {
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(
-                session.env().catalog_reader().read_guard(),
-                session.database().to_string(),
-            );
+            let mut binder = Binder::new(&session);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
