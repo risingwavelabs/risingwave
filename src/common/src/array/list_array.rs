@@ -228,7 +228,7 @@ impl ListArray {
             array.values.is_empty(),
             "Must have no buffer in a list array"
         );
-        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+        let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let cardinality = bitmap.len();
         let array_data = array.get_list_array_data()?.to_owned();
         let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;

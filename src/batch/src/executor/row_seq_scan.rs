@@ -183,7 +183,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
-                vnodes: Bitmap::try_from(vnodes).unwrap().into(),
+                vnodes: Bitmap::from(vnodes).into(),
                 dist_key_indices,
             },
             // This is possbile for dml. vnode_bitmap is not filled by scheduler.
