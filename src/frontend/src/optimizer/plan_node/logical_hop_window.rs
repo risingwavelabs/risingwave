@@ -110,10 +110,10 @@ impl LogicalHopWindow {
                 }
             }
             if let Some(start_idx) = window_start_index {
-                current_fd.add_key_column(actual_schema.len(), &[start_idx])
+                current_fd.add_key(actual_schema.len(), &[start_idx])
             }
             if let Some(end_idx) = window_end_index {
-                current_fd.add_key_column(actual_schema.len(), &[end_idx])
+                current_fd.add_key(actual_schema.len(), &[end_idx])
             }
             current_fd
         };

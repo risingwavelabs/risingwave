@@ -18,6 +18,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 /// [`FunctionalDependency`] represent a dependency of from --> to.
+///
+/// For columns ABCD, the FD AC --> B is represented as {0, 2} --> {1} using [`FixedBitset`].
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependency {
     pub from: FixedBitSet,
@@ -44,7 +46,8 @@ impl FunctionalDependency {
         FunctionalDependency { from, to }
     }
 
-    /// Create a [`FunctionalDependency`] with column indices.
+    /// Create a [`FunctionalDependency`] with column indices. The order of the indices doesn't
+    /// matter. It is treated as a combination of columns.
     pub fn with_indices(column_cnt: usize, from: &[usize], to: &[usize]) -> Self {
         let from = {
             let mut tmp = FixedBitSet::with_capacity(column_cnt);
@@ -118,22 +121,15 @@ pub struct FunctionalDependencySet {
 impl fmt::Display for FunctionalDependencySet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("{")?;
-        for fd in self.strict.iter().with_position() {
-            match fd {
-                itertools::Position::First(fd) | itertools::Position::Middle(fd) => {
-                    f.write_fmt(format_args!("{}, ", fd))?;
-                }
-                itertools::Position::Last(fd) | itertools::Position::Only(fd) => {
-                    f.write_fmt(format_args!("{}", fd))?;
-                }
-            }
-        }
+        self.strict
+            .iter()
+            .format_with(", ", |fd, f| f(&format_args!("{}, ", fd)));
         f.write_str("}")
     }
 }
 
 impl FunctionalDependencySet {
-    /// Create a empty [`FunctionalDependencySet`]
+    /// Create an empty [`FunctionalDependencySet`]
     pub fn new() -> Self {
         Self { strict: Vec::new() }
     }
@@ -141,8 +137,6 @@ impl FunctionalDependencySet {
     /// Create a [`FunctionalDependencySet`] with the indices of a key.
     ///
     /// The **combination** of these columns can determine all other columns.
-    ///
-    /// Note that if `key_indices` empty, an empty fd set will be returned.
     ///
     /// # Examples
     /// ```rust
@@ -160,9 +154,7 @@ impl FunctionalDependencySet {
     /// ```
     pub fn with_key(column_cnt: usize, key_indices: &[usize]) -> Self {
         let mut tmp = Self::new();
-        if !key_indices.is_empty() {
-            tmp.add_key_column(column_cnt, key_indices);
-        }
+        tmp.add_key(column_cnt, key_indices);
         tmp
     }
 
@@ -188,11 +180,6 @@ impl FunctionalDependencySet {
     /// Add a functional dependency to a [`FunctionalDependencySet`].
     pub fn add_functional_dependency(&mut self, fd: FunctionalDependency) {
         let FunctionalDependency { from, to } = fd;
-        assert_eq!(
-            from.len(),
-            to.len(),
-            "from and to should have the same length"
-        );
         if !to.is_clear() {
             match self.strict.iter().position(|elem| elem.from == from) {
                 Some(idx) => self.strict[idx].to.union_with(&to),
@@ -209,7 +196,7 @@ impl FunctionalDependencySet {
     /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
     /// let mut fd = FunctionalDependencySet::new();
-    /// fd.add_key_column(4, &[1]);
+    /// fd.add_key(4, &[1]);
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
@@ -218,7 +205,7 @@ impl FunctionalDependencySet {
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
-    pub fn add_key_column(&mut self, column_cnt: usize, key_indices: &[usize]) {
+    pub fn add_key(&mut self, column_cnt: usize, key_indices: &[usize]) {
         self.add_functional_dependency(FunctionalDependency::with_key(column_cnt, key_indices));
     }
 
@@ -357,7 +344,7 @@ mod tests {
     fn test_minimize_key() {
         let mut fd_set = FunctionalDependencySet::new();
         // [0, 2, 3, 4] is a key
-        fd_set.add_key_column(5, &[0, 2, 3, 4]);
+        fd_set.add_key(5, &[0, 2, 3, 4]);
         // 0 is constant
         fd_set.add_constant_column(5, &[0]);
         // 1, 2 --> 3
