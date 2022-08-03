@@ -63,6 +63,9 @@ fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
     let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
     cast_sigs()
         .filter(|cast| cast.context == CastContext::Explicit) // TODO: generate implicit casts.
+        .filter(|cast| {
+            cast.from_type != DataTypeName::Varchar || cast.to_type == DataTypeName::Varchar
+        })
         .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
     casts
 }
