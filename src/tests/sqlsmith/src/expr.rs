@@ -386,5 +386,27 @@ pub fn print_function_table() -> String {
         })
         .join("\n");
 
-    func_str + "\n" + &agg_func_str
+    let cast_str = cast_sigs()
+        .map(|sig| {
+            format!(
+                "{:?} CAST {:?} -> {:?}",
+                sig.context, sig.to_type, sig.from_type,
+            )
+        })
+        .sorted()
+        .join("\n");
+
+    format!(
+        "
+==== FUNCTION SIGNATURES
+{}
+
+==== AGGREGATE FUNCTION SIGNATURES
+{}
+
+==== CAST SIGNATURES
+{}
+",
+        func_str, agg_func_str, cast_str
+    )
 }
