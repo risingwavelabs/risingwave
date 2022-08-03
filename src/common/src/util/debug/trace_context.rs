@@ -8,7 +8,7 @@ use std::hash::Hash;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Poll;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
@@ -101,11 +101,11 @@ impl StackTreeNode {
         assert!(inner.children.insert(child), "child already mounted");
     }
 
-    fn delete(&self) {
-        assert!(self.delete_unchecked(), "child not exists");
+    fn delete_from_parent(&self) {
+        assert!(self.delete_from_parent_unchecked(), "child not exists");
     }
 
-    fn delete_unchecked(&self) -> bool {
+    fn delete_from_parent_unchecked(&self) -> bool {
         let parent = self.parent();
         let mut parent_inner = parent.inner.borrow_mut();
         parent_inner.children.remove(self)
@@ -155,6 +155,7 @@ impl std::fmt::Display for TraceContext {
                 .iter()
                 .sorted_by(|a, b| a.inner.borrow().value.cmp(&b.inner.borrow().value))
             {
+                assert_eq!(&child.parent(), node);
                 fmt_node(f, child, depth + 1)?;
             }
 
@@ -176,14 +177,14 @@ impl TraceContext {
     }
 
     fn push(&mut self, span: SpanValue) -> StackTreeNode {
-        let current_node = self.current.clone();
-        let new_current_node = current_node.add_child(span);
+        let new_current_node = self.current.add_child(span);
         self.current = new_current_node.clone();
         new_current_node
     }
 
     fn step_in(&mut self, child: &StackTreeNode) {
         if !self.current.has_child(child) {
+            child.delete_from_parent_unchecked();
             child.set_parent(self.current.clone());
             self.current.mount_child(child.clone());
         }
@@ -192,7 +193,7 @@ impl TraceContext {
     }
 
     fn pop(&mut self, child: &StackTreeNode) {
-        child.delete();
+        child.delete_from_parent();
         self.current = child.parent();
     }
 
@@ -234,17 +235,20 @@ impl TraceContextManager {
         tx
     }
 
-    pub fn get_all(&self) -> impl Iterator<Item = (&str, watch::Ref<String>)> {
-        self.rxs.iter().map(|(k, v)| (k.as_str(), v.borrow()))
+    pub fn get_all(&mut self) -> impl Iterator<Item = (&str, watch::Ref<String>)> {
+        self.rxs.retain(|_, rx| rx.has_changed().is_ok());
+        self.rxs
+            .iter_mut()
+            .map(|(k, v)| (k.as_str(), v.borrow_and_update()))
     }
 }
 
 #[pin_project(PinnedDrop)]
 pub struct StackTraced<F: Future> {
     #[pin]
-    inner: Fuse<F>,
+    inner: F,
 
-    span: SpanValue,
+    span: Option<SpanValue>,
 
     this_node: Option<StackTreeNode>,
 }
@@ -252,8 +256,8 @@ pub struct StackTraced<F: Future> {
 impl<F: Future> StackTraced<F> {
     fn new(inner: F, span: impl Into<SpanValue>) -> Self {
         Self {
-            inner: inner.fuse(),
-            span: span.into(),
+            inner,
+            span: Some(span.into()),
             this_node: None,
         }
     }
@@ -270,15 +274,19 @@ impl<F: Future> Future for StackTraced<F> {
             return this.inner.poll(cx);
         }
 
+        let old_current = with_write_context(|c| c.current.clone());
+
         let this_node = with_write_context(|mut c| match this.this_node {
             Some(this_node) => {
                 c.step_in(this_node);
                 this_node
             }
-            None => this.this_node.insert(c.push(std::mem::take(this.span))),
+            None => this
+                .this_node
+                .insert(c.push(this.span.take().expect("node should only be created once"))),
         });
 
-        match this.inner.poll(cx) {
+        let r = match this.inner.poll(cx) {
             Poll::Ready(r) => {
                 with_write_context(|mut c| c.pop(this_node));
                 *this.this_node = None;
@@ -288,7 +296,11 @@ impl<F: Future> Future for StackTraced<F> {
                 with_write_context(|mut c| c.step_out());
                 Poll::Pending
             }
-        }
+        };
+
+        assert_eq!(old_current, with_write_context(|c| c.current.clone()));
+
+        r
     }
 }
 
@@ -301,7 +313,7 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
 
         match this.this_node {
             Some(this_node) => {
-                this_node.delete_unchecked();
+                this_node.delete_from_parent();
                 this_node.clear_children();
             }
             None => {} // not polled or ready
@@ -312,8 +324,8 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
 impl<T> StackTrace for T where T: Future {}
 
 pub trait StackTrace: Future + Sized {
-    fn stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self> {
-        StackTraced::new(self, span)
+    fn stack_trace(self, span: impl Into<SpanValue>) -> Fuse<StackTraced<Self>> {
+        StackTraced::new(self, span).fuse()
     }
 }
 
@@ -321,24 +333,24 @@ pub async fn monitored<F: Future>(
     f: F,
     root_span: impl Into<SpanValue>,
     trace_sender: TraceSender,
-    ms: u64,
+    interval: Duration,
 ) -> F::Output {
     TRACE_CONTEXT
         .scope(
             RefCell::new(TraceContext::new(root_span.into())),
             async move {
                 let monitor = async move {
+                    let mut interval = tokio::time::interval(interval);
                     loop {
-                        let new_trace = TRACE_CONTEXT.with(|c| format!("{}", c.borrow()));
-                        trace_sender.send_if_modified(|trace| {
-                            if trace != &new_trace {
-                                *trace = new_trace;
-                                true
-                            } else {
-                                false
+                        interval.tick().await;
+                        let new_trace = TRACE_CONTEXT.with(|c| c.borrow().to_string());
+                        match trace_sender.send(new_trace) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::error!("Trace monitor error: failed to send trace: {}", e);
+                                futures::future::pending().await
                             }
-                        });
-                        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                        }
                     }
                 };
 
@@ -464,7 +476,7 @@ mod tests {
             }
         });
 
-        monitored(hello(), "actor 233", watch_tx, 1000).await;
+        monitored(hello(), "actor 233", watch_tx, Duration::from_millis(1000)).await;
 
         collector.await.unwrap();
     }

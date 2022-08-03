@@ -50,6 +50,8 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
         } else {
             bail!("actor {actor_id} not found");
         }
+    } else if all_traces.is_empty() {
+        println!("No traces found");
     } else {
         for (key, trace) in all_traces {
             println!(">> {key}\n{trace}");

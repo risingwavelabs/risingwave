@@ -155,7 +155,7 @@ impl LocalStreamManager {
     pub async fn print_trace(&self) {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
-            let core = self.core.lock();
+            let mut core = self.core.lock();
 
             for (k, trace) in core.trace_context_manager.get_all() {
                 println!(">> {}\n\n{}", k, &*trace);
@@ -164,7 +164,7 @@ impl LocalStreamManager {
     }
 
     pub fn get_actor_traces(&self) -> HashMap<String, String> {
-        let core = self.core.lock();
+        let mut core = self.core.lock();
         core.trace_context_manager
             .get_all()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -572,7 +572,7 @@ impl LocalStreamManagerCore {
                     },
                     format!("Actor {actor_id}"),
                     trace_sender,
-                    1000,
+                    Duration::from_millis(500),
                 ))),
             );
 
