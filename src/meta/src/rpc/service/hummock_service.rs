@@ -24,7 +24,7 @@ use crate::error::meta_error_to_tonic;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
-use crate::rpc::service::MetaErrorReceiverStream;
+use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -65,28 +65,24 @@ impl<S> HummockManagerService for HummockServiceImpl<S>
 where
     S: MetaStore,
 {
-    type SubscribeCompactTasksStream = MetaErrorReceiverStream<SubscribeCompactTasksResponse>;
+    type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
 
     async fn pin_version(
         &self,
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let result = self
+        let (is_delta_response, version_deltas, pinned_version) = self
             .hummock_manager
             .pin_version(req.context_id, req.last_pinned)
-            .await;
-        match result {
-            Ok((is_delta_response, version_deltas, pinned_version)) => {
-                Ok(Response::new(PinVersionResponse {
-                    status: None,
-                    is_delta_response,
-                    version_deltas,
-                    pinned_version,
-                }))
-            }
-            Err(e) => Err(meta_error_to_tonic(e)),
-        }
+            .await
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(PinVersionResponse {
+            status: None,
+            is_delta_response,
+            version_deltas,
+            pinned_version,
+        }))
     }
 
     async fn unpin_version(
@@ -94,11 +90,11 @@ where
         request: Request<UnpinVersionRequest>,
     ) -> Result<Response<UnpinVersionResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.unpin_version(req.context_id).await;
-        match result {
-            Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
-            Err(e) => Err(meta_error_to_tonic(e)),
-        }
+        self.hummock_manager
+            .unpin_version(req.context_id)
+            .await
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(UnpinVersionResponse { status: None }))
     }
 
     async fn unpin_version_before(
@@ -106,14 +102,11 @@ where
         request: Request<UnpinVersionBeforeRequest>,
     ) -> Result<Response<UnpinVersionBeforeResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
+        self.hummock_manager
             .unpin_version_before(req.context_id, req.unpin_version_before)
-            .await;
-        match result {
-            Ok(_) => Ok(Response::new(UnpinVersionBeforeResponse { status: None })),
-            Err(e) => Err(meta_error_to_tonic(e)),
-        }
+            .await
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
     }
 
     async fn report_compaction_tasks(
@@ -126,16 +119,13 @@ where
                 status: None,
             })),
             Some(compact_task) => {
-                let result = self
-                    .hummock_manager
+                self.hummock_manager
                     .report_compact_task(req.context_id, &compact_task)
-                    .await;
-                match result {
-                    Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
-                        status: None,
-                    })),
-                    Err(e) => Err(meta_error_to_tonic(e)),
-                }
+                    .await
+                    .map_err(meta_error_to_tonic)?;
+                Ok(Response::new(ReportCompactionTasksResponse {
+                    status: None,
+                }))
             }
         }
     }
@@ -145,14 +135,15 @@ where
         request: Request<PinSnapshotRequest>,
     ) -> Result<Response<PinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.pin_snapshot(req.context_id).await;
-        match result {
-            Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
-                status: None,
-                snapshot: Some(hummock_snapshot),
-            })),
-            Err(e) => Err(meta_error_to_tonic(e)),
-        }
+        let hummock_snapshot = self
+            .hummock_manager
+            .pin_snapshot(req.context_id)
+            .await
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(PinSnapshotResponse {
+            status: None,
+            snapshot: Some(hummock_snapshot),
+        }))
     }
 
     async fn unpin_snapshot(
@@ -160,9 +151,10 @@ where
         request: Request<UnpinSnapshotRequest>,
     ) -> Result<Response<UnpinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        if let Err(e) = self.hummock_manager.unpin_snapshot(req.context_id).await {
-            return Err(meta_error_to_tonic(e));
-        }
+        self.hummock_manager
+            .unpin_snapshot(req.context_id)
+            .await
+            .map_err(meta_error_to_tonic)?;
         Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }
 
@@ -171,13 +163,10 @@ where
         request: Request<UnpinSnapshotBeforeRequest>,
     ) -> Result<Response<UnpinSnapshotBeforeResponse>, Status> {
         let req = request.into_inner();
-        if let Err(e) = self
-            .hummock_manager
+        self.hummock_manager
             .unpin_snapshot_before(req.context_id, req.min_snapshot.unwrap())
             .await
-        {
-            return Err(meta_error_to_tonic(e));
-        }
+            .map_err(meta_error_to_tonic)?;
         Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
     }
 
@@ -185,18 +174,16 @@ where
         &self,
         request: Request<GetNewSstIdsRequest>,
     ) -> Result<Response<GetNewSstIdsResponse>, Status> {
-        let result = self
+        let sst_id_range = self
             .hummock_manager
             .get_new_sst_ids(request.into_inner().number)
-            .await;
-        match result {
-            Ok(sst_id_range) => Ok(Response::new(GetNewSstIdsResponse {
-                status: None,
-                start_id: sst_id_range.start_id,
-                end_id: sst_id_range.end_id,
-            })),
-            Err(e) => Err(meta_error_to_tonic(e)),
-        }
+            .await
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(GetNewSstIdsResponse {
+            status: None,
+            start_id: sst_id_range.start_id,
+            end_id: sst_id_range.end_id,
+        }))
     }
 
     async fn subscribe_compact_tasks(
@@ -211,7 +198,7 @@ where
                 .map_err(meta_error_to_tonic);
         }
         let rx = self.compactor_manager.add_compactor(context_id);
-        Ok(Response::new(MetaErrorReceiverStream::new(rx)))
+        Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
     async fn report_vacuum_task(
@@ -286,35 +273,27 @@ where
             &option
         );
 
-        let result_state = match self
-            .hummock_manager
+        self.hummock_manager
             .trigger_manual_compaction(compaction_group_id, option)
             .await
-        {
-            Ok(_) => None,
+            .map_err(meta_error_to_tonic)?;
 
-            Err(error) => {
-                return Err(meta_error_to_tonic(error));
-            }
-        };
-
-        let resp = TriggerManualCompactionResponse {
-            status: result_state,
-        };
-        Ok(Response::new(resp))
+        Ok(Response::new(TriggerManualCompactionResponse {
+            status: None,
+        }))
     }
 
     async fn get_epoch(
         &self,
         _request: Request<GetEpochRequest>,
     ) -> Result<Response<GetEpochResponse>, Status> {
-        let result = self.hummock_manager.get_last_epoch();
-        match result {
-            Ok(hummock_snapshot) => Ok(Response::new(GetEpochResponse {
-                status: None,
-                snapshot: Some(hummock_snapshot),
-            })),
-            Err(e) => Err(meta_error_to_tonic(e)),
-        }
+        let hummock_snapshot = self
+            .hummock_manager
+            .get_last_epoch()
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(GetEpochResponse {
+            status: None,
+            snapshot: Some(hummock_snapshot),
+        }))
     }
 }

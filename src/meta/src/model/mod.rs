@@ -87,7 +87,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
                     .map(Self::from_protobuf)
                     .map_err(Into::into)
             })
-            .collect::<MetadataModelResult<Vec<_>>>()
+            .collect()
     }
 
     /// `insert` insert a new record in meta store, replaced it if the record already exist.

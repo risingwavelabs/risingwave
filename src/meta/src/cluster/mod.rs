@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -197,7 +198,7 @@ where
             core.update_worker_ttl(worker.key().unwrap(), self.max_heartbeat_interval);
             Ok(())
         } else {
-            Err(anyhow::anyhow!("unknown worker_id: {}", worker_id).into())
+            bail!("unknown worker id: {}", worker_id);
         }
     }
 

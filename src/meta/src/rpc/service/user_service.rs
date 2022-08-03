@@ -118,11 +118,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .map_err(meta_error_to_tonic)? as u32;
         let mut user = req.get_user().map_err(meta_error_to_tonic)?.clone();
         user.id = id;
-        let version = self
-            .user_manager
-            .create_user(&user)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.user_manager.create_user(&user).await?;
 
         Ok(Response::new(CreateUserResponse {
             status: None,
@@ -136,11 +132,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<DropUserRequest>,
     ) -> Result<Response<DropUserResponse>, Status> {
         let req = request.into_inner();
-        let version = self
-            .user_manager
-            .drop_user(req.user_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.user_manager.drop_user(req.user_id).await?;
 
         Ok(Response::new(DropUserResponse {
             status: None,
@@ -160,11 +152,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .map(|i| UpdateField::from_i32(*i).unwrap())
             .collect_vec();
         let user = req.get_user().map_err(meta_error_to_tonic)?.clone();
-        let version = self
-            .user_manager
-            .update_user(&user, &update_fields)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.user_manager.update_user(&user, &update_fields).await?;
 
         Ok(Response::new(UpdateUserResponse {
             status: None,
@@ -180,13 +168,11 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         let req = request.into_inner();
         let new_privileges = self
             .expand_privilege(req.get_privileges(), Some(req.with_grant_option))
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
         let version = self
             .user_manager
             .grant_privilege(&req.user_ids, &new_privileges, req.granted_by)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(GrantPrivilegeResponse {
             status: None,
@@ -200,10 +186,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<RevokePrivilegeRequest>,
     ) -> Result<Response<RevokePrivilegeResponse>, Status> {
         let req = request.into_inner();
-        let privileges = self
-            .expand_privilege(req.get_privileges(), None)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let privileges = self.expand_privilege(req.get_privileges(), None).await?;
         let revoke_grant_option = req.revoke_grant_option;
         let version = self
             .user_manager
@@ -215,8 +198,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
                 revoke_grant_option,
                 req.cascade,
             )
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(RevokePrivilegeResponse {
             status: None,

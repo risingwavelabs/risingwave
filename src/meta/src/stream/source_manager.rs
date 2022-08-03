@@ -57,7 +57,7 @@ use crate::model::{
 };
 use crate::storage::{MetaStore, Transaction};
 use crate::stream::FragmentManagerRef;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
@@ -478,11 +478,7 @@ where
             }
         }
 
-        self.env
-            .meta_store()
-            .txn(trx)
-            .await
-            .map_err(MetaError::transaction_error)
+        self.env.meta_store().txn(trx).await.map_err(Into::into)
     }
 
     pub async fn patch_update(
@@ -498,11 +494,7 @@ where
             }
         }
 
-        self.env
-            .meta_store()
-            .txn(trx)
-            .await
-            .map_err(MetaError::transaction_error)?;
+        self.env.meta_store().txn(trx).await?;
 
         let mut core = self.core.lock().await;
         core.patch_diff(source_fragments, actor_splits);

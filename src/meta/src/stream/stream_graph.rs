@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{generate_intertable_name_with_type, TableId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -956,7 +957,7 @@ impl ActorGraphBuilder {
 
         if !downstream_cnts.is_empty() {
             // There are fragments that are not processed yet.
-            return Err(anyhow::anyhow!("graph is not a DAG").into());
+            bail!("graph is not a DAG");
         }
 
         Ok(())

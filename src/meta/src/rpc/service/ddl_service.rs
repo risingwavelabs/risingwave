@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -95,11 +96,7 @@ where
             .map_err(meta_error_to_tonic)? as u32;
         let mut database = req.get_db().map_err(meta_error_to_tonic)?.clone();
         database.id = id;
-        let version = self
-            .catalog_manager
-            .create_database(&database)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.catalog_manager.create_database(&database).await?;
 
         Ok(Response::new(CreateDatabaseResponse {
             status: None,
@@ -114,11 +111,7 @@ where
     ) -> Result<Response<DropDatabaseResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let version = self
-            .catalog_manager
-            .drop_database(database_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.catalog_manager.drop_database(database_id).await?;
         Ok(Response::new(DropDatabaseResponse {
             status: None,
             version,
@@ -138,11 +131,7 @@ where
             .map_err(meta_error_to_tonic)? as u32;
         let mut schema = req.get_schema().map_err(meta_error_to_tonic)?.clone();
         schema.id = id;
-        let version = self
-            .catalog_manager
-            .create_schema(&schema)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.catalog_manager.create_schema(&schema).await?;
 
         Ok(Response::new(CreateSchemaResponse {
             status: None,
@@ -157,11 +146,7 @@ where
     ) -> Result<Response<DropSchemaResponse>, Status> {
         let req = request.into_inner();
         let schema_id = req.get_schema_id();
-        let version = self
-            .catalog_manager
-            .drop_schema(schema_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.catalog_manager.drop_schema(schema_id).await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
             version,
@@ -185,23 +170,20 @@ where
 
         self.catalog_manager
             .start_create_source_procedure(&source)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         // QUESTION(patrick): why do we need to contact compute node on create source
         if let Err(e) = self.source_manager.create_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
-                .await
-                .map_err(meta_error_to_tonic)?;
+                .await?;
             return Err(e.into());
         }
 
         let version = self
             .catalog_manager
             .finish_create_source_procedure(&source)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
         Ok(Response::new(CreateSourceResponse {
             status: None,
             source_id: id,
@@ -217,17 +199,10 @@ where
         let source_id = request.into_inner().source_id;
 
         // 1. Drop source in catalog. Ref count will be checked.
-        let version = self
-            .catalog_manager
-            .drop_source(source_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.catalog_manager.drop_source(source_id).await?;
 
         // 2. Drop source on compute nodes.
-        self.source_manager
-            .drop_source(source_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        self.source_manager.drop_source(source_id).await?;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -251,8 +226,7 @@ where
 
         let (sink_id, version) = self
             .create_relation(&mut Relation::Sink(sink), fragment_graph)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(CreateSinkResponse {
             status: None,
@@ -268,11 +242,7 @@ where
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
-        let version = self
-            .catalog_manager
-            .drop_sink(sink_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.catalog_manager.drop_sink(sink_id).await?;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -299,8 +269,7 @@ where
 
         let (table_id, version) = self
             .create_relation(&mut Relation::Table(mview), fragment_graph)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
@@ -320,17 +289,12 @@ where
 
         let table_id = request.into_inner().table_id;
         // 1. Drop table in catalog. Ref count will be checked.
-        let version = self
-            .catalog_manager
-            .drop_table(table_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let version = self.catalog_manager.drop_table(table_id).await?;
 
         // 2. drop mv in stream manager
         self.stream_manager
             .drop_materialized_view(&TableId::new(table_id))
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -350,8 +314,7 @@ where
 
         let (source_id, table_id, version) = self
             .create_materialized_source_inner(source, mview, fragment_graph)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(CreateMaterializedSourceResponse {
             status: None,
@@ -372,8 +335,7 @@ where
 
         let version = self
             .drop_materialized_source_inner(source_id, table_id)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok(Response::new(DropMaterializedSourceResponse {
             status: None,
@@ -406,8 +368,7 @@ where
             .collect_vec();
 
         for inner_table in &mut internal_table {
-            self.set_table_mapping(inner_table)
-                .map_err(meta_error_to_tonic)?;
+            self.set_table_mapping(inner_table)?;
         }
         Ok(internal_table)
     }
@@ -438,8 +399,7 @@ where
         // 2. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
             .start_create_procedure(relation)
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         // 3. Create relation in stream manager. The id in stream node will be filled.
         let mut ctx = CreateMaterializedViewContext {
@@ -457,13 +417,12 @@ where
             Err(e) => {
                 self.catalog_manager
                     .cancel_create_procedure(relation)
-                    .await
-                    .map_err(meta_error_to_tonic)?;
+                    .await?;
                 return Err(e);
             }
             Ok(()) => {
                 if let Relation::Table(table) = relation {
-                    self.set_table_mapping(table).map_err(meta_error_to_tonic)?;
+                    self.set_table_mapping(table)?;
                 }
                 self.get_internal_table(&ctx)?
             }
@@ -490,8 +449,7 @@ where
                 },
                 relation,
             )
-            .await
-            .map_err(meta_error_to_tonic)?;
+            .await?;
 
         Ok((id, version))
     }
@@ -667,8 +625,7 @@ where
                 return Err(e);
             }
             Ok(()) => {
-                self.set_table_mapping(&mut mview)
-                    .map_err(meta_error_to_tonic)?;
+                self.set_table_mapping(&mut mview)?;
                 self.get_internal_table(&ctx)?
             }
         };
@@ -724,11 +681,10 @@ where
                 });
                 Ok(())
             }
-            None => Err(anyhow::anyhow!(
+            None => bail!(
                 "no data distribution found for materialized view table_id = {}",
                 table.id
-            )
-            .into()),
+            ),
         }
     }
 }
@@ -756,8 +712,7 @@ fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> MetaResult<V
 
     let mut dependent_relations = Default::default();
     for fragment in fragment_graph.fragments.values() {
-        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)
-            .map_err(meta_error_to_tonic)?;
+        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)?;
     }
     Ok(dependent_relations.into_iter().collect())
 }

@@ -191,7 +191,7 @@ where
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())
             .await
-            .map_err(|err| anyhow!(err.to_string()))?;
+            .map_err(|err| anyhow!(err))?;
         Ok(())
     }
 }

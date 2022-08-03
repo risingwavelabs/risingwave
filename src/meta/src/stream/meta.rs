@@ -33,7 +33,7 @@ use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::stream::record_table_vnode_mappings;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 struct FragmentManagerCore {
     table_fragments: HashMap<TableId, TableFragments>,
@@ -105,16 +105,11 @@ where
             if map.contains_key(&table_fragment.table_id()) {
                 table_fragment.upsert_in_transaction(&mut transaction)?;
             } else {
-                return Err(
-                    anyhow!("table_fragment not exist: id={}", table_fragment.table_id()).into(),
-                );
+                bail!("table_fragment not exist: id={}", table_fragment.table_id());
             }
         }
 
-        self.meta_store
-            .txn(transaction)
-            .await
-            .map_err(MetaError::transaction_error)?;
+        self.meta_store.txn(transaction).await?;
         for table_fragment in table_fragments {
             map.insert(table_fragment.table_id(), table_fragment.clone());
         }
@@ -130,7 +125,7 @@ where
         if let Some(table_fragments) = map.get(table_id) {
             Ok(table_fragments.clone())
         } else {
-            Err(anyhow!("table_fragment not exist: id={}", table_id).into())
+            bail!("table_fragment not exist: id={}", table_id);
         }
     }
 
@@ -143,11 +138,10 @@ where
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
-            Entry::Occupied(_) => Err(anyhow!(
+            Entry::Occupied(_) => bail!(
                 "table_fragment already exist: id={}",
                 table_fragment.table_id()
-            )
-            .into()),
+            ),
             Entry::Vacant(v) => {
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
@@ -166,7 +160,7 @@ where
                 o.remove();
                 Ok(())
             }
-            Entry::Vacant(_) => Err(anyhow!("table_fragment not exist: id={}", table_id).into()),
+            Entry::Vacant(_) => bail!("table_fragment not exist: id={}", table_id),
         }
     }
 
@@ -204,10 +198,7 @@ where
                 dependent_tables.push(dependent_table);
             }
 
-            self.meta_store
-                .txn(transaction)
-                .await
-                .map_err(MetaError::transaction_error)?;
+            self.meta_store.txn(transaction).await?;
             map.insert(*table_id, table_fragments);
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
@@ -215,7 +206,7 @@ where
 
             Ok(())
         } else {
-            Err(anyhow!("table_fragment not exist: id={}", table_id).into())
+            bail!("table_fragment not exist: id={}", table_id)
         }
     }
 
@@ -256,17 +247,14 @@ where
                 dependent_tables.push(dependent_table);
             }
 
-            self.meta_store
-                .txn(transaction)
-                .await
-                .map_err(MetaError::transaction_error)?;
+            self.meta_store.txn(transaction).await?;
             map.remove(table_id).unwrap();
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
             }
             Ok(())
         } else {
-            Err(anyhow!("table_fragment not exist: id={}", table_id).into())
+            bail!("table_fragment not exist: id={}", table_id);
         }
     }
 
@@ -460,10 +448,7 @@ where
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
 
-        self.meta_store
-            .txn(transaction)
-            .await
-            .map_err(MetaError::transaction_error)?;
+        self.meta_store.txn(transaction).await?;
         Ok(())
     }
 
@@ -474,7 +459,7 @@ where
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.worker_actor_ids()),
-            None => Err(anyhow!("table_fragment not exist: id={}", table_id).into()),
+            None => bail!("table_fragment not exist: id={}", table_id),
         }
     }
 
@@ -482,7 +467,7 @@ where
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.actor_ids()),
-            None => Err(anyhow!("table_fragment not exist: id={}", table_id).into()),
+            None => bail!("table_fragment not exist: id={}", table_id),
         }
     }
 
@@ -490,7 +475,7 @@ where
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
-            None => Err(anyhow!("table_fragment not exist: id={}", table_id).into()),
+            None => bail!("table_fragment not exist: id={}", table_id),
         }
     }
 
@@ -511,7 +496,7 @@ where
                         .insert(*table_id, table_fragment.sink_actor_ids());
                 }
                 None => {
-                    return Err(anyhow!("table_fragment not exist: id={}", table_id).into());
+                    bail!("table_fragment not exist: id={}", table_id);
                 }
             }
         }
@@ -531,7 +516,7 @@ where
                     info.insert(*table_id, table_fragment.parallel_unit_sink_actor_id());
                 }
                 None => {
-                    return Err(anyhow!("table_fragment not exist: id={}", table_id).into());
+                    bail!("table_fragment not exist: id={}", table_id);
                 }
             }
         }
@@ -552,7 +537,7 @@ where
                     info.insert(*table_id, table_fragment.worker_actor_ids());
                 }
                 None => {
-                    return Err(anyhow!("table_fragment not exist: id={}", table_id).into());
+                    bail!("table_fragment not exist: id={}", table_id);
                 }
             }
         }

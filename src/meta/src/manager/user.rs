@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use risingwave_common::bail;
 use risingwave_common::catalog::{
     DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
     DEFAULT_SUPER_USER_ID,
@@ -220,7 +221,7 @@ impl<S: MetaStore> UserManager<S> {
     pub async fn drop_user(&self, id: UserId) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.user_info.contains_key(&id) {
-            return Err(anyhow!("User {} not found", id).into());
+            bail!("User {} not found", id);
         }
         let user = core.user_info.get(&id).cloned().unwrap();
 
@@ -385,11 +386,7 @@ impl<S: MetaStore> UserManager<S> {
             user_updated.push(user);
         }
 
-        self.env
-            .meta_store()
-            .txn(transaction)
-            .await
-            .map_err(MetaError::transaction_error)?;
+        self.env.meta_store().txn(transaction).await?;
         let mut version = 0;
         for user in user_updated {
             core.user_info.insert(user.id, user.clone());
@@ -550,11 +547,7 @@ impl<S: MetaStore> UserManager<S> {
             }
         }
 
-        self.env
-            .meta_store()
-            .txn(transaction)
-            .await
-            .map_err(MetaError::transaction_error)?;
+        self.env.meta_store().txn(transaction).await?;
         let mut version = 0;
         for (user_id, user_info) in user_updated {
             core.user_info.insert(user_id, user_info.clone());
@@ -585,11 +578,7 @@ impl<S: MetaStore> UserManager<S> {
             }
         }
 
-        self.env
-            .meta_store()
-            .txn(transaction)
-            .await
-            .map_err(MetaError::transaction_error)?;
+        self.env.meta_store().txn(transaction).await?;
         for user in users_need_update {
             core.user_info.insert(user.id, user.clone());
             self.env

@@ -27,28 +27,27 @@ use std::task::{Context, Poll};
 use futures::Stream;
 use tokio::sync::mpsc::Receiver;
 
-use crate::error::meta_error_to_tonic;
 use crate::MetaError;
 
-/// `MetaErrorReceiverStream` is a wrapper around `tokio::sync::mpsc::Receiver` that implements
-/// Stream. `MetaErrorReceiverStream` is similar to `tokio_stream::wrappers::ReceiverStream`, but it
+/// `RwReceiverStream` is a wrapper around `tokio::sync::mpsc::Receiver` that implements
+/// Stream. `RwReceiverStream` is similar to `tokio_stream::wrappers::ReceiverStream`, but it
 /// maps Result<S, `MetaError`> to Result<S, `tonic::Status`>.
-pub struct MetaErrorReceiverStream<S> {
+pub struct RwReceiverStream<S> {
     inner: Receiver<Result<S, MetaError>>,
 }
 
-impl<S> MetaErrorReceiverStream<S> {
+impl<S> RwReceiverStream<S> {
     pub fn new(inner: Receiver<Result<S, MetaError>>) -> Self {
         Self { inner }
     }
 }
 
-impl<S> Stream for MetaErrorReceiverStream<S> {
+impl<S> Stream for RwReceiverStream<S> {
     type Item = Result<S, tonic::Status>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner
             .poll_recv(cx)
-            .map(|opt| opt.map(|res| res.map_err(meta_error_to_tonic)))
+            .map(|opt| opt.map(|res| res.map_err(Into::into)))
     }
 }

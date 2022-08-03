@@ -19,6 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use itertools::Itertools;
 use prost::Message;
+use risingwave_common::bail;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -172,7 +173,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                     now.as_secs(),
                 );
                 tracing::error!("{}", err_info);
-                return Err(anyhow::anyhow!(err_info).into());
+                bail!(err_info);
             }
         }
         let lease_id = if !old_leader_info.is_empty() {

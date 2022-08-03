@@ -17,13 +17,12 @@ use std::collections::{HashMap, HashSet};
 use std::option::Option::Some;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::ensure;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
 use risingwave_pb::common::ParallelUnit;
@@ -143,11 +142,7 @@ where
                 schema.upsert_in_transaction(&mut transaction)?;
                 schemas.push(schema);
             }
-            self.env
-                .meta_store()
-                .txn(transaction)
-                .await
-                .map_err(MetaError::transaction_error)?;
+            self.env.meta_store().txn(transaction).await?;
 
             core.add_database(database);
             let mut version = self
@@ -166,7 +161,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("database already exists").into())
+            bail!("database already exists");
         }
     }
 
@@ -185,11 +180,7 @@ where
             let mut transaction = Transaction::default();
             database.delete_in_transaction(&mut transaction)?;
             schemas[0].delete_in_transaction(&mut transaction)?;
-            self.env
-                .meta_store()
-                .txn(transaction)
-                .await
-                .map_err(MetaError::transaction_error)?;
+            self.env.meta_store().txn(transaction).await?;
             core.drop_schema(schemas[0]);
             core.drop_database(&database);
 
@@ -201,7 +192,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("database doesn't exist").into())
+            bail!("database doesn't exist");
         }
     }
 
@@ -219,7 +210,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("schema already exists").into())
+            bail!("schema already exists");
         }
     }
 
@@ -238,7 +229,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("schema doesn't exist").into())
+            bail!("schema doesn't exist");
         }
     }
 
@@ -280,7 +271,7 @@ where
             }
             Ok(())
         } else {
-            Err(anyhow!("table already exists or in creating procedure").into())
+            bail!("table already exists or in creating procedure");
         }
     }
 
@@ -298,11 +289,7 @@ where
                 table.upsert_in_transaction(&mut transaction)?;
             }
             table.upsert_in_transaction(&mut transaction)?;
-            core.env
-                .meta_store()
-                .txn(transaction)
-                .await
-                .map_err(MetaError::transaction_error)?;
+            core.env.meta_store().txn(transaction).await?;
 
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
@@ -317,7 +304,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("table already exist or not in creating procedure").into())
+            bail!("table already exist or not in creating procedure");
         }
     }
 
@@ -331,7 +318,7 @@ where
             }
             Ok(())
         } else {
-            Err(anyhow!("table already exist or not in creating procedure").into())
+            bail!("table already exist or not in creating procedure");
         }
     }
 
@@ -359,7 +346,7 @@ where
                 }
             }
         } else {
-            Err(anyhow!("table doesn't exist").into())
+            bail!("table doesn't exist");
         }
     }
 
@@ -370,7 +357,7 @@ where
             core.mark_creating(&key);
             Ok(())
         } else {
-            Err(anyhow!("source already exists or in creating procedure").into())
+            bail!("source already exists or in creating procedure");
         }
     }
 
@@ -391,7 +378,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("source already exist or not in creating procedure").into())
+            bail!("source already exist or not in creating procedure");
         }
     }
 
@@ -402,7 +389,7 @@ where
             core.unmark_creating(&key);
             Ok(())
         } else {
-            Err(anyhow!("source already exist or not in creating procedure").into())
+            bail!("source already exist or not in creating procedure");
         }
     }
 
@@ -438,11 +425,7 @@ where
                 }
             }
         }
-        core.env
-            .meta_store()
-            .txn(transaction)
-            .await
-            .map_err(MetaError::transaction_error)?;
+        core.env.meta_store().txn(transaction).await?;
         for table in &tables {
             self.broadcast_info_op(Operation::Update, Info::Table(table.to_owned()))
                 .await;
@@ -472,7 +455,7 @@ where
                 }
             }
         } else {
-            Err(anyhow!("source doesn't exist").into())
+            bail!("source doesn't exist");
         }
     }
 
@@ -494,7 +477,7 @@ where
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
-            Err(anyhow!("source or table already exist").into())
+            bail!("source or table already exist");
         }
     }
 
@@ -521,11 +504,7 @@ where
             for table in &tables {
                 table.upsert_in_transaction(&mut transaction)?;
             }
-            core.env
-                .meta_store()
-                .txn(transaction)
-                .await
-                .map_err(MetaError::transaction_error)?;
+            core.env.meta_store().txn(transaction).await?;
 
             core.add_source(source);
             core.add_table(mview);
@@ -544,7 +523,7 @@ where
                 .await;
             Ok(version)
         } else {
-            Err(anyhow!("source already exist or not in creating procedure").into())
+            bail!("source already exist or not in creating procedure");
         }
     }
 
@@ -565,7 +544,7 @@ where
             core.unmark_creating(&mview_key);
             Ok(())
         } else {
-            Err(anyhow!("source already exist or not in creating procedure").into())
+            bail!("source already exist or not in creating procedure");
         }
     }
 
@@ -584,13 +563,10 @@ where
                     mview.optional_associated_source_id
                 {
                     if associated_source_id != source_id {
-                        return Err(anyhow!(
-                            "mview's associated source id doesn't match source id"
-                        )
-                        .into());
+                        bail!("mview's associated source id doesn't match source id");
                     }
                 } else {
-                    return Err(anyhow!("mview do not have associated source id").into());
+                    bail!("mview do not have associated source id");
                 }
                 // check ref count
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
@@ -610,11 +586,7 @@ where
                 let mut transaction = Transaction::default();
                 mview.delete_in_transaction(&mut transaction)?;
                 source.delete_in_transaction(&mut transaction)?;
-                core.env
-                    .meta_store()
-                    .txn(transaction)
-                    .await
-                    .map_err(MetaError::transaction_error)?;
+                core.env.meta_store().txn(transaction).await?;
                 core.drop_table(&mview);
                 core.drop_source(&source);
                 for &dependent_relation_id in &mview.dependent_relations {
@@ -630,7 +602,7 @@ where
                 Ok(version)
             }
 
-            _ => Err(anyhow!("table or source doesn't exist").into()),
+            _ => bail!("table or source doesn't exist"),
         }
     }
 
@@ -644,7 +616,7 @@ where
             }
             Ok(())
         } else {
-            Err(anyhow!("sink already exists or in creating procedure").into())
+            bail!("sink already exists or in creating procedure");
         }
     }
 
@@ -667,7 +639,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("sink already exist or not in creating procedure").into())
+            bail!("sink already exist or not in creating procedure");
         }
     }
 
@@ -678,7 +650,7 @@ where
             core.unmark_creating(&key);
             Ok(())
         } else {
-            Err(anyhow!("sink already exist or not in creating procedure").into())
+            bail!("sink already exist or not in creating procedure");
         }
     }
 
@@ -696,7 +668,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("sink already exists").into())
+            bail!("sink already exists");
         }
     }
 
@@ -718,7 +690,7 @@ where
 
             Ok(version)
         } else {
-            Err(anyhow!("sink doesn't exist").into())
+            bail!("sink doesn't exist");
         }
     }
 

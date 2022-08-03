@@ -77,11 +77,6 @@ impl std::fmt::Debug for MetaError {
 }
 
 impl MetaError {
-    /// `MetaStore` transaction error.
-    pub fn transaction_error(e: MetaStoreError) -> Self {
-        MetaErrorInner::TransactionError(e).into()
-    }
-
     /// Permission denied error.
     pub fn permission_denied(s: String) -> Self {
         MetaErrorInner::PermissionDenied(s).into()
@@ -137,5 +132,15 @@ pub fn meta_error_to_tonic(err: impl Into<MetaError>) -> tonic::Status {
 impl From<ProstFieldNotFound> for MetaError {
     fn from(e: ProstFieldNotFound) -> Self {
         MetadataModelError::from(e).into()
+    }
+}
+
+impl From<MetaStoreError> for MetaError {
+    fn from(e: MetaStoreError) -> Self {
+        match e {
+            // `MetaStore::txn` method error.
+            MetaStoreError::TransactionAbort() => MetaErrorInner::TransactionError(e).into(),
+            _ => MetadataModelError::from(e).into(),
+        }
     }
 }

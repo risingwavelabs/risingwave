@@ -24,6 +24,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use log::debug;
 use prometheus::HistogramTimer;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
@@ -640,9 +641,7 @@ where
         command_context: Arc<CommandContext<S>>,
         barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
     ) -> MetaResult<()> {
-        fail_point!("inject_barrier_err", |_| Err(
-            anyhow!("inject_barrier_err").into()
-        ));
+        fail_point!("inject_barrier_err", |_| bail!("inject_barrier_err"));
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info.clone();
         let mut node_need_collect = HashMap::new();
@@ -725,9 +724,7 @@ where
             });
 
             let result = try_join_all(collect_futures).await;
-            barrier_complete_tx
-                .send((prev_epoch, result.map_err(Into::into)))
-                .unwrap();
+            barrier_complete_tx.send((prev_epoch, result)).unwrap();
         });
         Ok(())
     }
