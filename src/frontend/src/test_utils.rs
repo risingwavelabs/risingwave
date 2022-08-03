@@ -248,7 +248,11 @@ impl CatalogWriter for MockCatalogWriter {
             data: [1, 2, 3].to_vec(),
         });
         self.catalog.write().create_table(&index_table);
-        self.add_table_or_index_id(index_table.id, index_table.schema_id, index_table.database_id);
+        self.add_table_or_index_id(
+            index_table.id,
+            index_table.schema_id,
+            index_table.database_id,
+        );
 
         index.id = index_table.id;
         index.table_id = index_table.id;

@@ -257,7 +257,9 @@ pub async fn handle_create_index(
     );
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_index(index, index_table, graph).await?;
+    catalog_writer
+        .create_index(index, index_table, graph)
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))
 }

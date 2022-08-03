@@ -80,7 +80,7 @@ impl fmt::Display for StreamIndexScan {
                         false => self.logical.column_names(),
                         true => self.logical.column_names_with_table_prefix(),
                     }
-                        .join(", ")
+                    .join(", ")
                 ),
             );
 

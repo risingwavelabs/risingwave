@@ -21,8 +21,8 @@ use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
