@@ -37,7 +37,7 @@ services:
       - ..:/risingwave
     pid: host
     userns_mode: host
-    hostname_mode: host
+    network_mode: host
     # networks:
     #   nw:
     #     ipv4_address: 172.24.2.1
@@ -45,8 +45,8 @@ services:
   mysql:
     image: mysql/mysql-server:latest
     container_name: mysql
-    ports:
-      - '3306:3306'
+    # ports:
+    #   - '3306:3306'
     volumes:
       - ./init:/docker-entrypoint-initdb.d
     environment:
@@ -57,7 +57,7 @@ services:
       retries: 5
     pid: host
     userns_mode: host
-    hostname_mode: host
+    network_mode: host
 #     networks:
 #       nw:
 #         ipv4_address: 172.24.2.2
