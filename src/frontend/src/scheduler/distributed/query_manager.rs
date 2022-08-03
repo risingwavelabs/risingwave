@@ -94,7 +94,7 @@ impl QueryManager {
 
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr((&worker_node_addr).into())
+            .get_by_addr((&worker_node_addr).into())
             .await?;
 
         let query_id = QueryId {
@@ -202,7 +202,7 @@ impl QueryResultFetcher {
         );
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr((&self.task_host).into())
+            .get_by_addr((&self.task_host).into())
             .await?;
         let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
         while let Some(response) = stream.next().await {

@@ -122,7 +122,7 @@ impl RemoteInput {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
     ) {
-        let client = client_pool.get_client_for_addr(upstream_addr).await?;
+        let client = client_pool.get_by_addr(upstream_addr).await?;
         let stream = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
             .await?;
