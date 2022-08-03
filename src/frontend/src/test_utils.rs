@@ -297,10 +297,29 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+        let &schema_id = self
+            .table_id_to_schema_id
+            .read()
+            .get(&index_id.index_id)
+            .unwrap();
+        let database_id = self.get_database_id_by_schema(schema_id);
+
+        let index = {
+            let catalog_reader = self.catalog.read();
+            let schema_catalog = catalog_reader
+                .get_schema_by_id(&database_id, &schema_id)
+                .unwrap();
+            schema_catalog.get_index_by_id(&index_id).unwrap().clone()
+        };
+
+        let index_table_id = index.table_id;
         let (database_id, schema_id) = self.drop_table_or_index_id(index_id.index_id);
         self.catalog
             .write()
             .drop_index(database_id, schema_id, index_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, index_table_id);
         Ok(())
     }
 

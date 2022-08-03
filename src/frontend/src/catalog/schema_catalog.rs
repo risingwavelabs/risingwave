@@ -204,6 +204,10 @@ impl SchemaCatalog {
         self.index_by_name.get(index_name)
     }
 
+    pub fn get_index_by_id(&self, index_id: &IndexId) -> Option<&IndexCatalog> {
+        self.index_by_name.get(self.index_name_by_id.get(index_id)?)
+    }
+
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
         self.system_table_by_name.get(table_name)
     }
