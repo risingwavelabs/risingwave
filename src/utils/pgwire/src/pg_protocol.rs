@@ -105,6 +105,8 @@ where
             Ok(v) => v,
             Err(e) => {
                 let mut error_msg = String::new();
+                // Execution error should not break current connection.
+                // For unexpected eof, just break and not print to log.
                 write!(&mut error_msg, "Error: {}", e).unwrap();
                 match e {
                     PsqlError::SslError(io_err) | PsqlError::IoError(io_err) => {
