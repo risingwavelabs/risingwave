@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::{Arc, RwLock, RwLockWriteGuard, Weak};
 use std::task::Poll;
 
 use futures::future::Fuse;
@@ -199,13 +198,13 @@ pub type TraceReceiver = watch::Receiver<String>;
 
 #[derive(Default, Debug)]
 pub struct TraceContextManager {
-    rxs: RwLock<HashMap<String, TraceReceiver>>,
+    rxs: HashMap<String, TraceReceiver>,
 }
 
 impl TraceContextManager {
-    pub fn register(&self, key: String) -> TraceSender {
+    pub fn register(&mut self, key: String) -> TraceSender {
         let (tx, rx) = watch::channel("<not reported>".to_owned());
-        self.rxs.write().unwrap().try_insert(key, rx).unwrap();
+        self.rxs.try_insert(key, rx).unwrap();
         tx
     }
 }
@@ -221,7 +220,7 @@ pub struct StackTraced<F: Future> {
 }
 
 impl<F: Future> StackTraced<F> {
-    pub fn new(inner: F, span: impl Into<SpanValue>) -> Self {
+    fn new(inner: F, span: impl Into<SpanValue>) -> Self {
         Self {
             inner: inner.fuse(),
             span: span.into(),
@@ -288,10 +287,44 @@ pub trait StackTrace: Future + Sized {
     }
 }
 
+pub async fn monitored<F: Future>(
+    f: F,
+    root_span: impl Into<SpanValue>,
+    watch_tx: TraceSender,
+    ms: u64,
+) -> F::Output {
+    TRACE_CONTEXT
+        .scope(
+            RefCell::new(TraceContext::new(root_span.into())),
+            async move {
+                let monitor = async move {
+                    loop {
+                        let new_report = TRACE_CONTEXT.with(|c| format!("{}", c.borrow()));
+                        watch_tx.send_if_modified(|report| {
+                            if report != &new_report {
+                                *report = new_report;
+                                true
+                            } else {
+                                false
+                            }
+                        });
+                        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                    }
+                };
+
+                tokio::select! {
+                    output = f => output,
+                    _ = monitor => unreachable!()
+                }
+            },
+        )
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use futures::future::{join_all, select_all};
-    use tokio::sync::{oneshot, watch};
+    use tokio::sync::watch;
 
     use super::*;
 
@@ -302,8 +335,8 @@ mod tests {
 
     async fn sleep_nested() {
         join_all([
-            StackTraced::new(sleep(1500), "sleep nested 1500"),
-            StackTraced::new(sleep(2500), "sleep nested 2500"),
+            sleep(1500).stack_trace("sleep nested 1500"),
+            sleep(2500).stack_trace("sleep nested 2500"),
         ])
         .await;
     }
@@ -311,40 +344,40 @@ mod tests {
     async fn multi_sleep() {
         sleep(400).await;
 
-        StackTraced::new(sleep(800), "sleep another in multi sleep").await;
+        sleep(800).stack_trace("sleep another in multi slepp").await;
     }
 
     async fn hello() {
-        StackTraced::new(
-            async move {
-                // Join
-                join_all([
-                    StackTraced::new(sleep(1000).boxed(), format!("sleep {}", 1000)),
-                    StackTraced::new(sleep(2000).boxed(), "sleep 2000"),
-                    StackTraced::new(sleep_nested().boxed(), "sleep nested"),
-                    StackTraced::new(multi_sleep().boxed(), "multi sleep"),
-                ])
-                .await;
+        async move {
+            // Join
+            join_all([
+                sleep(1000).boxed().stack_trace(format!("sleep {}", 1000)),
+                sleep(2000).boxed().stack_trace("sleep 2000"),
+                sleep_nested().boxed().stack_trace("sleep nested"),
+                multi_sleep().boxed().stack_trace("multi sleep"),
+            ])
+            .await;
 
-                // Join another
-                join_all([
-                    StackTraced::new(sleep(1200), "sleep 1200"),
-                    StackTraced::new(sleep(2200), "sleep 2200"),
-                ])
-                .await;
+            // Join another
+            join_all([
+                sleep(1200).stack_trace("sleep 1200"),
+                sleep(2200).stack_trace("sleep 2200"),
+            ])
+            .await;
 
-                // Cancel
-                select_all([
-                    StackTraced::new(sleep(666).boxed(), "sleep 666"),
-                    StackTraced::new(sleep_nested().boxed(), "sleep nested (should be cancelled)"),
-                ])
-                .await;
+            // Cancel
+            select_all([
+                sleep(666).boxed().stack_trace("sleep 666"),
+                sleep_nested()
+                    .boxed()
+                    .stack_trace("sleep nested (should be cancelled)"),
+            ])
+            .await;
 
-                // Check whether cleaned up
-                StackTraced::new(sleep(233), "sleep 233").await;
-            },
-            "hello",
-        )
+            // Check whether cleaned up
+            sleep(233).stack_trace("sleep 233").await;
+        }
+        .stack_trace("hello")
         .await
     }
 
@@ -358,37 +391,7 @@ mod tests {
             }
         });
 
-        TRACE_CONTEXT
-            .scope(
-                RefCell::new(TraceContext::new("actor 233".into())),
-                async move {
-                    let (tx, mut rx) = oneshot::channel();
-
-                    let monitor = async move {
-                        println!("Start monitor!");
-                        while rx.try_recv().is_err() {
-                            let new_report = TRACE_CONTEXT.with(|c| format!("{}", c.borrow()));
-                            watch_tx.send_if_modified(|report| {
-                                if report != &new_report {
-                                    *report = new_report;
-                                    true
-                                } else {
-                                    false
-                                }
-                            });
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        }
-                    };
-
-                    let work = async move {
-                        hello().await;
-                        tx.send(()).unwrap();
-                    };
-
-                    select_all([monitor.boxed(), work.boxed()]).await;
-                },
-            )
-            .await;
+        monitored(hello(), "actor 233", watch_tx, 100).await;
 
         collector.await.unwrap();
     }
