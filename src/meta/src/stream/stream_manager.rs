@@ -18,7 +18,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
@@ -40,6 +39,7 @@ use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
+use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
@@ -106,7 +106,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-    ) -> Result<Self> {
+    ) -> MetaResult<Self> {
         Ok(Self {
             scheduler: Scheduler::new(cluster_manager.clone(), env.hash_mapping_manager_ref()),
             fragment_manager,
@@ -126,7 +126,7 @@ where
         dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
         upstream_worker_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &ScheduledLocations,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
             /// Records what's the correspoding actor of each parallel unit of one table.
@@ -148,7 +148,7 @@ where
                 actor_id: ActorId,
                 same_worker_node_as_upstream: bool,
                 is_singleton: bool,
-            ) -> Result<()> {
+            ) -> MetaResult<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
@@ -311,7 +311,7 @@ where
             table_properties,
             ..
         }: &mut CreateMaterializedViewContext,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
         // It MUST be cleared before Ok returns.
         let mut revert_funcs = scopeguard::guard(
@@ -652,7 +652,7 @@ where
 
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
-    pub async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()> {
+    pub async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(table_id)
@@ -708,7 +708,6 @@ mod tests {
     use std::time::Duration;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
@@ -729,6 +728,7 @@ mod tests {
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
+    use crate::error::meta_error_to_tonic;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{CatalogManager, MetaSrvEnv};
@@ -788,7 +788,7 @@ mod tests {
             for info in req.get_info() {
                 guard.insert(
                     info.get_actor_id(),
-                    info.get_host().map_err(tonic_err)?.clone(),
+                    info.get_host().map_err(meta_error_to_tonic)?.clone(),
                 );
             }
 
@@ -856,7 +856,7 @@ mod tests {
     }
 
     impl MockServices {
-        async fn start(host: &str, port: u16) -> Result<Self> {
+        async fn start(host: &str, port: u16) -> MetaResult<Self> {
             let addr = SocketAddr::new(host.parse().unwrap(), port);
             let state = Arc::new(FakeFragmentState {
                 actor_streams: Mutex::new(HashMap::new()),
@@ -984,7 +984,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_create_materialized_view() -> Result<()> {
+    async fn test_create_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12333).await?;
 
         let table_id = TableId::new(0);
@@ -1060,7 +1060,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_drop_materialized_view() -> Result<()> {
+    async fn test_drop_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 
         let table_id = TableId::new(0);
@@ -1156,10 +1156,7 @@ mod tests {
             .unwrap_err();
 
         // TODO: check memory and metastore consistent
-        assert_eq!(
-            select_err_1.to_string(),
-            "internal error: table_fragment not exist: id=0"
-        );
+        assert_eq!(select_err_1.to_string(), "table_fragment not exist: id=0");
 
         services.stop().await;
         Ok(())
@@ -1282,10 +1279,7 @@ mod tests {
             .unwrap_err();
 
         // TODO: check memory and metastore consistent
-        assert_eq!(
-            select_err_1.to_string(),
-            "internal error: table_fragment not exist: id=0"
-        );
+        assert_eq!(select_err_1.to_string(), "table_fragment not exist: id=0");
 
         services.stop().await;
     }

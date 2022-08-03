@@ -123,12 +123,14 @@
                 BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, window_end, avg], pk_columns: [v1, window_end] }
-      StreamProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3))] }
-        StreamHashAgg { group_key: [t.v1, window_end], aggs: [count, sum(t.v3), count(t.v3)] }
+      StreamProject { exprs: [t.v1, window_end, (sum(sum(t.v3)) / sum(count(t.v3)))] }
+        StreamHashAgg { group_key: [t.v1, window_end], aggs: [sum(count), sum(sum(t.v3)), sum(count(t.v3))] }
           StreamExchange { dist: HashShard(t.v1, window_end) }
-            StreamProject { exprs: [t.v1, window_end, t.v3, t._row_id] }
-              StreamHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end, t._row_id] }
-                StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamHashAgg { group_key: [t.v1, window_end, Vnode(t._row_id)], aggs: [count, sum(t.v3), count(t.v3)] }
+              StreamProject { exprs: [t.v1, window_end, t.v3, t._row_id, Vnode(t._row_id)] }
+                StreamProject { exprs: [t.v1, window_end, t.v3, t._row_id] }
+                  StreamHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end, t._row_id] }
+                    StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
 - sql: |
     create table t1 (id int, v1 int, created_at date);
     with t2 as (select * from t1 where v1 >= 10)
