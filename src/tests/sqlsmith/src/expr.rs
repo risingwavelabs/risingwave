@@ -19,7 +19,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, func_sigs, AggFuncSig, DataTypeName, ExprType, FuncSign,
+    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastSig, DataTypeName, ExprType, FuncSign,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -40,6 +40,12 @@ lazy_static::lazy_static! {
     };
 }
 
+lazy_static::lazy_static! {
+    static ref CAST_TABLE: HashMap<DataTypeName, Vec<CastSig>> = {
+        init_cast_table()
+    };
+}
+
 fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
     func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
@@ -50,6 +56,12 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
     let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSig>>::new();
     agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
+}
+
+fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
+    let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
+    cast_sigs().for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
+    casts
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -79,7 +91,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let range = 90;
 
         match self.rng.gen_range(0..=range) {
-            0..=90 => self.gen_func(typ, can_agg, inside_agg),
+            0..=80 => self.gen_func(typ, can_agg, inside_agg),
+            81..=90 => self.gen_cast(typ),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
@@ -113,6 +126,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
             Expr::Identifier(Ident::new(&col_def.name))
         }
+    }
+
+    /// Generate casts from a cast map.
+    fn gen_cast(&mut self, ret: DataTypeName) -> Expr {
+        todo!()
     }
 
     fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
