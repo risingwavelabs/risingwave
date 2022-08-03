@@ -218,12 +218,6 @@ impl From<JoinError> for RwError {
     }
 }
 
-impl From<prost::DecodeError> for RwError {
-    fn from(prost_error: prost::DecodeError) -> Self {
-        ErrorCode::ProstError(prost_error).into()
-    }
-}
-
 impl From<MemComparableError> for RwError {
     fn from(mem_comparable_error: MemComparableError) -> Self {
         ErrorCode::MemComparableError(mem_comparable_error).into()
