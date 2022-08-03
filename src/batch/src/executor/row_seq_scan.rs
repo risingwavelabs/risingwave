@@ -49,8 +49,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    TableScan(StorageTableIter<S, RowBasedSerde>),
-    RangeScan(StorageTableIter<S, RowBasedSerde>),
+    BatchScan(StorageTableIter<S, RowBasedSerde>),
     PointGet(Option<Row>),
 }
 
@@ -209,7 +208,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 let iter = table.batch_iter(source.epoch).await?;
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
-                    vec![ScanType::TableScan(iter)],
+                    vec![ScanType::BatchScan(iter)],
                     RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                     source.plan_node().get_identity().clone(),
                     batch_stats,
@@ -244,7 +243,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                                     next_col_bounds,
                                 )
                                 .await?;
-                            ScanType::RangeScan(iter)
+                            ScanType::BatchScan(iter)
                         };
 
                     Ok(scan_type)
@@ -299,28 +298,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         chunk_size: usize,
     ) {
         match scan_type {
-            ScanType::TableScan(iter) => {
+            ScanType::BatchScan(iter) => {
                 pin_mut!(iter);
                 loop {
-                    let timer = stats.row_seq_scan_next_duration.start_timer();
-
-                    let chunk = iter
-                        .collect_data_chunk(&schema, Some(chunk_size))
-                        .await
-                        .map_err(RwError::from)?;
-                    timer.observe_duration();
-
-                    if let Some(chunk) = chunk {
-                        yield chunk
-                    } else {
-                        break;
-                    }
-                }
-            }
-            ScanType::RangeScan(iter) => {
-                pin_mut!(iter);
-                loop {
-                    // TODO: same as TableScan except iter type
                     let timer = stats.row_seq_scan_next_duration.start_timer();
 
                     let chunk = iter
