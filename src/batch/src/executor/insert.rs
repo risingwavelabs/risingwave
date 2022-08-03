@@ -298,6 +298,7 @@ mod tests {
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store
             .scan(
+                None,
                 full_range,
                 None,
                 ReadOptions {
