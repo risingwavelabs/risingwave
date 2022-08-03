@@ -183,7 +183,7 @@ where
         let indices = Arc::new(LruCache::with_event_listener(
             LRU_SHARD_BITS,
             options.capacity,
-            Some(store.clone()),
+            store.clone(),
         ));
         store.restore(&indices, &hash_builder)?;
 

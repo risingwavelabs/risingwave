@@ -584,12 +584,22 @@ const DEFAULT_OBJECT_POOL_SIZE: usize = 1024;
 
 impl<K: LruKey, T: LruValue> LruCache<K, T> {
     pub fn new(num_shard_bits: usize, capacity: usize) -> Self {
-        Self::with_event_listener(num_shard_bits, capacity, None)
+        Self::new_inner(num_shard_bits, capacity, None)
     }
 
     pub fn with_event_listener(
         num_shard_bits: usize,
         capacity: usize,
+
+        listener: Arc<dyn LruCacheEventListener<K = K, T = T>>,
+    ) -> Self {
+        Self::new_inner(num_shard_bits, capacity, Some(listener))
+    }
+
+    fn new_inner(
+        num_shard_bits: usize,
+        capacity: usize,
+
         listener: Option<Arc<dyn LruCacheEventListener<K = K, T = T>>>,
     ) -> Self {
         let num_shards = 1 << num_shard_bits;
@@ -1169,7 +1179,8 @@ mod tests {
     #[test]
     fn test_event_listener() {
         let listener = Arc::new(TestLruCacheEventListener::default());
-        let cache = Arc::new(LruCache::with_event_listener(0, 2, Some(listener.clone())));
+
+        let cache = Arc::new(LruCache::with_event_listener(0, 2, listener.clone()));
 
         // full-fill cache
         let h = cache.insert("k1".to_string(), 0, 1, "v1".to_string());

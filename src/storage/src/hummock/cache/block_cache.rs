@@ -199,7 +199,7 @@ impl BlockCache {
         while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
             max_shard_bits -= 1;
         }
-        let cache = LruCache::with_event_listener(max_shard_bits, capacity, Some(listener));
+        let cache = LruCache::with_event_listener(max_shard_bits, capacity, listener);
 
         Self {
             inner: Arc::new(cache),
