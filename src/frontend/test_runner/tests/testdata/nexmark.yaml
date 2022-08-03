@@ -93,27 +93,25 @@
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [person.name, person.city, person.state, auction.id] }
-        BatchHashJoin { type: Inner, predicate: auction.seller = person.id, output: [auction.id, person.name, person.city, person.state] }
-          BatchExchange { order: [], dist: HashShard(auction.seller) }
-            BatchProject { exprs: [auction.id, auction.seller] }
-              BatchFilter { predicate: (auction.category = 10:Int32) }
-                BatchScan { table: auction, columns: [auction.id, auction.seller, auction.category], distribution: SomeShard }
-          BatchExchange { order: [], dist: HashShard(person.id) }
-            BatchFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
-              BatchScan { table: person, columns: [person.id, person.name, person.city, person.state], distribution: SomeShard }
+      BatchHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id] }
+        BatchExchange { order: [], dist: HashShard(auction.seller) }
+          BatchProject { exprs: [auction.id, auction.seller] }
+            BatchFilter { predicate: (auction.category = 10:Int32) }
+              BatchScan { table: auction, columns: [auction.id, auction.seller, auction.category], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(person.id) }
+          BatchFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
+            BatchScan { table: person, columns: [person.id, person.name, person.city, person.state], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [name, city, state, id, auction._row_id(hidden), person._row_id(hidden)], pk_columns: [auction._row_id, person._row_id] }
       StreamExchange { dist: HashShard(auction._row_id, person._row_id) }
-        StreamProject { exprs: [person.name, person.city, person.state, auction.id, auction._row_id, person._row_id] }
-          StreamHashJoin { type: Inner, predicate: auction.seller = person.id, output: [auction.id, person.name, person.city, person.state, auction._row_id, person._row_id] }
-            StreamExchange { dist: HashShard(auction.seller) }
-              StreamProject { exprs: [auction.id, auction.seller, auction._row_id] }
-                StreamFilter { predicate: (auction.category = 10:Int32) }
-                  StreamTableScan { table: auction, columns: [auction.id, auction.seller, auction._row_id, auction.category], pk: [auction._row_id], distribution: HashShard(auction._row_id) }
-            StreamExchange { dist: HashShard(person.id) }
-              StreamFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
-                StreamTableScan { table: person, columns: [person.id, person.name, person.city, person.state, person._row_id], pk: [person._row_id], distribution: HashShard(person._row_id) }
+        StreamHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id, auction._row_id, person._row_id] }
+          StreamExchange { dist: HashShard(auction.seller) }
+            StreamProject { exprs: [auction.id, auction.seller, auction._row_id] }
+              StreamFilter { predicate: (auction.category = 10:Int32) }
+                StreamTableScan { table: auction, columns: [auction.id, auction.seller, auction._row_id, auction.category], pk: [auction._row_id], distribution: HashShard(auction._row_id) }
+          StreamExchange { dist: HashShard(person.id) }
+            StreamFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
+              StreamTableScan { table: person, columns: [person.id, person.name, person.city, person.state, person._row_id], pk: [person._row_id], distribution: HashShard(person._row_id) }
 - id: nexmark_q4
   before:
   - create_tables

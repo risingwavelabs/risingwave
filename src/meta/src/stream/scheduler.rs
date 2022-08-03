@@ -19,7 +19,6 @@ use anyhow::anyhow;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::error::Result;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
@@ -31,6 +30,7 @@ use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::manager::HashMappingManagerRef;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
+use crate::MetaResult;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
 pub struct Scheduler<S: MetaStore> {
@@ -106,7 +106,7 @@ impl ScheduledLocations {
     }
 
     /// Find a placement location that is on the same worker node of given actor ids.
-    pub fn schedule_colocate_with(&self, actor_ids: &[ActorId]) -> Result<ParallelUnit> {
+    pub fn schedule_colocate_with(&self, actor_ids: &[ActorId]) -> MetaResult<ParallelUnit> {
         let mut result_location = None;
         for actor_id in actor_ids {
             let location = self
@@ -152,7 +152,7 @@ where
         &self,
         fragment: &mut Fragment,
         locations: &mut ScheduledLocations,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         if fragment.actors.is_empty() {
             bail!("fragment has no actor");
         }
@@ -244,7 +244,7 @@ where
         &self,
         fragment: &mut Fragment,
         parallel_units: &[ParallelUnit],
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let vnode_mapping = self
             .hash_mapping_manager
             .build_fragment_hash_mapping(fragment.fragment_id, parallel_units);
@@ -285,7 +285,7 @@ mod test {
     use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
-    async fn test_schedule() -> Result<()> {
+    async fn test_schedule() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_manager =
             Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
@@ -418,7 +418,7 @@ mod test {
             );
             let mut vnode_sum = 0;
             for actor in fragment.actors {
-                vnode_sum += Bitmap::try_from(actor.get_vnode_bitmap()?)?.num_high_bits();
+                vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).num_high_bits();
             }
             assert_eq!(vnode_sum as usize, VIRTUAL_NODE_COUNT);
         }
