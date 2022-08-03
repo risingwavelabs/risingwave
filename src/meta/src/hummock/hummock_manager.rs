@@ -1552,11 +1552,7 @@ where
         let tracked_sst_ids: HashSet<HummockSstableId> = HashSet::from_iter({
             let versioning_guard = read_lock!(self, versioning).await;
             let mut tracked_sst_ids = versioning_guard.current_version.get_sst_ids();
-            let min_pinned_verison_id = versioning_guard.min_pinned_version_id();
-            for (_, delta) in versioning_guard
-                .hummock_version_deltas
-                .range(min_pinned_verison_id..)
-            {
+            for delta in versioning_guard.hummock_version_deltas.values() {
                 tracked_sst_ids.extend(delta.get_inserted_sst_ids());
             }
             tracked_sst_ids
