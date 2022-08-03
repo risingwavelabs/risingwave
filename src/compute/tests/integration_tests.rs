@@ -17,6 +17,7 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -26,6 +27,7 @@ use risingwave_batch::executor::{
     RowSeqScanExecutor, ScanType,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
@@ -135,10 +137,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+    let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
     let stream_source = SourceExecutor::new(
         0x3f3f3f,
         source_table_id,
-        source_desc.clone(),
+        source_desc,
+        vnodes,
         keyspace,
         all_column_ids.clone(),
         all_schema.clone(),
