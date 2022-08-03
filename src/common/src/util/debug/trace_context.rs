@@ -354,6 +354,8 @@ pub async fn monitored<F: Future>(
 #[cfg(test)]
 mod tests {
     use futures::future::{join_all, select_all};
+    use futures::StreamExt;
+    use futures_async_stream::stream;
     use tokio::sync::watch;
 
     use super::*;
@@ -375,6 +377,27 @@ mod tests {
         sleep(400).await;
 
         sleep(800).stack_trace("sleep another in multi slepp").await;
+    }
+
+    #[stream(item = ())]
+    async fn stream1() {
+        loop {
+            sleep(150).await;
+            yield;
+        }
+    }
+
+    #[stream(item = ())]
+    async fn stream2() {
+        sleep(200).await;
+        yield;
+        join_all([
+            sleep(400).stack_trace("sleep nested 400"),
+            sleep(600).stack_trace("sleep nested 600"),
+        ])
+        .stack_trace("sleep nested another in stream 2")
+        .await;
+        yield;
     }
 
     async fn hello() {
@@ -403,6 +426,26 @@ mod tests {
                     .stack_trace("sleep nested (should be cancelled)"),
             ])
             .await;
+
+            // Check whether cleaned up
+            sleep(233).stack_trace("sleep 233").await;
+
+            // Check stream next drop
+            {
+                let mut stream1 = stream1().fuse().boxed();
+                let mut stream2 = stream2().fuse().boxed();
+                let mut count = 0;
+
+                'outer: loop {
+                    tokio::select! {
+                        _ = stream1.next().stack_trace(format!("stream1 next {count}")) => {},
+                        r = stream2.next().stack_trace(format!("stream2 next {count}")) => {
+                            if r.is_none() { break 'outer }
+                        },
+                    }
+                    count += 1;
+                }
+            }
 
             // Check whether cleaned up
             sleep(233).stack_trace("sleep 233").await;
