@@ -71,9 +71,13 @@ impl StackTreeNode {
 
     fn add_child(&self, value: SpanValue) -> Self {
         let child = Self::new(self.clone(), value);
-        let mut inner = self.inner.borrow_mut();
-        inner.children.push(child.clone());
+        self.mount_child(child.clone());
         child
+    }
+
+    fn mount_child(&self, child: Self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.children.push(child);
     }
 
     fn delete(&self) {
@@ -97,6 +101,11 @@ impl StackTreeNode {
 
     fn parent(&self) -> Self {
         self.inner.borrow().parent.clone().unwrap()
+    }
+
+    fn set_parent(&self, parent: Self) {
+        let mut inner = self.inner.borrow_mut();
+        inner.parent = Some(parent);
     }
 
     fn has_child(&self, child: &StackTreeNode) -> bool {
@@ -161,6 +170,10 @@ impl TraceContext {
     }
 
     fn step_in(&mut self, child: &StackTreeNode) {
+        if !self.current.has_child(child) {
+            child.set_parent(self.current.clone());
+            self.current.mount_child(child.clone());
+        }
         assert!(self.current.has_child(child));
         self.current = child.clone();
     }
