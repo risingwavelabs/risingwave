@@ -138,6 +138,7 @@ async fn test_failpoints_state_store_read_upload() {
     assert!(result.is_err());
     let result = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: 2,
@@ -195,6 +196,7 @@ async fn test_failpoints_state_store_read_upload() {
     assert_eq!(value, Bytes::from("111"));
     let mut iters = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: 5,

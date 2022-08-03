@@ -20,7 +20,6 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
-    use parking_lot::RwLock;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -28,6 +27,7 @@ mod tests {
     use risingwave_common::util::epoch::Epoch;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
     use risingwave_hummock_sdk::key::get_table_id;
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::{
@@ -120,7 +120,7 @@ mod tests {
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: None,
-            table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
+            filter_key_extractor_manager: Arc::new(FilterKeyExtractorManager::default()),
             memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
@@ -555,6 +555,7 @@ mod tests {
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
+                None,
                 ..,
                 None,
                 ReadOptions {
@@ -706,6 +707,7 @@ mod tests {
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
+                None,
                 ..,
                 None,
                 ReadOptions {

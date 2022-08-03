@@ -209,6 +209,7 @@ async fn test_basic() {
     // Write aa bb
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch1,
@@ -253,6 +254,7 @@ async fn test_basic() {
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch2,
@@ -268,6 +270,7 @@ async fn test_basic() {
     // Delete aa, write dd,ee
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch3,
@@ -570,6 +573,7 @@ async fn test_reload_storage() {
     // Write aa bb
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch1,
@@ -614,6 +618,7 @@ async fn test_reload_storage() {
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch2,
@@ -709,6 +714,7 @@ async fn test_write_anytime() {
             // check iter
             let mut iter = hummock_storage
                 .iter(
+                    None,
                     "aa".as_bytes()..="cc".as_bytes(),
                     ReadOptions {
                         epoch,
@@ -800,6 +806,7 @@ async fn test_write_anytime() {
             );
             let mut iter = hummock_storage
                 .iter(
+                    None,
                     "aa".as_bytes()..="cc".as_bytes(),
                     ReadOptions {
                         epoch,

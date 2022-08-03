@@ -32,6 +32,7 @@ macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
             .iter::<_, Vec<u8>>(
+                None,
                 $range,
                 ReadOptions {
                     epoch: $epoch,

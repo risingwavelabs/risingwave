@@ -655,6 +655,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         encoded_key_range: R,
         epoch: u64,
         vnode_hint: Option<VirtualNode>,
@@ -684,17 +685,22 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+            let prefix_hint = prefix_hint
+                .clone()
+                .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
 
             async move {
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
+                    prefix_hint,
                     raw_key_range,
                     wait_epoch,
                     self.get_read_option(epoch),
                 )
                 .await?
                 .into_stream();
+
                 Ok::<_, StorageError>(iter)
             }
         }))
@@ -786,13 +792,23 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             false,
         );
 
+        let prefix_hint = if pk_prefix.size() == 0 {
+            None
+        } else {
+            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+            Some(serialized_pk_prefix)
+        };
+
         trace!(
-            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
+            "iter_with_pk_bounds: prefix_hint {:?} start_key: {:?}, end_key: {:?}",
+            prefix_hint,
             start_key,
             end_key
         );
 
         self.iter_with_encoded_key_range(
+            prefix_hint,
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
@@ -865,6 +881,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
+        prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         wait_epoch: bool,
         read_options: ReadOptions,
@@ -882,7 +899,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
 
         let row_deserializer = RS::create_deserializer(table_descs);
         let iter = keyspace
-            .iter_with_range(raw_key_range, read_options)
+            .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
         let iter = Self {
             iter,
