@@ -83,6 +83,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // TODO: Negative numbers have a few issues.
             // - Parsing, tracked by: <https://github.com/singularity-data/risingwave/issues/4344>.
             // - Neg op with Interval, tracked by: <https://github.com/singularity-data/risingwave/issues/112>
+            // 3 => i32::MIN as f64,
             3..=4 => self.rng.gen_range(1..max),
             _ => unreachable!(),
         };
@@ -97,7 +98,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // TODO: Negative numbers have a few issues.
             // - Parsing, tracked by: <https://github.com/singularity-data/risingwave/issues/4344>.
             // - Neg op with Interval, tracked by: <https://github.com/singularity-data/risingwave/issues/112>
-            // 2 => i32::MIN as f64,
+            // 3 => i32::MIN as f64,
             3..=4 => self.rng.gen_range(1.0..i32::MAX as f64),
             _ => unreachable!(),
         };
