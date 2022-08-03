@@ -331,7 +331,7 @@ impl FunctionalDependencySet {
     /// assert!(fd.is_determined_by(from, to)); // (1, 2) --> (4) holds
     /// ```
     pub fn is_determined_by(&self, determinant: &FixedBitSet, dependant: &FixedBitSet) -> bool {
-        self.get_closure(&determinant).is_superset(&dependant)
+        self.get_closure(determinant).is_superset(dependant)
     }
 
     /// Return true if the combination of `columns` can fully determine other columns.
