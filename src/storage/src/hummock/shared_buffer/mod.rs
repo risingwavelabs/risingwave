@@ -36,7 +36,6 @@ use crate::hummock::iterator::{
     UnorderedMergeIteratorInner,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
-use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
@@ -91,9 +90,36 @@ pub(crate) type KeyIndexedUncommittedData = BTreeMap<(Vec<u8>, OrderIndex), Unco
 /// the same order index, which means their keys don't overlap.
 pub(crate) type OrderSortedUncommittedData = Vec<Vec<UncommittedData>>;
 
-pub(crate) fn to_order_sorted(
-    key_indexed_data: &KeyIndexedUncommittedData,
+pub fn to_order_sorted_new(
+    key_indexed_data: &BTreeMap<
+        HummockEpoch,
+        Option<(OrderIndex, KeyIndexedUncommittedData, usize)>,
+    >,
 ) -> OrderSortedUncommittedData {
+    let mut all_order_sort_uncommit_data = vec![];
+    key_indexed_data.iter().for_each(|(_, key_indexed_data)| {
+        if let Some(key_indexed_data) = key_indexed_data {
+            let mut order_indexed_data = BTreeMap::new();
+            for ((_, order_id), data) in &key_indexed_data.1 {
+                // println!("{:?}",data);
+                order_indexed_data
+                    .entry(order_id)
+                    .or_insert_with(Vec::new)
+                    .push(data.clone());
+            }
+            // println!("{:?}",order_indexed_data);
+            // Take rev here to ensure order index sorted in descending order.
+            all_order_sort_uncommit_data
+                .insert(0, order_indexed_data.into_values().rev().collect_vec());
+        }
+    });
+    all_order_sort_uncommit_data
+        .into_iter()
+        .flatten()
+        .collect_vec()
+}
+
+pub fn to_order_sorted(key_indexed_data: &KeyIndexedUncommittedData) -> OrderSortedUncommittedData {
     let mut order_indexed_data = BTreeMap::new();
     for ((_, order_id), data) in key_indexed_data {
         order_indexed_data
@@ -334,13 +360,17 @@ impl SharedBuffer {
         keyed_payload
     }
 
+    pub fn inset_task(&mut self, key: OrderIndex, value: (KeyIndexedUncommittedData, usize)) {
+        self.uploading_tasks.insert(key, value);
+    }
+
     /// Create a new upload task
     ///
     /// Return: (order index, task payload, task write batch size)
     pub fn new_upload_task(
         &mut self,
         task_type: UploadTaskType,
-    ) -> Option<(OrderIndex, UploadTaskPayload, usize)> {
+    ) -> Option<(OrderIndex, KeyIndexedUncommittedData, usize)> {
         let keyed_payload = match task_type {
             UploadTaskType::FlushWriteBatch => {
                 // For flush write batch, currently we only flush the write batches. We first pick
@@ -423,13 +453,14 @@ impl SharedBuffer {
                 .fetch_add(task_write_batch_size, Relaxed);
             let ret = Some((
                 min_order_index,
-                to_order_sorted(&keyed_payload),
+                keyed_payload.clone(),
                 task_write_batch_size,
             ));
             self.uploading_tasks
                 .insert(min_order_index, (keyed_payload, task_write_batch_size));
             ret
         } else {
+            self.uploading_tasks.insert(0, (Default::default(), 0));
             None
         }
     }
@@ -671,6 +702,7 @@ mod tests {
             .borrow_mut()
             .new_upload_task(FlushWriteBatch)
             .unwrap();
+        let payload1 = to_order_sorted(&payload1);
         assert_eq!(order_index1, 0);
         assert_eq!(2, payload1.len());
         assert_eq!(payload1[0].len(), 1);
@@ -686,6 +718,7 @@ mod tests {
             .borrow_mut()
             .new_upload_task(FlushWriteBatch)
             .unwrap();
+        let payload2 = to_order_sorted(&payload2);
         assert_eq!(order_index2, 2);
         assert_eq!(2, payload2.len());
         assert_eq!(payload2[0].len(), 1);
@@ -699,6 +732,7 @@ mod tests {
             .borrow_mut()
             .new_upload_task(FlushWriteBatch)
             .unwrap();
+        let payload1 = to_order_sorted(&payload1);
         assert_eq!(order_index1, 0);
         assert_eq!(2, payload1.len());
         assert_eq!(payload1[0].len(), 1);
@@ -719,7 +753,7 @@ mod tests {
             .borrow_mut()
             .new_upload_task(SyncEpoch(None))
             .unwrap();
-
+        let payload3 = to_order_sorted(&payload3);
         assert_eq!(order_index3, 0);
         assert_eq!(3, payload3.len());
         assert_eq!(task_size, batch3.size() + batch4.size());

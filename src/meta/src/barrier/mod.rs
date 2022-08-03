@@ -205,16 +205,15 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     env: MetaSrvEnv<S>,
 
-    sync_queue: Arc<
-        RwLock<
-            Vec<(
-                Arc<CommandContext<S>>,
-                SmallVec<[Notifier; 1]>,
-                Vec<CreateMviewProgress>,
-            )>,
-        >,
-    >,
+    sync_queue: Arc<SyncQueue<S>>,
 }
+type SyncQueue<S> = RwLock<
+    Vec<(
+        Arc<CommandContext<S>>,
+        SmallVec<[Notifier; 1]>,
+        Vec<CreateMviewProgress>,
+    )>,
+>;
 
 /// Controls the concurrent execution of commands.
 struct CheckpointControl<S: MetaStore> {
@@ -709,6 +708,7 @@ where
         let env = self.env.clone();
         tokio::spawn(async move {
             let prev_epoch = command_context.prev_epoch.0;
+            let curr_epoch = command_context.curr_epoch.0;
             let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
                 if !*node_need_collect.get(node_id).unwrap() {
                     // No need to send or collect barrier for this node.
@@ -721,6 +721,7 @@ where
                         let request = BarrierCompleteRequest {
                             request_id,
                             prev_epoch,
+                            curr_epoch,
                         };
                         tracing::trace!(
                             target: "events::meta::barrier::barrier_complete",
@@ -830,21 +831,22 @@ where
                     })
                     .collect_vec();
 
-                if prev_epoch == INVALID_EPOCH {
-                    assert!(
-                        synced_ssts.is_empty(),
-                        "no sstables should be produced in the first epoch"
-                    );
-                } else {
-                    self.hummock_manager
-                        .commit_epoch(prev_epoch, synced_ssts)
-                        .await?;
-                }
-                node.timer.take().unwrap().observe_duration();
-
                 if resps.iter().all(|node| node.is_sync) {
-                    while let Some((command_ctx, mut notifiers, a)) = self.sync_queue.write().await.pop(){
-                        println!("epoch {:?}",command_ctx.curr_epoch);
+                    if prev_epoch == INVALID_EPOCH {
+                        assert!(
+                            synced_ssts.is_empty(),
+                            "no sstables should be produced in the first epoch"
+                        );
+                    } else {
+                        self.hummock_manager
+                            .commit_epoch(prev_epoch, synced_ssts)
+                            .await?;
+                    }
+                    node.timer.take().unwrap().observe_duration();
+                    while let Some((command_ctx, mut notifiers, a)) =
+                        self.sync_queue.write().await.pop()
+                    {
+                        println!("epoch {:?}", command_ctx.prev_epoch);
                         checkpoint_control.remove_changes(command_ctx.command.changes());
                         command_ctx.post_collect().await?;
 
@@ -858,6 +860,7 @@ where
                             tracker.update(&progress);
                         }
                     }
+
                     self.sync_queue.write().await.clear();
                     checkpoint_control.remove_changes(node.command_ctx.command.changes());
                     node.command_ctx.post_collect().await?;
@@ -873,18 +876,25 @@ where
                         tracker.update(progress);
                     }
                 } else {
+                    assert!(synced_ssts.is_empty());
                     let notifiers = take(&mut node.notifiers);
                     let command_ctx = node.command_ctx.clone();
                     let a = resps
                         .iter()
                         .flat_map(|r| r.create_mview_progress.clone())
                         .collect_vec();
-                    a.iter().for_each(|a| println!("epoch{:?},{:?}",command_ctx.curr_epoch,a.chain_actor_id.clone()));
+                    // a.iter().for_each(|a| {
+                    //     println!(
+                    //         "epoch{:?},{:?}",
+                    //         command_ctx.curr_epoch,
+                    //         a.chain_actor_id.clone()
+                    //     )
+                    // });
                     self.sync_queue
                         .write()
                         .await
-                        .insert(0,(command_ctx, notifiers, a));
-                        //.push((command_ctx, notifiers, a));
+                        .insert(0, (command_ctx, notifiers, a));
+                    //.push((command_ctx, notifiers, a));
                 }
 
                 // node.command_ctx.post_collect().await?;

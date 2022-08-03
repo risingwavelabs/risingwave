@@ -864,10 +864,12 @@ async fn test_write_anytime() {
     // Assert epoch 2 correctness
     assert_old_value(epoch2).await;
 
+    println!("sync");
     hummock_storage
         .sync(Some((epoch1 - 1, epoch1)))
         .await
         .unwrap();
+
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
@@ -1012,6 +1014,21 @@ async fn test_range_sync() {
         )
         .await
         .unwrap();
+    let batch3 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("123")),
+        (Bytes::from("bb"), StorageValue::new_default_put("123")),
+        (Bytes::from("cc"), StorageValue::new_default_put("123")),
+    ];
+    hummock_storage
+        .ingest_batch(
+            batch3,
+            WriteOptions {
+                epoch: 3,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
     // hummock_storage
     //     .sync(Some((epoch1 - 1, epoch1)))
     //     .await
@@ -1034,14 +1051,14 @@ async fn test_range_sync() {
         .await
         .unwrap();
     let epoch3 = initial_epoch + 3;
-    let batch3 = vec![
-        (Bytes::from("aa"), StorageValue::new_default_put("123")),
-        (Bytes::from("bb"), StorageValue::new_default_put("123")),
-        (Bytes::from("cc"), StorageValue::new_default_put("123")),
+    let batch4 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("12345")),
+        (Bytes::from("bb"), StorageValue::new_default_put("12345")),
+        (Bytes::from("cc"), StorageValue::new_default_put("12345")),
     ];
     hummock_storage
         .ingest_batch(
-            batch3,
+            batch4,
             WriteOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -1050,20 +1067,51 @@ async fn test_range_sync() {
         .await
         .unwrap();
 
-    hummock_storage
-        .sync(Some((initial_epoch, epoch3)))
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 1,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
         .await
         .unwrap();
-    let ssts = hummock_storage.get_uncommitted_ssts(epoch3);
-    hummock_meta_client
-        .commit_epoch(epoch2, vec![])
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 2,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
         .await
         .unwrap();
-    hummock_meta_client
-        .commit_epoch(epoch3, ssts)
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 3,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
         .await
         .unwrap();
-    hummock_storage.wait_epoch(epoch3).await.unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
     assert_eq!(
         hummock_storage
             .get(
@@ -1082,7 +1130,7 @@ async fn test_range_sync() {
     assert_eq!(
         hummock_storage
             .get(
-                "bb".as_bytes(),
+                "dd".as_bytes(),
                 ReadOptions {
                     epoch: epoch2,
                     table_id: Default::default(),
@@ -1092,7 +1140,7 @@ async fn test_range_sync() {
             .await
             .unwrap()
             .unwrap(),
-        "222"
+        "444"
     );
     assert_eq!(
         hummock_storage
@@ -1107,6 +1155,287 @@ async fn test_range_sync() {
             .await
             .unwrap()
             .unwrap(),
-        "123"
+        "12345"
+    );
+    hummock_storage
+        .sync(Some((initial_epoch, epoch3 + 1)))
+        .await
+        .unwrap();
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 1,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 2,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 4,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
+                    epoch: epoch1,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "222"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "dd".as_bytes(),
+                ReadOptions {
+                    epoch: epoch2,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "444"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
+                    epoch: epoch3 + 1,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "12345"
+    );
+    let ssts = hummock_storage.get_uncommitted_ssts(epoch3);
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 1,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 2,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 3,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
+                    epoch: epoch1,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "222"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "dd".as_bytes(),
+                ReadOptions {
+                    epoch: epoch2,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "444"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
+                    epoch: epoch3 + 1,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "12345"
+    );
+    hummock_meta_client
+        .commit_epoch(epoch3 + 1, ssts)
+        .await
+        .unwrap();
+    hummock_storage.wait_epoch(epoch3 + 1).await.unwrap();
+
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 1,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 2,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    let mut iter = hummock_storage
+        .iter(
+            "aa".as_bytes()..="ff".as_bytes(),
+            ReadOptions {
+                epoch: 3,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
+        .await
+        .unwrap();
+    while let Some(a) = iter.next().await.unwrap() {
+        println!("{:?}", a);
+    }
+    println!("============");
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
+                    epoch: epoch1,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "222"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "dd".as_bytes(),
+                ReadOptions {
+                    epoch: epoch2,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "444"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
+                    epoch: epoch3 + 1,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "12345"
     );
 }

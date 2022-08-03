@@ -267,8 +267,7 @@ impl Compactor {
             for uncommitted in uncommitted_list {
                 let compaction_group_id = match &uncommitted {
                     UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
-                    UncommittedData::Batch(batch) => {
-                        batch.compaction_group_id()},
+                    UncommittedData::Batch(batch) => batch.compaction_group_id(),
                 };
                 let group = grouped_payload
                     .entry(compaction_group_id)
@@ -283,6 +282,7 @@ impl Compactor {
 
         let mut futures = vec![];
         for (id, group_payload) in grouped_payload {
+            // println!("{:?}",group_payload);
             let id_copy = id;
             futures.push(
                 Compactor::compact_shared_buffer(context.clone(), group_payload, water_epoch)
@@ -300,6 +300,7 @@ impl Compactor {
             .into_iter()
             .flatten()
             .collect_vec();
+        // println!("{:?}",result);
         Ok(result)
     }
 
@@ -339,15 +340,16 @@ impl Compactor {
         let existing_table_ids: Vec<u32> = payload
             .iter()
             .flat_map(|data_list| {
-                data_list
-                    .iter()
-                    .flat_map(|uncommitted_data| match uncommitted_data {
+                data_list.iter().flat_map(|uncommitted_data| {
+                    // println!("{:?}",uncommitted_data);
+                    match uncommitted_data {
                         UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
 
                         UncommittedData::Batch(shared_buffer_write_batch) => {
                             vec![shared_buffer_write_batch.table_id]
                         }
-                    })
+                    }
+                })
             })
             .dedup()
             .collect();

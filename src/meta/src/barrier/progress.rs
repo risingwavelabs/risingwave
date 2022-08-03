@@ -121,7 +121,7 @@ impl CreateMviewProgressTracker {
     /// finished, `notify_finished` will be called on registered notifiers.
     pub fn update(&mut self, progress: &CreateMviewProgress) {
         let actor = progress.chain_actor_id;
-        println!("actor {:?}",actor);
+        println!("actor {:?}", actor);
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
             panic!("no tracked progress for actor {}, is it already finished?", actor);
         };

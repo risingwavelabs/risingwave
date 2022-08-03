@@ -637,9 +637,8 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
+            storage.sync(Some((epoch - 1, epoch))).await.unwrap();
         }
-
-        storage.sync(None).await.unwrap();
 
         for epoch in &epoch_set {
             hummock_meta_client
@@ -650,6 +649,14 @@ mod tests {
                 .await
                 .unwrap();
         }
+
+        // hummock_meta_client
+        //     .commit_epoch(
+        //         epoch,
+        //         storage.local_version_manager().get_uncommitted_ssts(epoch),
+        //     )
+        //     .await
+        //     .unwrap();
 
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
@@ -691,6 +698,7 @@ mod tests {
         // 3. compact
         Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
 
+        println!("213213123");
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let table_ids_from_version: Vec<_> = version

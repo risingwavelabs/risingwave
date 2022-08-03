@@ -17,7 +17,7 @@ use std::ops::RangeBounds;
 
 use risingwave_common::array::Row;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum RowOp {
     Insert(Row),
     Delete(Row),

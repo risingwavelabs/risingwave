@@ -184,11 +184,12 @@ impl LocalStreamManager {
         rx.await.unwrap()
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> (Vec<LocalSstableInfo>, bool) {
+    pub async fn sync_epoch(&self, epoch: u64, _epoch_2: u64) -> (Vec<LocalSstableInfo>, bool) {
         let last_epoch;
         loop {
             let max_sync_epoch = self.max_sync_epoch.load(Ordering::Relaxed);
             if epoch <= max_sync_epoch {
+                tracing::info!("sync no {:?},{:?}", epoch, max_sync_epoch);
                 return (vec![], false);
             }
             if self

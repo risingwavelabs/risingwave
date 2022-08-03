@@ -24,8 +24,8 @@ use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::shared_buffer::UploadTaskType::SyncEpoch;
+use risingwave_storage::hummock::shared_buffer::{to_order_sorted, UncommittedData};
 use risingwave_storage::hummock::test_utils::{
     default_config_for_test, gen_dummy_batch, gen_dummy_sst_info,
 };
@@ -187,6 +187,7 @@ async fn test_update_uncommitted_ssts() {
             .new_upload_task(SyncEpoch(None))
             .unwrap();
         {
+            let payload = to_order_sorted(&payload);
             assert_eq!(1, payload.len());
             assert_eq!(1, payload[0].len());
             assert_eq!(payload[0][0], UncommittedData::Batch(batches[0].clone()));
@@ -244,6 +245,7 @@ async fn test_update_uncommitted_ssts() {
             .new_upload_task(SyncEpoch(None))
             .unwrap();
         {
+            let payload = to_order_sorted(&payload);
             assert_eq!(1, payload.len());
             assert_eq!(1, payload[0].len());
             assert_eq!(payload[0][0], UncommittedData::Batch(batches[1].clone()));

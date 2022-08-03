@@ -21,3 +21,43 @@ group by
 order by
   l_returnflag,
   l_linestatus;
+
+query ITITTT rowsort
+SELECT count(*) FROM lineitem;
+----
+6005
+
+query ITITTZ rowsort
+SELECT count(*) FROM customer;
+----
+150
+
+query ITITTX rowsort
+SELECT count(*) FROM nation;
+----
+25
+
+query ITITTC rowsort
+SELECT count(*) FROM orders;
+----
+1500
+
+query ITITTD rowsort
+SELECT count(*) FROM part;
+----
+200
+
+query ITITTQ rowsort
+SELECT count(*) FROM partsupp;
+----
+800
+
+query ITITTQ rowsort
+SELECT count(*) FROM region;
+----
+5
+
+query ITITTQ rowsort
+SELECT count(*) FROM supplier;
+----
+10

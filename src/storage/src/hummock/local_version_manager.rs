@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::{Arc, Weak};
@@ -45,7 +45,8 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
 use crate::hummock::shared_buffer::{
-    KeyIndexedUncommittedData, OrderIndex, SharedBufferEvent, WriteRequest,
+    to_order_sorted, to_order_sorted_new, KeyIndexedUncommittedData, OrderIndex, SharedBufferEvent,
+    WriteRequest,
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
@@ -432,13 +433,16 @@ impl LocalVersionManager {
     ) -> Option<(HummockEpoch, JoinHandle<()>)> {
         // The current implementation is a trivial one, which issue only one flush task and wait for
         // the task to finish.
+        tracing::info!("flush{:?}", syncing_epoch);
         let mut task = None;
+        let mut map = BTreeMap::default();
         for (epoch, shared_buffer) in self.local_version.read().iter_shared_buffer() {
             // skip the epoch that is being synced
             if syncing_epoch.get(epoch).is_some() {
                 continue;
             }
             if let Some(upload_task) = shared_buffer.write().new_upload_task(FlushWriteBatch) {
+                map.insert(*epoch, Some(upload_task.clone()));
                 task = Some((*epoch, upload_task));
                 break;
             }
@@ -455,7 +459,7 @@ impl LocalVersionManager {
             );
             // TODO: may apply different `is_local` according to whether local spill is enabled.
             let _ = self
-                .run_upload_task(order_index, epoch, payload, true, u64::MAX)
+                .run_upload_task(&map, epoch, to_order_sorted(&payload), true, u64::MAX)
                 .await
                 .inspect_err(|err| {
                     error!(
@@ -490,7 +494,7 @@ impl LocalVersionManager {
             return Ok(());
         }
         let epoch_range =
-            epoch_range.unwrap_or_else(|| (*epochs.get(0).unwrap() - 1, *epochs.last().unwrap()));
+            epoch_range.unwrap_or_else(|| (epochs.first().unwrap() - 1, *epochs.last().unwrap()));
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
             .send_event(SharedBufferEvent::SyncEpoch(epochs.clone(), tx));
@@ -509,47 +513,25 @@ impl LocalVersionManager {
     /// Sync all shared buffer less than or equal to epoch
     pub async fn sync_all_shared_buffer(&self, epoch_range: (u64, u64)) -> HummockResult<()> {
         let epoch = epoch_range.1;
-        let mut size = 0;
-        let keyed_payload = self
-            .local_version
-            .read()
-            .scan_shared_buffer(epoch_range)
-            .map(|(key, value)| {
-                if key != &epoch {
-                    size += value.read().get_upload_size();
-                }
-                let uncommitted_data = value.write().get_uncommitted_data();
-                uncommitted_data.into_iter().map(|(key_1,value)| {
-                    let new_key = (key_1.0, key_1.1 + (key - epoch_range.0) as usize);
-                    (new_key, value)
-                }).collect()
-            })
-            .flat_map(|value:KeyIndexedUncommittedData| {
-                value
-            })
-            .collect::<KeyIndexedUncommittedData>();
-        let (order_index, task_payload, task_write_batch_size) = match self
-            .local_version
-            .write()
-            .new_shared_buffer(epoch, Arc::new(AtomicUsize::new(0)))
-            .write()
-            .new_upload_task(SyncEpoch(Some((keyed_payload, size))))
-        {
-            Some(task) => task,
-            None => {
-                tracing::trace!("sync epoch {} has no more task to do", epoch);
-                return Ok(());
-            }
-        };
-
-        let ret = self
-            .run_upload_task(order_index, epoch, task_payload, false, epoch_range.0)
-            .await;
-        tracing::trace!(
-            "sync epoch {} finished. Task size {}",
-            epoch,
-            task_write_batch_size
+        self.local_version.write().new_shared_buffer(
+            epoch_range.1,
+            self.buffer_tracker.global_upload_task_size.clone(),
         );
+        let pay: BTreeMap<HummockEpoch, Option<(OrderIndex, KeyIndexedUncommittedData, usize)>> =
+            self.local_version
+                .read()
+                .scan_shared_buffer(epoch_range)
+                .map(|(key, value)| {
+                    let task = value.write().new_upload_task(SyncEpoch(None));
+                    (*key, task)
+                })
+                .collect();
+
+        let task_payload = to_order_sorted_new(&pay);
+        let ret = self
+            .run_upload_task(&pay, epoch, task_payload, false, epoch_range.0)
+            .await;
+        tracing::info!("sync epoch {} finished.", epoch,);
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.archive_epoch(epoch);
         }
@@ -558,7 +540,10 @@ impl LocalVersionManager {
 
     async fn run_upload_task(
         &self,
-        order_index: OrderIndex,
+        order_index: &BTreeMap<
+            HummockEpoch,
+            Option<(OrderIndex, KeyIndexedUncommittedData, usize)>,
+        >,
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
         is_local: bool,
@@ -570,24 +555,35 @@ impl LocalVersionManager {
             .await;
 
         let local_version_guard = self.local_version.read();
-        let mut shared_buffer_guard = local_version_guard
-            .get_shared_buffer(epoch)
-            .expect("shared buffer should exist since some uncommitted data is not committed yet")
-            .write();
+        // let mut shared_buffer_guard = local_version_guard
+        //     .get_shared_buffer(epoch)
+        //     .expect("shared buffer should exist since some uncommitted data is not committed
+        // yet")     .write();
+        local_version_guard
+            .scan_shared_buffer((water_epoch, epoch))
+            .for_each(|(key, value)| {
+                let order_index_1 = order_index.get(key).unwrap().clone().unwrap_or((
+                    0,
+                    KeyIndexedUncommittedData::new(),
+                    0,
+                ));
+                let mut shared_buffer_guard = value.write();
+                match &task_result {
+                    Ok(ssts) => {
+                        tracing::info!("test{:?}", epoch);
+                        shared_buffer_guard.succeed_upload_task(order_index_1.0, ssts.clone());
+                        // Ok(())
+                    }
+                    Err(_e) => {
+                        shared_buffer_guard.fail_upload_task(order_index_1.0);
+                        // Err(e)
+                    }
+                };
+            });
 
-        let ret = match task_result {
-            Ok(ssts) => {
-                tracing::info!("test{:?}", epoch);
-                shared_buffer_guard.succeed_upload_task(order_index, ssts);
-                Ok(())
-            }
-            Err(e) => {
-                shared_buffer_guard.fail_upload_task(order_index);
-                Err(e)
-            }
-        };
         self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
-        ret
+        let _a = task_result?;
+        Ok(())
     }
 
     pub fn read_version(self: &Arc<LocalVersionManager>, read_epoch: HummockEpoch) -> ReadVersion {
@@ -877,10 +873,10 @@ impl LocalVersionManager {
                         }
                     }
                     SharedBufferEvent::SyncEpoch(epochs, join_handle_sender) => {
+                        tracing::info!("sadsad{:?}", epochs);
                         let join_handle = epochs
                             .into_iter()
                             .flat_map(|epoch| {
-                                tracing::info!("sadsad{:?}", syncing_epoch);
                                 assert!(
                                     syncing_epoch.insert(epoch),
                                     "epoch {} cannot be synced for twice",

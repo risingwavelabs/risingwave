@@ -545,13 +545,17 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
 
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(storage_row.is_some(), "deleting an non-existing row {:?}",epoch);
+                        assert!(
+                            storage_row.is_some(),
+                            "deleting an non-existing row {:?}",
+                            epoch
+                        );
                         assert!(
                             storage_row.as_ref().unwrap() == &old_row,
                             "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?} {:?}",
                             storage_row.as_ref().unwrap(),
-                            old_row
-                            ,epoch
+                            old_row,
+                            epoch
                         );
                     }
 
