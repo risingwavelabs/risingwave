@@ -57,6 +57,12 @@ impl FeStartupMessage {
         }?;
         let mut map = HashMap::new();
         let config: Vec<&str> = config.split('\0').collect();
+        if config.len() % 2 == 1 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Invalid input config: odd number of config pairs",
+            ));
+        }
         config.chunks(2).for_each(|chunk| {
             map.insert(chunk[0].to_string(), chunk[1].to_string());
         });

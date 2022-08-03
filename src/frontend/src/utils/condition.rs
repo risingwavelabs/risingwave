@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
 
 use fixedbitset::FixedBitSet;
@@ -526,33 +526,20 @@ pub struct ConditionDisplay<'a> {
 
 impl ConditionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.condition;
-        let mut conjunctions = that.conjunctions.iter();
-        if let Some(expr) = conjunctions.next() {
-            write!(
-                f,
-                "{:?}",
-                ExprDisplay {
-                    expr,
-                    input_schema: self.input_schema
-                }
-            )?;
-        }
-        if that.always_true() {
-            write!(f, "true")?;
+        if self.condition.always_true() {
+            write!(f, "true")
         } else {
-            for expr in conjunctions {
-                write!(
-                    f,
-                    " AND {:?}",
-                    ExprDisplay {
+            self.condition
+                .conjunctions
+                .iter()
+                .format_with(" AND ", |expr, f| {
+                    f(&ExprDisplay {
                         expr,
-                        input_schema: self.input_schema
-                    }
-                )?;
-            }
+                        input_schema: self.input_schema,
+                    })
+                })
+                .fmt(f)
         }
-        Ok(())
     }
 }
 

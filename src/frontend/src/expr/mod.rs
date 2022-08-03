@@ -634,6 +634,12 @@ impl std::fmt::Debug for ExprDisplay<'_> {
     }
 }
 
+impl std::fmt::Display for ExprDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (self as &dyn std::fmt::Debug).fmt(f)
+    }
+}
+
 #[cfg(test)]
 /// Asserts that the expression is an [`InputRef`] with the given index.
 macro_rules! assert_eq_input_ref {
