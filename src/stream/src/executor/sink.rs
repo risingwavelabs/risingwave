@@ -170,12 +170,13 @@ mod test {
 
         use crate::executor::Barrier;
 
-        let mut properties = HashMap::new();
-        properties.insert("sink_type".into(), "mysql".into());
-        properties.insert("endpoint".into(), "127.0.0.1:3306".into());
-        properties.insert("database".into(), "db".into());
-        properties.insert("table".into(), "t".into());
-        properties.insert("user".into(), "root".into());
+        let properties = maplit::hashmap! {
+            "sink_type".into() => "mysql".into(),
+            "endpoint".into() => "127.0.0.1:3306".into(),
+            "database".into() => "db".into(),
+            "table".into() => "t".into(),
+            "user".into() => "root".into()
+            };
 
         // Mock `child`
         let mock = MockSource::with_messages(
