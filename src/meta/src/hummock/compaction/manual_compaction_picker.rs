@@ -16,13 +16,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, LevelType, OverlappingLevel, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
-use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
-use crate::hummock::compaction::{CompactionInput, ManualCompactionOption};
+use crate::hummock::compaction::{CompactionInput, CompactionPicker, ManualCompactionOption};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
@@ -47,7 +47,58 @@ impl ManualCompactionPicker {
         }
     }
 
-    fn pick_l0_files(
+    fn pick_l0_to_sub_level(
+        &self,
+        l0: &OverlappingLevel,
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<CompactionInput> {
+        let mut input_levels = vec![];
+        let mut sub_level_id = 0;
+        let mut hint_sst_ids: HashSet<u64> = HashSet::new();
+        hint_sst_ids.extend(self.option.sst_ids.iter());
+        for sst_id in &self.option.sst_ids {
+            if level_handlers[0].is_pending_compact(sst_id) {
+                return None;
+            }
+        }
+
+        for level in &l0.sub_levels {
+            let table_infos = level
+                .table_infos
+                .iter()
+                .filter(|table| hint_sst_ids.contains(&table.id))
+                .cloned()
+                .collect_vec();
+            if !table_infos.is_empty() {
+                input_levels.push(InputLevel {
+                    level_idx: 0,
+                    level_type: level.level_type,
+                    table_infos,
+                });
+                if sub_level_id == 0 {
+                    sub_level_id = level.sub_level_id;
+                }
+            }
+        }
+
+        for level in &input_levels {
+            if !level.table_infos.is_empty() {
+                level_handlers[level.level_idx as usize].add_pending_task(
+                    self.compact_task_id,
+                    self.target_level,
+                    &level.table_infos,
+                );
+            }
+        }
+
+        Some(CompactionInput {
+            input_levels,
+            target_level: self.target_level,
+            target_sub_level_id: sub_level_id,
+        })
+    }
+
+    fn pick_l0_to_base_level(
         &self,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
@@ -139,19 +190,32 @@ impl ManualCompactionPicker {
     }
 }
 
-impl ManualCompactionPicker {
-    fn pick_tables(
+impl CompactionPicker for ManualCompactionPicker {
+    fn pick_compaction(
         &self,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
         if self.option.level == 0 {
-            return self.pick_l0_files(levels, level_handlers);
+            if !self.option.sst_ids.is_empty() {
+                return self.pick_l0_to_sub_level(levels.l0.as_ref().unwrap(), level_handlers);
+            } else if self.target_level > 0 {
+                return self.pick_l0_to_base_level(levels, level_handlers);
+            } else {
+                return None;
+            }
         }
-
+        let mut hint_sst_ids: HashSet<u64> = HashSet::new();
+        hint_sst_ids.extend(self.option.sst_ids.iter());
+        let mut tmp_sst_info = SstableInfo::default();
+        let mut range_overlap_info = RangeOverlapInfo::default();
+        tmp_sst_info.key_range = Some(self.option.key_range.clone());
+        range_overlap_info.update(&tmp_sst_info);
+        let mut select_input_ssts = vec![];
         let level = self.option.level;
         let target_level = self.target_level;
-        let level_table_infos: Vec<SstableInfo> = levels.levels[level - 1]
+        let level_table_infos: Vec<SstableInfo> = levels
+            .get_level(self.option.level)
             .table_infos
             .iter()
             .filter(|sst_info| hint_sst_ids.is_empty() || hint_sst_ids.contains(&sst_info.id))
@@ -171,14 +235,13 @@ impl ManualCompactionPicker {
                         return true;
                     }
                 }
-
                 false
             })
             .cloned()
             .collect();
 
         for table in &level_table_infos {
-            if level_handlers[select_level].is_pending_compact(&table.id) {
+            if level_handlers[self.option.level].is_pending_compact(&table.id) {
                 continue;
             }
 
@@ -199,16 +262,12 @@ impl ManualCompactionPicker {
             select_input_ssts.push(table.clone());
         }
 
-        if select_level == target_level {
-            return (select_input_ssts, vec![]);
-        }
-
         let target_input_ssts = if target_level == level {
             vec![]
         } else {
             self.overlap_strategy.check_base_level_overlap(
                 &select_input_ssts,
-                &levels.levels[target_level - 1].table_infos,
+                &levels.get_level(target_level).table_infos,
             )
         };
 
@@ -232,8 +291,8 @@ impl ManualCompactionPicker {
             );
         }
 
-        let input_levels = if level != target_level {
-            vec![
+        Some(CompactionInput {
+            input_levels: vec![
                 InputLevel {
                     level_idx: level as u32,
                     level_type: levels.levels[level - 1].level_type,
@@ -244,17 +303,7 @@ impl ManualCompactionPicker {
                     level_type: levels.levels[target_level - 1].level_type,
                     table_infos: target_input_ssts,
                 },
-            ]
-        } else {
-            vec![InputLevel {
-                level_idx: level as u32,
-                level_type: levels[level].level_type,
-                table_infos: select_input_ssts,
-            }]
-        };
-
-        Some(CompactionInput {
-            input_levels,
+            ],
             target_level,
             target_sub_level_id: 0,
         })
