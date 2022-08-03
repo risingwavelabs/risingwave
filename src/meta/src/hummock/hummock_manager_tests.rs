@@ -146,7 +146,7 @@ async fn test_unpin_snapshot_before() {
 async fn test_hummock_compaction_task() {
     let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2usize;
+    let sst_num = 2;
 
     // Construct vnode mappings for generating compaction tasks.
     let parallel_units = cluster_manager.list_parallel_units().await;
@@ -659,13 +659,7 @@ async fn test_pin_snapshot_response_lost() {
     let context_id = worker_node.id;
 
     let mut epoch: u64 = 1;
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -691,13 +685,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -732,13 +720,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -764,13 +746,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -871,7 +847,7 @@ async fn test_invalid_sst_id() {
 async fn test_trigger_manual_compaction() {
     let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2usize;
+    let sst_num = 2;
 
     // Construct vnode mappings for generating compaction tasks.
     let parallel_units = cluster_manager.list_parallel_units().await;

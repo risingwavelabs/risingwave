@@ -42,21 +42,19 @@ pub mod sstable_store;
 mod state_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-mod utils;
+pub mod utils;
 pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
 
 #[cfg(target_os = "linux")]
 pub mod file_cache;
-
-use std::collections::HashMap;
-
 pub use error::*;
-use parking_lot::RwLock;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -87,6 +85,8 @@ pub struct HummockStorage {
     stats: Arc<StateStoreMetrics>,
 
     compaction_group_client: Arc<dyn CompactionGroupClient>,
+
+    sstable_id_manager: SstableIdManagerRef,
 }
 
 impl HummockStorage {
@@ -104,7 +104,7 @@ impl HummockStorage {
             hummock_meta_client,
             hummock_metrics,
             compaction_group_client,
-            Arc::new(RwLock::new(HashMap::new())),
+            Arc::new(FilterKeyExtractorManager::default()),
         )
         .await
     }
@@ -117,19 +117,23 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<dyn CompactionGroupClient>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
         let write_conflict_detector = ConflictDetector::new_from_config(options.clone());
-
+        let sstable_id_manager = Arc::new(SstableIdManager::new(
+            hummock_meta_client.clone(),
+            options.sstable_id_remote_fetch_number,
+        ));
         let local_version_manager = LocalVersionManager::new(
             options.clone(),
             sstable_store.clone(),
             stats.clone(),
             hummock_meta_client.clone(),
             write_conflict_detector,
-            table_id_to_slice_transform,
+            sstable_id_manager.clone(),
+            filter_key_extractor_manager,
         )
         .await;
 
@@ -140,6 +144,7 @@ impl HummockStorage {
             sstable_store,
             stats,
             compaction_group_client,
+            sstable_id_manager,
         };
         Ok(instance)
     }
@@ -212,6 +217,10 @@ impl HummockStorage {
             ))),
             Ok(resp) => resp,
         }
+    }
+
+    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
+        &self.sstable_id_manager
     }
 }
 
