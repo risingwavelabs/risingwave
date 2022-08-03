@@ -151,9 +151,7 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
 
     match stmt.clone() {
         Statement::Query(_) => {
-            let mut binder = Binder::new(
-                &session,
-            );
+            let mut binder = Binder::new(&session);
             let bound = binder
                 .bind(stmt.clone())
                 .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
