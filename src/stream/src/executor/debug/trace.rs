@@ -63,12 +63,6 @@ pub async fn trace(
 
     while let Some(message) = DEBUG_CONTEXT
         .scope(debug_context(), input.next())
-        .stack_trace(format!(
-            "{} (actor {}, executor {})",
-            info.identity,
-            actor_id,
-            executor_id as u32 // Use the lower 32 bit to match the dashboard.
-        ))
         .instrument(span())
         .await
         .transpose()?
@@ -113,6 +107,31 @@ pub async fn metrics(
             }
         }
 
+        yield message;
+    }
+}
+
+/// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
+#[try_stream(ok = Message, error = StreamExecutorError)]
+pub async fn stack_trace(
+    info: Arc<ExecutorInfo>,
+    actor_id: ActorId,
+    executor_id: u64,
+    input: impl MessageStream,
+) {
+    pin_mut!(input);
+
+    while let Some(message) = input
+        .next()
+        .stack_trace(format!(
+            "{} (actor {}, executor {})",
+            info.identity,
+            actor_id,
+            executor_id as u32 // Use the lower 32 bit to match the dashboard.
+        ))
+        .await
+        .transpose()?
+    {
         yield message;
     }
 }

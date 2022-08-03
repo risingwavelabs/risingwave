@@ -161,12 +161,9 @@ where
         while let Some(barrier) = stream
             .next()
             .instrument(span)
-            .stack_trace(
-                last_epoch
-                    .map_or(Cow::Borrowed("Epoch <initial>"), |e| {
-                        format!("Epoch {}", e.curr).into()
-                    }),
-            )
+            .stack_trace(last_epoch.map_or(Cow::Borrowed("Epoch <initial>"), |e| {
+                format!("Epoch {}", e.curr).into()
+            }))
             .await
             .transpose()?
         {
