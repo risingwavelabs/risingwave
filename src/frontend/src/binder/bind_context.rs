@@ -235,7 +235,7 @@ impl BindContext {
                 if group.non_nullable_column.is_none() {
                     group.non_nullable_column = non_nullable_column;
                 }
-                self.column_group_context.mapping.insert(right, group_id);
+                self.column_group_context.mapping.insert(left, group_id);
             }
             (Some(l_group_id), Some(r_group_id)) => {
                 if r_group_id == l_group_id {

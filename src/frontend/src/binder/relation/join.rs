@@ -57,7 +57,7 @@ impl Binder {
         Ok(Some(root))
     }
 
-    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
+    pub(crate) fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let (constraint, join_type) = match join.join_operator {
@@ -109,7 +109,6 @@ impl Binder {
                 // Bind this table factor to an empty context
                 self.push_lateral_context();
                 let table_factor = table_factor.unwrap();
-                let right_table = get_table_name(&table_factor);
                 let relation = self.bind_table_factor(table_factor)?;
 
                 let using_columns = match c {
@@ -179,9 +178,11 @@ impl Binder {
                         ])
                     };
                     let right_expr = if idxes.len() == 1 {
-                        let mut right_table_clone = right_table.clone().unwrap();
-                        right_table_clone.push(column.clone());
-                        Expr::CompoundIdentifier(right_table_clone)
+                        let right_table = self.context.columns[idxes[0]].table_name.clone();
+                        Expr::CompoundIdentifier(vec![
+                            Ident::new(right_table.clone()),
+                            column.clone(),
+                        ])
                     } else {
                         let group_id = self
                             .context
@@ -231,24 +232,5 @@ impl Binder {
                 (bound_expr, None)
             }
         })
-    }
-}
-
-fn get_table_name(table_factor: &TableFactor) -> Option<Vec<Ident>> {
-    match table_factor {
-        TableFactor::Table { name, alias, .. } => {
-            if let Some(table_alias) = alias {
-                Some(vec![table_alias.name.clone()])
-            } else {
-                Some(name.0.clone())
-            }
-        }
-        TableFactor::Derived { alias, .. } => alias
-            .as_ref()
-            .map(|table_alias| vec![table_alias.name.clone()]),
-        TableFactor::TableFunction { expr: _, alias } => alias
-            .as_ref()
-            .map(|table_alias| vec![table_alias.name.clone()]),
-        TableFactor::NestedJoin(table_with_joins) => get_table_name(&table_with_joins.relation),
     }
 }

@@ -323,6 +323,12 @@ impl Binder {
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
             }
+            TableFactor::NestedJoin(table_with_joins) => {
+                self.push_lateral_context();
+                let bound_join = self.bind_table_with_joins(*table_with_joins)?;
+                self.pop_and_merge_lateral_context()?;
+                Ok(bound_join)
+            }
 
             // TODO: if and when we allow nested joins (binding table factors which are themselves
             // joins), We need to `self.push_table_context()` prior to binding the join and
