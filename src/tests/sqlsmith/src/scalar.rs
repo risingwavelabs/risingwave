@@ -77,7 +77,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             0 => 0,
             1 => 1,
             2 => max,
-            3 => min, // tests for negative too
+            3 => min + 1, // Tracked by https://github.com/singularity-data/risingwave/issues/4344.
             4 => self.rng.gen_range(1..max),
             _ => unreachable!(),
         };
@@ -88,9 +88,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let n = match self.rng.gen_range(0..=4) {
             0 => 0.0,
             1 => 1.0,
-            2 => i64::MIN.to_f64().unwrap(),
-            3 => i64::MAX.to_f64().unwrap(),
-            4 => self.rng.gen_range(1.0..i64::MAX.to_f64().unwrap()),
+            2 => (i64::MIN + 1) as f64, // Tracked by https://github.com/singularity-data/risingwave/issues/4344.
+            3 => i64::MAX as f64,
+            4 => self.rng.gen_range(1.0..i64::MAX as f64),
             _ => unreachable!(),
         };
         n.to_string()
