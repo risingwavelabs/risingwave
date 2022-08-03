@@ -19,12 +19,15 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
+use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -42,6 +45,9 @@ pub struct SourceExecutor<S: StateStore> {
     source_id: TableId,
     source_desc: SourceDesc,
 
+    /// Row id generator for this source executor.
+    row_id_generator: RowIdGenerator,
+
     column_ids: Vec<ColumnId>,
     schema: Schema,
     pk_indices: PkIndices,
@@ -52,7 +58,7 @@ pub struct SourceExecutor<S: StateStore> {
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
-    // monitor
+    /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
 
     /// Split info for stream source
@@ -75,6 +81,7 @@ impl<S: StateStore> SourceExecutor<S> {
         actor_id: ActorId,
         source_id: TableId,
         source_desc: SourceDesc,
+        vnodes: Bitmap,
         keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
@@ -86,10 +93,16 @@ impl<S: StateStore> SourceExecutor<S> {
         streaming_metrics: Arc<StreamingMetrics>,
         expected_barrier_latency_ms: u64,
     ) -> Result<Self> {
+        // Using vnode range start for row id generator.
+        let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
             actor_id,
             source_id,
             source_desc,
+            row_id_generator: RowIdGenerator::with_epoch(
+                vnode_id as u32,
+                *UNIX_SINGULARITY_DATE_EPOCH,
+            ),
             column_ids,
             schema,
             pk_indices,
@@ -107,7 +120,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// Generate a row ID column.
     fn gen_row_id_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len);
-        let row_ids = self.source_desc.next_row_id_batch(len);
+        let row_ids = self.row_id_generator.next_batch(len);
 
         for row_id in row_ids {
             builder.append(Some(row_id)).unwrap();
@@ -116,7 +129,28 @@ impl<S: StateStore> SourceExecutor<S> {
         builder.finish().unwrap().into()
     }
 
-    fn refill_row_id_column(&mut self, chunk: StreamChunk) -> StreamChunk {
+    /// Generate a row ID column according to ops.
+    fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
+        let len = column.array_ref().len();
+        let mut builder = I64ArrayBuilder::new(len);
+
+        for i in 0..len {
+            // Only refill row_id for insert operation.
+            if ops.get(i) == Some(&Op::Insert) {
+                builder.append(Some(self.row_id_generator.next())).unwrap();
+            } else {
+                builder
+                    .append(Some(
+                        i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
+                    ))
+                    .unwrap();
+            }
+        }
+
+        Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
+    }
+
+    fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
         let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
@@ -126,7 +160,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .position(|column_id| *column_id == row_id_column_id)
         {
             let (ops, mut columns, bitmap) = chunk.into_inner();
-            columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+            if append_only {
+                columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+            } else {
+                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops);
+            }
             return StreamChunk::new(ops, columns, bitmap);
         }
         chunk
@@ -301,12 +339,11 @@ impl<S: StateStore> SourceExecutor<S> {
                         self.state_cache.extend(state);
                     }
 
-                    match self.source_desc.source.as_ref() {
-                        // Refill row id column for connector sources.
-                        SourceImpl::Connector(_) => chunk = self.refill_row_id_column(chunk),
-                        // The row id column of table v2 is already set in `TableSource`.
-                        SourceImpl::TableV2(_) => {}
-                    }
+                    // Refill row id column for source.
+                    chunk = match self.source_desc.source.as_ref() {
+                        SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true),
+                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false),
+                    };
 
                     self.metrics
                         .source_output_row_count
@@ -351,6 +388,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 mod tests {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use futures::StreamExt;
     use maplit::hashmap;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -410,15 +448,15 @@ mod tests {
 
         let chunk1 = StreamChunk::from_pretty(
             " I i T
-            + 0 1 foo
-            + 0 2 bar
-            + 0 3 baz",
+            U+ 1 1 foo
+            U+ 2 2 bar
+            U+ 3 3 baz",
         );
         let chunk2 = StreamChunk::from_pretty(
             " I i T
-            + 0 4 hello
-            + 0 5 .
-            + 0 6 world",
+            U+ 4 4 hello
+            U+ 5 5 .
+            U+ 6 6 world",
         );
 
         let schema = Schema {
@@ -434,11 +472,13 @@ mod tests {
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
             0x3f3f3f,
             table_id,
             source_desc,
+            vnodes,
             keyspace,
             column_ids,
             schema,
@@ -472,9 +512,9 @@ mod tests {
                     chunk,
                     StreamChunk::from_pretty(
                         " I i T
-                        + 0 1 foo
-                        + 0 2 bar
-                        + 0 3 baz",
+                        U+ 1 1 foo
+                        U+ 2 2 bar
+                        U+ 3 3 baz",
                     )
                 ),
                 Message::Barrier(barrier) => {
@@ -491,9 +531,9 @@ mod tests {
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I i T
-                + 0 4 hello
-                + 0 5 .
-                + 0 6 world",
+                U+ 4 4 hello
+                U+ 5 5 .
+                U+ 6 6 world",
             )
         );
 
@@ -557,10 +597,12 @@ mod tests {
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
             0x3f3f3f,
             table_id,
             source_desc,
+            vnodes,
             keyspace,
             column_ids,
             schema,
@@ -677,11 +719,13 @@ mod tests {
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
+        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let source_exec = SourceExecutor::new(
             actor_id,
             source_table_id,
             source_desc,
+            vnodes,
             keyspace.clone(),
             column_ids.clone(),
             schema,

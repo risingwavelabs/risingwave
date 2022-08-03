@@ -373,7 +373,10 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
         tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
-        self.check_vnode_is_set(vnode);
+        // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
+        if !indices.is_empty() {
+            self.check_vnode_is_set(vnode);
+        }
         vnode
     }
 

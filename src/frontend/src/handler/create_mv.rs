@@ -61,10 +61,7 @@ pub fn gen_create_mv_plan(
     };
 
     let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
+        let mut binder = Binder::new(session);
         binder.bind_query(*query)?
     };
 
