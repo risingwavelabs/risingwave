@@ -57,9 +57,3 @@
 
 - input: SELECT id FROM customer WHERE NOT salary = ''
   formatted_sql: SELECT id FROM customer WHERE NOT (salary = '')
-
-- input: SELECT -9223372036854775808
-  formatted_sql: SELECT -9223372036854775808
-
-- input: SELECT -1.0
-  formatted_sql: SELECT -1.0
