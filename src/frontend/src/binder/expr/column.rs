@@ -16,7 +16,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
-use crate::expr::{CorrelatedInputRef, ExprImpl, InputRef};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -36,13 +36,32 @@ impl Binder {
             }
         };
 
-        let result = self
+        match self
             .context
-            .get_column_binding_index(&table_name, &column_name);
-        match result {
-            Ok(index) => {
-                let column = &self.context.columns[index];
-                return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+            .get_column_binding_indices(&table_name, &column_name)
+        {
+            Ok(mut indices) => {
+                match indices.len() {
+                    0 => unreachable!(),
+                    1 => {
+                        let index = indices[0];
+                        let column = &self.context.columns[index];
+                        return Ok(
+                            InputRef::new(column.index, column.field.data_type.clone()).into()
+                        );
+                    }
+                    _ => {
+                        indices.sort(); // make sure we have a consistent result
+                        let inputs = indices
+                            .iter()
+                            .map(|index| {
+                                let column = &self.context.columns[*index];
+                                InputRef::new(column.index, column.field.data_type.clone()).into()
+                            })
+                            .collect::<Vec<_>>();
+                        return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into());
+                    }
+                }
             }
             Err(e) => {
                 // If the error message is not that the column is not found, throw the error
