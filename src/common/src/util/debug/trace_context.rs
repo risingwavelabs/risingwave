@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cell::{RefCell, RefMut};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Write};
 use std::pin::Pin;
 use std::rc::Rc;
@@ -198,7 +198,7 @@ pub type TraceReceiver = watch::Receiver<String>;
 
 #[derive(Default, Debug)]
 pub struct TraceContextManager {
-    rxs: HashMap<String, TraceReceiver>,
+    rxs: BTreeMap<String, TraceReceiver>,
 }
 
 impl TraceContextManager {
@@ -206,6 +206,10 @@ impl TraceContextManager {
         let (tx, rx) = watch::channel("<not reported>".to_owned());
         self.rxs.try_insert(key, rx).unwrap();
         tx
+    }
+
+    pub fn get_all(&self) -> impl Iterator<Item = (&str, watch::Ref<String>)> {
+        self.rxs.iter().map(|(k, v)| (k.as_str(), v.borrow()))
     }
 }
 
@@ -290,7 +294,7 @@ pub trait StackTrace: Future + Sized {
 pub async fn monitored<F: Future>(
     f: F,
     root_span: impl Into<SpanValue>,
-    watch_tx: TraceSender,
+    trace_sender: TraceSender,
     ms: u64,
 ) -> F::Output {
     TRACE_CONTEXT
@@ -299,10 +303,10 @@ pub async fn monitored<F: Future>(
             async move {
                 let monitor = async move {
                     loop {
-                        let new_report = TRACE_CONTEXT.with(|c| format!("{}", c.borrow()));
-                        watch_tx.send_if_modified(|report| {
-                            if report != &new_report {
-                                *report = new_report;
+                        let new_trace = TRACE_CONTEXT.with(|c| format!("{}", c.borrow()));
+                        trace_sender.send_if_modified(|trace| {
+                            if trace != &new_trace {
+                                *trace = new_trace;
                                 true
                             } else {
                                 false

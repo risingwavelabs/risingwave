@@ -197,6 +197,11 @@ pub async fn compute_node_serve(
         state_store,
     );
 
+    {
+        let stream_mgr = stream_mgr.clone();
+        tokio::spawn(async move { stream_mgr.print_trace().await });
+    }
+
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =

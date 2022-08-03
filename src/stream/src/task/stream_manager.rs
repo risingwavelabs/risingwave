@@ -24,7 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::debug::trace_context::{TraceContextManager, TRACE_CONTEXT};
+use risingwave_common::util::debug::trace_context::{self, TraceContextManager};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -150,6 +150,17 @@ impl LocalStreamManager {
     #[cfg(test)]
     pub fn for_test() -> Self {
         Self::with_core(LocalStreamManagerCore::for_test())
+    }
+
+    pub async fn print_trace(&self) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            let core = self.core.lock();
+
+            for (k, trace) in core.trace_context_manager.get_all() {
+                println!(">> {}\n\n{}", k, &*trace);
+            }
+        }
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
@@ -540,26 +551,21 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            // let trace_context = self
-            //     .trace_context_manager
-            //     .register(format!("actor {actor_id}"), "actor_root");
-
-            // self.handles.insert(
-            //     actor_id,
-            //     tokio::spawn(
-            //         monitor.instrument(TRACE_CONTEXT.scope(trace_context, async move {
-            //             // unwrap the actor result to panic on error
-            //             actor.run().await.expect("actor failed");
-            //         })),
-            //     ),
-            // );
+            let trace_sender = self
+                .trace_context_manager
+                .register(format!("actor {actor_id}"));
 
             self.handles.insert(
                 actor_id,
-                tokio::spawn(monitor.instrument(async move {
-                    // unwrap the actor result to panic on error
-                    actor.run().await.expect("actor failed");
-                })),
+                tokio::spawn(monitor.instrument(trace_context::monitored(
+                    async move {
+                        // unwrap the actor result to panic on error
+                        actor.run().await.expect("actor failed");
+                    },
+                    format!("actor {actor_id}"),
+                    trace_sender,
+                    1000,
+                ))),
             );
 
             let actor_id_str = actor_id.to_string();
