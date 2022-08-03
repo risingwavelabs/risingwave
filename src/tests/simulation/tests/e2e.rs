@@ -60,8 +60,7 @@ async fn basic() {
         .build();
 
     // compute node
-    // TODO: support multiple nodes
-    for i in 1..=1 {
+    for i in 1..=2 {
         handle
             .create_node()
             .name(format!("compute-{i}"))
@@ -75,6 +74,8 @@ async fn basic() {
                     &format!("192.168.3.{i}:5688"),
                     "--meta-address",
                     "192.168.1.1:5690",
+                    "--state-store",
+                    "hummock+memory-shared",
                 ]);
                 risingwave_compute::start(opts).await
             })
