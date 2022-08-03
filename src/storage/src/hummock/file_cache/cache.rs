@@ -157,10 +157,10 @@ where
         .await?;
         let store = Arc::new(store);
 
-        let indices = Arc::new(LruCache::with_event_listeners(
+        let indices = Arc::new(LruCache::with_event_listener(
             LRU_SHARD_BITS,
             options.capacity,
-            vec![store.clone()],
+            store.clone(),
         ));
         store.restore(&indices, &hash_builder)?;
 

@@ -152,16 +152,15 @@
     select * from ab join bc using(b) join ca using(c);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [bc.c, ab.b, ab.a, ca.a] }
-        BatchHashJoin { type: Inner, predicate: bc.c = ca.c, output: [ab.a, ab.b, bc.c, ca.a] }
-          BatchExchange { order: [], dist: HashShard(bc.c) }
-            BatchHashJoin { type: Inner, predicate: ab.b = bc.b, output: [ab.a, ab.b, bc.c] }
-              BatchExchange { order: [], dist: HashShard(ab.b) }
-                BatchScan { table: ab, columns: [ab.a, ab.b], distribution: SomeShard }
-              BatchExchange { order: [], dist: HashShard(bc.b) }
-                BatchScan { table: bc, columns: [bc.b, bc.c], distribution: SomeShard }
-          BatchExchange { order: [], dist: HashShard(ca.c) }
-            BatchScan { table: ca, columns: [ca.c, ca.a], distribution: SomeShard }
+      BatchHashJoin { type: Inner, predicate: bc.c = ca.c, output: [bc.c, ab.b, ab.a, ca.a] }
+        BatchExchange { order: [], dist: HashShard(bc.c) }
+          BatchHashJoin { type: Inner, predicate: ab.b = bc.b, output: [ab.a, ab.b, bc.c] }
+            BatchExchange { order: [], dist: HashShard(ab.b) }
+              BatchScan { table: ab, columns: [ab.a, ab.b], distribution: SomeShard }
+            BatchExchange { order: [], dist: HashShard(bc.b) }
+              BatchScan { table: bc, columns: [bc.b, bc.c], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(ca.c) }
+          BatchScan { table: ca, columns: [ca.c, ca.a], distribution: SomeShard }
 - sql: |
     /* Only push to left */
     create table t1 (v1 int, v2 int);

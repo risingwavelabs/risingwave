@@ -80,10 +80,14 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
         S: MetaStore,
     {
         let bytes_vec = store.list_cf(&Self::cf_name()).await?;
-        Ok(bytes_vec
+        bytes_vec
             .iter()
-            .map(|bytes| Self::from_protobuf(Self::ProstType::decode(bytes.as_slice()).unwrap()))
-            .collect::<Vec<_>>())
+            .map(|bytes| {
+                Self::ProstType::decode(bytes.as_slice())
+                    .map(Self::from_protobuf)
+                    .map_err(Into::into)
+            })
+            .collect()
     }
 
     /// `insert` insert a new record in meta store, replaced it if the record already exist.
