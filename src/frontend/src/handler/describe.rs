@@ -66,23 +66,43 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
 
-    // Convert all indexs to rows
+    // Convert all indexes to rows
     rows.extend(indices.iter().filter_map(|index| {
-        let table_result =
-            catalog_reader.get_table_by_id(session.database(), &schema_name, &index.table_id);
+        let table_result = catalog_reader.get_table_by_id(
+            session.database(),
+            &schema_name,
+            &index.indexed_table_id,
+        );
         if table_result.is_err() {
             return None;
         }
         let table = table_result.unwrap();
 
-        let s = table
-            .distribution_key
+        let index_column_s = index
+            .index_columns
             .iter()
-            .map(|c| table.columns[*c].name().to_string())
+            .map(|x| table.columns[x.index].name().to_string())
             .collect_vec();
+        let include_column_s = index
+            .include_columns
+            .iter()
+            .map(|x| table.columns[x.index].name().to_string())
+            .collect_vec();
+
         Some(Row::new(vec![
             Some(index.name.clone().into()),
-            Some(format!("index({})", display_comma_separated(&s)).into()),
+            if include_column_s.is_empty() {
+                Some(format!("index({})", display_comma_separated(&index_column_s)).into())
+            } else {
+                Some(
+                    format!(
+                        "index({}) include({})",
+                        display_comma_separated(&index_column_s),
+                        display_comma_separated(&include_column_s)
+                    )
+                    .into(),
+                )
+            },
         ]))
     }));
 

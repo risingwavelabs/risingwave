@@ -21,17 +21,70 @@ use risingwave_pb::expr::expr_node::RexNode;
 use crate::catalog::{DatabaseId, SchemaId, TableId};
 use crate::expr::{Expr, InputRef};
 
+/// # `IndexCatalog` Example:
+/// create table t (a int, b int, c int, d int);
+/// create index idx on t(a,b,a) include(a,c,d,b);
+///
+/// Table t (called indexed table)
+/// columns:
+/// 0: `_row_id`
+/// 1: a
+/// 2: b
+/// 3: c
+/// 4: d
+///
+/// index idx (called index table)
+/// columns:
+/// 0: a
+/// 1: b
+/// 2: c
+/// 3: d
+/// 4: `t._row_id`
+///
+/// `TableDesc` columns of index table
+/// | index columns | include columns | hidden(pk columns) |
+/// If index columns and include columns contain pk columns of the indexed table,
+/// then the hidden pk columns can be removed.
+///
+/// The index of `InputRef` is the index of the indexed `TableDesc` columns.
+/// `index_columns`: InputRef(1),InputRef(2)
+/// `include_columns`: InputRef(3),InputRef(4)
+
 #[derive(Clone, Debug)]
 pub struct IndexCatalog {
     pub id: IndexId,
+
     pub schema_id: SchemaId,
+
     pub database_id: DatabaseId,
+
+    /// index name
     pub name: String,
+
     pub owner: u32,
+
+    /// The id of the index table
     pub table_id: TableId,
+
+    /// The id of the indexed table
     pub indexed_table_id: TableId,
-    // Only InputRef type index is supported.
+
+    /// Only `InputRef` type index is supported Now.
+    /// The index of `InputRef` is the index of the indexed `TableDesc` columns.
+    /// `index_columns` and `include_columns` are in canonical form.
+    ///
+    /// example-1:
+    /// create table t (a int, b int, c int, d int)
+    /// create index idx on t(a,b) include(c,d)
+    /// index_columns stand for (a,b)
+    /// include_columns stand for (c,d)
+    ///
+    /// example-2: illustration of canonical form
+    /// create index idx on t(a,b,a) include(a,c,d,b)
+    /// `index_columns` stand for (a,b)
+    /// `include_columns` stand for (c,d)
     pub index_columns: Vec<InputRef>,
+
     pub include_columns: Vec<InputRef>,
 }
 
@@ -65,6 +118,7 @@ impl From<&ProstIndex> for IndexCatalog {
                         index: input_ref_expr.column_idx as usize,
                         data_type: DataType::from(x.return_type.as_ref().unwrap()),
                     },
+                    RexNode::FuncCall(_) => unimplemented!(),
                     _ => unreachable!(),
                 })
                 .collect_vec(),

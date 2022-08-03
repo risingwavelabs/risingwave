@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{IndexId, TableId};
+use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -28,7 +28,7 @@ use crate::binder::Binder;
 use crate::catalog::{check_schema_writable, IndexCatalog};
 use crate::expr::{ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
-use crate::optimizer::plan_node::{LogicalProject, LogicalScan};
+use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -42,36 +42,7 @@ pub(crate) fn gen_create_index_plan(
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
 ) -> Result<(PlanRef, ProstTable, ProstIndex)> {
-    let columns = columns
-        .iter()
-        .map(|column| {
-            if column.asc.is_some() {
-                return Err(
-                    ErrorCode::NotImplemented("asc not supported".into(), None.into()).into(),
-                );
-            }
-
-            if column.nulls_first.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    "nulls_first not supported".into(),
-                    None.into(),
-                )
-                .into());
-            }
-
-            use risingwave_sqlparser::ast::Expr;
-
-            if let Expr::Identifier(ref ident) = column.expr {
-                Ok::<_, RwError>(ident)
-            } else {
-                Err(ErrorCode::NotImplemented(
-                    "only identifier is supported for create index".into(),
-                    None.into(),
-                )
-                .into())
-            }
-        })
-        .try_collect::<_, Vec<_>, _>()?;
+    let columns = check_columns(columns)?;
 
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
     let catalog_reader = session.env().catalog_reader();
@@ -96,26 +67,23 @@ pub(crate) fn gen_create_index_plan(
         .enumerate()
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
+
+    let to_column_indices = |ident: &Ident| {
+        let x = ident.to_string();
+        table_desc_map
+            .get(&x)
+            .cloned()
+            .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
+    };
+
     let mut index_columns = columns
         .iter()
-        .map(|x| {
-            let x = x.to_string();
-            table_desc_map
-                .get(&x)
-                .cloned()
-                .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
-        })
+        .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
 
     let mut include_columns = include
         .iter()
-        .map(|x| {
-            let x = x.to_string();
-            table_desc_map
-                .get(&x)
-                .cloned()
-                .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
-        })
+        .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
 
     // remove duplicate column
@@ -132,50 +100,15 @@ pub(crate) fn gen_create_index_plan(
         .collect_vec();
 
     // Manually assemble the materialization plan for the index MV.
-    let materialize = {
-        let out_names: Vec<String> = index_columns
-            .iter()
-            .chain(include_columns.iter())
-            .map(|&i| table_desc.columns.get(i).unwrap().name.clone())
-            .collect_vec();
-
-        let exprs = index_columns
-            .iter()
-            .chain(include_columns.iter())
-            .map(|&i| {
-                ExprImpl::InputRef(
-                    InputRef::new(i, table_desc.columns.get(i).unwrap().data_type.clone()).into(),
-                )
-            })
-            .collect_vec();
-
-        let logical_scan = LogicalScan::create(
-            table_name,
-            false,
-            table_desc.clone(),
-            // indexes are only used by DeltaJoin rule, and we don't need to provide them here.
-            vec![],
-            context,
-        );
-
-        let logical_project = LogicalProject::create(logical_scan.into(), exprs);
-        let mut project_required_cols = FixedBitSet::with_capacity(logical_project.schema().len());
-        project_required_cols.toggle_range(0..logical_project.schema().len());
-
-        PlanRoot::new(
-            logical_project,
-            RequiredDist::AnyShard,
-            Order::new(
-                (0..index_columns.len())
-                    .into_iter()
-                    .map(FieldOrder::ascending)
-                    .collect(),
-            ),
-            project_required_cols,
-            out_names,
-        )
-        .gen_create_index_plan(index_name.to_string(), table.id())?
-    };
+    let materialize = assemble_materialize(
+        table_name,
+        table.id,
+        table_desc.clone(),
+        context,
+        index_name.to_string(),
+        &index_columns,
+        &include_columns,
+    )?;
 
     let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
     check_schema_writable(&index_schema_name)?;
@@ -224,6 +157,96 @@ pub(crate) fn gen_create_index_plan(
     .to_prost(index_schema_id, index_database_id);
 
     Ok((materialize.into(), index_table, index))
+}
+
+fn assemble_materialize(
+    table_name: String,
+    table_id: TableId,
+    table_desc: Rc<TableDesc>,
+    context: OptimizerContextRef,
+    index_name: String,
+    index_columns: &[usize],
+    include_columns: &[usize],
+) -> Result<StreamMaterialize> {
+    // build logical plan and then call gen_create_index_plan
+    // LogicalProject(index_columns, include_columns)
+    //   LogicalScan(table_desc)
+
+    let logical_scan = LogicalScan::create(
+        table_name,
+        false,
+        table_desc.clone(),
+        // index table has no indexes.
+        vec![],
+        context,
+    );
+
+    let exprs = index_columns
+        .iter()
+        .chain(include_columns.iter())
+        .map(|&i| {
+            ExprImpl::InputRef(
+                InputRef::new(i, table_desc.columns.get(i).unwrap().data_type.clone()).into(),
+            )
+        })
+        .collect_vec();
+
+    let logical_project = LogicalProject::create(logical_scan.into(), exprs);
+    let mut project_required_cols = FixedBitSet::with_capacity(logical_project.schema().len());
+    project_required_cols.toggle_range(0..logical_project.schema().len());
+
+    let out_names: Vec<String> = index_columns
+        .iter()
+        .chain(include_columns.iter())
+        .map(|&i| table_desc.columns.get(i).unwrap().name.clone())
+        .collect_vec();
+
+    PlanRoot::new(
+        logical_project,
+        RequiredDist::AnyShard,
+        Order::new(
+            (0..index_columns.len())
+                .into_iter()
+                .map(FieldOrder::ascending)
+                .collect(),
+        ),
+        project_required_cols,
+        out_names,
+    )
+    .gen_create_index_plan(index_name, table_id)
+}
+
+fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
+    columns
+        .into_iter()
+        .map(|column| {
+            if column.asc.is_some() {
+                return Err(
+                    ErrorCode::NotImplemented("asc not supported".into(), None.into()).into(),
+                );
+            }
+
+            if column.nulls_first.is_some() {
+                return Err(ErrorCode::NotImplemented(
+                    "nulls_first not supported".into(),
+                    None.into(),
+                )
+                .into());
+            }
+
+            use risingwave_sqlparser::ast::Expr;
+
+            if let Expr::Identifier(ident) = column.expr {
+                Ok::<_, RwError>(ident)
+            } else {
+                Err(ErrorCode::NotImplemented(
+                    "only identifier is supported for create index".into(),
+                    None.into(),
+                )
+                .into())
+            }
+        })
+        .try_collect::<_, Vec<_>, _>()
 }
 
 pub async fn handle_create_index(
