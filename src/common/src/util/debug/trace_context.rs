@@ -2,14 +2,17 @@
 
 use std::borrow::Cow;
 use std::cell::{RefCell, RefMut};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Debug, Write};
+use std::hash::Hash;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::task::Poll;
+use std::time::Instant;
 
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
+use itertools::Itertools;
 use pin_project::{pin_project, pinned_drop};
 use tokio::sync::watch;
 
@@ -23,6 +26,19 @@ pub struct StackTreeNode {
 // SAFETY: we'll never clone the `Rc` in multiple threads.
 unsafe impl Send for StackTreeNode {}
 
+impl PartialEq for StackTreeNode {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+impl Eq for StackTreeNode {}
+
+impl Hash for StackTreeNode {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.inner.as_ptr().hash(state);
+    }
+}
+
 impl From<StackTreeNodeInner> for StackTreeNode {
     fn from(inner: StackTreeNodeInner) -> Self {
         Self {
@@ -33,7 +49,8 @@ impl From<StackTreeNodeInner> for StackTreeNode {
 
 struct StackTreeNodeInner {
     parent: Option<StackTreeNode>,
-    children: Vec<StackTreeNode>,
+    children: HashSet<StackTreeNode>,
+    start_time: Instant,
     value: SpanValue,
 }
 
@@ -56,7 +73,8 @@ impl StackTreeNode {
     fn new(parent: StackTreeNode, value: SpanValue) -> Self {
         StackTreeNodeInner {
             parent: Some(parent),
-            children: Vec::new(),
+            children: Default::default(),
+            start_time: Instant::now(),
             value,
         }
         .into()
@@ -65,7 +83,8 @@ impl StackTreeNode {
     fn root(value: SpanValue) -> Self {
         StackTreeNodeInner {
             parent: None,
-            children: Vec::new(),
+            children: Default::default(),
+            start_time: Instant::now(),
             value,
         }
         .into()
@@ -79,26 +98,17 @@ impl StackTreeNode {
 
     fn mount_child(&self, child: Self) {
         let mut inner = self.inner.borrow_mut();
-        inner.children.push(child);
+        assert!(inner.children.insert(child), "child already mounted");
     }
 
     fn delete(&self) {
-        let parent = self.parent();
-        assert!(parent.has_child(self));
-
-        let mut parent_inner = parent.inner.borrow_mut();
-        parent_inner
-            .children
-            .retain(|x| !Rc::ptr_eq(&x.inner, &self.inner));
+        assert!(self.delete_unchecked(), "child not exists");
     }
 
-    fn delete_unchecked(&self) {
+    fn delete_unchecked(&self) -> bool {
         let parent = self.parent();
-
         let mut parent_inner = parent.inner.borrow_mut();
-        parent_inner
-            .children
-            .retain(|x| !Rc::ptr_eq(&x.inner, &self.inner));
+        parent_inner.children.remove(self)
     }
 
     fn parent(&self) -> Self {
@@ -111,11 +121,7 @@ impl StackTreeNode {
     }
 
     fn has_child(&self, child: &StackTreeNode) -> bool {
-        self.inner
-            .borrow()
-            .children
-            .iter()
-            .any(|x| Rc::ptr_eq(&x.inner, &child.inner))
+        self.inner.borrow().children.contains(child)
     }
 
     fn clear_children(&self) {
@@ -142,8 +148,13 @@ impl std::fmt::Display for TraceContext {
 
             let inner = node.inner.borrow();
             f.write_str(inner.value.as_ref())?;
+            f.write_fmt(format_args!(" [{:?}]", inner.start_time.elapsed()))?;
             f.write_char('\n')?;
-            for child in &inner.children {
+            for child in inner
+                .children
+                .iter()
+                .sorted_by(|a, b| a.inner.borrow().value.cmp(&b.inner.borrow().value))
+            {
                 fmt_node(f, child, depth + 1)?;
             }
 
@@ -410,7 +421,7 @@ mod tests {
             }
         });
 
-        monitored(hello(), "actor 233", watch_tx, 100).await;
+        monitored(hello(), "actor 233", watch_tx, 1000).await;
 
         collector.await.unwrap();
     }

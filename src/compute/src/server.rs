@@ -197,6 +197,7 @@ pub async fn compute_node_serve(
         state_store,
     );
 
+    #[cfg(any())]
     {
         let stream_mgr = stream_mgr.clone();
         tokio::spawn(async move { stream_mgr.print_trace().await });

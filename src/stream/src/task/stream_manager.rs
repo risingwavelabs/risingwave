@@ -553,7 +553,7 @@ impl LocalStreamManagerCore {
             let monitor = tokio_metrics::TaskMonitor::new();
             let trace_sender = self
                 .trace_context_manager
-                .register(format!("actor {actor_id}"));
+                .register(format!("Actor {actor_id}"));
 
             self.handles.insert(
                 actor_id,
@@ -562,7 +562,7 @@ impl LocalStreamManagerCore {
                         // unwrap the actor result to panic on error
                         actor.run().await.expect("actor failed");
                     },
-                    format!("actor {actor_id}"),
+                    format!("Actor {actor_id}"),
                     trace_sender,
                     1000,
                 ))),
