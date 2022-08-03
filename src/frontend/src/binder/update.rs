@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::ParallelUnitId;
 use risingwave_sqlparser::ast::{Assignment, Expr, TableFactor, TableWithJoins};
 
 use super::{Binder, BoundTableSource, Relation};
@@ -28,6 +28,9 @@ use crate::expr::{Expr as _, ExprImpl};
 pub struct BoundUpdate {
     /// Used for injecting new chunks to the source.
     pub table_source: BoundTableSource,
+
+    /// Used for scheduling.
+    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     /// Used for scanning the records to update with the `selection`.
     pub table: Relation,
@@ -63,7 +66,11 @@ impl Binder {
         }
 
         let table = self.bind_vec_table_with_joins(vec![table])?.unwrap();
-        assert_matches!(table, Relation::BaseTable(_));
+        let vnode_mapping = if let Relation::BaseTable(base_table) = &table {
+            base_table.table_catalog.vnode_mapping.clone()
+        } else {
+            unreachable!()
+        };
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
@@ -123,6 +130,7 @@ impl Binder {
 
         Ok(BoundUpdate {
             table_source,
+            vnode_mapping,
             table,
             selection,
             exprs,

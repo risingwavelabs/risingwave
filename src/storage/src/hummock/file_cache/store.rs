@@ -222,9 +222,9 @@ where
     type K = K;
     type T = SlotId;
 
-    fn on_evict(&self, _key: &Self::K, slot: &Self::T) {
+    fn on_release(&self, _key: Self::K, slot: Self::T) {
         // TODO: Throw warning log instead?
-        self.free(*slot).unwrap();
+        self.free(slot).unwrap();
     }
 }
 

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::storage_table::StorageTable;
+use risingwave_storage::table::storage_table::RowBasedStorageTable;
 
 use super::*;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
@@ -48,7 +48,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .iter()
             .map(ColumnDesc::from)
             .collect();
-        let storage_table = StorageTable::from_table_catalog(
+        let storage_table = RowBasedStorageTable::from_table_catalog(
             lookup.arrangement_table.as_ref().unwrap(),
             store,
             params.vnode_bitmap.map(Arc::new),
