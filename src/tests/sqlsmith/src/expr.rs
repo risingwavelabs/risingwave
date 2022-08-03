@@ -92,7 +92,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         match self.rng.gen_range(0..=range) {
             0..=80 => self.gen_func(typ, can_agg, inside_agg),
-            81..=90 => self.gen_cast(typ),
+            81..=90 => self.gen_cast(typ, can_agg, inside_agg),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
@@ -129,8 +129,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generate casts from a cast map.
-    fn gen_cast(&mut self, ret: DataTypeName) -> Expr {
-        todo!()
+    fn gen_cast(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
+        let casts = match CAST_TABLE.get(&ret) {
+            None => return self.gen_simple_scalar(ret),
+            Some(casts) => casts,
+        };
+        let cast = casts.choose(&mut self.rng).unwrap();
+        self.gen_expr(cast.to_type, can_agg, inside_agg)
     }
 
     fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
