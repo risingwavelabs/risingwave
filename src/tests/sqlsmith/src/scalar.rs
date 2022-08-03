@@ -42,14 +42,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     .map(|_| self.rng.sample(Alphanumeric) as char)
                     .collect(),
             )),
-            T::Decimal => Expr::Value(Value::Number(self.gen_float(f64::MIN, f64::MAX), false)),
+            T::Decimal => Expr::Value(Value::Number(self.gen_float(), false)),
             T::Float64 => Expr::TypedString {
                 data_type: DataType::Float(None),
-                value: self.gen_float(f64::MIN, f64::MAX),
+                value: self.gen_float(),
             },
             T::Float32 => Expr::TypedString {
                 data_type: DataType::Real,
-                value: self.gen_float(f32::MIN as f64, f32::MAX as f64),
+                value: self.gen_float(),
             },
             T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
             T::Date => Expr::TypedString {
@@ -72,27 +72,25 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_int(&mut self, _min: isize, max: isize) -> String {
+    fn gen_int(&mut self, min: isize, max: isize) -> String {
         let n = match self.rng.gen_range(0..=4) {
             0 => 0,
             1 => 1,
             2 => max,
-            // Tracking issue: <https://github.com/singularity-data/risingwave/issues/4344>
-            // 3 => min, // tests for negative too
-            3..=4 => self.rng.gen_range(1..max),
+            3 => min, // tests for negative too
+            4 => self.rng.gen_range(1..max),
             _ => unreachable!(),
         };
         n.to_string()
     }
 
-    fn gen_float(&mut self, _min: f64, max: f64) -> String {
+    fn gen_float(&mut self) -> String {
         let n = match self.rng.gen_range(0..=4) {
             0 => 0.0,
             1 => 1.0,
-            2 => max,
-            // Tracking issue: <https://github.com/singularity-data/risingwave/issues/4344>
-            // 3 => min, // tests for negative too
-            3..=4 => self.rng.gen_range(1.0..max),
+            2 => i64::MIN.to_f64().unwrap(),
+            3 => i64::MAX.to_f64().unwrap(),
+            4 => self.rng.gen_range(1.0..i64::MAX.to_f64().unwrap()),
             _ => unreachable!(),
         };
         n.to_string()
