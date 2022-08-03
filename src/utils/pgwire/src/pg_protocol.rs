@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::io::{self, Error as IoError, ErrorKind};
 use std::str::Utf8Error;
 use std::sync::Arc;
@@ -103,7 +104,10 @@ where
         match self.do_process_inner().await {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!("Error: {}", e);
+                let mut error_msg = String::new();
+                // Execution error should not break current connection.
+                // For unexpected eof, just break and not print to log.
+                write!(&mut error_msg, "Error: {}", e).unwrap();
                 match e {
                     PsqlError::SslError(io_err) | PsqlError::IoError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
@@ -114,6 +118,7 @@ where
                     PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
                         self.stream
                             .write_for_error(&BeMessage::ErrorResponse(Box::new(e)));
+                        tracing::error!("{}", error_msg);
                         return true;
                     }
 
@@ -145,6 +150,7 @@ where
                     PsqlError::CancelMsg(_) => todo!(),
                 }
                 self.stream.flush_for_error().await;
+                tracing::error!("{}", error_msg);
                 false
             }
         }
