@@ -37,12 +37,12 @@ impl RegexpContext {
 }
 
 #[derive(Debug)]
-pub struct RegexpMatchExpr {
+pub struct RegexpMatchExpression {
     pub child: Box<dyn Expression>,
     pub ctx: RegexpContext,
 }
 
-impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpr {
+impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
@@ -77,7 +77,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpr {
     }
 }
 
-impl RegexpMatchExpr {
+impl RegexpMatchExpression {
     /// Match one row and return the result.
     // TODO: The optimization can be allocated.
     fn match_one(&self, text: Option<&str>) -> Option<ListValue> {
@@ -111,7 +111,7 @@ impl RegexpMatchExpr {
     }
 }
 
-impl Expression for RegexpMatchExpr {
+impl Expression for RegexpMatchExpression {
     fn return_type(&self) -> DataType {
         DataType::List {
             datatype: Box::new(DataType::Varchar),

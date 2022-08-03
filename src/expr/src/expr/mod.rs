@@ -52,7 +52,7 @@ use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
 use crate::expr::expr_in::InExpression;
 use crate::expr::expr_nested_construct::NestedConstructExpression;
-use crate::expr::expr_regexp::RegexpMatchExpr;
+use crate::expr::expr_regexp::RegexpMatchExpression;
 use crate::expr::expr_vnode::VnodeExpression;
 use crate::ExprError;
 
@@ -130,7 +130,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Field => FieldExpression::try_from(prost).map(Expression::boxed),
         Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        RegexpMatch => RegexpMatchExpr::try_from(prost).map(Expression::boxed),
+        RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
