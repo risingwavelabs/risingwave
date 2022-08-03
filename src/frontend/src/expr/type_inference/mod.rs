@@ -15,6 +15,7 @@
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::DataType as AstDataType;
 
 mod agg;
 mod cast;
@@ -93,6 +94,29 @@ impl From<&DataType> for DataTypeName {
 impl From<DataType> for DataTypeName {
     fn from(ty: DataType) -> Self {
         (&ty).into()
+    }
+}
+
+impl From<DataTypeName> for AstDataType {
+    fn from(type_name: DataTypeName) -> Self {
+        match type_name {
+            DataTypeName::Boolean => AstDataType::Boolean,
+            DataTypeName::Int16 => AstDataType::SmallInt(None),
+            DataTypeName::Int32 => AstDataType::Int(None),
+            DataTypeName::Int64 => AstDataType::BigInt(None),
+            DataTypeName::Decimal => AstDataType::Decimal(None, None),
+            DataTypeName::Float32 => AstDataType::Real,
+            DataTypeName::Float64 => AstDataType::Double,
+            DataTypeName::Varchar => AstDataType::Varchar,
+            DataTypeName::Date => AstDataType::Date,
+            DataTypeName::Timestamp => AstDataType::Timestamp(false),
+            DataTypeName::Timestampz => AstDataType::Timestamp(true),
+            DataTypeName::Time => AstDataType::Time(false),
+            DataTypeName::Interval => AstDataType::Interval,
+            DataTypeName::Struct | DataTypeName::List => {
+                panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
+            }
+        }
     }
 }
 

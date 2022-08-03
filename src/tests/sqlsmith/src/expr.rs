@@ -19,7 +19,8 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastSig, DataTypeName, ExprType, FuncSign,
+    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, DataTypeName, ExprType,
+    FuncSign,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -60,7 +61,9 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
 
 fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
     let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
-    cast_sigs().for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
+    cast_sigs()
+        .filter(|cast| cast.context == CastContext::Explicit) // TODO: generate implicit casts.
+        .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
     casts
 }
 
@@ -134,8 +137,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             None => return self.gen_simple_scalar(ret),
             Some(casts) => casts,
         };
-        let cast = casts.choose(&mut self.rng).unwrap();
-        self.gen_expr(cast.to_type, can_agg, inside_agg)
+        let cast_sig = casts.choose(&mut self.rng).unwrap();
+        let from_expr = self.gen_expr(cast_sig.from_type, can_agg, inside_agg);
+        Expr::Cast {
+            expr: from_expr.into(),
+            data_type: cast_sig.to_type.into(),
+        }
     }
 
     fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
