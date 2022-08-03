@@ -280,6 +280,7 @@ impl CompactStatus {
 
 #[derive(Clone, Debug)]
 pub struct ManualCompactionOption {
+    pub sst_ids: Vec<u64>,
     pub key_range: KeyRange,
     pub internal_table_id: HashSet<u32>,
     pub level: usize,
@@ -288,6 +289,7 @@ pub struct ManualCompactionOption {
 impl Default for ManualCompactionOption {
     fn default() -> Self {
         Self {
+            sst_ids: vec![],
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],

@@ -67,7 +67,7 @@
     insert into t select v1 from t;
   batch_plan: |
     BatchInsert { table: t }
-      BatchScan { table: t, columns: [v1] }
+      BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     /* insert into select with cast */
     create table t (v1 time, v2 int, v3 real);
@@ -75,7 +75,7 @@
   batch_plan: |
     BatchInsert { table: t }
       BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
-        BatchScan { table: t, columns: [] }
+        BatchScan { table: t, columns: [], distribution: SomeShard }
 - sql: |
     /* insert into select with cast error */
     create table t (v1 timestamp, v2 real);

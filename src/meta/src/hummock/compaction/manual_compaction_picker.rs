@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -138,8 +139,8 @@ impl ManualCompactionPicker {
     }
 }
 
-impl CompactionPicker for ManualCompactionPicker {
-    fn pick_compaction(
+impl ManualCompactionPicker {
+    fn pick_tables(
         &self,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
@@ -150,16 +151,10 @@ impl CompactionPicker for ManualCompactionPicker {
 
         let level = self.option.level;
         let target_level = self.target_level;
-
-        let mut select_input_ssts = vec![];
-        let mut tmp_sst_info = SstableInfo::default();
-        let mut range_overlap_info = RangeOverlapInfo::default();
-        tmp_sst_info.key_range = Some(self.option.key_range.clone());
-        range_overlap_info.update(&tmp_sst_info);
-
         let level_table_infos: Vec<SstableInfo> = levels.levels[level - 1]
             .table_infos
             .iter()
+            .filter(|sst_info| hint_sst_ids.is_empty() || hint_sst_ids.contains(&sst_info.id))
             .filter(|sst_info| range_overlap_info.check_overlap(sst_info))
             .filter(|sst_info| {
                 if self.option.internal_table_id.is_empty() {
@@ -183,7 +178,7 @@ impl CompactionPicker for ManualCompactionPicker {
             .collect();
 
         for table in &level_table_infos {
-            if level_handlers[level].is_pending_compact(&table.id) {
+            if level_handlers[select_level].is_pending_compact(&table.id) {
                 continue;
             }
 
@@ -204,8 +199,8 @@ impl CompactionPicker for ManualCompactionPicker {
             select_input_ssts.push(table.clone());
         }
 
-        if select_input_ssts.is_empty() {
-            return None;
+        if select_level == target_level {
+            return (select_input_ssts, vec![]);
         }
 
         let target_input_ssts = if target_level == level {
@@ -237,8 +232,8 @@ impl CompactionPicker for ManualCompactionPicker {
             );
         }
 
-        Some(CompactionInput {
-            input_levels: vec![
+        let input_levels = if level != target_level {
+            vec![
                 InputLevel {
                     level_idx: level as u32,
                     level_type: levels.levels[level - 1].level_type,
@@ -249,7 +244,17 @@ impl CompactionPicker for ManualCompactionPicker {
                     level_type: levels.levels[target_level - 1].level_type,
                     table_infos: target_input_ssts,
                 },
-            ],
+            ]
+        } else {
+            vec![InputLevel {
+                level_idx: level as u32,
+                level_type: levels[level].level_type,
+                table_infos: select_input_ssts,
+            }]
+        };
+
+        Some(CompactionInput {
+            input_levels,
             target_level,
             target_sub_level_id: 0,
         })
@@ -408,6 +413,7 @@ pub mod tests {
 
             // test key range filter first
             let option = ManualCompactionOption {
+                sst_ids: vec![],
                 level: 1,
                 key_range: KeyRange {
                     left: iterator_test_key_of_epoch(1, 101, 1),
