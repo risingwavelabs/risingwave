@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 
 use risingwave_common::array::DataChunk;
@@ -24,9 +25,14 @@ use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::BOUNDED_BUFFER_SIZE;
-
 pub struct FifoSender {
     sender: mpsc::Sender<Option<DataChunkInChannel>>,
+}
+
+impl Debug for FifoSender {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FifoSender").finish()
+    }
 }
 
 pub struct FifoReceiver {
@@ -37,7 +43,7 @@ impl ChanSender for FifoSender {
     type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
-        async move {
+        async {
             self.sender
                 .send(chunk.map(DataChunkInChannel::new))
                 .await
