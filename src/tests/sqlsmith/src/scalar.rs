@@ -16,8 +16,8 @@ use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
-use rand::Rng;
 use rand::prelude::SliceRandom;
+use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{DataType, Expr, Value};
 
@@ -28,7 +28,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {
         use DataTypeName as T;
         match typ {
-            T::Int64 => Expr::Value(Value::Number(self.gen_int(i64::MIN as isize, i64::MAX as isize), false)),
+            T::Int64 => Expr::Value(Value::Number(
+                self.gen_int(i64::MIN as isize, i64::MAX as isize),
+                false,
+            )),
             T::Int32 => Expr::TypedString {
                 data_type: DataType::Int(None),
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
@@ -72,13 +75,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_int(&mut self, min: isize, max: isize) -> String {
+    fn gen_int(&mut self, _min: isize, max: isize) -> String {
         let n = match self.rng.gen_range(0..=4) {
             0 => 0,
             1 => 1,
             2 => max,
-            3 => min + 1, // Tracked by https://github.com/singularity-data/risingwave/issues/4344.
-            4 => self.rng.gen_range(1..max),
+            // TODO: Negative numbers have a few issues.
+            // - Parsing, tracked by: <https://github.com/singularity-data/risingwave/issues/4344>.
+            // - Neg op with Interval, tracked by: <https://github.com/singularity-data/risingwave/issues/112>
+            3..=4 => self.rng.gen_range(1..max),
             _ => unreachable!(),
         };
         n.to_string()
@@ -88,13 +93,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let n = match self.rng.gen_range(0..=4) {
             0 => 0.0,
             1 => 1.0,
-            2 => (i64::MIN + 1) as f64, // Tracked by https://github.com/singularity-data/risingwave/issues/4344.
-            3 => i64::MAX as f64,
-            4 => self.rng.gen_range(1.0..i64::MAX as f64),
+            2 => i32::MAX as f64,
+            // TODO: Negative numbers have a few issues.
+            // - Parsing, tracked by: <https://github.com/singularity-data/risingwave/issues/4344>.
+            // - Neg op with Interval, tracked by: <https://github.com/singularity-data/risingwave/issues/112>
+            // 2 => i32::MIN as f64,
+            3..=4 => self.rng.gen_range(1.0..i32::MAX as f64),
             _ => unreachable!(),
         };
         n.to_string()
-     }
+    }
 
     fn gen_temporal_scalar(&mut self, typ: DataTypeName) -> String {
         use DataTypeName as T;
