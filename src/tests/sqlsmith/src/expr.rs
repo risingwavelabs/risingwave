@@ -79,7 +79,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let range = 90;
 
         match self.rng.gen_range(0..=range) {
-            0..=90 => self.gen_func(typ, can_agg, inside_agg),
+            0..=80 => self.gen_func(typ, can_agg, inside_agg),
+            81..=90 => self.gen_exists(typ),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
@@ -135,6 +136,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
+    }
+
+    fn gen_exists(&mut self, ret: DataTypeName) -> Expr {
+        // TODO: Streaming nested loop join is not implemented yet. 
+        // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
+        if self.is_mview || ret != DataTypeName::Boolean{
+            return self.gen_simple_scalar(ret);
+        };
+        let (subquery, _ ) = self.gen_local_query();
+        Expr::Exists(Box::new(subquery))
     }
 
     fn gen_agg(&mut self, ret: DataTypeName) -> Expr {

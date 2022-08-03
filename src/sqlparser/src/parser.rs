@@ -157,6 +157,7 @@ impl Parser {
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
+        //println!("{:#?}",stmts);
         Ok(stmts)
     }
 
