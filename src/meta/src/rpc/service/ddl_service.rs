@@ -248,8 +248,7 @@ where
         // 2. drop sink in stream manager
         self.stream_manager
             .drop_materialized_view(&TableId::new(sink_id))
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
