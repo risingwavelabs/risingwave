@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache};
+use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_hummock_sdk::HummockSstableId;
 
 use super::{Block, HummockResult};
@@ -135,6 +136,7 @@ impl BlockCache {
                     Ok((block, len))
                 }
             })
+            .stack_trace("block_cache_lookup")
             .await
             .map_err(|e| {
                 HummockError::other(format!(

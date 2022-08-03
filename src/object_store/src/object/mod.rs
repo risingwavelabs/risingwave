@@ -20,6 +20,7 @@ pub mod mem;
 pub use mem::*;
 
 pub mod s3;
+use risingwave_common::util::debug::trace_context::StackTrace;
 pub use s3::*;
 
 mod disk;
@@ -248,7 +249,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_size
             .with_label_values(&["upload"])
             .observe(obj.len() as f64);
-        self.inner.upload(path, obj).await?;
+        self.inner
+            .upload(path, obj)
+            .stack_trace("object_store_upload")
+            .await?;
         Ok(())
     }
 
@@ -258,7 +262,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["read"])
             .start_timer();
-        let ret = self.inner.read(path, block_loc).await?;
+        let ret = self
+            .inner
+            .read(path, block_loc)
+            .stack_trace("object_store_read")
+            .await?;
         self.object_store_metrics
             .read_bytes
             .inc_by(ret.len() as u64);
@@ -279,7 +287,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["readv"])
             .start_timer();
-        let ret = self.inner.readv(path, block_locs).await?;
+        let ret = self
+            .inner
+            .readv(path, block_locs)
+            .stack_trace("object_store_readv")
+            .await?;
         self.object_store_metrics
             .read_bytes
             .inc_by(ret.iter().map(|block| block.len()).sum::<usize>() as u64);
@@ -292,7 +304,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["metadata"])
             .start_timer();
-        self.inner.metadata(path).await
+        self.inner
+            .metadata(path)
+            .stack_trace("object_store_metadata")
+            .await
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -301,7 +316,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["delete"])
             .start_timer();
-        self.inner.delete(path).await
+        self.inner
+            .delete(path)
+            .stack_trace("object_store_delete")
+            .await
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
@@ -310,7 +328,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["list"])
             .start_timer();
-        self.inner.list(prefix).await
+        self.inner
+            .list(prefix)
+            .stack_trace("object_store_list")
+            .await
     }
 }
 
