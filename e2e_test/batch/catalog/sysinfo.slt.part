@@ -1,0 +1,5 @@
+query T
+SELECT current_schema();
+----
+public
+
