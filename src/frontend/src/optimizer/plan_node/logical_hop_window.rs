@@ -96,24 +96,24 @@ impl LogicalHopWindow {
                         original_schema.len(),
                     ))
                     .rewrite_functional_dependency_set(input.functional_dependency().clone());
-            let mut current_fd = FunctionalDependencySet::new();
+            let mut current_fd = FunctionalDependencySet::new(actual_schema.len());
             for fd in input_fd.as_dependencies() {
                 if let Some(start_idx) = window_start_index {
                     let mut fd = fd.clone();
-                    fd.from.set(start_idx, true);
+                    fd.set_from(start_idx, true);
                     current_fd.add_functional_dependency(fd);
                 }
                 if let Some(end_idx) = window_end_index {
                     let mut fd = fd.clone();
-                    fd.from.set(end_idx, true);
+                    fd.set_from(end_idx, true);
                     current_fd.add_functional_dependency(fd);
                 }
             }
             if let Some(start_idx) = window_start_index {
-                current_fd.add_key(actual_schema.len(), &[start_idx])
+                current_fd.add_key(&[start_idx])
             }
             if let Some(end_idx) = window_end_index {
-                current_fd.add_key(actual_schema.len(), &[end_idx])
+                current_fd.add_key(&[end_idx])
             }
             current_fd
         };
@@ -493,7 +493,7 @@ mod test {
         values
             .base
             .functional_dependency
-            .add_functional_dependency_by_column_indices(&[0, 1], &[2], 3);
+            .add_functional_dependency_by_column_indices(&[0, 1], &[2]);
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),

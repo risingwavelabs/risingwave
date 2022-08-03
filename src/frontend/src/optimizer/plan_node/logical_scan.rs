@@ -88,7 +88,11 @@ impl LogicalScan {
             .unwrap_or_default();
 
         let schema = Schema { fields };
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = if !schema.is_empty() {
+            FunctionalDependencySet::with_key(schema.len(), &pk_indices)
+        } else {
+            FunctionalDependencySet::new(schema.len())
+        };
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
 
         let mut required_col_idx = output_col_idx.clone();

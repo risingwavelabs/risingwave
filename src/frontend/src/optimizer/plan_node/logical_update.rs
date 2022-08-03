@@ -51,7 +51,8 @@ impl LogicalUpdate {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = PlanBase::new_logical(ctx, schema, vec![], FunctionalDependencySet::new());
+        let fd_set = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
             table_source_name,

@@ -43,7 +43,7 @@ impl LogicalInsert {
     pub fn new(input: PlanRef, table_source_name: String, source_id: TableId) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let functional_dependency = FunctionalDependencySet::new();
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self {
             base,

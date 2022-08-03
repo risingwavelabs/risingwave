@@ -340,20 +340,18 @@ impl LogicalJoin {
         };
         let fd_set: FunctionalDependencySet = match join_type {
             JoinType::Inner => {
-                let mut fd_set = FunctionalDependencySet::new();
+                let mut fd_set = FunctionalDependencySet::new(out_col_num);
                 for i in &on.conjunctions {
                     if let Some((col, _)) = i.as_eq_const() {
-                        fd_set.add_constant_column(out_col_num, &[col.index()])
+                        fd_set.add_constant_column(&[col.index()])
                     } else if let Some((left, right)) = i.as_eq_cond() {
                         fd_set.add_functional_dependency_by_column_indices(
                             &[left.index()],
                             &[right.index()],
-                            out_col_num,
                         );
                         fd_set.add_functional_dependency_by_column_indices(
                             &[right.index()],
                             &[left.index()],
-                            out_col_num,
                         );
                     }
                 }
@@ -370,7 +368,7 @@ impl LogicalJoin {
             }
             JoinType::LeftOuter => get_new_right_fd_set(right_fd_set),
             JoinType::RightOuter => get_new_left_fd_set(left_fd_set),
-            JoinType::FullOuter => FunctionalDependencySet::new(),
+            JoinType::FullOuter => FunctionalDependencySet::new(out_col_num),
             JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
             JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
             JoinType::Unspecified => unreachable!(),
@@ -1553,7 +1551,7 @@ mod tests {
             values
                 .base
                 .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1], 2);
+                .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
         let right = {
@@ -1567,7 +1565,7 @@ mod tests {
             values
                 .base
                 .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1, 2], 3);
+                .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
         // l0 = 0 AND l1 = r1

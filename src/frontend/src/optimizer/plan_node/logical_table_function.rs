@@ -40,7 +40,7 @@ impl LogicalTableFunction {
                 table_function.function_type.name(),
             )],
         };
-        let functional_dependency = FunctionalDependencySet::new();
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self {
             base,

@@ -255,7 +255,7 @@ impl LogicalMultiJoin {
                 .unwrap_or_default()
         };
         let functional_dependency = {
-            let mut fd_set = FunctionalDependencySet::new();
+            let mut fd_set = FunctionalDependencySet::new(tot_col_num);
             let mut column_cnt: usize = 0;
             let id_mapping = ColIndexMapping::identity(tot_col_num);
             for i in &inputs {
@@ -271,17 +271,15 @@ impl LogicalMultiJoin {
             }
             for i in &on.conjunctions {
                 if let Some((col, _)) = i.as_eq_const() {
-                    fd_set.add_constant_column(tot_col_num, &[col.index()])
+                    fd_set.add_constant_column(&[col.index()])
                 } else if let Some((left, right)) = i.as_eq_cond() {
                     fd_set.add_functional_dependency_by_column_indices(
                         &[left.index()],
                         &[right.index()],
-                        tot_col_num,
                     );
                     fd_set.add_functional_dependency_by_column_indices(
                         &[right.index()],
                         &[left.index()],
-                        tot_col_num,
                     );
                 }
             }
@@ -552,7 +550,7 @@ mod test {
             values
                 .base
                 .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1], 2);
+                .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
         let right = {
@@ -566,7 +564,7 @@ mod test {
             values
                 .base
                 .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1, 2], 3);
+                .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
         // l0 = 0 AND l1 = r1

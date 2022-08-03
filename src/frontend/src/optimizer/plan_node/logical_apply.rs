@@ -89,7 +89,11 @@ impl LogicalApply {
             join_type,
             &output_indices,
         );
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = if !pk_indices.is_empty() {
+            FunctionalDependencySet::with_key(schema.len(), &pk_indices)
+        } else {
+            FunctionalDependencySet::new(schema.len())
+        };
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,

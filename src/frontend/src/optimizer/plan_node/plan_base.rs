@@ -71,6 +71,7 @@ impl PlanBase {
     ) -> Self {
         // assert!(!pk_indices.is_empty()); TODO: reopen it when ensure the pk for stream op
         let id = ctx.next_plan_node_id();
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
         Self {
             id,
             ctx,
@@ -79,7 +80,7 @@ impl PlanBase {
             order: Order::any(),
             pk_indices,
             append_only,
-            functional_dependency: FunctionalDependencySet::new(),
+            functional_dependency,
         }
     }
 
@@ -90,6 +91,7 @@ impl PlanBase {
         order: Order,
     ) -> Self {
         let id = ctx.next_plan_node_id();
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
         Self {
             id,
             ctx,
@@ -99,7 +101,7 @@ impl PlanBase {
             pk_indices: vec![],
             // Batch plan node won't touch `append_only` field
             append_only: true,
-            functional_dependency: FunctionalDependencySet::new(),
+            functional_dependency,
         }
     }
 }

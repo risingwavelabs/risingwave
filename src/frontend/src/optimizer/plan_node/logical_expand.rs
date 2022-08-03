@@ -54,11 +54,10 @@ impl LogicalExpand {
         let flag_index = schema.len() - 1; // assume that `flag` is the last column
         let functional_dependency = {
             let input_fd = input.functional_dependency().clone().into_dependencies();
-            let mut current_fd = FunctionalDependencySet::new();
+            let mut current_fd = FunctionalDependencySet::new(schema.len());
             for mut fd in input_fd {
-                fd.from.grow(schema.len());
-                fd.to.grow(schema.len());
-                fd.from.set(flag_index, true);
+                fd.grow(schema.len());
+                fd.set_from(flag_index, true);
                 current_fd.add_functional_dependency(fd);
             }
             current_fd
@@ -291,13 +290,13 @@ mod tests {
         values
             .base
             .functional_dependency
-            .add_functional_dependency_by_column_indices(&[0], &[1, 2], 3);
+            .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
 
         let column_subsets = vec![vec![0, 1], vec![2]];
         let expand = LogicalExpand::create(values.into(), column_subsets);
         let fd = expand.functional_dependency().as_dependencies();
         assert_eq!(fd.len(), 1);
-        assert_eq!(fd[0].from.ones().collect_vec(), &[0, 3]);
-        assert_eq!(fd[0].to.ones().collect_vec(), &[1, 2]);
+        assert_eq!(fd[0].from().ones().collect_vec(), &[0, 3]);
+        assert_eq!(fd[0].to().ones().collect_vec(), &[1, 2]);
     }
 }

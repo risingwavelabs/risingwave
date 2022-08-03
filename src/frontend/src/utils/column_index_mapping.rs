@@ -356,14 +356,13 @@ impl ColIndexMapping {
         &self,
         fd: &FunctionalDependency,
     ) -> Option<FunctionalDependency> {
-        assert_eq!(fd.from.len(), self.source_size());
-        assert_eq!(fd.to.len(), self.source_size());
-        if fd.to.is_clear() {
+        if fd.to().is_clear() {
             return None;
         }
-        let new_from = self.rewrite_bitset(&fd.from);
-        let new_to = self.rewrite_bitset(&fd.to);
-        if (!fd.from.is_clear() && new_from.is_clear()) || (!fd.to.is_clear() && new_to.is_clear())
+        let new_from = self.rewrite_bitset(fd.from());
+        let new_to = self.rewrite_bitset(fd.to());
+        if (!fd.from().is_clear() && new_from.is_clear())
+            || (!fd.to().is_clear() && new_to.is_clear())
         {
             None
         } else {
@@ -375,7 +374,7 @@ impl ColIndexMapping {
         &self,
         fd_set: FunctionalDependencySet,
     ) -> FunctionalDependencySet {
-        let mut new_fd_set = FunctionalDependencySet::new();
+        let mut new_fd_set = FunctionalDependencySet::new(self.target_size());
         for i in fd_set.into_dependencies() {
             if let Some(fd) = self.rewrite_functional_dependency(&i) {
                 new_fd_set.add_functional_dependency(fd);
@@ -468,22 +467,28 @@ mod tests {
     #[test]
     fn test_rewrite_fd_set() {
         let new_fd = |from, to| FunctionalDependency::with_indices(4, from, to);
-        let fd_set = FunctionalDependencySet::with_dependencies(vec![
-            new_fd(&[0, 1], &[2, 3]),
-            new_fd(&[2], &[0, 1]),
-            new_fd(&[1], &[0]),
-            // empty mappings will be removed
-            new_fd(&[], &[]),
-            new_fd(&[1], &[]),
-            // constant column mapping will be kept
-            new_fd(&[], &[0]),
-        ]);
+        let fd_set = FunctionalDependencySet::with_dependencies(
+            4,
+            vec![
+                new_fd(&[0, 1], &[2, 3]),
+                new_fd(&[2], &[0, 1]),
+                new_fd(&[1], &[0]),
+                // empty mappings will be removed
+                new_fd(&[], &[]),
+                new_fd(&[1], &[]),
+                // constant column mapping will be kept
+                new_fd(&[], &[0]),
+            ],
+        );
         let mapping = ColIndexMapping::with_remaining_columns(&[1, 0], 4);
         let result = mapping.rewrite_functional_dependency_set(fd_set);
-        let expected = FunctionalDependencySet::with_dependencies(vec![
-            FunctionalDependency::with_indices(2, &[0], &[1]),
-            FunctionalDependency::with_indices(2, &[], &[1]),
-        ]);
+        let expected = FunctionalDependencySet::with_dependencies(
+            2,
+            vec![
+                FunctionalDependency::with_indices(2, &[0], &[1]),
+                FunctionalDependency::with_indices(2, &[], &[1]),
+            ],
+        );
         assert_eq!(result, expected);
     }
 }

@@ -22,8 +22,8 @@ use itertools::Itertools;
 /// For columns ABCD, the FD AC --> B is represented as {0, 2} --> {1} using [`FixedBitset`].
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependency {
-    pub from: FixedBitSet,
-    pub to: FixedBitSet,
+    from: FixedBitSet,
+    to: FixedBitSet,
 }
 
 impl fmt::Display for FunctionalDependency {
@@ -44,6 +44,29 @@ impl FunctionalDependency {
             "from and to should have the same length"
         );
         FunctionalDependency { from, to }
+    }
+
+    pub fn from(&self) -> &FixedBitSet {
+        &self.from
+    }
+
+    pub fn to(&self) -> &FixedBitSet {
+        &self.to
+    }
+
+    /// Grow the capacity of [`FunctionalDepdency`] to **columns**, all new columns initialized to
+    /// zero.
+    pub fn grow(&mut self, columns: usize) {
+        self.from.grow(columns);
+        self.to.grow(columns);
+    }
+
+    pub fn set_from(&mut self, column_index: usize, enabled: bool) {
+        self.from.set(column_index, enabled);
+    }
+
+    pub fn set_to(&mut self, column_index: usize, enabled: bool) {
+        self.to.set(column_index, enabled);
     }
 
     /// Create a [`FunctionalDependency`] with column indices. The order of the indices doesn't
@@ -101,6 +124,8 @@ impl FunctionalDependency {
 /// It is used in optimizer to track the dependencies between columns.
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependencySet {
+    /// the number of columns
+    column_count: usize,
     /// `strict` contains all strict functional dependencies.
     ///
     /// The strict functional dependency use the **NULL=** semantic. It means that all NULLs are
@@ -130,8 +155,11 @@ impl fmt::Display for FunctionalDependencySet {
 
 impl FunctionalDependencySet {
     /// Create an empty [`FunctionalDependencySet`]
-    pub fn new() -> Self {
-        Self { strict: Vec::new() }
+    pub fn new(column_count: usize) -> Self {
+        Self {
+            strict: Vec::new(),
+            column_count,
+        }
     }
 
     /// Create a [`FunctionalDependencySet`] with the indices of a key.
@@ -147,21 +175,28 @@ impl FunctionalDependencySet {
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = &fd_inner[0];
+    /// let (from, to) = fd_inner[0].clone().into_parts();
     /// // 1 --> 0, 2, 3
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
     pub fn with_key(column_cnt: usize, key_indices: &[usize]) -> Self {
-        let mut tmp = Self::new();
-        tmp.add_key(column_cnt, key_indices);
+        let mut tmp = Self::new(column_cnt);
+        tmp.add_key(key_indices);
         tmp
     }
 
     /// Create a [`FunctionalDependencySet`] with a dependency [`Vec`]
-    pub fn with_dependencies(strict_dependencies: Vec<FunctionalDependency>) -> Self {
+    pub fn with_dependencies(
+        column_count: usize,
+        strict_dependencies: Vec<FunctionalDependency>,
+    ) -> Self {
+        for i in &strict_dependencies {
+            assert_eq!(column_count, i.from().len())
+        }
         Self {
             strict: strict_dependencies,
+            column_count,
         }
     }
 
@@ -180,6 +215,7 @@ impl FunctionalDependencySet {
     /// Add a functional dependency to a [`FunctionalDependencySet`].
     pub fn add_functional_dependency(&mut self, fd: FunctionalDependency) {
         let FunctionalDependency { from, to } = fd;
+        assert_eq!(self.column_count, from.len());
         if !to.is_clear() {
             match self.strict.iter().position(|elem| elem.from == from) {
                 Some(idx) => self.strict[idx].to.union_with(&to),
@@ -195,18 +231,21 @@ impl FunctionalDependencySet {
     /// ```rust
     /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
-    /// let mut fd = FunctionalDependencySet::new();
-    /// fd.add_key(4, &[1]);
+    /// let mut fd = FunctionalDependencySet::new(4);
+    /// fd.add_key(&[1]);
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = &fd_inner[0];
+    /// let (from, to) = fd_inner[0].clone().into_parts();
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
-    pub fn add_key(&mut self, column_cnt: usize, key_indices: &[usize]) {
-        self.add_functional_dependency(FunctionalDependency::with_key(column_cnt, key_indices));
+    pub fn add_key(&mut self, key_indices: &[usize]) {
+        self.add_functional_dependency(FunctionalDependency::with_key(
+            self.column_count,
+            key_indices,
+        ));
     }
 
     /// Add constant columns to a  [`FunctionalDependencySet`].
@@ -215,19 +254,19 @@ impl FunctionalDependencySet {
     /// ```rust
     /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
-    /// let mut fd = FunctionalDependencySet::new();
-    /// fd.add_constant_column(4, &[1]);
+    /// let mut fd = FunctionalDependencySet::new(4);
+    /// fd.add_constant_column(&[1]);
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = &fd_inner[0];
+    /// let (from, to) = fd_inner[0].clone().into_parts();
     /// assert!(from.ones().collect_vec().is_empty());
     /// assert_eq!(to.ones().collect_vec(), &[1]);
     /// ```
-    pub fn add_constant_column(&mut self, column_cnt: usize, constant_columns: &[usize]) {
+    pub fn add_constant_column(&mut self, constant_columns: &[usize]) {
         self.add_functional_dependency(FunctionalDependency::with_constant(
-            column_cnt,
+            self.column_count,
             constant_columns,
         ));
     }
@@ -239,23 +278,22 @@ impl FunctionalDependencySet {
     /// ```rust
     /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
-    /// let mut fd = FunctionalDependencySet::new();
-    /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0], 4); // (1, 2) --> (0), 4 columns
+    /// let mut fd = FunctionalDependencySet::new(4);
+    /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0]); // (1, 2) --> (0), 4 columns
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = &fd_inner[0];
+    /// let (from, to) = fd_inner[0].clone().into_parts();
     /// assert_eq!(from.ones().collect_vec(), &[1, 2]);
     /// assert_eq!(to.ones().collect_vec(), &[0]);
     /// ```
-    pub fn add_functional_dependency_by_column_indices(
-        &mut self,
-        from: &[usize],
-        to: &[usize],
-        column_cnt: usize,
-    ) {
-        self.add_functional_dependency(FunctionalDependency::with_indices(column_cnt, from, to))
+    pub fn add_functional_dependency_by_column_indices(&mut self, from: &[usize], to: &[usize]) {
+        self.add_functional_dependency(FunctionalDependency::with_indices(
+            self.column_count,
+            from,
+            to,
+        ))
     }
 
     fn get_closure(&self, columns: FixedBitSet) -> FixedBitSet {
@@ -283,10 +321,10 @@ impl FunctionalDependencySet {
     /// ```rust
     /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use fixedbitset::FixedBitSet;
-    /// let mut fd = FunctionalDependencySet::new();
-    /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0], 5); // (1, 2) --> (0)
-    /// fd.add_functional_dependency_by_column_indices(&[0, 1], &[3], 5); // (0, 1) --> (3)
-    /// fd.add_functional_dependency_by_column_indices(&[3], &[4], 5); // (3) --> (4)
+    /// let mut fd = FunctionalDependencySet::new(5);
+    /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0]); // (1, 2) --> (0)
+    /// fd.add_functional_dependency_by_column_indices(&[0, 1], &[3]); // (0, 1) --> (3)
+    /// fd.add_functional_dependency_by_column_indices(&[3], &[4]); // (3) --> (4)
     /// let from = FixedBitSet::from_iter([1usize, 2usize].into_iter());
     /// let to = FixedBitSet::from_iter([4usize].into_iter());
     /// assert!(fd.is_determined_by(from, to)); // (1, 2) --> (4) holds
@@ -342,17 +380,17 @@ mod tests {
 
     #[test]
     fn test_minimize_key() {
-        let mut fd_set = FunctionalDependencySet::new();
+        let mut fd_set = FunctionalDependencySet::new(5);
         // [0, 2, 3, 4] is a key
-        fd_set.add_key(5, &[0, 2, 3, 4]);
+        fd_set.add_key(&[0, 2, 3, 4]);
         // 0 is constant
-        fd_set.add_constant_column(5, &[0]);
+        fd_set.add_constant_column(&[0]);
         // 1, 2 --> 3
-        fd_set.add_functional_dependency_by_column_indices(&[1, 2], &[3], 5);
+        fd_set.add_functional_dependency_by_column_indices(&[1, 2], &[3]);
         // 0, 2 --> 3
-        fd_set.add_functional_dependency_by_column_indices(&[0, 2], &[3], 5);
+        fd_set.add_functional_dependency_by_column_indices(&[0, 2], &[3]);
         // 3, 4 --> 2
-        fd_set.add_functional_dependency_by_column_indices(&[3, 4], &[2], 5);
+        fd_set.add_functional_dependency_by_column_indices(&[3, 4], &[2]);
         // therefore, column 0 and column 2 can be removed from key
         let key = fd_set.minimize_key(&[0, 2, 3, 4], 5);
         assert_eq!(key, &[3, 4]);

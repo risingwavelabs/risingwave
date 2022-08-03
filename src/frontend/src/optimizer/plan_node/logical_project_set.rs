@@ -224,10 +224,10 @@ impl LogicalProjectSet {
         select_list: &[ExprImpl],
     ) -> FunctionalDependencySet {
         let i2o = Self::i2o_col_mapping_inner(input_len, select_list);
-        let mut fd_set = FunctionalDependencySet::new();
+        let mut fd_set = FunctionalDependencySet::new(select_list.len() + 1);
         for fd in input_fd_set.as_dependencies() {
             if let Some(mut fd) = i2o.rewrite_functional_dependency(fd) {
-                fd.from.set(0, true);
+                fd.set_from(0, true);
                 fd_set.add_functional_dependency(fd);
             }
         }
@@ -396,7 +396,7 @@ mod test {
         values
             .base
             .functional_dependency
-            .add_functional_dependency_by_column_indices(&[1], &[2], 3);
+            .add_functional_dependency_by_column_indices(&[1], &[2]);
         let project_set = LogicalProjectSet::new(
             values.into(),
             vec![

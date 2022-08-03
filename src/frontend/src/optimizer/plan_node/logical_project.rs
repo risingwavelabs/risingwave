@@ -208,7 +208,7 @@ impl LogicalProject {
         exprs: &[ExprImpl],
     ) -> FunctionalDependencySet {
         let i2o = Self::i2o_col_mapping_inner(input_len, exprs);
-        let mut fd_set = FunctionalDependencySet::new();
+        let mut fd_set = FunctionalDependencySet::new(exprs.len());
         for fd in input_fd_set.as_dependencies() {
             if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
                 fd_set.add_functional_dependency(fd);
