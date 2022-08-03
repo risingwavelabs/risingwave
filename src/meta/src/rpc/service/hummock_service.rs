@@ -254,6 +254,7 @@ where
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
             level: request.level as usize,
+            sst_ids: request.sst_ids,
             ..Default::default()
         };
 
