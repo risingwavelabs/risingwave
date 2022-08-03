@@ -28,7 +28,7 @@ use risingwave_common::hash::{
     calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -253,10 +253,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
             #[for_await]
             for chunk in stream {
                 #[for_await]
-                for output_chunk in Self::append_chunk(
-                    &mut output_chunk_builder,
-                    chunk?.reorder_columns(&self.output_indices),
-                ) {
+                for output_chunk in output_chunk_builder
+                    .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
+                {
                     yield output_chunk?
                 }
             }
@@ -1279,23 +1278,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
         if let Some(spilled) = chunk_builder.consume_all()? {
             yield spilled
-        }
-    }
-
-    // Disable clippy's annoying lifetime warning
-    #[allow(clippy::needless_lifetimes)]
-    #[try_stream(ok = DataChunk, error = RwError)]
-    async fn append_chunk(chunk_builder: &mut DataChunkBuilder, chunk: DataChunk) {
-        let (mut remain, mut output) =
-            chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
-        if let Some(output_chunk) = output {
-            yield output_chunk
-        }
-        while let Some(remain_chunk) = remain {
-            (remain, output) = chunk_builder.append_chunk(remain_chunk)?;
-            if let Some(output_chunk) = output {
-                yield output_chunk
-            }
         }
     }
 
