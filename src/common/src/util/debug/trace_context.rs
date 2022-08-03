@@ -1,3 +1,5 @@
+#![allow(clippy::declare_interior_mutable_const)]
+
 use std::borrow::Cow;
 use std::cell::{RefCell, RefMut};
 use std::collections::BTreeMap;
@@ -141,7 +143,7 @@ impl std::fmt::Display for TraceContext {
             let inner = node.inner.borrow();
             f.write_str(inner.value.as_ref())?;
             f.write_char('\n')?;
-            for child in inner.children.iter() {
+            for child in &inner.children {
                 fmt_node(f, child, depth + 1)?;
             }
 

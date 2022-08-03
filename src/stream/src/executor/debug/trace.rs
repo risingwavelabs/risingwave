@@ -64,7 +64,7 @@ pub async fn trace(
     while let Some(message) = DEBUG_CONTEXT
         .scope(debug_context(), input.next())
         .stack_trace(format!(
-            "{}({}:{})",
+            "{} (actor {}, executor {})",
             info.identity,
             actor_id,
             executor_id as u32 // Use the lower 32 bit to match the dashboard.

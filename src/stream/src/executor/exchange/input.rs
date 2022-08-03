@@ -15,13 +15,14 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::Stream;
+use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use madsim::time::Instant;
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc::Receiver;
 
@@ -47,15 +48,21 @@ pub trait Input: MessageStream {
 pub type BoxedInput = Pin<Box<dyn Input>>;
 
 /// `LocalInput` receives data from a local channel.
+#[pin_project]
 pub struct LocalInput {
-    channel: Receiver<Message>,
+    #[pin]
+    inner: LocalInputStreamInner,
 
     actor_id: ActorId,
 }
+type LocalInputStreamInner = impl MessageStream;
 
 impl LocalInput {
     fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
-        Self { channel, actor_id }
+        Self {
+            inner: Self::run(channel, actor_id),
+            actor_id,
+        }
     }
 
     #[cfg(test)]
@@ -63,14 +70,25 @@ impl LocalInput {
         // `actor_id` is currently only used by configuration change, use a dummy value.
         Self::new(channel, 0).boxed_input()
     }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn run(mut channel: Receiver<Message>, actor_id: ActorId) {
+        while let Some(msg) = channel
+            .recv()
+            .stack_trace(format!("LocalInput (actor {actor_id})"))
+            .await
+        {
+            yield msg;
+        }
+    }
 }
 
 impl Stream for LocalInput {
     type Item = MessageStreamItem;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // TODO: shall we pass the error with local exchange?
-        self.channel.poll_recv(cx).map(|m| m.map(Ok))
+        self.project().inner.poll_next(cx)
     }
 }
 
@@ -135,8 +153,12 @@ impl RemoteInput {
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
 
-        #[for_await]
-        for data_res in stream {
+        pin_mut!(stream);
+        while let Some(data_res) = stream
+            .next()
+            .stack_trace(format!("RemoteInput (actor {up_actor_id})"))
+            .await
+        {
             match data_res {
                 Ok(stream_msg) => {
                     let bytes = Message::get_encoded_len(&stream_msg);

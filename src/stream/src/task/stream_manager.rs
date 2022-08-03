@@ -154,7 +154,7 @@ impl LocalStreamManager {
 
     pub async fn print_trace(&self) {
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(3000)).await;
             let core = self.core.lock();
 
             for (k, trace) in core.trace_context_manager.get_all() {
