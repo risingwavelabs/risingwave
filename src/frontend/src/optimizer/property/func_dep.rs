@@ -256,7 +256,7 @@ impl FunctionalDependencySet {
     /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
     /// let mut fd = FunctionalDependencySet::new(4);
-    /// fd.add_constant_column(&[1]);
+    /// fd.add_constant_columns(&[1]);
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
@@ -265,7 +265,7 @@ impl FunctionalDependencySet {
     /// assert!(from.ones().collect_vec().is_empty());
     /// assert_eq!(to.ones().collect_vec(), &[1]);
     /// ```
-    pub fn add_constant_column(&mut self, constant_columns: &[usize]) {
+    pub fn add_constant_columns(&mut self, constant_columns: &[usize]) {
         self.add_functional_dependency(FunctionalDependency::with_constant(
             self.column_count,
             constant_columns,
@@ -297,8 +297,8 @@ impl FunctionalDependencySet {
         ))
     }
 
-    fn get_closure(&self, columns: FixedBitSet) -> FixedBitSet {
-        let mut closure = columns;
+    fn get_closure(&self, columns: &FixedBitSet) -> FixedBitSet {
+        let mut closure = columns.clone();
         let mut no_updates;
         loop {
             no_updates = true;
@@ -330,18 +330,18 @@ impl FunctionalDependencySet {
     /// let to = FixedBitSet::from_iter([4usize].into_iter());
     /// assert!(fd.is_determined_by(from, to)); // (1, 2) --> (4) holds
     /// ```
-    pub fn is_determined_by(&self, determinant: FixedBitSet, dependant: FixedBitSet) -> bool {
-        self.get_closure(determinant).is_superset(&dependant)
+    pub fn is_determined_by(&self, determinant: &FixedBitSet, dependant: &FixedBitSet) -> bool {
+        self.get_closure(&determinant).is_superset(&dependant)
     }
 
     /// Return true if the combination of `columns` can fully determine other columns.
-    pub fn is_key(&self, columns: FixedBitSet) -> bool {
+    pub fn is_key(&self, columns: &FixedBitSet) -> bool {
         let all_columns = {
             let mut tmp = columns.clone();
             tmp.set_range(.., true);
             tmp
         };
-        self.is_determined_by(columns, all_columns)
+        self.is_determined_by(columns, &all_columns)
     }
 
     /// Remove redundant columns from the given set.
@@ -353,9 +353,8 @@ impl FunctionalDependencySet {
     /// so we use a approximate algorithm which use O(cn) time. `c` is the number of columns, and
     /// `n` is the number of functional dependency rules.
     ///
-    /// This algorithm removes columns one by one and check
-    /// whether the remaining columns can form a key or not. If the remaining columns can form a
-    /// key, then this column can be removed.
+    /// This algorithm may not necessarily find the key with the least number of columns.
+    /// But it will ensure that no redundant columns will be preserved.
     pub fn minimize_key(&self, key_indices: &[usize], column_cnt: usize) -> Vec<usize> {
         let mut key_bitset = FixedBitSet::from_iter(key_indices.iter().copied());
         key_bitset.grow(column_cnt);
@@ -363,11 +362,15 @@ impl FunctionalDependencySet {
         res.ones().collect_vec()
     }
 
+    /// This algorithm removes columns one by one and check
+    /// whether the remaining columns can form a key or not. If the remaining columns can form a
+    /// key, then this column can be removed.
     fn minimize_key_inner(&self, key: FixedBitSet) -> FixedBitSet {
+        assert!(self.is_key(&key));
         let mut new_key = key.clone();
         for i in key.ones() {
             new_key.set(i, false);
-            if !self.is_key(new_key.clone()) {
+            if !self.is_key(&new_key) {
                 new_key.set(i, true);
             }
         }
@@ -385,7 +388,7 @@ mod tests {
         // [0, 2, 3, 4] is a key
         fd_set.add_key(&[0, 2, 3, 4]);
         // 0 is constant
-        fd_set.add_constant_column(&[0]);
+        fd_set.add_constant_columns(&[0]);
         // 1, 2 --> 3
         fd_set.add_functional_dependency_by_column_indices(&[1, 2], &[3]);
         // 0, 2 --> 3

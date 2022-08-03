@@ -271,7 +271,7 @@ impl LogicalMultiJoin {
             }
             for i in &on.conjunctions {
                 if let Some((col, _)) = i.as_eq_const() {
-                    fd_set.add_constant_column(&[col.index()])
+                    fd_set.add_constant_columns(&[col.index()])
                 } else if let Some((left, right)) = i.as_eq_cond() {
                     fd_set.add_functional_dependency_by_column_indices(
                         &[left.index()],
