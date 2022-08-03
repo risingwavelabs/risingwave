@@ -126,6 +126,9 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     pk_indices.extend(&base.pk_indices);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    if !base.ctx.inner().with_properties.is_empty() {
+        internal_table_catalog_builder.add_properties(base.ctx.inner().with_properties.clone());
+    }
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -134,6 +137,10 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     pk_indices.iter().for_each(|idx| {
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
+
+    if !base.ctx.inner().with_properties.is_empty() {
+        internal_table_catalog_builder.add_properties(base.ctx.inner().with_properties.clone());
+    }
 
     internal_table_catalog_builder.build(dist_keys, append_only)
 }
