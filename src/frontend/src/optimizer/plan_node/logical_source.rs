@@ -55,7 +55,7 @@ impl LogicalSource {
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         let schema = Schema { fields };
-        let functional_dependency = if !schema.is_empty() {
+        let functional_dependency = if !pk_indices.is_empty() {
             FunctionalDependencySet::with_key(schema.len(), &pk_indices)
         } else {
             FunctionalDependencySet::new(schema.len())
