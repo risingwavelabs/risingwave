@@ -163,8 +163,9 @@ where
             .instrument(span)
             .stack_trace(
                 last_epoch
-                    .clone()
-                    .map_or(Cow::Borrowed("Epoch <initial>"), |e| format!("Epoch {}", e.curr).into()),
+                    .map_or(Cow::Borrowed("Epoch <initial>"), |e| {
+                        format!("Epoch {}", e.curr).into()
+                    }),
             )
             .await
             .transpose()?

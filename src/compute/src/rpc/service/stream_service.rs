@@ -218,6 +218,18 @@ impl StreamService for StreamServiceImpl {
 
         Ok(Response::new(DropSourceResponse { status: None }))
     }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn actor_trace(
+        &self,
+        request: Request<ActorTraceRequest>,
+    ) -> Result<Response<ActorTraceResponse>, Status> {
+        let _req = request.into_inner();
+
+        let traces = self.mgr.get_actor_traces();
+
+        Ok(Response::new(ActorTraceResponse { traces }))
+    }
 }
 
 impl StreamServiceImpl {
