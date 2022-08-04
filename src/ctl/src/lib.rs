@@ -106,7 +106,7 @@ enum MetaCommands {
 
 #[derive(Subcommand)]
 enum StreamCommands {
-    /// get traces of all actors
+    /// get traces of all actors or some specific actor
     Trace {
         #[clap(short, long = "actor-id")]
         actor_id: Option<u32>,

@@ -34,6 +34,8 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
 
     let mut all_traces = BTreeMap::new();
 
+    // FIXME: the compute node may not be accessible from the our network with their listen
+    // addresses.
     for cn in compute_nodes {
         let mut client = clients.get(&cn).await?;
         let traces = client

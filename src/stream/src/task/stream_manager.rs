@@ -152,17 +152,21 @@ impl LocalStreamManager {
         Self::with_core(LocalStreamManagerCore::for_test())
     }
 
-    pub async fn print_trace(&self) {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
-            let mut core = self.core.lock();
+    /// Print the traces of all actors periodically, used for debugging only.
+    pub fn spawn_print_trace(self: Arc<Self>) -> JoinHandle<!> {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
+                let mut core = self.core.lock();
 
-            for (k, trace) in core.trace_context_manager.get_all() {
-                println!(">> {}\n\n{}", k, &*trace);
+                for (k, trace) in core.trace_context_manager.get_all() {
+                    println!(">> Actor {}\n\n{}", k, &*trace);
+                }
             }
-        }
+        })
     }
 
+    /// Get stack trace reports for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
         let mut core = self.core.lock();
         core.trace_context_manager

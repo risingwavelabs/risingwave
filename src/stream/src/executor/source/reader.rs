@@ -61,9 +61,7 @@ impl SourceReaderStream {
                 Ok(chunk) => yield chunk,
                 Err(err) => {
                     error!("hang up stream reader due to polling error: {}", err);
-                    futures::future::pending()
-                        .stack_trace("source_error_pending")
-                        .await
+                    futures::future::pending().stack_trace("source_error").await
                 }
             }
         }

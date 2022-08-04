@@ -104,15 +104,11 @@ impl NexmarkEventGenerator {
             )));
         }
 
-        if !self.use_real_time {
-            if self.min_event_gap_in_ns > 0 {
-                tokio::time::sleep(std::time::Duration::from_nanos(
-                    (self.events_so_far - old_events_so_far) as u64 * self.min_event_gap_in_ns,
-                ))
-                .await;
-            } else {
-                tokio::task::yield_now().await;
-            }
+        if !self.use_real_time && self.min_event_gap_in_ns > 0 {
+            tokio::time::sleep(std::time::Duration::from_nanos(
+                (self.events_so_far - old_events_so_far) as u64 * self.min_event_gap_in_ns,
+            ))
+            .await;
         }
 
         Ok(res)
