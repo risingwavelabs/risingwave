@@ -244,10 +244,13 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 write!(
                     f,
                     "{}",
-                    self.input_schema.fields.get(input.index).unwrap().name
+                    InputRefDisplay {
+                        input_ref: input,
+                        input_schema: &self.input_schema
+                    }
                 )?;
                 if idx != (that.inputs.len() - 1) {
-                    write!(f, ",")?;
+                    write!(f, ", ")?;
                 }
             }
             if !that.order_by_fields.is_empty() {

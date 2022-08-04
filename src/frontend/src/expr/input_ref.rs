@@ -44,7 +44,7 @@ pub fn input_ref_to_column_indices(input_refs: &[InputRef]) -> Vec<usize> {
 
 impl fmt::Display for RawInputRefDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${}", self.0)
+        (self as &dyn fmt::Debug).fmt(f)
     }
 }
 
@@ -62,35 +62,23 @@ pub struct InputRefDisplay<'a> {
 
 impl fmt::Display for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.input_schema
-                .fields
-                .get(self.input_ref.index)
-                .unwrap()
-                .name
-        )
+        (self as &dyn fmt::Debug).fmt(f)
     }
 }
 
 impl fmt::Debug for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.input_schema
-                .fields
-                .get(self.input_ref.index)
-                .unwrap()
-                .name
-        )
-    }
-}
-
-impl fmt::Display for InputRef {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", RawInputRefDisplay(self.index))
+        let field = self.input_schema.fields.get(self.input_ref.index).unwrap();
+        if field.name.is_empty() {
+            write!(
+                f,
+                "{}:{:?}",
+                RawInputRefDisplay(self.input_ref.index),
+                self.input_ref.data_type
+            )
+        } else {
+            write!(f, "{}", field.name)
+        }
     }
 }
 
@@ -106,6 +94,12 @@ impl<'a> fmt::Debug for AliasDisplay<'a> {
 impl<'a> fmt::Display for AliasDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+impl fmt::Display for InputRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", RawInputRefDisplay(self.index))
     }
 }
 
