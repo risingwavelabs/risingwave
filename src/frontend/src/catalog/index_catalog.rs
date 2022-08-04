@@ -15,11 +15,13 @@
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Index as ProstIndex;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use crate::catalog::{DatabaseId, SchemaId, TableId};
 use crate::expr::{Expr, InputRef};
+use crate::optimizer::property::FieldOrder;
 
 /// # `IndexCatalog` Example:
 /// create table t (a int, b int, c int, d int);
@@ -86,6 +88,9 @@ pub struct IndexCatalog {
     pub index_columns: Vec<InputRef>,
 
     pub include_columns: Vec<InputRef>,
+
+    /// mapping the index columns to the order key of the indexed table, used by table lookup
+    pub indexed_table_order_key: Vec<OrderPair>,
 }
 
 impl From<&ProstIndex> for IndexCatalog {
@@ -122,6 +127,12 @@ impl From<&ProstIndex> for IndexCatalog {
                     _ => unreachable!(),
                 })
                 .collect_vec(),
+            indexed_table_order_key: index
+                .indexed_table_order_key
+                .iter()
+                .map(FieldOrder::from_protobuf)
+                .map(|x| x.to_order_pair())
+                .collect_vec(),
         }
     }
 }
@@ -146,6 +157,11 @@ impl IndexCatalog {
                 .iter()
                 .map(InputRef::to_expr_proto)
                 .collect_vec(),
+            indexed_table_order_key: self
+                .indexed_table_order_key
+                .iter()
+                .map(|o| o.to_protobuf())
+                .collect(),
         }
     }
 }

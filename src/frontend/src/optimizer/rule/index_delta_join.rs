@@ -101,11 +101,11 @@ impl Rule for IndexDeltaJoinRule {
                         primary_to_secondary.insert(input_ref.index, i);
                     });
                 primary_table_desc
-                    .pk
+                    .order_key
                     .iter()
-                    .zip_eq(index_table_desc.pk.iter())
-                    .for_each(|(&i, &j)| {
-                        primary_to_secondary.insert(i, j);
+                    .zip_eq(index.indexed_table_order_key.iter())
+                    .for_each(|(i, j)| {
+                        primary_to_secondary.insert(i.column_idx, j.column_idx);
                     });
 
                 if primary_to_secondary.len() == primary_table_desc.columns.len() {
