@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
@@ -78,6 +79,8 @@ pub struct OptimizerContext {
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
     /// Store correlated id
     pub next_correlated_id: AtomicU32,
+    /// Store handle_with_properties for internal table
+    pub with_properties: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +146,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
+            with_properties: HashMap::new(),
         }
     }
 
@@ -158,6 +162,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
+            with_properties: HashMap::new(),
         }
         .into()
     }
@@ -628,10 +633,7 @@ fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<Pg
     let session = context.session_ctx.clone();
 
     let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
+        let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
 

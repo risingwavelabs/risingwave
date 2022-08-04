@@ -75,6 +75,8 @@ pub enum CastContext {
     Explicit,
 }
 
+pub type CastMap = HashMap<(DataTypeName, DataTypeName), CastContext>;
+
 impl From<&CastContext> for String {
     fn from(c: &CastContext) -> Self {
         match c {
@@ -94,7 +96,7 @@ pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastCont
     matches!(CAST_MAP.get(&(source, target)), Some(context) if *context <= allows)
 }
 
-fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
+fn build_cast_map() -> CastMap {
     use DataTypeName as T;
 
     // Implicit cast operations in PG are organized in 3 sequences, with the reverse direction being
@@ -170,9 +172,26 @@ pub fn cast_map_array() -> Vec<(DataTypeName, DataTypeName, CastContext)> {
 }
 
 lazy_static::lazy_static! {
-    static ref CAST_MAP: HashMap<(DataTypeName, DataTypeName), CastContext> = {
+    pub static ref CAST_MAP: CastMap = {
         build_cast_map()
     };
+}
+
+#[derive(Clone)]
+pub struct CastSig {
+    pub from_type: DataTypeName,
+    pub to_type: DataTypeName,
+    pub context: CastContext,
+}
+
+pub fn cast_sigs() -> impl Iterator<Item = CastSig> {
+    CAST_MAP
+        .iter()
+        .map(|((from_type, to_type), context)| CastSig {
+            from_type: *from_type,
+            to_type: *to_type,
+            context: *context,
+        })
 }
 
 #[cfg(test)]

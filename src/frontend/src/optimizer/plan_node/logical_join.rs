@@ -97,15 +97,6 @@ impl fmt::Display for LogicalJoin {
     }
 }
 
-fn has_duplicate_index(indices: &[usize]) -> bool {
-    for i in 1..indices.len() {
-        if indices[i..].contains(&indices[i - 1]) {
-            return true;
-        }
-    }
-    false
-}
-
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let out_column_num =
@@ -120,7 +111,6 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
-        assert!(!has_duplicate_index(&output_indices));
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
         let pk_indices = Self::derive_pk(
