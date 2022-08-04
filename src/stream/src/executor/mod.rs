@@ -26,7 +26,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -39,6 +38,7 @@ use risingwave_pb::stream_plan::{
     UpdateMutation,
 };
 use smallvec::SmallVec;
+use stack_trace::StackTrace;
 use tracing::trace_span;
 
 use crate::task::{ActorId, ENABLE_BARRIER_AGGREGATION};

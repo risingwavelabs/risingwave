@@ -20,8 +20,8 @@ pub mod mem;
 pub use mem::*;
 
 pub mod s3;
-use risingwave_common::util::debug::trace_context::StackTrace;
 pub use s3::*;
+use stack_trace::StackTrace;
 
 mod disk;
 pub mod error;

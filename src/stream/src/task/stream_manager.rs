@@ -24,11 +24,11 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::debug::trace_context::{self, TraceContextManager, TraceReport};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use stack_trace::{TraceContextManager, TraceReport};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -563,7 +563,7 @@ impl LocalStreamManagerCore {
 
             self.handles.insert(
                 actor_id,
-                tokio::spawn(monitor.instrument(trace_context::monitored(
+                tokio::spawn(monitor.instrument(stack_trace::monitored(
                     async move {
                         // unwrap the actor result to panic on error
                         actor.run().await.expect("actor failed");

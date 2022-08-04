@@ -20,7 +20,7 @@ use futures::pin_mut;
 use madsim::time::Instant;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
-use risingwave_common::util::debug::trace_context::StackTrace;
+use stack_trace::StackTrace;
 use tokio_stream::StreamExt;
 use tracing_futures::Instrument;
 

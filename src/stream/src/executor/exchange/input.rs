@@ -22,8 +22,8 @@ use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_rpc_client::ComputeClientPool;
+use stack_trace::StackTrace;
 use tokio::sync::mpsc::Receiver;
 
 use crate::executor::error::StreamExecutorError;

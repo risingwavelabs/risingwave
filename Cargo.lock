@@ -1225,7 +1225,6 @@ dependencies = [
  "libc",
  "num-integer",
  "num-traits",
- "serde",
  "time 0.1.43",
  "winapi",
 ]
@@ -5028,6 +5027,7 @@ dependencies = [
  "prometheus",
  "risingwave_common",
  "spin 0.9.4",
+ "stack_trace",
  "tempfile",
  "thiserror",
  "tracing",
@@ -5082,6 +5082,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
+ "stack_trace",
  "thiserror",
  "tokio-retry",
  "tracing",
@@ -5289,6 +5290,7 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.4",
+ "stack_trace",
  "tempfile",
  "thiserror",
  "tokio-metrics",
@@ -5350,6 +5352,7 @@ dependencies = [
  "serde-value",
  "serde_json",
  "smallvec",
+ "stack_trace",
  "static_assertions",
  "stats_alloc",
  "thiserror",
@@ -5856,6 +5859,18 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "stack_trace"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "futures-async-stream",
+ "itertools",
+ "madsim-tokio",
+ "pin-project",
+ "tracing",
+]
 
 [[package]]
 name = "static_assertions"
@@ -6890,13 +6905,11 @@ dependencies = [
  "criterion",
  "crossbeam-deque",
  "crossbeam-epoch",
- "digest",
  "either",
  "fail",
  "fixedbitset",
  "flate2",
  "frunk_core",
- "futures",
  "futures-channel",
  "futures-core",
  "futures-executor",

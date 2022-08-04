@@ -17,7 +17,7 @@ use std::sync::Arc;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
-use risingwave_common::util::debug::trace_context::StackTrace;
+use stack_trace::StackTrace;
 use tracing::event;
 use tracing_futures::Instrument;
 

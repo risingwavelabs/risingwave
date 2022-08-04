@@ -17,7 +17,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use moka::future::Cache;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::debug::trace_context::StackTrace;
+use stack_trace::StackTrace;
 
 use crate::error::Result;
 use crate::ComputeClient;

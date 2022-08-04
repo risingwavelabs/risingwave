@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::addr::is_local_address;
-use risingwave_common::util::debug::trace_context::StackTrace;
+use stack_trace::StackTrace;
 use tokio::sync::mpsc::Sender;
 
 use crate::executor::Message;

@@ -1,4 +1,6 @@
 #![allow(clippy::declare_interior_mutable_const)]
+#![feature(generators)]
+#![feature(map_try_insert)]
 
 use std::borrow::Cow;
 use std::cell::{RefCell, RefMut};

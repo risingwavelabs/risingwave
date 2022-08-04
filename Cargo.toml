@@ -33,6 +33,7 @@ members = [
   "src/utils/memcomparable",
   "src/utils/pgwire",
   "src/utils/runtime",
+  "src/utils/stack_trace",
   "src/utils/static-link",
   "src/utils/stats_alloc",
   "src/utils/value-encoding",

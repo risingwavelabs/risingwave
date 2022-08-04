@@ -23,10 +23,10 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
+use stack_trace::StackTrace;
 
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};

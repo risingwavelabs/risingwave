@@ -19,18 +19,16 @@ auto_enums = { version = "0.7", features = ["futures", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
-chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "serde", "std", "time", "winapi"] }
+chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "std", "time", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
 criterion = { version = "0.3", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
-digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 flate2 = { version = "1", features = ["any_zlib", "libz-sys", "miniz_oxide", "rust_backend", "zlib"] }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
-futures = { version = "0.3", features = ["alloc", "async-await", "executor", "futures-executor", "std"] }
 futures-channel = { version = "0.3", features = ["alloc", "futures-sink", "sink", "std"] }
 futures-core = { version = "0.3", features = ["alloc", "std"] }
 futures-executor = { version = "0.3", features = ["std"] }
@@ -87,21 +85,19 @@ anyhow = { version = "1", features = ["backtrace", "std"] }
 auto_enums = { version = "0.7", features = ["futures", "std"] }
 auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "futures03", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
-bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde1", "serde1-nostd", "std", "unicode"] }
+bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
-chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "serde", "std", "time", "winapi"] }
+chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "std", "time", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
 criterion = { version = "0.3", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
-digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 flate2 = { version = "1", features = ["any_zlib", "libz-sys", "miniz_oxide", "rust_backend", "zlib"] }
 frunk_core = { version = "0.4", default-features = false, features = ["std"] }
-futures = { version = "0.3", features = ["alloc", "async-await", "executor", "futures-executor", "std"] }
 futures-channel = { version = "0.3", features = ["alloc", "futures-sink", "sink", "std"] }
 futures-core = { version = "0.3", features = ["alloc", "std"] }
 futures-executor = { version = "0.3", features = ["std"] }

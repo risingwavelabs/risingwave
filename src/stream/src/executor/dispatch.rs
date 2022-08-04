@@ -26,10 +26,10 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::Result;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::decompress_data;
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
+use stack_trace::StackTrace;
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};

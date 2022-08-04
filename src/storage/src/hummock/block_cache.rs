@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache};
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_hummock_sdk::HummockSstableId;
+use stack_trace::StackTrace;
 
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;

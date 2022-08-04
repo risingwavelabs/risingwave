@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_hummock_sdk::LocalSstableInfo;
+use stack_trace::StackTrace;
 use tracing::error;
 
 use super::StateStoreMetrics;

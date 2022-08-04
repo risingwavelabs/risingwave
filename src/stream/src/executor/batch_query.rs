@@ -16,10 +16,10 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
+use stack_trace::StackTrace;
 
 use super::error::StreamExecutorError;
 use super::{Executor, ExecutorInfo, Message};

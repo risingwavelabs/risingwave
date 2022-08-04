@@ -31,12 +31,12 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
-use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
+use stack_trace::StackTrace;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
