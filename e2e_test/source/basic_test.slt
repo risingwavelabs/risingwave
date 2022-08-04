@@ -35,6 +35,15 @@ statement ok
 select * from s6;
 
 statement ok
+create sink si from s5 with ( kafka.brokers = '127.0.0.1:29092', kafka.topic = 'sink_target', sink.type = 'append_only', sink_type = 'kafka' )
+
+statement ok
+create materialized source s7 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'sink_target', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
+
+statement ok
+select * from s7
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -89,8 +98,19 @@ select count(*) from s5
 ----
 100
 
+query I
+select count(*) from s7
+----
+100
+
+statement ok
+drop sink si
+
 statement ok
 drop source s5
+
+statement ok
+drop source s7
 
 query I
 select count(*) from s6

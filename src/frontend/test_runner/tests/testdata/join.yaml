@@ -189,15 +189,52 @@
       LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2], predicate: (t1.v1 > 100:Int32) }
       LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v1 < 1000:Int32) }
 - sql: |
-    /* Left & right has same distribution. There should be no exchange below hash join */
+    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
     create table t(x int);
     create index i on t(x);
     select * from i join i as ii on i.x=ii.x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchHashJoin { type: Inner, predicate: i.x = i.x, output: all }
-        BatchScan { table: i, columns: [i.x], distribution: HashShard(i.x) }
-        BatchScan { table: i, columns: [i.x], distribution: HashShard(i.x) }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+- sql: |
+    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
+    create table t(x int);
+    create index i on t(x);
+    select * from i join t on i.x=t.x;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchHashJoin { type: Inner, predicate: i.x = t.x, output: all }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(t.x) }
+          BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+- sql: |
+    /* Left & right has same HashShard distribution. There should be no exchange below hash join */
+    create table t(x int);
+    create index i on t(x);
+    select * from
+      (select * from i join i as ii using (x)) t1
+    full join
+      (select * from i join i as ii using (x)) t2
+    using (x);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Coalesce(i.x, i.x)] }
+        BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
+          BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+          BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
 - sql: |
     /* Use lookup join */
     create table t1 (v1 int, v2 int);
@@ -435,3 +472,36 @@
     select * from t1 join t2 using (v3);
   binder_error: 'Item not found: column "v3" specified in USING clause does not exist
     in left table'
+- sql: |
+    /* Ensure that non-trivial ambiguous references can be resolved */
+    create table a(x int);
+    create table b(x int);
+    select 2 * x as Y, x + x as Z from a natural full join b where 2 * x < 10 order by x + x;
+  logical_plan: |
+    LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+      LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+        LogicalFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
+          LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
+            LogicalScan { table: a, columns: [a._row_id, a.x] }
+            LogicalScan { table: b, columns: [b._row_id, b.x] }
+  batch_plan: |
+    BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+      BatchExchange { order: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) ASC], dist: Single }
+        BatchSort { order: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) ASC] }
+          BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+            BatchFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
+              BatchHashJoin { type: FullOuter, predicate: a.x = b.x, output: all }
+                BatchExchange { order: [], dist: HashShard(a.x) }
+                  BatchScan { table: a, columns: [a.x], distribution: SomeShard }
+                BatchExchange { order: [], dist: HashShard(b.x) }
+                  BatchScan { table: b, columns: [b.x], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [y, z, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))(hidden), a._row_id(hidden), b._row_id(hidden)], pk_columns: [a._row_id, b._row_id], order_descs: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), a._row_id, b._row_id] }
+      StreamExchange { dist: HashShard(a._row_id, b._row_id) }
+        StreamProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), a._row_id, b._row_id] }
+          StreamFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
+            StreamHashJoin { type: FullOuter, predicate: a.x = b.x, output: [a.x, b.x, a._row_id, b._row_id] }
+              StreamExchange { dist: HashShard(a.x) }
+                StreamTableScan { table: a, columns: [a.x, a._row_id], pk: [a._row_id], distribution: HashShard(a._row_id) }
+              StreamExchange { dist: HashShard(b.x) }
+                StreamTableScan { table: b, columns: [b.x, b._row_id], pk: [b._row_id], distribution: HashShard(b._row_id) }

@@ -18,10 +18,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitImpl, SplitMetaData,
@@ -57,6 +57,7 @@ use crate::model::{
 };
 use crate::storage::{MetaStore, Transaction};
 use crate::stream::FragmentManagerRef;
+use crate::MetaResult;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
@@ -128,18 +129,15 @@ impl MetadataModel for SourceActorInfo {
 }
 
 impl ConnectorSourceWorker {
-    pub async fn create(source: &Source, period: Duration) -> Result<Self> {
+    pub async fn create(source: &Source, period: Duration) -> MetaResult<Self> {
         let source_id = source.get_id();
         let info = source
             .info
             .clone()
-            .ok_or_else(|| internal_error("source info is empty"))?;
+            .ok_or_else(|| anyhow!("source info is empty"))?;
         let stream_source_info = try_match_expand!(info, Info::StreamSource)?;
-        let properties =
-            ConnectorProperties::extract(stream_source_info.properties).to_rw_result()?;
-        let enumerator = SplitEnumeratorImpl::create(properties)
-            .await
-            .to_rw_result()?;
+        let properties = ConnectorProperties::extract(stream_source_info.properties)?;
+        let enumerator = SplitEnumeratorImpl::create(properties).await?;
         let current_splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id,
@@ -149,7 +147,10 @@ impl ConnectorSourceWorker {
         })
     }
 
-    pub async fn run(&mut self, mut sync_call_rx: UnboundedReceiver<oneshot::Sender<Result<()>>>) {
+    pub async fn run(
+        &mut self,
+        mut sync_call_rx: UnboundedReceiver<oneshot::Sender<MetaResult<()>>>,
+    ) {
         let mut interval = time::interval(self.period);
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
@@ -169,8 +170,8 @@ impl ConnectorSourceWorker {
         }
     }
 
-    async fn tick(&mut self) -> Result<()> {
-        let splits = self.enumerator.list_splits().await.to_rw_result()?;
+    async fn tick(&mut self) -> MetaResult<()> {
+        let splits = self.enumerator.list_splits().await?;
         let mut current_splits = self.current_splits.lock().await;
         current_splits.splits.replace(
             splits
@@ -185,7 +186,7 @@ impl ConnectorSourceWorker {
 
 pub struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
-    sync_call_tx: UnboundedSender<oneshot::Sender<Result<()>>>,
+    sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
 }
 
@@ -214,7 +215,7 @@ where
         }
     }
 
-    async fn diff(&mut self) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
+    async fn diff(&mut self) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         // first, list all fragment, so that we can get `FragmentId` -> `Vec<ActorId>` map
         let table_frags = self.fragment_manager.list_table_fragments().await?;
         let mut frag_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
@@ -415,7 +416,7 @@ where
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-    ) -> Result<Self> {
+    ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
             let catalog_guard = catalog_manager.get_catalog_core_guard().await;
@@ -460,7 +461,7 @@ where
         &self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashSet<ActorId>>,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         {
             let mut core = self.core.lock().await;
             core.drop_diff(source_fragments, actor_splits.clone());
@@ -477,18 +478,14 @@ where
             }
         }
 
-        self.env
-            .meta_store()
-            .txn(trx)
-            .await
-            .map_err(|e| internal_error(e.to_string()))
+        self.env.meta_store().txn(trx).await.map_err(Into::into)
     }
 
     pub async fn patch_update(
         &self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let mut trx = Transaction::default();
         if let Some(actor_splits) = actor_splits.clone() {
             for (actor_id, splits) in actor_splits {
@@ -497,11 +494,7 @@ where
             }
         }
 
-        self.env
-            .meta_store()
-            .txn(trx)
-            .await
-            .map_err(|e| internal_error(e.to_string()))?;
+        self.env.meta_store().txn(trx).await?;
 
         let mut core = self.core.lock().await;
         core.patch_diff(source_fragments, actor_splits);
@@ -513,7 +506,7 @@ where
         &self,
         table_id: &TableId,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-    ) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
+    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
         let table_fragments = core
             .fragment_manager
@@ -526,13 +519,16 @@ where
             let handle = core
                 .managed_sources
                 .get(&source_id)
-                .ok_or_else(|| internal_error(format!("could not found source {}", source_id)))?;
+                .ok_or_else(|| anyhow!("could not found source {}", source_id))?;
 
             if handle.splits.lock().await.splits.is_none() {
                 // force refresh source
                 let (tx, rx) = oneshot::channel();
-                handle.sync_call_tx.send(tx).to_rw_result()?;
-                rx.await.map_err(|e| internal_error(e.to_string()))??;
+                handle
+                    .sync_call_tx
+                    .send(tx)
+                    .map_err(|e| anyhow!(e.to_string()))?;
+                rx.await.map_err(|e| anyhow!(e.to_string()))??;
             }
 
             if let Some(splits) = &handle.splits.lock().await.splits {
@@ -545,9 +541,7 @@ where
                     let empty_actor_splits = table_fragments
                         .fragments
                         .get(&fragment_id)
-                        .ok_or_else(|| {
-                            internal_error(format!("could not found source {}", source_id))
-                        })?
+                        .ok_or_else(|| anyhow!("could not found source {}", source_id))?
                         .actors
                         .iter()
                         .map(|actor| (actor.actor_id, vec![]))
@@ -565,7 +559,7 @@ where
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
+    async fn all_stream_clients(&self) -> MetaResult<impl Iterator<Item = StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -587,7 +581,7 @@ where
     }
 
     /// Broadcast the create source request to all compute nodes.
-    pub async fn create_source(&self, source: &Source) -> Result<()> {
+    pub async fn create_source(&self, source: &Source) -> MetaResult<()> {
         // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
         // It MUST be cleared before Ok returns.
         let mut revert_funcs = scopeguard::guard(
@@ -620,7 +614,7 @@ where
                 let request = ComputeNodeCreateSourceRequest {
                     source: Some(source.clone()),
                 };
-                async move { client.create_source(request).await.map_err(RwError::from) }
+                async move { client.create_source(request).await }
             });
 
         // ignore response body, always none
@@ -644,7 +638,7 @@ where
     async fn create_source_worker(
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
         log::info!("spawning new watcher for source {}", source.id);
@@ -664,14 +658,14 @@ where
         Ok(())
     }
 
-    pub async fn drop_source(&self, source_id: SourceId) -> Result<()> {
+    pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<()> {
         let futures = self
             .all_stream_clients()
             .await?
             .into_iter()
             .map(|mut client| {
                 let request = ComputeNodeDropSourceRequest { source_id };
-                async move { client.drop_source(request).await.map_err(RwError::from) }
+                async move { client.drop_source(request).await }
             });
         let _responses: Vec<_> = try_join_all(futures).await?;
 
@@ -705,7 +699,7 @@ where
         Ok(())
     }
 
-    async fn tick(&self) -> Result<()> {
+    async fn tick(&self) -> MetaResult<()> {
         let diff = {
             let mut core_guard = self.core.lock().await;
             core_guard.diff().await?
@@ -742,7 +736,7 @@ where
         Ok(())
     }
 
-    pub async fn run(&self) -> Result<()> {
+    pub async fn run(&self) -> MetaResult<()> {
         let mut ticker = time::interval(Self::SOURCE_TICK_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
