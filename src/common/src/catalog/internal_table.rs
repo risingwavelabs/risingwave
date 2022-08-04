@@ -24,7 +24,6 @@ pub fn generate_intertable_name_with_type(
 }
 
 pub fn valid_table_name(table_name: &str) -> bool {
-    // "also can use __RW_TABLE(table_id)"
     lazy_static! {
         static ref INTERNAL_TABLE_NAME: Regex = Regex::new(r"__internal_.*_\d+").unwrap();
     }

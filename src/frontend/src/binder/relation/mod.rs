@@ -268,27 +268,32 @@ impl Binder {
         self.bind_table_or_source(&schema_name, &table_name, alias)
     }
 
-    fn bind_rw_table(
-        &mut self,
-        args: Vec<FunctionArg>,
-        alias: Option<TableAlias>,
-    ) -> Result<Relation> {
+    fn resolve_table_id(&self, args: Vec<FunctionArg>) -> Result<(String, TableId)> {
         if args.is_empty() || args.len() > 2 {
             return Err(ErrorCode::BindError(
                 "usage: __rw_table(table_id[,schema_name])".to_string(),
             )
             .into());
         }
+
         let table_id = if let Ok(id) = args[0].to_string().parse::<u32>() {
             TableId::from(id)
         } else {
             return Err(ErrorCode::BindError("invalid table_id".to_string()).into());
         };
-        let schema = if args.len() > 1 {
-            args[1].to_string()
-        } else {
-            DEFAULT_SCHEMA_NAME.to_string()
-        };
+
+        let schema = args
+            .get(1)
+            .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
+        Ok((schema, table_id))
+    }
+
+    fn bind_rw_table(
+        &mut self,
+        args: Vec<FunctionArg>,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
+        let (schema, table_id) = self.resolve_table_id(args)?;
         self.bind_relation_by_id(table_id, schema, alias)
     }
 
@@ -299,7 +304,7 @@ impl Binder {
                     self.bind_relation_by_name(name, alias)
                 } else {
                     let func_name = &name.0[0].value;
-                    if func_name == "__rw_table" {
+                    if func_name.eq_ignore_ascii_case("__rw_table") {
                         return self.bind_rw_table(args, alias);
                     }
                     if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
