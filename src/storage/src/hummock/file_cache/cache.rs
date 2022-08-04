@@ -80,7 +80,7 @@ where
             let frozen = self.buffer.frozen();
 
             let mut encoded_value_lens = Vec::with_capacity(64);
-            let mut batch = self.store.batch(64);
+            let mut batch = self.store.start_batch_writer(64);
 
             frozen.for_all(|key, value| {
                 batch.append(key.clone(), value);
@@ -92,7 +92,7 @@ where
                 // Avoid allocate a new buffer.
                 self.buffer.swap();
             } else {
-                let (keys, slots) = self.store.insert(batch).await?;
+                let (keys, slots) = batch.finish().await?;
 
                 for ((key, encoded_value_len), slot) in keys
                     .into_iter()

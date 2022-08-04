@@ -36,7 +36,7 @@ pub enum FsType {
     Xfs,
 }
 
-pub struct WriteBatch<K, V>
+pub struct StoreBatchWriter<'a, K, V>
 where
     K: TieredCacheKey,
     V: TieredCacheValue,
@@ -47,21 +47,30 @@ where
 
     block_size: usize,
 
+    store: &'a Store<K, V>,
+
     _phantom: PhantomData<(K, V)>,
 }
 
-impl<K, V> WriteBatch<K, V>
+impl<'a, K, V> StoreBatchWriter<'a, K, V>
 where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
-    fn new(block_size: usize, buffer_capacity: usize, item_capacity: usize) -> Self {
+    fn new(
+        store: &'a Store<K, V>,
+        block_size: usize,
+        buffer_capacity: usize,
+        item_capacity: usize,
+    ) -> Self {
         Self {
             keys: Vec::with_capacity(item_capacity),
             buffer: DioBuffer::with_capacity_in(buffer_capacity, &DIO_BUFFER_ALLOCATOR),
             blocs: Vec::with_capacity(item_capacity),
 
             block_size,
+
+            store,
 
             _phantom: PhantomData::default(),
         }
@@ -94,9 +103,24 @@ where
         self.len() == 0
     }
 
-    fn finish(self) -> (DioBuffer, Vec<BlockLoc>, Vec<K>) {
+    pub async fn finish(mut self) -> Result<(Vec<K>, Vec<SlotId>)> {
         debug_assert!(!self.buffer.is_empty());
-        (self.buffer, self.blocs, self.keys)
+
+        let mut slots = Vec::with_capacity(self.blocs.len());
+
+        let boff = self.store.cache_file.append(self.buffer).await? as u32 / self.block_size as u32;
+
+        for bloc in &mut self.blocs {
+            bloc.bidx += boff;
+        }
+
+        let mut mf = self.store.meta_file.write();
+
+        for (key, bloc) in self.keys.iter().zip_eq(self.blocs.iter()) {
+            slots.push(mf.insert(key, bloc)?);
+        }
+
+        Ok((self.keys, slots))
     }
 }
 
@@ -228,27 +252,8 @@ where
         Ok(())
     }
 
-    pub fn batch(&self, item_capacity: usize) -> WriteBatch<K, V> {
-        WriteBatch::new(self.block_size, self.buffer_capacity, item_capacity)
-    }
-
-    pub async fn insert(&self, batch: WriteBatch<K, V>) -> Result<(Vec<K>, Vec<SlotId>)> {
-        let (buf, mut blocs, keys) = batch.finish();
-        let mut slots = Vec::with_capacity(blocs.len());
-
-        let boff = self.cache_file.append(buf).await? as u32 / self.block_size as u32;
-
-        for bloc in &mut blocs {
-            bloc.bidx += boff;
-        }
-
-        let mut mf = self.meta_file.write();
-
-        for (key, bloc) in keys.iter().zip_eq(blocs.iter()) {
-            slots.push(mf.insert(key, bloc)?);
-        }
-
-        Ok((keys, slots))
+    pub fn start_batch_writer(&self, item_capacity: usize) -> StoreBatchWriter<K, V> {
+        StoreBatchWriter::new(self, self.block_size, self.buffer_capacity, item_capacity)
     }
 
     pub async fn get(&self, slot: SlotId) -> Result<Vec<u8>> {
@@ -298,21 +303,12 @@ pub type StoreRef<K, V> = Arc<Store<K, V>>;
 mod tests {
 
     use super::*;
-    use crate::hummock::file_cache::test_utils::{key, TestCacheKey, TestCacheValue};
+    use crate::hummock::file_cache::test_utils::{TestCacheKey, TestCacheValue};
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
 
     #[test]
     fn ensure_send_sync_clone() {
         is_send_sync_clone::<StoreRef<TestCacheKey, TestCacheValue>>();
-    }
-
-    #[test]
-    fn test_write_batch() {
-        let mut batch: WriteBatch<TestCacheKey, TestCacheValue> = WriteBatch::new(4096, 0, 0);
-        batch.append(key(1), &vec![b'x'; 1024]);
-        batch.append(key(2), &vec![b'y'; 1024]);
-        batch.append(key(3), &vec![b'z'; 1024]);
-        assert_eq!(batch.buffer.len(), 4096 * 3);
     }
 }
