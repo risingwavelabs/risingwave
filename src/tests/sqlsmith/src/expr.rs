@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::{
     TrimWhereField, UnaryOperator, Value,
 };
 
+use crate::utils::data_type_name_to_ast_data_type;
 use crate::SqlGenerator;
 
 lazy_static::lazy_static! {
@@ -59,10 +60,15 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
     funcs
 }
 
+/// Build a cast map from return types to viable cast-signatures.
+/// TODO: Generate implicit casts.
+/// NOTE: We avoid cast from varchar to other datatypes apart from itself.
+/// This is because arbitrary strings may not be able to cast,
+/// creating large number of invalid queries.
 fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
     let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
     cast_sigs()
-        .filter(|cast| cast.context == CastContext::Explicit) // TODO: generate implicit casts.
+        .filter(|cast| cast.context == CastContext::Explicit)
         .filter(|cast| {
             cast.from_type != DataTypeName::Varchar || cast.to_type == DataTypeName::Varchar
         })
@@ -134,18 +140,25 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    /// Generate casts from a cast map.
     fn gen_cast(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
-        let casts = match CAST_TABLE.get(&ret) {
-            None => return self.gen_simple_scalar(ret),
-            Some(casts) => casts,
-        };
+        self.gen_cast_inner(ret, can_agg, inside_agg)
+            .unwrap_or_else(|| self.gen_simple_scalar(ret))
+    }
+
+    /// Generate casts from a cast map.
+    fn gen_cast_inner(
+        &mut self,
+        ret: DataTypeName,
+        can_agg: bool,
+        inside_agg: bool,
+    ) -> Option<Expr> {
+        let casts = CAST_TABLE.get(&ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
-        let from_expr = self.gen_expr(cast_sig.from_type, can_agg, inside_agg);
-        Expr::Cast {
-            expr: from_expr.into(),
-            data_type: cast_sig.to_type.into(),
-        }
+        let expr = self
+            .gen_expr(cast_sig.from_type, can_agg, inside_agg)
+            .into();
+        let data_type = data_type_name_to_ast_data_type(cast_sig.to_type)?;
+        Some(Expr::Cast { expr, data_type })
     }
 
     fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
