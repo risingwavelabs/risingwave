@@ -189,15 +189,52 @@
       LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2], predicate: (t1.v1 > 100:Int32) }
       LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v1 < 1000:Int32) }
 - sql: |
-    /* Left & right has same distribution. There should be no exchange below hash join */
+    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
     create table t(x int);
     create index i on t(x);
     select * from i join i as ii on i.x=ii.x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchHashJoin { type: Inner, predicate: i.x = i.x, output: all }
-        BatchScan { table: i, columns: [i.x], distribution: HashShard(i.x) }
-        BatchScan { table: i, columns: [i.x], distribution: HashShard(i.x) }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+- sql: |
+    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
+    create table t(x int);
+    create index i on t(x);
+    select * from i join t on i.x=t.x;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchHashJoin { type: Inner, predicate: i.x = t.x, output: all }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(t.x) }
+          BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+- sql: |
+    /* Left & right has same HashShard distribution. There should be no exchange below hash join */
+    create table t(x int);
+    create index i on t(x);
+    select * from
+      (select * from i join i as ii using (x)) t1
+    full join
+      (select * from i join i as ii using (x)) t2
+    using (x);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Coalesce(i.x, i.x)] }
+        BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
+          BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+          BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
 - sql: |
     /* Use lookup join */
     create table t1 (v1 int, v2 int);
