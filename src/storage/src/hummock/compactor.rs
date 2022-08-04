@@ -464,7 +464,7 @@ impl Compactor {
             }
         };
         let sstable_id_manager_clone = context.sstable_id_manager.clone();
-        scopeguard::guard(
+        let _guard = scopeguard::guard(
             (tracker_id, sstable_id_manager_clone),
             |(tracker_id, sstable_id_manager)| {
                 tokio::spawn(async move {
