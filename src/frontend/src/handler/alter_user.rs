@@ -96,7 +96,7 @@ fn alter_prost_user_info(
                 }
             }
         }
-        if !has_privilege {
+        if !session_user.is_supper && !has_privilege {
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
     }
