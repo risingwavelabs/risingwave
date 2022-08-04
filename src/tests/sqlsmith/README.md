@@ -29,6 +29,7 @@ Additionally, in some cases where you may want to debug whether we have defined 
 you can try:
 
 ```sh
+cargo build
 ./target/debug/sqlsmith print-function-table > ft.txt
 ```
 
