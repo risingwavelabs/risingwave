@@ -140,6 +140,7 @@ where
     fn clone(&self) -> Self {
         match self {
             TieredCache::NoneCache(_) => TieredCache::NoneCache(PhantomData::default()),
+            #[cfg(target_os = "linux")]
             TieredCache::FileCache(file_cache) => TieredCache::FileCache(file_cache.clone()),
         }
     }
