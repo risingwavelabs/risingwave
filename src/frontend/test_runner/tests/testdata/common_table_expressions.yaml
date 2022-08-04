@@ -39,3 +39,15 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
       StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
+- sql: |
+    create table t1 (x int);
+    with with_0 as (select * from t1 group by x having EXISTS(select 0.1)) select * from with_0;
+  logical_plan: |
+    LogicalProject { exprs: [t1.x] }
+      LogicalProject { exprs: [t1.x] }
+        LogicalJoin { type: LeftSemi, on: true, output: all }
+          LogicalAgg { group_key: [t1.x], aggs: [] }
+            LogicalProject { exprs: [t1.x] }
+              LogicalScan { table: t1, columns: [t1._row_id, t1.x] }
+          LogicalProject { exprs: [0.1:Decimal] }
+            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
