@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -23,10 +22,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName, SqlOption};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use super::create_source::make_prost_source;
-use super::util::handle_with_properties;
 use crate::binder::expr::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
@@ -81,18 +79,16 @@ pub(crate) fn gen_create_table_plan(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
-    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
             columns: bind_sql_columns(columns)?,
-            properties: properties.clone(),
+            properties: context.inner().with_properties.clone(),
         }),
     )?;
-    let (plan, table) =
-        gen_materialized_source_plan(context, source.clone(), session.user_id(), properties)?;
+    let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;
     Ok((plan, source, table))
 }
 
@@ -102,7 +98,6 @@ pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
     owner: u32,
-    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
@@ -127,7 +122,6 @@ pub(crate) fn gen_materialized_source_plan(
         .table()
         .to_prost(source.schema_id, source.database_id);
     table.owner = owner;
-    table.properties = properties;
     Ok((materialize.into(), table))
 }
 
@@ -135,18 +129,12 @@ pub async fn handle_create_table(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
-    with_options: Vec<SqlOption>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {
-        let (plan, source, table) = gen_create_table_plan(
-            &session,
-            context.into(),
-            table_name.clone(),
-            columns,
-            handle_with_properties("create_table", with_options)?,
-        )?;
+        let (plan, source, table) =
+            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);
 
