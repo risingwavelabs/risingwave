@@ -72,7 +72,11 @@ pub async fn handle_create_user(
         }
 
         let session_user = reader.get_user_by_name(session.user_name()).unwrap();
-        if !session_user.is_supper && (!session_user.can_create_user || user_info.is_supper || (!session_user.can_create_db && user_info.can_create_db)) {
+        if !session_user.is_supper
+            && (!session_user.can_create_user
+                || user_info.is_supper
+                || (!session_user.can_create_db && user_info.can_create_db))
+        {
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
     }
