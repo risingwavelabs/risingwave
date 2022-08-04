@@ -38,10 +38,7 @@ pub async fn handle_query(
     let session = context.session_ctx.clone();
 
     let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
+        let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
 

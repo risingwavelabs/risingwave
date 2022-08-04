@@ -29,6 +29,7 @@ pub struct TableCatalogBuilder {
     column_names: HashMap<String, i32>,
     order_key: Vec<FieldOrder>,
     pk_indices: Vec<usize>,
+    properties: HashMap<String, String>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -70,6 +71,11 @@ impl TableCatalogBuilder {
         });
     }
 
+    /// Add `properties` for `TableCatalog`
+    pub fn add_properties(&mut self, properties: HashMap<String, String>) {
+        self.properties = properties;
+    }
+
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
@@ -96,7 +102,7 @@ impl TableCatalogBuilder {
             appendonly: append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
-            properties: HashMap::default(),
+            properties: self.properties,
             read_pattern_prefix_column: 0,
         }
     }
