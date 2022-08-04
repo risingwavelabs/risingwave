@@ -28,5 +28,10 @@ fn main() -> Result<()> {
 
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-    risingwave_rt::main_okk(risingwave_ctl::start(opts))
+    // Use current thread runtime for ctl.
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(risingwave_ctl::start(opts))
 }
