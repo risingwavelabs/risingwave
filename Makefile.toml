@@ -398,6 +398,10 @@ echo
 echo "check: $(tput setaf 4)cmake$(tput sgr0)"
 cmake --version || echo "$(tput setaf 3)cmake$(tput sgr0) not found."
 echo
+
+echo "check: $(tput setaf 4)protoc$(tput sgr0)"
+protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
+echo
 """
 description = "Install required tools to do pre-CI check and run e2e tests"
 
@@ -434,7 +438,7 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
@@ -446,12 +450,12 @@ cargo build "$@"
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo test "$@"
+cargo nextest run "$@"
 """
 
 [tasks.check-hakari]
@@ -499,7 +503,7 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --workspace --all-targets
+cargo clippy --all-targets --features failpoints --locked -- -D warnings
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 
