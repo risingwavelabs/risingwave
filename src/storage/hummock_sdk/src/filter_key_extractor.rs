@@ -38,6 +38,18 @@ pub enum FilterKeyExtractorImpl {
     Multi(MultiFilterKeyExtractor),
 }
 
+impl FilterKeyExtractorImpl {
+    pub fn from_table(table_catalog: &Table) -> Self {
+        if table_catalog.read_pattern_prefix_column < 1 {
+            // for now frontend had not infer the table_id_to_filter_key_extractor, so we
+            // use FullKeyFilterKeyExtractor
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
+        } else {
+            FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
+        }
+    }
+}
+
 macro_rules! impl_filter_key_extractor {
     ([], $( { $variant_name:ident } ),*) => {
         impl FilterKeyExtractorImpl {
@@ -233,6 +245,13 @@ impl FilterKeyExtractorManagerInner {
         self.notify.notify_waiters();
     }
 
+    fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
+        let mut guard = self.table_id_to_filter_key_extractor.write();
+        guard.clear();
+        guard.extend(filter_key_extractor_map);
+        self.notify.notify_waiters();
+    }
+
     fn remove(&self, table_id: u32) {
         self.table_id_to_filter_key_extractor
             .write()
@@ -285,6 +304,11 @@ impl FilterKeyExtractorManager {
     /// Remove a mapping by table_id
     pub fn remove(&self, table_id: u32) {
         self.inner.remove(table_id);
+    }
+
+    /// Sync all filter key extractors by snapshot
+    pub fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
+        self.inner.sync(filter_key_extractor_map)
     }
 
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
