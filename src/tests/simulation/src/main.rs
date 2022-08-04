@@ -11,3 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+#[cfg(madsim)]
+include!("e2e.rs");
+
+#[cfg(not(madsim))]
+fn main() {
+    println!("This binary is only available in simulation.");
+}

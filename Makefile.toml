@@ -458,6 +458,18 @@ set -e
 cargo nextest run "$@"
 """
 
+[tasks.sslt]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run e2e tests in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo run -p risingwave_simulation "$@"
+"""
+
 [tasks.check-hakari]
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"

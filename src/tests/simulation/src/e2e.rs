@@ -12,15 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
-
 use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
 
-#[madsim::test]
-async fn basic() {
+/// Determinisitic simulation end-to-end test runner.
+///
+/// ENVS:
+///
+///     RUST_LOG            Set the log level.
+/// 
+///     MADSIM_TEST_SEED    Random seed for this run.
+///
+///     MADSIM_TEST_NUM     The number of runs.
+#[derive(Debug, Parser)]
+pub struct Args {
+    /// Glob of sqllogictest scripts.
+    #[clap()]
+    files: String,
+
+    /// The number of compute nodes.
+    #[clap(long, default_value = "3")]
+    compute_node_num: usize,
+
+    /// The number of CPU cores for each compute node.
+    ///
+    /// This determines worker_node_parallelism.
+    #[clap(long, default_value = "2")]
+    compute_node_cores: usize,
+}
+
+#[madsim::main]
+async fn main() {
+    let args = Args::parse();
+
     let handle = madsim::runtime::Handle::current();
 
     // meta node
@@ -60,11 +86,12 @@ async fn basic() {
         .build();
 
     // compute node
-    for i in 1..=2 {
+    for i in 1..=args.compute_node_num {
         handle
             .create_node()
             .name(format!("compute-{i}"))
-            .ip([192, 168, 3, i].into())
+            .ip([192, 168, 3, i as u8].into())
+            .cores(args.compute_node_cores)
             .init(move || async move {
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                     "compute-node",
@@ -90,7 +117,7 @@ async fn basic() {
         .name("client")
         .ip("192.168.100.1".parse().unwrap())
         .build()
-        .spawn(async {
+        .spawn(async move {
             let (client, connection) = tokio_postgres::Config::new()
                 .host("192.168.2.1")
                 .port(4566)
@@ -106,16 +133,12 @@ async fn basic() {
             let mut tester = sqllogictest::Runner::new(Postgres {
                 client: Arc::new(client),
             });
-            // run the following e2e tests
-            for dir in ["ddl", "batch", "streaming", "streaming_delta_join"] {
-                let files = glob::glob(&format!("../../../e2e_test/{dir}/**/*.slt"))
-                    .expect("failed to read glob pattern");
-                for file in files {
-                    tester
-                        .run_file_async(file.unwrap().as_path())
-                        .await
-                        .unwrap();
-                }
+            let files = glob::glob(&args.files).expect("failed to read glob pattern");
+            for file in files {
+                tester
+                    .run_file_async(file.unwrap().as_path())
+                    .await
+                    .unwrap();
             }
         })
         .await
