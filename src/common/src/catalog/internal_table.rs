@@ -22,7 +22,12 @@ pub fn generate_intertable_name_with_type(
     table_id: u32,
     table_type: &str,
 ) -> String {
-    format!("__internal_{}_{}_{}", mview_name, table_type, table_id)
+    format!(
+        "__internal_{}_{}_{}",
+        mview_name,
+        table_type.to_lowercase(),
+        table_id
+    )
 }
 
 pub fn valid_table_name(table_name: &str) -> bool {
