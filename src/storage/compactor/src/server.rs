@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
@@ -118,10 +118,13 @@ pub async fn compactor_serve(
         storage_config.sstable_id_remote_fetch_number,
     ));
 
+    let (heartbeat_extra_info_source_tx, heartbeat_extra_info_source_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ExtraInfoSourceRef>();
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            Some(heartbeat_extra_info_source_rx),
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             storage_config,
@@ -131,9 +134,12 @@ pub async fn compactor_serve(
             Some(Arc::new(CompactionExecutor::new(None))),
             filter_key_extractor_manager.clone(),
             memory_limiter,
-            sstable_id_manager,
+            sstable_id_manager.clone(),
         ),
     ];
+    heartbeat_extra_info_source_tx
+        .send(sstable_id_manager)
+        .unwrap_or_else(|_| panic!("heartbeat task should be alive"));
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {

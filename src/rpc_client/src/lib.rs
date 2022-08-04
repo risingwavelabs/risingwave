@@ -32,6 +32,9 @@
 #![feature(associated_type_defaults)]
 
 mod meta_client;
+
+use std::sync::Arc;
+
 pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
 mod compute_client;
 pub use compute_client::ComputeClient;
@@ -39,7 +42,17 @@ mod compute_client_pool;
 pub use compute_client_pool::{ComputeClientPool, ComputeClientPoolRef};
 mod hummock_meta_client;
 pub use hummock_meta_client::HummockMetaClient;
+use risingwave_pb::meta::heartbeat_request::extra_info;
+
 mod stream_client_pool;
 pub use stream_client_pool::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 pub mod error;
+
+/// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.
+pub trait ExtraInfoSource: Send + Sync {
+    /// None means the info is not available at the moment.
+    fn get_extra_info(&self) -> Option<extra_info::Info>;
+}
+
+pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;

@@ -29,7 +29,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
@@ -90,9 +90,12 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
+    let (heartbeat_extra_info_source_tx, heartbeat_extra_info_source_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ExtraInfoSourceRef>();
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![MetaClient::start_heartbeat_loop(
         meta_client.clone(),
         Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+        Some(heartbeat_extra_info_source_rx),
     )];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
@@ -138,6 +141,9 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        heartbeat_extra_info_source_tx
+            .send(storage.sstable_id_manager())
+            .unwrap_or_else(|_| panic!("heartbeat task should be alive"));
         let memory_limiter = Arc::new(MemoryLimiter::new(
             storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
         ));

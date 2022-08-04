@@ -31,6 +31,7 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -40,7 +41,7 @@ use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, UnboundedReceiver};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -49,6 +50,7 @@ use tonic::{Status, Streaming};
 
 use crate::error::Result;
 use crate::hummock_meta_client::HummockMetaClient;
+use crate::ExtraInfoSourceRef;
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -121,8 +123,14 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
-        let request = HeartbeatRequest { node_id };
+    pub async fn send_heartbeat(&self, node_id: u32, info: Vec<extra_info::Info>) -> Result<()> {
+        let request = HeartbeatRequest {
+            node_id,
+            info: info
+                .into_iter()
+                .map(|info| ExtraInfo { info: Some(info) })
+                .collect(),
+        };
         self.inner.heartbeat(request).await?;
         Ok(())
     }
@@ -309,12 +317,18 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Starts a heartbeat worker.
+    ///
+    /// When sending heartbeat RPC, it also carries extra info from all extra info sources.
+    /// Extra info source is added via `extra_info_source_rx`.
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
+        mut extra_info_source_rx: Option<UnboundedReceiver<ExtraInfoSourceRef>>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
+            let mut extra_info_sources = vec![];
             let mut min_interval_ticker = tokio::time::interval(min_interval);
             loop {
                 tokio::select! {
@@ -326,11 +340,20 @@ impl MetaClient {
                         return;
                     }
                 }
+                if let Some(rx) = extra_info_source_rx.as_mut() {
+                    while let Ok(extra_info_source) = rx.try_recv() {
+                        extra_info_sources.push(extra_info_source);
+                    }
+                }
+                let extra_info = extra_info_sources
+                    .iter()
+                    .filter_map(|s| s.get_extra_info())
+                    .collect::<Vec<_>>();
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
-                    meta_client.send_heartbeat(meta_client.worker_id()),
+                    meta_client.send_heartbeat(meta_client.worker_id(), extra_info),
                 )
                 .await
                 {
