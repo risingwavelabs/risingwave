@@ -17,8 +17,9 @@ use std::sync::Arc;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement, WithProperties};
+use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
+use self::util::handle_with_properties;
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub mod alter_user;
@@ -55,14 +56,26 @@ pub async fn handle(
     sql: &str,
     format: bool,
 ) -> Result<PgResponse> {
-    let context = OptimizerContext::new(session.clone(), Arc::from(sql));
+    let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
             statement,
             verbose,
             trace,
             ..
-        } => explain::handle_explain(context, *statement, verbose, trace),
+        } => {
+            match statement.as_ref() {
+                Statement::CreateTable { with_options, .. }
+                | Statement::CreateView { with_options, .. } => {
+                    context.with_properties =
+                        handle_with_properties("explain create_table", with_options.clone())?;
+                }
+
+                _ => {}
+            }
+
+            explain::handle_explain(context, *statement, verbose, trace)
+        }
         Statement::CreateSource {
             is_materialized,
             stmt,
@@ -73,7 +86,10 @@ pub async fn handle(
             columns,
             with_options,
             ..
-        } => create_table::handle_create_table(context, name, columns, with_options).await,
+        } => {
+            context.with_properties = handle_with_properties("handle_create_table", with_options)?;
+            create_table::handle_create_table(context, name, columns).await
+        }
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
@@ -133,7 +149,10 @@ pub async fn handle(
             query,
             with_options,
             ..
-        } => create_mv::handle_create_mv(context, name, query, WithProperties(with_options)).await,
+        } => {
+            context.with_properties = handle_with_properties("handle_create_mv", with_options)?;
+            create_mv::handle_create_mv(context, name, query).await
+        }
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,
