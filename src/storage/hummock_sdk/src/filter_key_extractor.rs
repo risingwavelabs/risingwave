@@ -248,9 +248,7 @@ impl FilterKeyExtractorManagerInner {
     fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
         let mut guard = self.table_id_to_filter_key_extractor.write();
         guard.clear();
-        for (table_id, filter_key_extractor) in filter_key_extractor_map {
-            guard.insert(table_id, filter_key_extractor);
-        }
+        guard.extend(filter_key_extractor_map);
         self.notify.notify_waiters();
     }
 
