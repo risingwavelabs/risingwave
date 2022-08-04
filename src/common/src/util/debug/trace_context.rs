@@ -356,7 +356,8 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
 
         match this.this_node {
             Some(this_node) => {
-                this_node.delete_from_parent();
+                // Our parent may have been dropped already, so don't check existence.
+                this_node.delete_from_parent_unchecked();
                 this_node.clear_children();
             }
             None => {} // not polled or ready
@@ -510,7 +511,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stack_trace() {
+    async fn test_stack_trace_display() {
         let (watch_tx, mut watch_rx) = watch::channel(Default::default());
 
         let collector = tokio::spawn(async move {
