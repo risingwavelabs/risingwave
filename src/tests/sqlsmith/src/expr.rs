@@ -183,12 +183,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_exists(&mut self, ret: DataTypeName) -> Expr {
-        // TODO: Streaming nested loop join is not implemented yet. 
+        // TODO: Streaming nested loop join is not implemented yet.
         // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
-        if self.is_mview || ret != DataTypeName::Boolean{
+        if self.is_mview || ret != DataTypeName::Boolean {
             return self.gen_simple_scalar(ret);
         };
-        let (subquery, _ ) = self.gen_local_query();
+        let (subquery, _) = self.gen_local_query();
         Expr::Exists(Box::new(subquery))
     }
 
