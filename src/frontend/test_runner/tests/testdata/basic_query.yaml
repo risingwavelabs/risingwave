@@ -131,3 +131,13 @@
     select * from unnest(Array[Array[1,2,3], Array[4,5,6]]);
   batch_plan: |
     BatchTableFunction { Unnest(Array(Array(1:Int32, 2:Int32, 3:Int32), Array(4:Int32, 5:Int32, 6:Int32))) }
+- sql: |
+    create table t1 (x int);
+    select * from t1 where EXISTS(select * where t1.x=1);
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    select *;
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    select * where x = 1;
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'

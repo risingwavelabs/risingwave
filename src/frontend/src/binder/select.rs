@@ -84,6 +84,9 @@ impl Binder {
         // Bind FROM clause.
         let from = self.bind_vec_table_with_joins(select.from)?;
 
+        // Bind SELECT clause.
+        let (select_items, aliases) = self.bind_select_list(select.projection)?;
+
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
         let selection = select
@@ -104,9 +107,6 @@ impl Binder {
         // Bind HAVING clause.
         let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
         Self::require_bool_clause(&having, "HAVING")?;
-
-        // Bind SELECT clause.
-        let (select_items, aliases) = self.bind_select_list(select.projection)?;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
@@ -182,6 +182,12 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
+                    if self.context.range_of.is_empty() || self.context.columns.is_empty() {
+                        return Err(ErrorCode::BindError(
+                            "SELECT * with no tables specified is not valid".into(),
+                        )
+                        .into());
+                    }
                     // Bind the column groups
                     // In psql, the USING and NATURAL columns come before the rest of the columns in
                     // a SELECT * statement
