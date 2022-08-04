@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
 
@@ -260,12 +260,11 @@ impl Binder {
         &mut self,
         table_id: TableId,
         schema_name: String,
-        db_name: String,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let table_name = self
-            .catalog
-            .get_table_name_by_id(table_id, &schema_name, &db_name)?;
+        let table_name =
+            self.catalog
+                .get_table_name_by_id(table_id, &self.db_name, &schema_name)?;
         self.bind_table_or_source(&schema_name, &table_name, alias)
     }
 
@@ -274,9 +273,9 @@ impl Binder {
         args: Vec<FunctionArg>,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        if args.is_empty() || args.len() > 3 {
+        if args.is_empty() || args.len() > 2 {
             return Err(ErrorCode::BindError(
-                "usage: __rw_table(table_id[,schema_name][,database_name])".to_string(),
+                "usage: __rw_table(table_id[,schema_name])".to_string(),
             )
             .into());
         }
@@ -290,12 +289,7 @@ impl Binder {
         } else {
             DEFAULT_SCHEMA_NAME.to_string()
         };
-        let db = if args.len() > 2 {
-            args[2].to_string()
-        } else {
-            DEFAULT_DATABASE_NAME.to_string()
-        };
-        self.bind_relation_by_id(table_id, schema, db, alias)
+        self.bind_relation_by_id(table_id, schema, alias)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {

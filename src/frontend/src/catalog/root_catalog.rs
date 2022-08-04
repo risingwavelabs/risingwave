@@ -193,8 +193,8 @@ impl Catalog {
     pub fn get_table_name_by_id(
         &self,
         table_id: TableId,
-        schema_name: &str,
         db_name: &str,
+        schema_name: &str,
     ) -> Result<String> {
         self.get_schema_by_name(db_name, schema_name)
             .unwrap()
