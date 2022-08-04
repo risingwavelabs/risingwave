@@ -24,8 +24,10 @@ use itertools::Itertools;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+#[cfg(any(test, feature = "test"))]
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
@@ -149,8 +151,8 @@ impl LocalVersionManager {
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
         sstable_id_manager: SstableIdManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -193,8 +195,8 @@ impl LocalVersionManager {
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
-                table_id_to_slice_transform.clone(),
                 sstable_id_manager,
+                filter_key_extractor_manager.clone(),
             )),
         });
 
@@ -233,11 +235,11 @@ impl LocalVersionManager {
             Arc::new(StateStoreMetrics::unused()),
             hummock_meta_client.clone(),
             write_conflict_detector,
-            Arc::new(RwLock::new(HashMap::new())),
             Arc::new(crate::hummock::SstableIdManager::new(
                 hummock_meta_client,
                 options.sstable_id_remote_fetch_number,
             )),
+            Arc::new(FilterKeyExtractorManager::default()),
         )
         .await
     }

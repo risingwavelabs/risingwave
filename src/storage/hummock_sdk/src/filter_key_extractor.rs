@@ -12,43 +12,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::sync::Arc;
 
+use parking_lot::{Mutex, RwLock};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::VIRTUAL_NODE_SIZE;
 use risingwave_common::util::ordered::OrderedRowDeserializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
+use tokio::sync::Notify;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
-/// Slice Transform generally used to transform key which will store in BloomFilter
-pub trait SliceTransform: Clone + Send + Sync {
-    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8];
+/// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
+pub trait FilterKeyExtractor: Send + Sync {
+    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
 }
 
-#[derive(Clone)]
-pub enum SliceTransformImpl {
-    Schema(SchemaSliceTransform),
-    FullKey(FullKeySliceTransform),
-    Dummy(DummySliceTransform),
-    Multi(MultiSliceTransform),
+pub enum FilterKeyExtractorImpl {
+    Schema(SchemaFilterKeyExtractor),
+    FullKey(FullKeyFilterKeyExtractor),
+    Dummy(DummyFilterKeyExtractor),
+    Multi(MultiFilterKeyExtractor),
 }
 
-macro_rules! impl_slice_transform {
+macro_rules! impl_filter_key_extractor {
     ([], $( { $variant_name:ident } ),*) => {
-        impl SliceTransformImpl {
-            pub fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8]{
+        impl FilterKeyExtractorImpl {
+            pub fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8]{
                 match self {
-                    $( Self::$variant_name(inner) => inner.transform(full_key), )*
+                    $( Self::$variant_name(inner) => inner.extract(full_key), )*
                 }
             }
         }
     }
 }
 
-macro_rules! for_all_slice_transform_variants {
+macro_rules! for_all_filter_key_extractor_variants {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x), *],
@@ -60,29 +62,28 @@ macro_rules! for_all_slice_transform_variants {
     };
 }
 
-for_all_slice_transform_variants! { impl_slice_transform }
+for_all_filter_key_extractor_variants! { impl_filter_key_extractor }
 
-#[derive(Default, Clone)]
-pub struct FullKeySliceTransform;
+#[derive(Default)]
+pub struct FullKeyFilterKeyExtractor;
 
-impl SliceTransform for FullKeySliceTransform {
-    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
+impl FilterKeyExtractor for FullKeyFilterKeyExtractor {
+    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         full_key
     }
 }
 
-#[derive(Default, Clone)]
-pub struct DummySliceTransform;
-impl SliceTransform for DummySliceTransform {
-    fn transform<'a>(&mut self, _full_key: &'a [u8]) -> &'a [u8] {
+#[derive(Default)]
+pub struct DummyFilterKeyExtractor;
+impl FilterKeyExtractor for DummyFilterKeyExtractor {
+    fn extract<'a>(&self, _full_key: &'a [u8]) -> &'a [u8] {
         &[]
     }
 }
 
-/// [`SchemaSliceTransform`] build from table_catalog and transform a `full_key` to prefix for
+/// [`SchemaFilterKeyExtractor`] build from table_catalog and extract a `full_key` to prefix for
 /// prefix_bloom_filter
-#[derive(Clone)]
-pub struct SchemaSliceTransform {
+pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
     /// Perfix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
@@ -93,8 +94,8 @@ pub struct SchemaSliceTransform {
     // prefix_key)
 }
 
-impl SliceTransform for SchemaSliceTransform {
-    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
+impl FilterKeyExtractor for SchemaFilterKeyExtractor {
+    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         debug_assert!(full_key.len() >= TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
@@ -115,7 +116,7 @@ impl SliceTransform for SchemaSliceTransform {
     }
 }
 
-impl SchemaSliceTransform {
+impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
         assert_ne!(0, table_catalog.read_pattern_prefix_column);
 
@@ -149,76 +150,159 @@ impl SchemaSliceTransform {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct MultiSliceTransform {
-    id_to_slice_transform: HashMap<u32, SliceTransformImpl>,
+#[derive(Default)]
+pub struct MultiFilterKeyExtractor {
+    id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
 
     // cached state
-    last_slice_transform_state: Option<(u32, Box<SliceTransformImpl>)>,
+    last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
 }
 
-impl MultiSliceTransform {
-    pub fn register(&mut self, table_id: u32, slice_transform: SliceTransformImpl) {
-        self.id_to_slice_transform.insert(table_id, slice_transform);
-    }
-
-    fn update_state(&mut self, new_table_id: u32) {
-        self.last_slice_transform_state = Some((
-            new_table_id,
-            Box::new(
-                self.id_to_slice_transform
-                    .get(&new_table_id)
-                    .unwrap()
-                    .clone(),
-            ),
-        ));
+impl MultiFilterKeyExtractor {
+    pub fn register(&mut self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+        self.id_to_filter_key_extractor
+            .insert(table_id, filter_key_extractor);
     }
 
     pub fn size(&self) -> usize {
-        self.id_to_slice_transform.len()
+        self.id_to_filter_key_extractor.len()
     }
 
     #[cfg(test)]
-    fn last_slice_transform_state(&self) -> &Option<(u32, Box<SliceTransformImpl>)> {
-        &self.last_slice_transform_state
+    fn last_filter_key_extractor_state(&self) -> Option<(u32, Arc<FilterKeyExtractorImpl>)> {
+        self.last_filter_key_extractor_state
+            .try_lock()
+            .unwrap()
+            .clone()
     }
 }
 
-impl Debug for MultiSliceTransform {
+impl Debug for MultiFilterKeyExtractor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MultiSliceTransform size {} ", self.size())
+        write!(f, "MultiFilterKeyExtractor size {} ", self.size())
     }
 }
 
-impl SliceTransform for MultiSliceTransform {
-    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
+impl FilterKeyExtractor for MultiFilterKeyExtractor {
+    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
 
         let table_id = get_table_id(full_key).unwrap();
-        match self.last_slice_transform_state.as_ref() {
-            Some(last_slice_transform_state) => {
-                if table_id != last_slice_transform_state.0 {
-                    self.update_state(table_id);
+        let mut last_state = self.last_filter_key_extractor_state.try_lock().unwrap();
+
+        match last_state.as_ref() {
+            Some(last_filter_key_extractor_state) => {
+                if table_id != last_filter_key_extractor_state.0 {
+                    last_state.replace((
+                        table_id,
+                        self.id_to_filter_key_extractor
+                            .get(&table_id)
+                            .unwrap()
+                            .clone(),
+                    ));
                 }
             }
 
             None => {
-                self.update_state(table_id);
+                last_state.replace((
+                    table_id,
+                    self.id_to_filter_key_extractor
+                        .get(&table_id)
+                        .unwrap()
+                        .clone(),
+                ));
             }
         }
 
-        self.last_slice_transform_state
-            .as_mut()
-            .unwrap()
-            .1
-            .transform(full_key)
+        last_state.as_ref().unwrap().1.extract(full_key)
     }
 }
 
+#[derive(Default)]
+struct FilterKeyExtractorManagerInner {
+    table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
+    notify: Notify,
+}
+
+impl FilterKeyExtractorManagerInner {
+    fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+        self.table_id_to_filter_key_extractor
+            .write()
+            .insert(table_id, filter_key_extractor);
+
+        self.notify.notify_waiters();
+    }
+
+    fn remove(&self, table_id: u32) {
+        self.table_id_to_filter_key_extractor
+            .write()
+            .remove(&table_id);
+
+        self.notify.notify_waiters();
+    }
+
+    async fn acquire(&self, mut table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+
+        while !table_id_set.is_empty() {
+            let notified = self.notify.notified();
+
+            {
+                let guard = self.table_id_to_filter_key_extractor.read();
+                table_id_set.drain_filter(|table_id| match guard.get(table_id) {
+                    Some(filter_key_extractor) => {
+                        multi_filter_key_extractor
+                            .register(*table_id, filter_key_extractor.clone());
+                        true
+                    }
+
+                    None => false,
+                });
+            }
+
+            if !table_id_set.is_empty() {
+                notified.await;
+            }
+        }
+
+        multi_filter_key_extractor
+    }
+}
+
+/// FilterKeyExtractorManager is a wrapper for inner, and provide a protected read and write
+/// interface, its thread safe
+#[derive(Default)]
+pub struct FilterKeyExtractorManager {
+    inner: FilterKeyExtractorManagerInner,
+}
+
+impl FilterKeyExtractorManager {
+    /// Insert (`table_id`, `filter_key_extractor`) as mapping to `HashMap` for `acquire`
+    pub fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+        self.inner.update(table_id, filter_key_extractor);
+    }
+
+    /// Remove a mapping by table_id
+    pub fn remove(&self, table_id: u32) {
+        self.inner.remove(table_id);
+    }
+
+    /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
+    /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
+    /// table_id does not util version update (notify), and retry to get
+    pub async fn acquire(&self, table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
+        self.inner.acquire(table_id_set).await
+    }
+}
+
+pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
+
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::mem;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use bytes::{BufMut, BytesMut};
     use risingwave_common::array::Row;
@@ -229,21 +313,25 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
+    use tokio::task;
 
-    use super::{DummySliceTransform, SchemaSliceTransform, SliceTransform};
+    use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
+    use crate::filter_key_extractor::{
+        FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+        MultiFilterKeyExtractor,
+    };
     use crate::key::TABLE_PREFIX_LEN;
-    use crate::slice_transform::{FullKeySliceTransform, MultiSliceTransform, SliceTransformImpl};
 
     #[test]
-    fn test_default_slice_transform() {
-        let mut dummy_slice_transform = DummySliceTransform::default();
+    fn test_default_filter_key_extractor() {
+        let dummy_filter_key_extractor = DummyFilterKeyExtractor::default();
         let full_key = "full_key".as_bytes();
-        let output_key = dummy_slice_transform.transform(full_key);
+        let output_key = dummy_filter_key_extractor.extract(full_key);
 
         assert_eq!("".as_bytes(), output_key);
 
-        let mut full_key_slice_transform = FullKeySliceTransform::default();
-        let output_key = full_key_slice_transform.transform(full_key);
+        let full_key_filter_key_extractor = FullKeyFilterKeyExtractor::default();
+        let output_key = full_key_filter_key_extractor.extract(full_key);
 
         assert_eq!(full_key, output_key);
     }
@@ -333,9 +421,9 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_slice_transform() {
+    fn test_schema_filter_key_extractor() {
         let prost_table = build_table_with_prefix_column_num(1);
-        let mut schema_slice_transform = SchemaSliceTransform::new(&prost_table);
+        let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
         let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
@@ -358,7 +446,7 @@ mod tests {
         assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
-        let output_key = schema_slice_transform.transform(&full_key);
+        let output_key = schema_filter_key_extractor.extract(&full_key);
         assert_eq!(
             TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + 1 + mem::size_of::<i64>(),
             output_key.len()
@@ -366,16 +454,19 @@ mod tests {
     }
 
     #[test]
-    fn test_multi_slice_transform() {
-        let mut multi_slice_transform = MultiSliceTransform::default();
-        let last_state = multi_slice_transform.last_slice_transform_state();
+    fn test_multi_filter_key_extractor() {
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+        let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
         assert!(last_state.is_none());
 
         {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(1);
-            let schema_slice_transform = SchemaSliceTransform::new(&prost_table);
-            multi_slice_transform.register(1, SliceTransformImpl::Schema(schema_slice_transform));
+            let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
+            multi_filter_key_extractor.register(
+                1,
+                Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
+            );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
             let serializer = OrderedRowSerializer::new(order_types);
@@ -397,7 +488,7 @@ mod tests {
             assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
-            let output_key = multi_slice_transform.transform(&full_key);
+            let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64];
             let order_types = vec![OrderType::Ascending];
@@ -411,7 +502,7 @@ mod tests {
                 output_key.len()
             );
 
-            let last_state = multi_slice_transform.last_slice_transform_state();
+            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
             assert!(last_state.is_some());
             assert_eq!(1, last_state.as_ref().unwrap().0);
         }
@@ -419,8 +510,11 @@ mod tests {
         {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(2);
-            let schema_slice_transform = SchemaSliceTransform::new(&prost_table);
-            multi_slice_transform.register(2, SliceTransformImpl::Schema(schema_slice_transform));
+            let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
+            multi_filter_key_extractor.register(
+                2,
+                Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
+            );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
             let serializer = OrderedRowSerializer::new(order_types);
@@ -442,7 +536,7 @@ mod tests {
             assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
-            let output_key = multi_slice_transform.transform(&full_key);
+            let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
             let order_types = vec![OrderType::Ascending, OrderType::Ascending];
@@ -457,15 +551,19 @@ mod tests {
                 output_key.len()
             );
 
-            let last_state = multi_slice_transform.last_slice_transform_state();
+            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
             assert!(last_state.is_some());
             assert_eq!(2, last_state.as_ref().unwrap().0);
         }
 
         {
-            let full_key_slice_transform = FullKeySliceTransform::default();
-            multi_slice_transform
-                .register(3, SliceTransformImpl::FullKey(full_key_slice_transform));
+            let full_key_filter_key_extractor = FullKeyFilterKeyExtractor::default();
+            multi_filter_key_extractor.register(
+                3,
+                Arc::new(FilterKeyExtractorImpl::FullKey(
+                    full_key_filter_key_extractor,
+                )),
+            );
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
@@ -480,15 +578,39 @@ mod tests {
             let row_bytes = "full_key".as_bytes();
 
             let full_key = [&table_prefix, vnode_prefix, row_bytes].concat();
-            let output_key = multi_slice_transform.transform(&full_key);
+            let output_key = multi_filter_key_extractor.extract(&full_key);
             assert_eq!(
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + row_bytes.len(),
                 output_key.len()
             );
 
-            let last_state = multi_slice_transform.last_slice_transform_state();
+            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
             assert!(last_state.is_some());
             assert_eq!(3, last_state.as_ref().unwrap().0);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_filter_key_extractor_manager() {
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let filter_key_extractor_manager_ref = filter_key_extractor_manager.clone();
+        let filter_key_extractor_manager_ref2 = filter_key_extractor_manager_ref.clone();
+
+        task::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            filter_key_extractor_manager_ref.update(
+                1,
+                Arc::new(FilterKeyExtractorImpl::Dummy(
+                    DummyFilterKeyExtractor::default(),
+                )),
+            );
+        });
+
+        let remaining_table_id_set = HashSet::from([1]);
+        let multi_filter_key_extractor = filter_key_extractor_manager_ref2
+            .acquire(remaining_table_id_set)
+            .await;
+
+        assert_eq!(1, multi_filter_key_extractor.size());
     }
 }

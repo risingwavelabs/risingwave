@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::ops::BitAnd;
 use std::option::Option;
@@ -33,7 +34,15 @@ use crate::task::BOUNDED_BUFFER_SIZE;
 
 pub struct HashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
-    hash_info: exchange_info::HashInfo,
+    hash_info: HashInfo,
+}
+
+impl Debug for HashShuffleSender {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HashShuffleSender")
+            .field("hash_info", &self.hash_info)
+            .finish()
+    }
 }
 
 pub struct HashShuffleReceiver {

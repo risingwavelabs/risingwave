@@ -120,7 +120,6 @@ impl PlanTreeNodeUnary for LogicalExpand {
             })
             .collect_vec();
         let (mut map, new_input_col_num) = input_col_change.into_parts();
-        assert_eq!(new_input_col_num, input.schema().len());
         map.push(Some(new_input_col_num));
 
         (Self::new(input, column_subsets), ColIndexMapping::new(map))
