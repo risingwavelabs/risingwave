@@ -98,9 +98,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             assert!(!inside_agg);
         }
 
-        // TODO:  https://github.com/singularity-data/risingwave/issues/3989.
-        // let range = if can_agg & !inside_agg { 99 } else { 90 };
-        let range = 90;
+        let range = if can_agg & !inside_agg { 99 } else { 90 };
 
         match self.rng.gen_range(0..=range) {
             0..=80 => self.gen_func(typ, can_agg, inside_agg),
@@ -329,17 +327,19 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
 /// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/singularity-data/risingwave/issues/3933>
-fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
+fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
         .collect();
 
+    // Distinct Aggregate shall be workaround until the following issue is resolved
+    // https://github.com/singularity-data/risingwave/issues/4220
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
         over: None,
-        distinct,
+        distinct: false,
         order_by: vec![],
         filter: None,
     }
