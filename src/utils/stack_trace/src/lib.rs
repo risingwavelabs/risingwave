@@ -22,144 +22,22 @@
 
 use std::borrow::Cow;
 use std::cell::{RefCell, RefMut};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::hash::Hash;
 use std::pin::Pin;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
+use indextree::{Arena, NodeId};
 use itertools::Itertools;
 use pin_project::{pin_project, pinned_drop};
 use tokio::sync::watch;
 
 pub type SpanValue = Cow<'static, str>;
-
-#[derive(Clone)]
-struct StackTreeNode {
-    inner: Rc<RefCell<StackTreeNodeInner>>,
-}
-
-// SAFETY: by checking the id from the context against the id in the future, we ensure that this
-// struct won't be touched if it's moved to another thread.
-unsafe impl Send for StackTreeNode {}
-
-impl PartialEq for StackTreeNode {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.inner, &other.inner)
-    }
-}
-impl Eq for StackTreeNode {}
-impl Hash for StackTreeNode {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.inner.as_ptr().hash(state);
-    }
-}
-
-impl From<StackTreeNodeInner> for StackTreeNode {
-    fn from(inner: StackTreeNodeInner) -> Self {
-        Self {
-            inner: Rc::new(RefCell::new(inner)),
-        }
-    }
-}
-
-struct StackTreeNodeInner {
-    parent: Option<StackTreeNode>,
-    children: HashSet<StackTreeNode>,
-    // TODO: may use a more efficient timing mechanism
-    start_time: Instant,
-    value: SpanValue,
-}
-
-impl Debug for StackTreeNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.inner.borrow().fmt(f)
-    }
-}
-
-impl Debug for StackTreeNodeInner {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Node")
-            .field("children", &self.children)
-            .field("value", &self.value)
-            .finish_non_exhaustive()
-    }
-}
-
-impl StackTreeNode {
-    /// Create a new node with the given parent and value.
-    fn new(parent: StackTreeNode, value: SpanValue) -> Self {
-        StackTreeNodeInner {
-            parent: Some(parent),
-            children: Default::default(),
-            start_time: Instant::now(),
-            value,
-        }
-        .into()
-    }
-
-    /// Create a new root node with the given value.
-    fn root(value: SpanValue) -> Self {
-        StackTreeNodeInner {
-            parent: None,
-            children: Default::default(),
-            start_time: Instant::now(),
-            value,
-        }
-        .into()
-    }
-
-    /// Build a new node with the given value and mount it as a child of the current node.
-    fn add_child(&self, value: SpanValue) -> Self {
-        let child = Self::new(self.clone(), value);
-        self.mount_child(child.clone());
-        child
-    }
-
-    /// Mount the given child as a child of the current node.
-    fn mount_child(&self, child: Self) {
-        let mut inner = self.inner.borrow_mut();
-        assert!(inner.children.insert(child), "child already mounted");
-    }
-
-    /// Unmount the current node from its parent. Panics if the parent does not have this child.
-    fn unmount_from_parent(&self) {
-        assert!(self.unmount_from_parent_unchecked(), "child not exists");
-    }
-
-    /// Unmount the current node from its parent. Returns whether this child exists.
-    fn unmount_from_parent_unchecked(&self) -> bool {
-        let parent = self.parent();
-        let mut parent_inner = parent.inner.borrow_mut();
-        parent_inner.children.remove(self)
-    }
-
-    /// Returns the parent node of this node. Panics when called on the root node.
-    fn parent(&self) -> Self {
-        self.inner.borrow().parent.clone().unwrap()
-    }
-
-    /// Set the parent node of this node.
-    fn set_parent(&self, parent: Self) {
-        let mut inner = self.inner.borrow_mut();
-        inner.parent = Some(parent);
-    }
-
-    /// Returns whether this node has the given child.
-    fn has_child(&self, child: &StackTreeNode) -> bool {
-        self.inner.borrow().children.contains(child)
-    }
-
-    /// Clears the references of the children of this node.
-    fn clear_children(&self) {
-        self.inner.borrow_mut().children.clear();
-    }
-}
 
 /// The report of a stack trace.
 #[derive(Debug, Clone)]
@@ -188,24 +66,46 @@ impl std::fmt::Display for StackTraceReport {
     }
 }
 
+/// Node in the span tree.
+#[derive(Debug)]
+struct SpanNode {
+    span: SpanValue,
+    // TODO: may use a more efficient timing mechanism
+    start_time: Instant,
+}
+
+impl SpanNode {
+    /// Create a new node with the given value.
+    fn new(span: SpanValue) -> Self {
+        Self {
+            span,
+            start_time: Instant::now(),
+        }
+    }
+}
+
+type ContextId = u64;
+
 #[derive(Debug)]
 struct TraceContext {
-    id: u64,
-    root: StackTreeNode,
-    current: StackTreeNode,
+    id: ContextId,
+    arena: Arena<SpanNode>,
+    root: NodeId,
+    current: NodeId,
 }
 
 impl std::fmt::Display for TraceContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn fmt_node(
             f: &mut std::fmt::Formatter<'_>,
-            node: &StackTreeNode,
+            arena: &Arena<SpanNode>,
+            node: NodeId,
             depth: usize,
         ) -> std::fmt::Result {
             f.write_str(&" ".repeat(depth * 2))?;
 
-            let inner = node.inner.borrow();
-            f.write_str(inner.value.as_ref())?;
+            let inner = arena[node].get();
+            f.write_str(inner.span.as_ref())?;
 
             let elapsed = inner.start_time.elapsed();
             f.write_fmt(format_args!(
@@ -219,19 +119,17 @@ impl std::fmt::Display for TraceContext {
             ))?;
 
             f.write_char('\n')?;
-            for child in inner
-                .children
-                .iter()
-                .sorted_by(|a, b| a.inner.borrow().value.cmp(&b.inner.borrow().value))
+            for child in node
+                .children(arena)
+                .sorted_by(|&a, &b| arena[a].get().span.cmp(&arena[b].get().span))
             {
-                assert_eq!(&child.parent(), node);
-                fmt_node(f, child, depth + 1)?;
+                fmt_node(f, arena, child, depth + 1)?;
             }
 
             Ok(())
         }
 
-        fmt_node(f, &self.root, 0)
+        fmt_node(f, &self.arena, self.root, 0)
     }
 }
 
@@ -239,14 +137,23 @@ impl TraceContext {
     /// Create a new stack trace context with the given root span.
     fn new(root_span: SpanValue) -> Self {
         static ID: AtomicU64 = AtomicU64::new(0);
+        let id = ID.fetch_add(1, Ordering::SeqCst);
 
-        let root = StackTreeNode::root(root_span);
+        let mut arena = Arena::new();
+        let root = arena.new_node(SpanNode::new(root_span));
 
         Self {
-            id: ID.fetch_add(1, Ordering::SeqCst),
-            root: root.clone(),
+            id,
+            arena,
+            root,
             current: root,
         }
+    }
+
+    /// Get the count of active span nodes in this context.
+    #[cfg_attr(not(test), expect(dead_code))]
+    fn active_node_count(&self) -> usize {
+        self.arena.iter().filter(|n| !n.is_removed()).count()
     }
 
     /// Get the report of the current state of the stack trace.
@@ -258,39 +165,58 @@ impl TraceContext {
         }
     }
 
-    /// Push a new span as a child of current span. Returns the new current span.
-    fn push(&mut self, span: SpanValue) -> StackTreeNode {
-        let new_current_node = self.current.add_child(span);
-        self.current = new_current_node.clone();
-        new_current_node
+    /// Push a new span as a child of current span, used for future firstly polled.
+    ///
+    /// Returns the new current span.
+    fn push(&mut self, span: SpanValue) -> NodeId {
+        let child = self.arena.new_node(SpanNode::new(span));
+        self.current.append(child, &mut self.arena);
+        self.current = child;
+        child
     }
 
-    /// Step in the current span to the given child.
+    /// Step in the current span to the given child, used for future polled again.
     ///
     /// If the child is not actually a child of the current span, it means we are using a new future
-    /// to poll it, so we need to unmount it from the previous parent, and mount it to the current
+    /// to poll it, so we need to detach it from the previous parent, and attach it to the current
     /// span.
-    fn step_in(&mut self, child: &StackTreeNode) {
-        if !self.current.has_child(child) {
-            // The previous parent might be already dropped, so uncheck here.
-            child.unmount_from_parent_unchecked();
-            child.set_parent(self.current.clone());
-            self.current.mount_child(child.clone());
+    fn step_in(&mut self, child: NodeId) {
+        if !self.current.children(&self.arena).contains(&child) {
+            // Actually we can always call this even if `child` is already a child of `current`.
+            self.current.append(child, &mut self.arena);
         }
-        assert!(self.current.has_child(child));
-        self.current = child.clone();
+        self.current = child;
     }
 
-    /// Pop the current span to the parent.
+    /// Pop the current span to the parent, used for future ready.
+    ///
+    /// Note that there might still be some children of this node, like `select_stream.next()`.
+    /// The children might be polled again later, and will be attached as the children of a new
+    /// span.
     fn pop(&mut self) {
-        let parent = self.current.parent();
-        self.current.unmount_from_parent();
+        let parent = self.arena[self.current]
+            .parent()
+            .expect("the root node should not be popped");
+        self.remove_and_detach(self.current);
         self.current = parent;
     }
 
-    /// Step out the current span to the parent.
+    /// Step out the current span to the parent, used for future pending.
     fn step_out(&mut self) {
-        self.current = self.current.parent();
+        let parent = self.arena[self.current]
+            .parent()
+            .expect("the root node should not be stepped out");
+        self.current = parent;
+    }
+
+    /// Remove the current span and detach the children, used for future aborting.
+    ///
+    /// The children might be polled again later, and will be attached as the children of a new
+    /// span.
+    fn remove_and_detach(&mut self, node: NodeId) {
+        node.detach(&mut self.arena);
+        // Removing detached `node` makes children detached.
+        node.remove(&mut self.arena);
     }
 }
 
@@ -298,7 +224,7 @@ tokio::task_local! {
     static TRACE_CONTEXT: RefCell<TraceContext>
 }
 
-fn with_mut_context<F, R>(f: F) -> R
+fn with_context<F, R>(f: F) -> R
 where
     F: FnOnce(RefMut<TraceContext>) -> R,
 {
@@ -308,28 +234,33 @@ where
     })
 }
 
+/// State for stack traced future.
+enum StackTracedState {
+    Initial(SpanValue),
+    Polled {
+        /// The node associated with this future.
+        this_node: NodeId,
+        // The id of the context where this future is first polled.
+        this_context: ContextId,
+    },
+    Ready,
+}
+
+/// The future for [`StackTrace::stack_trace`].
 #[pin_project(PinnedDrop)]
 pub struct StackTraced<F: Future> {
     #[pin]
     inner: F,
 
-    /// The span of this traced future, will be taken after first poll.
-    span: Option<SpanValue>,
-
-    /// The node associated with this future, will be set after first poll.
-    this_node: Option<StackTreeNode>,
-
-    /// The id of the context where this future is first polled.
-    this_context_id: Option<u64>,
+    /// The state of this traced future.
+    state: StackTracedState,
 }
 
 impl<F: Future> StackTraced<F> {
     fn new(inner: F, span: impl Into<SpanValue>) -> Self {
         Self {
             inner,
-            span: Some(span.into()),
-            this_node: None,
-            this_context_id: None,
+            state: StackTracedState::Initial(span.into()),
         }
     }
 }
@@ -340,60 +271,73 @@ impl<F: Future> Future for StackTraced<F> {
     // TODO: may disable based on features
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-
-        let current_context_id = TRACE_CONTEXT.try_with(|c| c.borrow().id);
-        match (current_context_id, &this.this_context_id) {
-            // First polled
-            (Ok(id), None) => *this.this_context_id = Some(id),
-            // Context correct
-            (Ok(current_id), Some(this_id)) if current_id == *this_id => {}
-            // Context changed
-            (Ok(_), Some(_)) => {
-                tracing::warn!("stack traced future is not the same context as it was first polled, are we sent to another traced task?");
-                return this.inner.poll(cx);
-            }
-            // Out of context
-            (Err(_), Some(_)) => {
-                tracing::warn!("stack traced future is not in a traced context, while it was when first polled, are we sent to another task?");
-                return this.inner.poll(cx);
-            }
-            // Not in a context ever
-            (Err(_), None) => return this.inner.poll(cx),
-        };
+        let current_context = TRACE_CONTEXT.try_with(|c| c.borrow().id);
 
         // For assertion.
-        let old_current = with_mut_context(|c| c.current.clone());
+        let old_current = TRACE_CONTEXT.try_with(|c| c.borrow().current);
 
-        let this_node = with_mut_context(|mut c| match this.this_node {
-            // First polled, push a new span to the context.
-            None => this
-                .this_node
-                .insert(c.push(this.span.take().expect("node should only be created once"))),
-            // Polled before, just step in.
-            Some(this_node) => {
-                c.step_in(this_node);
-                this_node
+        let this_node = match this.state {
+            StackTracedState::Initial(span) => {
+                match current_context {
+                    // First polled
+                    Ok(current_context) => {
+                        // First polled, push a new span to the context.
+                        let node = with_context(|mut c| c.push(std::mem::take(span)));
+                        *this.state = StackTracedState::Polled {
+                            this_node: node,
+                            this_context: current_context,
+                        };
+                        node
+                    }
+                    // Not in a context
+                    Err(_) => return this.inner.poll(cx),
+                }
             }
-        });
+            StackTracedState::Polled {
+                this_node,
+                this_context,
+            } => {
+                match current_context {
+                    // Context correct
+                    Ok(current_context) if current_context == *this_context => {
+                        // Polled before, just step in.
+                        with_context(|mut c| c.step_in(*this_node));
+                        *this_node
+                    }
+                    // Context changed
+                    Ok(_) => {
+                        tracing::warn!("stack traced future is polled in a different context as it was first polled, won't be traced now");
+                        return this.inner.poll(cx);
+                    }
+                    // Out of context
+                    Err(_) => {
+                        tracing::warn!("stack traced future is not polled in a traced context, while it was when first polled, won't be traced now");
+                        return this.inner.poll(cx);
+                    }
+                }
+            }
+            StackTracedState::Ready => unreachable!("the traced future should always be fused"),
+        };
+
+        // The current node must be the this_node.
+        assert_eq!(this_node, with_context(|c| c.current));
 
         let r = match this.inner.poll(cx) {
             // The future is ready, clean-up this span by popping from the context.
             Poll::Ready(output) => {
-                assert_eq!(this_node, &with_mut_context(|c| c.current.clone()));
-                with_mut_context(|mut c| c.pop());
-                // Show that the state is clean when dropping this future.
-                *this.this_node = None;
+                with_context(|mut c| c.pop());
+                *this.state = StackTracedState::Ready;
                 Poll::Ready(output)
             }
             // Still pending, just step out.
             Poll::Pending => {
-                with_mut_context(|mut c| c.step_out());
+                with_context(|mut c| c.step_out());
                 Poll::Pending
             }
         };
 
         // The current node must be the same as we started with.
-        assert_eq!(old_current, with_mut_context(|c| c.current.clone()));
+        assert_eq!(old_current.unwrap(), with_context(|c| c.current));
 
         r
     }
@@ -403,16 +347,27 @@ impl<F: Future> Future for StackTraced<F> {
 impl<F: Future> PinnedDrop for StackTraced<F> {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
+        let current_context = TRACE_CONTEXT.try_with(|c| c.borrow().id);
 
-        match this.this_node {
-            Some(this_node) => {
-                // Our parent may have been dropped already, so uncheck here.
-                this_node.unmount_from_parent_unchecked();
-                // Clear the references of the children to avoid cyclic references.
-                // TODO: can we use `Weak` here?
-                this_node.clear_children();
-            }
-            None => {} // not polled or ready
+        match this.state {
+            StackTracedState::Polled {
+                this_node,
+                this_context,
+            } => match current_context {
+                // Context correct
+                Ok(current_context) if current_context == *this_context => {
+                    with_context(|mut c| c.remove_and_detach(*this_node));
+                }
+                // Context changed
+                Ok(_) => {
+                    tracing::warn!("stack traced future is dropped in a different context as it was first polled, cannot clean up!");
+                }
+                // Out of context
+                Err(_) => {
+                    tracing::warn!("stack traced future is not in a traced context, while it was when first polled, cannot clean up!");
+                }
+            },
+            StackTracedState::Initial(_) | StackTracedState::Ready => {}
         }
     }
 }
@@ -474,7 +429,7 @@ pub async fn stack_traced<F: Future>(
                     let mut interval = tokio::time::interval(interval);
                     loop {
                         interval.tick().await;
-                        let new_trace = TRACE_CONTEXT.with(|c| c.borrow().to_report());
+                        let new_trace = with_context(|c| c.to_report());
                         match trace_sender.send(new_trace) {
                             Ok(_) => {}
                             Err(e) => {
@@ -495,122 +450,4 @@ pub async fn stack_traced<F: Future>(
 }
 
 #[cfg(test)]
-mod tests {
-    use futures::future::{join_all, select_all};
-    use futures::StreamExt;
-    use futures_async_stream::stream;
-    use tokio::sync::watch;
-
-    use super::*;
-
-    async fn sleep(time: u64) {
-        tokio::time::sleep(std::time::Duration::from_millis(time)).await;
-        println!("slept {time}ms");
-    }
-
-    async fn sleep_nested() {
-        join_all([
-            sleep(1500).stack_trace("sleep nested 1500"),
-            sleep(2500).stack_trace("sleep nested 2500"),
-        ])
-        .await;
-    }
-
-    async fn multi_sleep() {
-        sleep(400).await;
-
-        sleep(800).stack_trace("sleep another in multi slepp").await;
-    }
-
-    #[stream(item = ())]
-    async fn stream1() {
-        loop {
-            sleep(150).await;
-            yield;
-        }
-    }
-
-    #[stream(item = ())]
-    async fn stream2() {
-        sleep(200).await;
-        yield;
-        join_all([
-            sleep(400).stack_trace("sleep nested 400"),
-            sleep(600).stack_trace("sleep nested 600"),
-        ])
-        .stack_trace("sleep nested another in stream 2")
-        .await;
-        yield;
-    }
-
-    async fn hello() {
-        async move {
-            // Join
-            join_all([
-                sleep(1000).boxed().stack_trace(format!("sleep {}", 1000)),
-                sleep(2000).boxed().stack_trace("sleep 2000"),
-                sleep_nested().boxed().stack_trace("sleep nested"),
-                multi_sleep().boxed().stack_trace("multi sleep"),
-            ])
-            .await;
-
-            // Join another
-            join_all([
-                sleep(1200).stack_trace("sleep 1200"),
-                sleep(2200).stack_trace("sleep 2200"),
-            ])
-            .await;
-
-            // Cancel
-            select_all([
-                sleep(666).boxed().stack_trace("sleep 666"),
-                sleep_nested()
-                    .boxed()
-                    .stack_trace("sleep nested (should be cancelled)"),
-            ])
-            .await;
-
-            // Check whether cleaned up
-            sleep(233).stack_trace("sleep 233").await;
-
-            // Check stream next drop
-            {
-                let mut stream1 = stream1().fuse().boxed();
-                let mut stream2 = stream2().fuse().boxed();
-                let mut count = 0;
-
-                'outer: loop {
-                    tokio::select! {
-                        _ = stream1.next().stack_trace(format!("stream1 next {count}")) => {},
-                        r = stream2.next().stack_trace(format!("stream2 next {count}")) => {
-                            if r.is_none() { break 'outer }
-                        },
-                    }
-                    count += 1;
-                }
-            }
-
-            // Check whether cleaned up
-            sleep(233).stack_trace("sleep 233").await;
-
-            // TODO: add tests on sending the future to another task or context.
-        }
-        .stack_trace("hello")
-        .await
-    }
-
-    #[tokio::test]
-    async fn test_stack_trace_display() {
-        let (watch_tx, mut watch_rx) = watch::channel(Default::default());
-
-        let collector = tokio::spawn(async move {
-            while watch_rx.changed().await.is_ok() {
-                println!("{}", &*watch_rx.borrow());
-            }
-        });
-
-        stack_traced(hello(), "actor 233", watch_tx, Duration::from_millis(1000)).await;
-
-        collector.await.unwrap();
-    }
-}
+mod tests;
