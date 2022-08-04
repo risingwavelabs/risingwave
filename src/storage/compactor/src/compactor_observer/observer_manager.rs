@@ -48,17 +48,16 @@ impl ObserverNodeImpl for CompactorObserverNode {
                 panic!("error type notification");
             }
         }
+        assert!(
+            resp.version > self.version,
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            self.version
+        );
+        self.version = resp.version;
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        if self.version > resp.version {
-            return Err(ErrorCode::InternalError(format!(
-                "the SnapshotVersion is incorrect local {} snapshot {}",
-                self.version, resp.version
-            ))
-            .into());
-        }
-
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 for table in snapshot.table {
