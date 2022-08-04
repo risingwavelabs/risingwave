@@ -25,6 +25,7 @@ use futures::future::try_join_all;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
+use super::MultipartUploadHandle;
 use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
 
 pub(super) mod utils {
@@ -182,6 +183,13 @@ impl ObjectStore for DiskObjectStore {
             .await
             .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
         Ok(())
+    }
+
+    async fn create_multipart_upload(
+        &self,
+        _path: &str,
+    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>> {
+        unimplemented!("disk object store does not support multipart upload for now");
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {

@@ -12,17 +12,99 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use tokio::sync::Mutex;
 
-use super::{BlockLocation, ObjectError, ObjectMetadata};
+use super::{BlockLocation, MultipartUploadHandle, ObjectError, ObjectMetadata, PartId};
 use crate::object::{Bytes, ObjectResult, ObjectStore};
 
+/// S3 multipart upload handle.
+/// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
+struct UploadHandle {
+    client: Arc<Client>,
+    bucket: String,
+    /// The key of the object.
+    key: String,
+    /// The identifier of multipart upload task for S3.
+    upload_id: String,
+    /// Parts that are already uploaded to S3.
+    /// The bool member indicates whether the upload is finished.
+    uploaded_parts: Mutex<(bool, BTreeMap<i32, UploadPartOutput>)>,
+}
+
+#[async_trait::async_trait]
+impl MultipartUploadHandle for UploadHandle {
+    async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
+        fail_point!("s3_upload_part_err", |_| Err(ObjectError::internal(
+            "s3_upload_part_err"
+        )));
+        let mut upload_guard = self.uploaded_parts.lock().await;
+        if !upload_guard.0 {
+            let part_id = part_id as i32;
+            let upload_output = self
+                .client
+                .upload_part()
+                .bucket(&self.bucket)
+                .key(&self.key)
+                .upload_id(&self.upload_id)
+                .part_number(part_id)
+                .body(aws_sdk_s3::types::ByteStream::from(part))
+                .send()
+                .await?;
+            upload_guard.1.insert(part_id, upload_output);
+        } else {
+            panic!("an upload task must be created first before the parts are uploaded");
+        }
+        Ok(())
+    }
+
+    async fn finish(&self) -> ObjectResult<()> {
+        fail_point!("s3_finish_multipart_upload", |_| Err(
+            ObjectError::internal("s3_finish_multipart_upload")
+        ));
+        let mut upload_guard = self.uploaded_parts.lock().await;
+        if !upload_guard.0 {
+            self.client
+                .complete_multipart_upload()
+                .bucket(&self.bucket)
+                .key(&self.key)
+                .upload_id(&self.upload_id)
+                .multipart_upload(
+                    CompletedMultipartUpload::builder()
+                        .set_parts(Some(
+                            upload_guard
+                                .1
+                                .iter()
+                                .map(|(part_id, output)| {
+                                    CompletedPart::builder()
+                                        .set_e_tag(output.e_tag.clone())
+                                        .set_part_number(Some(*part_id))
+                                        .build()
+                                })
+                                .collect_vec(),
+                        ))
+                        .build(),
+                )
+                .send()
+                .await?;
+            upload_guard.0 = true;
+        } else {
+            panic!("an upload task must be created first before finishing it");
+        }
+        Ok(())
+    }
+}
 /// Object store with S3 backend
 pub struct S3ObjectStore {
-    client: Client,
+    client: Arc<Client>,
     bucket: String,
 }
 
@@ -40,6 +122,29 @@ impl ObjectStore for S3ObjectStore {
             .send()
             .await?;
         Ok(())
+    }
+
+    async fn create_multipart_upload(
+        &self,
+        path: &str,
+    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>> {
+        fail_point!("s3_create_multipart_upload_err", |_| Err(
+            ObjectError::internal("s3 upload error")
+        ));
+        let resp = self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.bucket)
+            .key(path)
+            .send()
+            .await?;
+        Ok(Box::new(UploadHandle {
+            client: self.client.clone(),
+            bucket: self.bucket.clone(),
+            key: path.to_string(),
+            upload_id: resp.upload_id.unwrap(),
+            uploaded_parts: Default::default(),
+        }))
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
@@ -166,7 +271,7 @@ impl S3ObjectStore {
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String) -> Self {
         let shared_config = aws_config::load_from_env().await;
-        let client = Client::new(&shared_config);
+        let client = Arc::new(Client::new(&shared_config));
 
         Self { client, bucket }
     }
@@ -190,7 +295,7 @@ impl S3ObjectStore {
             None,
         ));
         let config = builder.build();
-        let client = Client::from_conf(config);
+        let client = Arc::new(Client::from_conf(config));
         Self {
             client,
             bucket: bucket.to_string(),

@@ -22,7 +22,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use super::{ObjectError, ObjectResult};
+use super::{MultipartUploadHandle, ObjectError, ObjectResult};
 use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 
 /// In-memory object storage, useful for testing.
@@ -54,6 +54,13 @@ impl ObjectStore for InMemObjectStore {
                 .insert(path.into(), (metadata, obj));
             Ok(())
         }
+    }
+
+    async fn create_multipart_upload(
+        &self,
+        _path: &str,
+    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>> {
+        unimplemented!("memory object store does not support multipart upload for now");
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
