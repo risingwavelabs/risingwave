@@ -29,7 +29,7 @@ use crate::catalog::{DatabaseId, SchemaId};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
-use crate::session::{OptimizerContext, OptimizerContextRef};
+use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn make_prost_sink(
@@ -52,30 +52,12 @@ pub(crate) fn make_prost_sink(
     })
 }
 
-fn gen_sink_plan(
+pub fn gen_sink_plan(
+    session: &SessionImpl,
     context: OptimizerContextRef,
-    associated_table_name: String,
-    associated_table_desc: TableDesc,
-    properties: HashMap<String, String>,
-) -> Result<PlanRef> {
-    let scan_node = StreamTableScan::new(LogicalScan::create(
-        associated_table_name,
-        false,
-        Rc::new(associated_table_desc),
-        vec![],
-        context,
-    ))
-    .into();
-
-    Ok(StreamSink::new(scan_node, properties).into())
-}
-
-pub async fn handle_create_sink(
-    context: OptimizerContext,
-    stmt: CreateSinkStatement,
-) -> Result<PgResponse> {
+    stmt: CreateSinkStatement
+) -> Result<(PlanRef, ProstSink)> {
     let with_properties = handle_with_properties("create_sink", stmt.with_properties.0)?;
-    let session = context.session_ctx.clone();
 
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
 
@@ -123,16 +105,42 @@ pub async fn handle_create_sink(
         session.user_id(),
     )?;
 
-    let graph = {
-        let plan = gen_sink_plan(
+    let scan_node = StreamTableScan::new(LogicalScan::create(
+        associated_table_name,
+        false,
+        Rc::new(associated_table_desc),
+        vec![],
+        context,
+    ))
+    .into();
+
+    let plan: PlanRef = StreamSink::new(scan_node, with_properties).into();
+
+    let ctx = plan.ctx();
+    let explain_trace = ctx.is_explain_trace();
+    if explain_trace {
+        ctx.trace("Create Sink:".to_string());
+        ctx.trace(plan.explain_to_string().unwrap());
+    }
+
+    Ok((plan, sink))
+}
+
+pub async fn handle_create_sink(
+    context: OptimizerContext,
+    stmt: CreateSinkStatement,
+) -> Result<PgResponse> {
+    let session = context.session_ctx.clone();
+
+    let (sink, graph) = {
+        let (plan, sink) = gen_sink_plan(
+            &session,
             context.into(),
-            associated_table_name,
-            associated_table_desc,
-            with_properties.clone(),
+            stmt
         )?;
         let stream_plan = plan.to_stream_prost();
 
-        StreamFragmenter::build_graph(stream_plan)
+        (sink, StreamFragmenter::build_graph(stream_plan))
     };
 
     let catalog_writer = session.env().catalog_writer();
