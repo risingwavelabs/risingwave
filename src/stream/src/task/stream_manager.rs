@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use stack_trace::{TraceContextManager, TraceReport};
+use stack_trace::{StackTraceManager, StackTraceReport};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -71,7 +71,7 @@ pub struct LocalStreamManagerCore {
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
 
-    trace_context_manager: TraceContextManager<ActorId>,
+    trace_context_manager: StackTraceManager<ActorId>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -163,7 +163,7 @@ impl LocalStreamManager {
         }
     }
 
-    pub fn get_actor_traces(&self) -> HashMap<ActorId, TraceReport> {
+    pub fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
         let mut core = self.core.lock();
         core.trace_context_manager
             .get_all()
@@ -563,7 +563,7 @@ impl LocalStreamManagerCore {
 
             self.handles.insert(
                 actor_id,
-                tokio::spawn(monitor.instrument(stack_trace::monitored(
+                tokio::spawn(monitor.instrument(stack_trace::stack_traced(
                     async move {
                         // unwrap the actor result to panic on error
                         actor.run().await.expect("actor failed");

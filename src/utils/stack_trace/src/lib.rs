@@ -4,11 +4,12 @@
 
 use std::borrow::Cow;
 use std::cell::{RefCell, RefMut};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Write};
 use std::hash::Hash;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -21,11 +22,12 @@ use tokio::sync::watch;
 pub type SpanValue = Cow<'static, str>;
 
 #[derive(Clone)]
-pub struct StackTreeNode {
+struct StackTreeNode {
     inner: Rc<RefCell<StackTreeNodeInner>>,
 }
 
-// SAFETY: we'll never clone the `Rc` in multiple threads.
+// SAFETY: by checking the id from the context against the id in the future, we ensure that this
+// struct won't be touched if it's moved to another thread.
 unsafe impl Send for StackTreeNode {}
 
 impl PartialEq for StackTreeNode {
@@ -34,7 +36,6 @@ impl PartialEq for StackTreeNode {
     }
 }
 impl Eq for StackTreeNode {}
-
 impl Hash for StackTreeNode {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.inner.as_ptr().hash(state);
@@ -52,6 +53,7 @@ impl From<StackTreeNodeInner> for StackTreeNode {
 struct StackTreeNodeInner {
     parent: Option<StackTreeNode>,
     children: HashSet<StackTreeNode>,
+    // TODO: may use a more efficient timing mechanism
     start_time: Instant,
     value: SpanValue,
 }
@@ -72,6 +74,7 @@ impl Debug for StackTreeNodeInner {
 }
 
 impl StackTreeNode {
+    /// Create a new node with the given parent and value.
     fn new(parent: StackTreeNode, value: SpanValue) -> Self {
         StackTreeNodeInner {
             parent: Some(parent),
@@ -82,6 +85,7 @@ impl StackTreeNode {
         .into()
     }
 
+    /// Create a new root node with the given value.
     fn root(value: SpanValue) -> Self {
         StackTreeNodeInner {
             parent: None,
@@ -92,76 +96,84 @@ impl StackTreeNode {
         .into()
     }
 
+    /// Build a new node with the given value and mount it as a child of the current node.
     fn add_child(&self, value: SpanValue) -> Self {
         let child = Self::new(self.clone(), value);
         self.mount_child(child.clone());
         child
     }
 
+    /// Mount the given child as a child of the current node.
     fn mount_child(&self, child: Self) {
         let mut inner = self.inner.borrow_mut();
         assert!(inner.children.insert(child), "child already mounted");
     }
 
-    fn delete_from_parent(&self) {
-        assert!(self.delete_from_parent_unchecked(), "child not exists");
+    /// Unmount the current node from its parent. Panics if the parent does not have this child.
+    fn unmount_from_parent(&self) {
+        assert!(self.unmount_from_parent_unchecked(), "child not exists");
     }
 
-    fn delete_from_parent_unchecked(&self) -> bool {
+    /// Unmount the current node from its parent. Returns whether this child exists.
+    fn unmount_from_parent_unchecked(&self) -> bool {
         let parent = self.parent();
         let mut parent_inner = parent.inner.borrow_mut();
         parent_inner.children.remove(self)
     }
 
+    /// Returns the parent node of this node. Panics when called on the root node.
     fn parent(&self) -> Self {
         self.inner.borrow().parent.clone().unwrap()
     }
 
+    /// Set the parent node of this node.
     fn set_parent(&self, parent: Self) {
         let mut inner = self.inner.borrow_mut();
         inner.parent = Some(parent);
     }
 
+    /// Returns whether this node has the given child.
     fn has_child(&self, child: &StackTreeNode) -> bool {
         self.inner.borrow().children.contains(child)
     }
 
+    /// Clears the references of the children of this node.
     fn clear_children(&self) {
         self.inner.borrow_mut().children.clear();
     }
 }
 
+/// The report of a stack trace.
 #[derive(Debug, Clone)]
-pub struct TraceReport {
+pub struct StackTraceReport {
     pub report: String,
-    pub time: Instant,
+    pub capture_time: Instant,
 }
 
-impl Default for TraceReport {
+impl Default for StackTraceReport {
     fn default() -> Self {
         Self {
             report: "<not reported>".to_string(),
-            time: Instant::now(),
+            capture_time: Instant::now(),
         }
     }
 }
 
-impl std::fmt::Display for TraceReport {
+impl std::fmt::Display for StackTraceReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "[captured {:?} ago]\n{}",
-            self.time.elapsed(),
+            self.capture_time.elapsed(),
             self.report
         )
     }
 }
 
-// TODO: may use a better name
 #[derive(Debug)]
-pub struct TraceContext {
-    pub root: StackTreeNode,
-
+struct TraceContext {
+    id: u64,
+    root: StackTreeNode,
     current: StackTreeNode,
 }
 
@@ -206,32 +218,44 @@ impl std::fmt::Display for TraceContext {
 }
 
 impl TraceContext {
+    /// Create a new stack trace context with the given root span.
     fn new(root_span: SpanValue) -> Self {
+        static ID: AtomicU64 = AtomicU64::new(0);
+
         let root = StackTreeNode::root(root_span);
 
         Self {
+            id: ID.fetch_add(1, Ordering::SeqCst),
             root: root.clone(),
             current: root,
         }
     }
 
-    fn to_report(&self) -> TraceReport {
+    /// Get the report of the current state of the stack trace.
+    fn to_report(&self) -> StackTraceReport {
         let report = format!("{}", self);
-        TraceReport {
+        StackTraceReport {
             report,
-            time: Instant::now(),
+            capture_time: Instant::now(),
         }
     }
 
+    /// Push a new span as a child of current span. Returns the new current span.
     fn push(&mut self, span: SpanValue) -> StackTreeNode {
         let new_current_node = self.current.add_child(span);
         self.current = new_current_node.clone();
         new_current_node
     }
 
+    /// Step in the current span to the given child.
+    ///
+    /// If the child is not actually a child of the current span, it means we are using a new future
+    /// to poll it, so we need to unmount it from the previous parent, and mount it to the current
+    /// span.
     fn step_in(&mut self, child: &StackTreeNode) {
         if !self.current.has_child(child) {
-            child.delete_from_parent_unchecked();
+            // The previous parent might be already dropped, so uncheck here.
+            child.unmount_from_parent_unchecked();
             child.set_parent(self.current.clone());
             self.current.mount_child(child.clone());
         }
@@ -239,21 +263,24 @@ impl TraceContext {
         self.current = child.clone();
     }
 
-    fn pop(&mut self, child: &StackTreeNode) {
-        child.delete_from_parent();
-        self.current = child.parent();
+    /// Pop the current span to the parent.
+    fn pop(&mut self) {
+        let parent = self.current.parent();
+        self.current.unmount_from_parent();
+        self.current = parent;
     }
 
+    /// Step out the current span to the parent.
     fn step_out(&mut self) {
         self.current = self.current.parent();
     }
 }
 
 tokio::task_local! {
-    pub static TRACE_CONTEXT: RefCell<TraceContext>
+    static TRACE_CONTEXT: RefCell<TraceContext>
 }
 
-fn with_write_context<F, R>(f: F) -> R
+fn with_mut_context<F, R>(f: F) -> R
 where
     F: FnOnce(RefMut<TraceContext>) -> R,
 {
@@ -263,39 +290,19 @@ where
     })
 }
 
-fn context_exists() -> bool {
-    TRACE_CONTEXT.try_with(|_| {}).is_ok()
-}
-
-pub type TraceSender = watch::Sender<TraceReport>;
-pub type TraceReceiver = watch::Receiver<TraceReport>;
-
-#[derive(Default, Debug)]
-pub struct TraceContextManager<K: Ord> {
-    rxs: BTreeMap<K, TraceReceiver>,
-}
-
-impl<K: Ord + std::fmt::Debug> TraceContextManager<K> {
-    pub fn register(&mut self, key: K) -> TraceSender {
-        let (tx, rx) = watch::channel(Default::default());
-        self.rxs.try_insert(key, rx).unwrap();
-        tx
-    }
-
-    pub fn get_all(&mut self) -> impl Iterator<Item = (&K, watch::Ref<TraceReport>)> {
-        self.rxs.retain(|_, rx| rx.has_changed().is_ok());
-        self.rxs.iter_mut().map(|(k, v)| (k, v.borrow_and_update()))
-    }
-}
-
 #[pin_project(PinnedDrop)]
 pub struct StackTraced<F: Future> {
     #[pin]
     inner: F,
 
+    /// The span of this traced future, will be taken after first poll.
     span: Option<SpanValue>,
 
+    /// The node associated with this future, will be set after first poll.
     this_node: Option<StackTreeNode>,
+
+    /// The id of the context where this future is first polled.
+    this_context_id: Option<u64>,
 }
 
 impl<F: Future> StackTraced<F> {
@@ -304,6 +311,7 @@ impl<F: Future> StackTraced<F> {
             inner,
             span: Some(span.into()),
             this_node: None,
+            this_context_id: None,
         }
     }
 }
@@ -311,39 +319,63 @@ impl<F: Future> StackTraced<F> {
 impl<F: Future> Future for StackTraced<F> {
     type Output = F::Output;
 
-    // TODO: may disable on cfg(not(debug_assertions))
+    // TODO: may disable based on features
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
-        if !context_exists() {
-            return this.inner.poll(cx);
-        }
+        let current_context_id = TRACE_CONTEXT.try_with(|c| c.borrow().id);
+        match (current_context_id, &this.this_context_id) {
+            // First polled
+            (Ok(id), None) => *this.this_context_id = Some(id),
+            // Context correct
+            (Ok(current_id), Some(this_id)) if current_id == *this_id => {}
+            // Context changed
+            (Ok(_), Some(_)) => {
+                tracing::warn!("stack traced future is not the same context as it was first polled, are we sent to another traced task?");
+                return this.inner.poll(cx);
+            }
+            // Out of context
+            (Err(_), Some(_)) => {
+                tracing::warn!("stack traced future is not in a traced context, while it was when first polled, are we sent to another task?");
+                return this.inner.poll(cx);
+            }
+            // Not in a context ever
+            (Err(_), None) => return this.inner.poll(cx),
+        };
 
-        let old_current = with_write_context(|c| c.current.clone());
+        // For assertion.
+        let old_current = with_mut_context(|c| c.current.clone());
 
-        let this_node = with_write_context(|mut c| match this.this_node {
+        let this_node = with_mut_context(|mut c| match this.this_node {
+            // First polled, push a new span to the context.
+            None => this
+                .this_node
+                .insert(c.push(this.span.take().expect("node should only be created once"))),
+            // Polled before, just step in.
             Some(this_node) => {
                 c.step_in(this_node);
                 this_node
             }
-            None => this
-                .this_node
-                .insert(c.push(this.span.take().expect("node should only be created once"))),
         });
 
         let r = match this.inner.poll(cx) {
-            Poll::Ready(r) => {
-                with_write_context(|mut c| c.pop(this_node));
+            // The future is ready, clean-up this span by popping from the context.
+            Poll::Ready(output) => {
+                assert_eq!(this_node, &with_mut_context(|c| c.current.clone()));
+                with_mut_context(|mut c| c.pop());
+                // Show that the state is clean when dropping this future.
                 *this.this_node = None;
-                Poll::Ready(r)
+                Poll::Ready(output)
             }
+            // Still pending, just step out.
             Poll::Pending => {
-                with_write_context(|mut c| c.step_out());
+                with_mut_context(|mut c| c.step_out());
                 Poll::Pending
             }
         };
 
-        assert_eq!(old_current, with_write_context(|c| c.current.clone()));
+        // The current node must be the same as we started with.
+        assert_eq!(old_current, with_mut_context(|c| c.current.clone()));
 
         r
     }
@@ -352,14 +384,14 @@ impl<F: Future> Future for StackTraced<F> {
 #[pinned_drop]
 impl<F: Future> PinnedDrop for StackTraced<F> {
     fn drop(self: Pin<&mut Self>) {
-        // TODO: check we have correctly handle future cancellation here
-        // TODO: may use `Weak` here
         let this = self.project();
 
         match this.this_node {
             Some(this_node) => {
-                // Our parent may have been dropped already, so don't check existence.
-                this_node.delete_from_parent_unchecked();
+                // Our parent may have been dropped already, so uncheck here.
+                this_node.unmount_from_parent_unchecked();
+                // Clear the references of the children to avoid cyclic references.
+                // TODO: can we use `Weak` here?
                 this_node.clear_children();
             }
             None => {} // not polled or ready
@@ -370,12 +402,46 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
 impl<T> StackTrace for T where T: Future {}
 
 pub trait StackTrace: Future + Sized {
+    /// Wrap this future, so that we're able to check the stack trace and find where and why this
+    /// future is pending, with [`StackTraceReport`] and [`StackTraceManager`].
     fn stack_trace(self, span: impl Into<SpanValue>) -> Fuse<StackTraced<Self>> {
         StackTraced::new(self, span).fuse()
     }
 }
 
-pub async fn monitored<F: Future>(
+pub type TraceSender = watch::Sender<StackTraceReport>;
+pub type TraceReceiver = watch::Receiver<StackTraceReport>;
+
+#[derive(Default, Debug)]
+pub struct StackTraceManager<K> {
+    rxs: HashMap<K, TraceReceiver>,
+}
+
+impl<K> StackTraceManager<K>
+where
+    K: Hash + Eq + std::fmt::Debug,
+{
+    /// Register with given key. Returns a sender that should be provided to [`stack_traced`].
+    pub fn register(&mut self, key: K) -> TraceSender {
+        let (tx, rx) = watch::channel(Default::default());
+        self.rxs.try_insert(key, rx).unwrap();
+        tx
+    }
+
+    /// Get all trace reports registered in this manager.
+    ///
+    /// Note that the reports might not be updated if the traced task is doing some computation
+    /// heavy work and never yields, one may see the captured time to check this.
+    pub fn get_all(&mut self) -> impl Iterator<Item = (&K, watch::Ref<StackTraceReport>)> {
+        self.rxs.retain(|_, rx| rx.has_changed().is_ok());
+        self.rxs.iter_mut().map(|(k, v)| (k, v.borrow_and_update()))
+    }
+}
+
+/// Provide a stack tracing context with the `root_span` for the given future `f`. A reporter will
+/// be started in the current task and update the captured stack trace report through the given
+/// `trace_sender` every `interval` time.
+pub async fn stack_traced<F: Future>(
     f: F,
     root_span: impl Into<SpanValue>,
     trace_sender: TraceSender,
@@ -385,7 +451,7 @@ pub async fn monitored<F: Future>(
         .scope(
             RefCell::new(TraceContext::new(root_span.into())),
             async move {
-                let monitor = async move {
+                let reporter = async move {
                     let mut interval = tokio::time::interval(interval);
                     loop {
                         interval.tick().await;
@@ -393,7 +459,7 @@ pub async fn monitored<F: Future>(
                         match trace_sender.send(new_trace) {
                             Ok(_) => {}
                             Err(e) => {
-                                tracing::error!("Trace monitor error: failed to send trace: {}", e);
+                                tracing::error!("Trace report error: failed to send trace: {}", e);
                                 futures::future::pending().await
                             }
                         }
@@ -402,7 +468,7 @@ pub async fn monitored<F: Future>(
 
                 tokio::select! {
                     output = f => output,
-                    _ = monitor => unreachable!()
+                    _ = reporter => unreachable!()
                 }
             },
         )
@@ -507,6 +573,8 @@ mod tests {
 
             // Check whether cleaned up
             sleep(233).stack_trace("sleep 233").await;
+
+            // TODO: add tests on sending the future to another task or context.
         }
         .stack_trace("hello")
         .await
@@ -522,7 +590,7 @@ mod tests {
             }
         });
 
-        monitored(hello(), "actor 233", watch_tx, Duration::from_millis(1000)).await;
+        stack_traced(hello(), "actor 233", watch_tx, Duration::from_millis(1000)).await;
 
         collector.await.unwrap();
     }
