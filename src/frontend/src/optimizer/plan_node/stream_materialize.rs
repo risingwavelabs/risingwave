@@ -18,6 +18,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
+use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -155,6 +156,15 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
+        let ctx = input.ctx();
+        let properties: HashMap<_, _> = ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -167,7 +177,7 @@ impl StreamMaterialize {
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
-            properties: HashMap::default(),
+            properties,
             read_pattern_prefix_column: 0,
         };
 
