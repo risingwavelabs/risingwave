@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Sink as ProstSink;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -55,7 +54,7 @@ pub(crate) fn make_prost_sink(
 pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
-    stmt: CreateSinkStatement
+    stmt: CreateSinkStatement,
 ) -> Result<(PlanRef, ProstSink)> {
     let with_properties = handle_with_properties("create_sink", stmt.with_properties.0)?;
 
@@ -67,7 +66,7 @@ pub fn gen_sink_plan(
         let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
 
         check_privileges(
-            &session,
+            session,
             &vec![ObjectCheckItem::new(
                 schema.owner(),
                 Action::Create,
@@ -133,11 +132,7 @@ pub async fn handle_create_sink(
     let session = context.session_ctx.clone();
 
     let (sink, graph) = {
-        let (plan, sink) = gen_sink_plan(
-            &session,
-            context.into(),
-            stmt
-        )?;
+        let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
         let stream_plan = plan.to_stream_prost();
 
         (sink, StreamFragmenter::build_graph(stream_plan))
