@@ -31,7 +31,7 @@ use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::{StreamFragmenterV2};
 
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
@@ -159,8 +159,7 @@ pub async fn handle_create_table(
     let (graph, source, table) = {
         let (plan, source, table) =
             gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
-        let plan = plan.to_stream_prost();
-        let graph = StreamFragmenter::build_graph(plan);
+        let graph = StreamFragmenterV2::build_graph(plan);
 
         (graph, source, table)
     };

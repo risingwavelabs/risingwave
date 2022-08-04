@@ -29,6 +29,8 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
+use crate::optimizer::PlanRef;
+
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -69,6 +71,14 @@ impl BuildFragmentGraphState {
         let ret = self.next_table_id;
         self.next_table_id += 1;
         ret
+    }
+}
+
+pub struct StreamFragmenterV2 {}
+
+impl StreamFragmenterV2 {
+    pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+        StreamFragmenter::build_graph(plan_node.to_stream_prost())
     }
 }
 
