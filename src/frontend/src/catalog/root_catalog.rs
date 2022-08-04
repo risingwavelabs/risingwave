@@ -15,9 +15,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    CatalogVersion, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
-};
+use risingwave_common::catalog::{CatalogVersion, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
@@ -192,8 +190,13 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
     }
 
-    pub fn get_table_name_by_id(&self, table_id: TableId) -> Result<String> {
-        self.get_schema_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+    pub fn get_table_name_by_id(
+        &self,
+        table_id: TableId,
+        schema_name: &str,
+        db_name: &str,
+    ) -> Result<String> {
+        self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_table_name_by_id(table_id)
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()).into())
