@@ -893,12 +893,7 @@ impl ToStream for LogicalJoin {
                 return Err(nested_loop_join_error);
             };
 
-            let left = self
-                .left()
-                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.left().schema().len(),
-                    &[left_ref_index],
-                ))?;
+            let left = self.left().to_stream()?;
 
             let right = self
                 .right()
