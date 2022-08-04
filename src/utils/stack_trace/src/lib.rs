@@ -28,7 +28,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
@@ -43,14 +43,14 @@ pub type SpanValue = Arc<str>;
 #[derive(Debug, Clone)]
 pub struct StackTraceReport {
     pub report: String,
-    pub capture_time: Instant,
+    pub capture_time: std::time::Instant,
 }
 
 impl Default for StackTraceReport {
     fn default() -> Self {
         Self {
             report: "<not reported>".to_string(),
-            capture_time: Instant::now(),
+            capture_time: std::time::Instant::now(),
         }
     }
 }
@@ -70,8 +70,7 @@ impl std::fmt::Display for StackTraceReport {
 #[derive(Debug)]
 struct SpanNode {
     span: SpanValue,
-    // TODO: may use a more efficient timing mechanism
-    start_time: Instant,
+    start_time: coarsetime::Instant,
 }
 
 impl SpanNode {
@@ -79,7 +78,7 @@ impl SpanNode {
     fn new(span: SpanValue) -> Self {
         Self {
             span,
-            start_time: Instant::now(),
+            start_time: coarsetime::Instant::now(),
         }
     }
 }
@@ -107,7 +106,7 @@ impl std::fmt::Display for TraceContext {
             let inner = arena[node].get();
             f.write_str(inner.span.as_ref())?;
 
-            let elapsed = inner.start_time.elapsed();
+            let elapsed: Duration = inner.start_time.elapsed().into();
             f.write_fmt(format_args!(
                 " [{}{:?}]",
                 if depth > 0 && elapsed.as_secs() >= 1 {
@@ -176,7 +175,7 @@ impl TraceContext {
         let report = format!("{}", self);
         StackTraceReport {
             report,
-            capture_time: Instant::now(),
+            capture_time: std::time::Instant::now(),
         }
     }
 

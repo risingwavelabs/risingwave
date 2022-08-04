@@ -575,7 +575,7 @@ impl LocalStreamManagerCore {
                     },
                     format!("Actor {actor_id}"),
                     trace_sender,
-                    Duration::from_millis(500),
+                    Duration::from_millis(1000),
                 ))),
             );
 
