@@ -90,13 +90,7 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let (heartbeat_extra_info_source_tx, heartbeat_extra_info_source_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ExtraInfoSourceRef>();
-    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-        Some(heartbeat_extra_info_source_rx),
-    )];
+    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
@@ -140,10 +134,10 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
-        heartbeat_extra_info_source_tx
-            .send(storage.sstable_id_manager())
-            .unwrap_or_else(|_| panic!("heartbeat task should be alive"));
+        extra_info_sources.push(storage.sstable_id_manager());
         let memory_limiter = Arc::new(MemoryLimiter::new(
             storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
         ));
@@ -169,6 +163,12 @@ pub async fn compute_node_serve(
         }
         monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
     }
+
+    sub_tasks.push(MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+        extra_info_sources,
+    ));
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());

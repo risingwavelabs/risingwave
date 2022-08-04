@@ -89,7 +89,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(1000),
-            None,
+            vec![],
         );
         self.heartbeat_handle = Some(heartbeat_handle);
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);

@@ -41,7 +41,7 @@ use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
-use tokio::sync::mpsc::{Receiver, UnboundedReceiver};
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -319,16 +319,14 @@ impl MetaClient {
 
     /// Starts a heartbeat worker.
     ///
-    /// When sending heartbeat RPC, it also carries extra info from all extra info sources.
-    /// Extra info source is added via `extra_info_source_rx`.
+    /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
-        mut extra_info_source_rx: Option<UnboundedReceiver<ExtraInfoSourceRef>>,
+        extra_info_sources: Vec<ExtraInfoSourceRef>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
-            let mut extra_info_sources = vec![];
             let mut min_interval_ticker = tokio::time::interval(min_interval);
             loop {
                 tokio::select! {
@@ -338,11 +336,6 @@ impl MetaClient {
                     _ = &mut shutdown_rx => {
                         tracing::info!("Heartbeat loop is stopped");
                         return;
-                    }
-                }
-                if let Some(rx) = extra_info_source_rx.as_mut() {
-                    while let Ok(extra_info_source) = rx.try_recv() {
-                        extra_info_sources.push(extra_info_source);
                     }
                 }
                 let extra_info = extra_info_sources
