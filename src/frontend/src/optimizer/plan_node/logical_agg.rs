@@ -246,7 +246,7 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                     "{}",
                     InputRefDisplay {
                         input_ref: input,
-                        input_schema: &self.input_schema
+                        input_schema: self.input_schema
                     }
                 )?;
                 if idx != (that.inputs.len() - 1) {
