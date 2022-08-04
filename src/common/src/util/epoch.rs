@@ -31,7 +31,11 @@ const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 
 impl Epoch {
     pub fn now() -> Self {
-        Self(Self::physical_now() << EPOCH_PHYSICAL_SHIFT_BITS)
+        if cfg!(debug_assertions) {
+            Self(0)
+        } else {
+            Self(Self::physical_now() << EPOCH_PHYSICAL_SHIFT_BITS)
+        }
     }
 
     #[must_use]
@@ -41,6 +45,7 @@ impl Epoch {
         match physical_now.cmp(&prev_physical_time) {
             Ordering::Greater => Epoch(physical_now << EPOCH_PHYSICAL_SHIFT_BITS),
             Ordering::Equal => {
+                #[cfg(not(debug_assertions))]
                 tracing::warn!("New generate epoch is too close to the previous one.");
                 Epoch(self.0 + 1)
             }
@@ -59,11 +64,17 @@ impl Epoch {
         self.0 >> EPOCH_PHYSICAL_SHIFT_BITS
     }
 
+    #[cfg(not(debug_assertions))]
     fn physical_now() -> u64 {
         UNIX_SINGULARITY_DATE_EPOCH
             .elapsed()
             .expect("system clock set earlier than singularity date!")
             .as_millis() as u64
+    }
+
+    #[cfg(debug_assertions)]
+    fn physical_now() -> u64 {
+        0
     }
 
     /// Returns the epoch in real system time.
