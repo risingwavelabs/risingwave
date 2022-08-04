@@ -140,7 +140,7 @@
     select * from t1 join t2 using(v1);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v1, output: all }
+      BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v1, output: [t1.v1, t1.v2, t2.v3] }
         BatchExchange { order: [], dist: HashShard(t1.v1) }
           BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
         BatchExchange { order: [], dist: HashShard(t2.v1) }
@@ -152,9 +152,9 @@
     select * from ab join bc using(b) join ca using(c);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchHashJoin { type: Inner, predicate: bc.c = ca.c, output: all }
+      BatchHashJoin { type: Inner, predicate: bc.c = ca.c, output: [bc.c, ab.b, ab.a, ca.a] }
         BatchExchange { order: [], dist: HashShard(bc.c) }
-          BatchHashJoin { type: Inner, predicate: ab.b = bc.b, output: all }
+          BatchHashJoin { type: Inner, predicate: ab.b = bc.b, output: [ab.a, ab.b, bc.c] }
             BatchExchange { order: [], dist: HashShard(ab.b) }
               BatchScan { table: ab, columns: [ab.a, ab.b], distribution: SomeShard }
             BatchExchange { order: [], dist: HashShard(bc.b) }
@@ -189,15 +189,52 @@
       LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [v1, v2], predicate: (t1.v1 > 100:Int32) }
       LogicalScan { table: t2, output_columns: [t2.v1, t2.v2], required_columns: [v1, v2], predicate: (t2.v1 < 1000:Int32) }
 - sql: |
-    /* Left & right has same distribution. There should be no exchange below hash join */
+    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
     create table t(x int);
     create index i on t(x);
     select * from i join i as ii on i.x=ii.x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchHashJoin { type: Inner, predicate: i.x = i.x, output: all }
-        BatchScan { table: i, columns: [i.x], distribution: HashShard(i.x) }
-        BatchScan { table: i, columns: [i.x], distribution: HashShard(i.x) }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+- sql: |
+    /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
+    create table t(x int);
+    create index i on t(x);
+    select * from i join t on i.x=t.x;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchHashJoin { type: Inner, predicate: i.x = t.x, output: all }
+        BatchExchange { order: [], dist: HashShard(i.x) }
+          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+        BatchExchange { order: [], dist: HashShard(t.x) }
+          BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+- sql: |
+    /* Left & right has same HashShard distribution. There should be no exchange below hash join */
+    create table t(x int);
+    create index i on t(x);
+    select * from
+      (select * from i join i as ii using (x)) t1
+    full join
+      (select * from i join i as ii using (x)) t2
+    using (x);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [Coalesce(i.x, i.x)] }
+        BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
+          BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+          BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+            BatchExchange { order: [], dist: HashShard(i.x) }
+              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
 - sql: |
     /* Use lookup join */
     create table t1 (v1 int, v2 int);
@@ -218,7 +255,7 @@
     create table t3(v2 varchar);
     select * from t3, t1 join t2 using (v1);
   logical_plan: |
-    LogicalProject { exprs: [t3.v2, t1.v1, t2.v1] }
+    LogicalProject { exprs: [t1.v1, t3.v2] }
       LogicalJoin { type: Inner, on: true, output: all }
         LogicalScan { table: t3, columns: [t3._row_id, t3.v2] }
         LogicalJoin { type: Inner, on: (t1.v1 = t2.v1), output: all }
@@ -244,7 +281,7 @@
     create table t3(v2 varchar);
     select * from t3, t1 left join t2 using (v1);
   logical_plan: |
-    LogicalProject { exprs: [t3.v2, t1.v1, t2.v1] }
+    LogicalProject { exprs: [t1.v1, t3.v2] }
       LogicalJoin { type: Inner, on: true, output: all }
         LogicalScan { table: t3, columns: [t3._row_id, t3.v2] }
         LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1), output: all }
@@ -276,3 +313,195 @@
     select * from a join lateral (select * from b where a1 = b1);
   binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported,
     Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    create table c(y int);
+    select * from a natural join b natural join c;
+  logical_plan: |
+    LogicalProject { exprs: [a.x, c.y] }
+      LogicalJoin { type: Inner, on: true, output: all }
+        LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
+          LogicalScan { table: a, columns: [a._row_id, a.x] }
+          LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: c, columns: [c._row_id, c.y] }
+- sql: |
+    /* Ensure that natural joins can disambiguate columns */
+    create table a(x int);
+    create table b(x int);
+    select x, a.x, b.x from a natural join b;
+  logical_plan: |
+    LogicalProject { exprs: [a.x, a.x, b.x] }
+      LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
+        LogicalScan { table: a, columns: [a._row_id, a.x] }
+        LogicalScan { table: b, columns: [b._row_id, b.x] }
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    create table c(y int);
+    select * from a natural join b natural join c;
+  logical_plan: |
+    LogicalProject { exprs: [a.x, c.y] }
+      LogicalJoin { type: Inner, on: true, output: all }
+        LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
+          LogicalScan { table: a, columns: [a._row_id, a.x] }
+          LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: c, columns: [c._row_id, c.y] }
+- sql: |
+    /* Ensure that natural joins can disambiguate columns */
+    create table a(x int);
+    create table b(x int);
+    select x, a.x, b.x from a natural join b;
+  logical_plan: |
+    LogicalProject { exprs: [a.x, a.x, b.x] }
+      LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
+        LogicalScan { table: a, columns: [a._row_id, a.x] }
+        LogicalScan { table: b, columns: [b._row_id, b.x] }
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    create table c(y int);
+    select * from a natural join b natural join c;
+  logical_plan: |
+    LogicalProject { exprs: [a.x, c.y] }
+      LogicalJoin { type: Inner, on: true, output: all }
+        LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
+          LogicalScan { table: a, columns: [a._row_id, a.x] }
+          LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: c, columns: [c._row_id, c.y] }
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    select x from a natural join b;
+  logical_plan: |
+    LogicalProject { exprs: [a.x] }
+      LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
+        LogicalScan { table: a, columns: [a._row_id, a.x] }
+        LogicalScan { table: b, columns: [b._row_id, b.x] }
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    select x from a natural left join b;
+  logical_plan: |
+    LogicalProject { exprs: [a.x] }
+      LogicalJoin { type: LeftOuter, on: (a.x = b.x), output: all }
+        LogicalScan { table: a, columns: [a._row_id, a.x] }
+        LogicalScan { table: b, columns: [b._row_id, b.x] }
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    select x, a.x, b.x from a natural right join b;
+  logical_plan: |
+    LogicalProject { exprs: [b.x, a.x, b.x] }
+      LogicalJoin { type: RightOuter, on: (a.x = b.x), output: all }
+        LogicalScan { table: a, columns: [a._row_id, a.x] }
+        LogicalScan { table: b, columns: [b._row_id, b.x] }
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    select x, a.x, b.x from a natural full join b;
+  logical_plan: |
+    LogicalProject { exprs: [Coalesce(a.x, b.x), a.x, b.x] }
+      LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
+        LogicalScan { table: a, columns: [a._row_id, a.x] }
+        LogicalScan { table: b, columns: [b._row_id, b.x] }
+- sql: |
+    /* Ensure that nested natural joins bind and disambiguate columns */
+    create table a(x int, y int);
+    create table b(x int, z int);
+    create table c(x int, a int);
+    select x, a.x, b.x, c.x from a natural join b natural join c;
+  logical_plan: |
+    LogicalProject { exprs: [a.x, a.x, b.x, c.x] }
+      LogicalJoin { type: Inner, on: (a.x = c.x), output: all }
+        LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
+          LogicalScan { table: a, columns: [a._row_id, a.x, a.y] }
+          LogicalScan { table: b, columns: [b._row_id, b.x, b.z] }
+        LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
+- sql: |
+    /* Ensure that nested natural joins bind and disambiguate columns */
+    create table a(x int, y int);
+    create table b(x int, z int);
+    create table c(x int, a int);
+    select x, a.x, b.x, c.x from a natural full join b natural full join c;
+  logical_plan: |
+    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
+      LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: all }
+        LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
+          LogicalScan { table: a, columns: [a._row_id, a.x, a.y] }
+          LogicalScan { table: b, columns: [b._row_id, b.x, b.z] }
+        LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
+      LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: all }
+        LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
+          LogicalScan { table: a, columns: [a.x] }
+          LogicalScan { table: b, columns: [b.x] }
+        LogicalScan { table: c, columns: [c.x] }
+- sql: |
+    /* Ensure that nested natural joins bind and disambiguate columns */
+    create table a(a int, y int);
+    create table b(x int, z int);
+    create table c(x int, a int);
+    select a, x, a.a, c.a, b.x, c.x from a natural full join b natural full join c;
+  logical_plan: |
+    LogicalProject { exprs: [Coalesce(a.a, c.a), Coalesce(b.x, c.x), a.a, c.a, b.x, c.x] }
+      LogicalJoin { type: FullOuter, on: (a.a = c.a) AND (b.x = c.x), output: all }
+        LogicalJoin { type: FullOuter, on: true, output: all }
+          LogicalScan { table: a, columns: [a._row_id, a.a, a.y] }
+          LogicalScan { table: b, columns: [b._row_id, b.x, b.z] }
+        LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
+- sql: |
+    /* Ensure error on non-existent USING col */
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v3 int);
+    select * from t1 join t2 using (v2);
+  binder_error: 'Item not found: column "v2" specified in USING clause does not exist
+    in right table'
+- sql: |
+    /* Ensure error on non-existent USING col */
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v3 int);
+    select * from t1 join t2 using (v3);
+  binder_error: 'Item not found: column "v3" specified in USING clause does not exist
+    in left table'
+- sql: |
+    /* Ensure that non-trivial ambiguous references can be resolved */
+    create table a(x int);
+    create table b(x int);
+    select 2 * x as Y, x + x as Z from a natural full join b where 2 * x < 10 order by x + x;
+  logical_plan: |
+    LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+      LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+        LogicalFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
+          LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
+            LogicalScan { table: a, columns: [a._row_id, a.x] }
+            LogicalScan { table: b, columns: [b._row_id, b.x] }
+  batch_plan: |
+    BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+      BatchExchange { order: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) ASC], dist: Single }
+        BatchSort { order: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) ASC] }
+          BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+            BatchFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
+              BatchHashJoin { type: FullOuter, predicate: a.x = b.x, output: all }
+                BatchExchange { order: [], dist: HashShard(a.x) }
+                  BatchScan { table: a, columns: [a.x], distribution: SomeShard }
+                BatchExchange { order: [], dist: HashShard(b.x) }
+                  BatchScan { table: b, columns: [b.x], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [y, z, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))(hidden), a._row_id(hidden), b._row_id(hidden)], pk_columns: [a._row_id, b._row_id], order_descs: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), a._row_id, b._row_id] }
+      StreamExchange { dist: HashShard(a._row_id, b._row_id) }
+        StreamProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), a._row_id, b._row_id] }
+          StreamFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
+            StreamHashJoin { type: FullOuter, predicate: a.x = b.x, output: [a.x, b.x, a._row_id, b._row_id] }
+              StreamExchange { dist: HashShard(a.x) }
+                StreamTableScan { table: a, columns: [a.x, a._row_id], pk: [a._row_id], distribution: HashShard(a._row_id) }
+              StreamExchange { dist: HashShard(b.x) }
+                StreamTableScan { table: b, columns: [b.x, b._row_id], pk: [b._row_id], distribution: HashShard(b._row_id) }

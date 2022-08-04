@@ -15,9 +15,9 @@
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::pin_mut;
-use madsim::time::Instant;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
 use stack_trace::StackTrace;
