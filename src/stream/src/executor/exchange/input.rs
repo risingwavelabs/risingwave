@@ -14,10 +14,10 @@
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Instant;
 
 use futures::Stream;
 use futures_async_stream::try_stream;
-use madsim::time::Instant;
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::error::Result;

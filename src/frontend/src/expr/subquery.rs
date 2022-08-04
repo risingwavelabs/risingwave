@@ -20,7 +20,7 @@ use super::{Expr, ExprImpl, ExprType};
 use crate::binder::BoundQuery;
 use crate::expr::CorrelatedId;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SubqueryKind {
     /// Returns a scalar value (single column single row).
     Scalar,
@@ -35,6 +35,7 @@ pub enum SubqueryKind {
 }
 
 /// Subquery expression.
+#[derive(Clone)]
 pub struct Subquery {
     pub query: BoundQuery,
     pub kind: SubqueryKind,
@@ -59,12 +60,6 @@ impl Subquery {
         correlated_indices.sort();
         correlated_indices.dedup();
         correlated_indices
-    }
-}
-
-impl Clone for Subquery {
-    fn clone(&self) -> Self {
-        unreachable!("Subquery {:?} has not been unnested", self)
     }
 }
 
