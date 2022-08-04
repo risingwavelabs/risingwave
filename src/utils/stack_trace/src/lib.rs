@@ -412,6 +412,7 @@ pub trait StackTrace: Future + Sized {
 pub type TraceSender = watch::Sender<StackTraceReport>;
 pub type TraceReceiver = watch::Receiver<StackTraceReport>;
 
+/// Manages the stack traces of multiple tasks.
 #[derive(Default, Debug)]
 pub struct StackTraceManager<K> {
     rxs: HashMap<K, TraceReceiver>,

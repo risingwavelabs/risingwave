@@ -71,7 +71,8 @@ pub struct LocalStreamManagerCore {
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
 
-    trace_context_manager: StackTraceManager<ActorId>,
+    /// Manages the stack traces of all actors.
+    stack_trace_manager: StackTraceManager<ActorId>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -159,7 +160,7 @@ impl LocalStreamManager {
                 tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
                 let mut core = self.core.lock();
 
-                for (k, trace) in core.trace_context_manager.get_all() {
+                for (k, trace) in core.stack_trace_manager.get_all() {
                     println!(">> Actor {}\n\n{}", k, &*trace);
                 }
             }
@@ -169,7 +170,7 @@ impl LocalStreamManager {
     /// Get stack trace reports for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
         let mut core = self.core.lock();
-        core.trace_context_manager
+        core.stack_trace_manager
             .get_all()
             .map(|(k, v)| (*k, v.clone()))
             .collect()
@@ -385,7 +386,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
-            trace_context_manager: Default::default(),
+            stack_trace_manager: Default::default(),
         }
     }
 
@@ -563,7 +564,7 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_sender = self.trace_context_manager.register(actor_id);
+            let trace_sender = self.stack_trace_manager.register(actor_id);
 
             self.handles.insert(
                 actor_id,
