@@ -20,13 +20,13 @@
 // https://github.com/rust-lang/rust-clippy/issues/8493
 #![expect(clippy::declare_interior_mutable_const)]
 
-use std::borrow::Cow;
 use std::cell::{RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -37,7 +37,7 @@ use itertools::Itertools;
 use pin_project::{pin_project, pinned_drop};
 use tokio::sync::watch;
 
-pub type SpanValue = Cow<'static, str>;
+pub type SpanValue = Arc<str>;
 
 /// The report of a stack trace.
 #[derive(Debug, Clone)]
@@ -129,7 +129,22 @@ impl std::fmt::Display for TraceContext {
             Ok(())
         }
 
-        fmt_node(f, &self.arena, self.root, 0)
+        fmt_node(f, &self.arena, self.root, 0)?;
+
+        // Print all detached spans. May hurt the performance so disable it by default.
+        #[cfg(any())]
+        for node in self.arena.iter().filter(|n| !n.is_removed()) {
+            let id = self.arena.get_node_id(node).unwrap();
+            if id == self.root {
+                continue;
+            }
+            if node.parent().is_none() {
+                f.write_str("[??? Detached]\n")?;
+                fmt_node(f, &self.arena, id, 1)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -282,7 +297,7 @@ impl<F: Future> Future for StackTraced<F> {
                     // First polled
                     Ok(current_context) => {
                         // First polled, push a new span to the context.
-                        let node = with_context(|mut c| c.push(std::mem::take(span)));
+                        let node = with_context(|mut c| c.push(span.clone()));
                         *this.state = StackTracedState::Polled {
                             this_node: node,
                             this_context: current_context,

@@ -21,7 +21,7 @@ async fn sleep_nested() {
 async fn multi_sleep() {
     sleep(400).await;
 
-    sleep(800).stack_trace("sleep another in multi slepp").await;
+    sleep(800).stack_trace("sleep another in multi sleep").await;
 }
 
 #[stream(item = ())]
@@ -89,6 +89,7 @@ async fn hello() {
                     },
                 }
                 count += 1;
+                sleep(50).stack_trace("sleep before next stream poll").await;
             }
         }
 
