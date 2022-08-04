@@ -1266,7 +1266,6 @@ mod tests {
     pub struct SyncPointFuture<F: Future> {
         inner: F,
         polled: Arc<AtomicBool>,
-        // recv: Receiver<()>,
     }
 
     impl<F: Future + Unpin> Future for SyncPointFuture<F> {
