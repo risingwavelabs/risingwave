@@ -615,6 +615,8 @@ impl Session for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
+        // result of run_statement().
         let rsp = match stmt {
             Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
                 tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
@@ -635,9 +637,9 @@ impl Session for SessionImpl {
                 let name = &variable[0].value.to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
-                        PgFieldDescriptor::new("name".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("setting".to_string(), TypeOid::Varchar),
-                        PgFieldDescriptor::new("description".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
                     ]
                 } else {
                     vec![PgFieldDescriptor::new(
