@@ -137,7 +137,7 @@ pub(crate) fn gen_create_index_plan(
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
     index_table_prost.owner = session.user_id();
 
-    let index = IndexCatalog {
+    let index_prost = IndexCatalog {
         id: IndexId::placeholder(),
         schema_id: index_schema_id,
         database_id: index_database_id,
@@ -161,7 +161,15 @@ pub(crate) fn gen_create_index_plan(
     }
     .to_prost(index_schema_id, index_database_id);
 
-    Ok((materialize.into(), index_table_prost, index))
+    let plan: PlanRef = materialize.into();
+    let ctx = plan.ctx();
+    let explain_trace = ctx.is_explain_trace();
+    if explain_trace {
+        ctx.trace("Create Index:".to_string());
+        ctx.trace(plan.explain_to_string().unwrap());
+    }
+
+    Ok((plan, index_table_prost, index_prost))
 }
 
 fn build_indexed_table_order_key(
