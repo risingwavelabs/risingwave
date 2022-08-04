@@ -24,7 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::debug::trace_context::{self, TraceContextManager};
+use risingwave_common::util::debug::trace_context::{self, TraceContextManager, TraceReport};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -71,7 +71,7 @@ pub struct LocalStreamManagerCore {
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
 
-    trace_context_manager: TraceContextManager,
+    trace_context_manager: TraceContextManager<ActorId>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -163,11 +163,11 @@ impl LocalStreamManager {
         }
     }
 
-    pub fn get_actor_traces(&self) -> HashMap<String, String> {
+    pub fn get_actor_traces(&self) -> HashMap<ActorId, TraceReport> {
         let mut core = self.core.lock();
         core.trace_context_manager
             .get_all()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| (*k, v.clone()))
             .collect()
     }
 
@@ -559,9 +559,7 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_sender = self
-                .trace_context_manager
-                .register(format!("Actor {actor_id}"));
+            let trace_sender = self.trace_context_manager.register(actor_id);
 
             self.handles.insert(
                 actor_id,

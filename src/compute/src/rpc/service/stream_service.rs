@@ -226,9 +226,13 @@ impl StreamService for StreamServiceImpl {
     ) -> Result<Response<ActorTraceResponse>, Status> {
         let _req = request.into_inner();
 
-        let traces = self.mgr.get_actor_traces();
+        let actor_traces = self.mgr.get_actor_traces();
+        let actor_traces = actor_traces
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect();
 
-        Ok(Response::new(ActorTraceResponse { traces }))
+        Ok(Response::new(ActorTraceResponse { actor_traces }))
     }
 }
 

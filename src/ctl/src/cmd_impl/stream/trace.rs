@@ -40,12 +40,12 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
             .actor_trace(ActorTraceRequest::default())
             .await?
             .into_inner()
-            .traces;
+            .actor_traces;
         all_traces.extend(traces);
     }
 
     if let Some(actor_id) = actor_id {
-        if let Some(trace) = all_traces.get(&format!("Actor {actor_id}")) {
+        if let Some(trace) = all_traces.get(&actor_id) {
             println!("{trace}");
         } else {
             bail!("actor {actor_id} not found");
@@ -54,7 +54,7 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
         println!("No traces found");
     } else {
         for (key, trace) in all_traces {
-            println!(">> {key}\n{trace}");
+            println!(">> Actor {key}\n{trace}");
         }
     }
 

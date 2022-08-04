@@ -126,7 +126,7 @@ message SyncSourcesResponse {
 message ActorTraceRequest {}
 
 message ActorTraceResponse {
-  map<string, string> traces = 1;
+  map<uint32, string> actor_traces = 1;
 }
 
 service StreamService {

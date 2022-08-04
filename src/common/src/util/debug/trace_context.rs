@@ -129,6 +129,32 @@ impl StackTreeNode {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TraceReport {
+    pub report: String,
+    pub time: Instant,
+}
+
+impl Default for TraceReport {
+    fn default() -> Self {
+        Self {
+            report: "<not reported>".to_string(),
+            time: Instant::now(),
+        }
+    }
+}
+
+impl std::fmt::Display for TraceReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[captured {:?} ago]\n{}",
+            self.time.elapsed(),
+            self.report
+        )
+    }
+}
+
 // TODO: may use a better name
 #[derive(Debug)]
 pub struct TraceContext {
@@ -176,6 +202,14 @@ impl TraceContext {
         }
     }
 
+    fn to_report(&self) -> TraceReport {
+        let report = format!("{}", self);
+        TraceReport {
+            report,
+            time: Instant::now(),
+        }
+    }
+
     fn push(&mut self, span: SpanValue) -> StackTreeNode {
         let new_current_node = self.current.add_child(span);
         self.current = new_current_node.clone();
@@ -220,26 +254,24 @@ fn context_exists() -> bool {
     TRACE_CONTEXT.try_with(|_| {}).is_ok()
 }
 
-pub type TraceSender = watch::Sender<String>;
-pub type TraceReceiver = watch::Receiver<String>;
+pub type TraceSender = watch::Sender<TraceReport>;
+pub type TraceReceiver = watch::Receiver<TraceReport>;
 
 #[derive(Default, Debug)]
-pub struct TraceContextManager {
-    rxs: BTreeMap<String, TraceReceiver>,
+pub struct TraceContextManager<K: Ord> {
+    rxs: BTreeMap<K, TraceReceiver>,
 }
 
-impl TraceContextManager {
-    pub fn register(&mut self, key: String) -> TraceSender {
-        let (tx, rx) = watch::channel("<not reported>".to_owned());
+impl<K: Ord + std::fmt::Debug> TraceContextManager<K> {
+    pub fn register(&mut self, key: K) -> TraceSender {
+        let (tx, rx) = watch::channel(Default::default());
         self.rxs.try_insert(key, rx).unwrap();
         tx
     }
 
-    pub fn get_all(&mut self) -> impl Iterator<Item = (&str, watch::Ref<String>)> {
+    pub fn get_all(&mut self) -> impl Iterator<Item = (&K, watch::Ref<TraceReport>)> {
         self.rxs.retain(|_, rx| rx.has_changed().is_ok());
-        self.rxs
-            .iter_mut()
-            .map(|(k, v)| (k.as_str(), v.borrow_and_update()))
+        self.rxs.iter_mut().map(|(k, v)| (k, v.borrow_and_update()))
     }
 }
 
@@ -343,7 +375,7 @@ pub async fn monitored<F: Future>(
                     let mut interval = tokio::time::interval(interval);
                     loop {
                         interval.tick().await;
-                        let new_trace = TRACE_CONTEXT.with(|c| c.borrow().to_string());
+                        let new_trace = TRACE_CONTEXT.with(|c| c.borrow().to_report());
                         match trace_sender.send(new_trace) {
                             Ok(_) => {}
                             Err(e) => {
@@ -468,7 +500,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stack_trace() {
-        let (watch_tx, mut watch_rx) = watch::channel(String::new());
+        let (watch_tx, mut watch_rx) = watch::channel(Default::default());
 
         let collector = tokio::spawn(async move {
             while watch_rx.changed().await.is_ok() {
