@@ -16,7 +16,6 @@ use std::fmt::{Display, Formatter};
 use std::str;
 
 use async_trait::async_trait;
-use risingwave_common::error::RwError;
 use thiserror::Error;
 
 use crate::storage::transaction::Transaction;
@@ -59,12 +58,6 @@ pub enum MetaStoreError {
 }
 
 pub type MetaStoreResult<T> = std::result::Result<T, MetaStoreError>;
-
-impl From<MetaStoreError> for RwError {
-    fn from(e: MetaStoreError) -> Self {
-        crate::model::MetadataModelError::from(e).into()
-    }
-}
 
 impl Display for MetaStoreError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -73,6 +73,7 @@ where
         .await
         .unwrap()
         .unwrap();
+    compact_task.target_level = 6;
     hummock_manager
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
@@ -122,7 +123,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
                 right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
                 inf: false,
             }),
-            file_size: 1,
+            file_size: 2,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
         });
     }
@@ -200,16 +201,19 @@ pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableId>
 }
 
 pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSstableId> {
-    hummock_version
-        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+    let levels =
+        hummock_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
+    levels
+        .levels
         .iter()
-        .flat_map(|level| level.table_infos.iter().map(|info| info.id))
+        .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
+        .flat_map(|levels| levels.table_infos.iter().map(|info| info.id))
         .sorted()
         .collect_vec()
 }
-
-pub async fn setup_compute_env(
+pub async fn setup_compute_env_with_config(
     port: i32,
+    config: CompactionConfig,
 ) -> (
     MetaSrvEnv<MemStore>,
     HummockManagerRef<MemStore>,
@@ -222,12 +226,7 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
-    let config = CompactionConfigBuilder::new()
-        .level0_tigger_file_numer(2)
-        .level0_tier_compact_file_number(1)
-        .min_compaction_bytes(1)
-        .max_bytes_for_level_base(1)
-        .build();
+
     let compaction_group_manager = Arc::new(
         CompactionGroupManager::new_with_config(env.clone(), config.clone())
             .await
@@ -257,6 +256,20 @@ pub async fn setup_compute_env(
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
+}
+
+pub async fn setup_compute_env(
+    port: i32,
+) -> (
+    MetaSrvEnv<MemStore>,
+    HummockManagerRef<MemStore>,
+    ClusterManagerRef<MemStore>,
+    WorkerNode,
+) {
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .build();
+    setup_compute_env_with_config(port, config).await
 }
 
 pub async fn get_sst_ids<S>(
