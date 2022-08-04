@@ -131,6 +131,18 @@
             LogicalAgg { aggs: [count] }
               LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
 - sql: |
+    select a + 1, b::varchar, c from (values (1, 2, 3), (4, 5, 6)) t(a, b, c);
+  logical_plan: |
+    LogicalProject { exprs: [($0:Int32 + 1:Int32), $1:Int32::Varchar, $2:Int32] }
+      LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [:Int32, :Int32, :Int32] } }
+- sql: |
+    select sum(a), max(b + c + 10), string_agg(c::varchar || '~', ',') from (values (1, 2, 3), (4, 5, 6)) as t(a, b, c);
+  logical_plan: |
+    LogicalProject { exprs: [sum($0:Int32), max((($1:Int32 + $2:Int32) + 10:Int32)), string_agg(ConcatOp($2:Int32::Varchar, '~':Varchar), ',':Varchar)] }
+      LogicalAgg { aggs: [sum($0:Int32), max((($1:Int32 + $2:Int32) + 10:Int32)), string_agg(ConcatOp($2:Int32::Varchar, '~':Varchar), ',':Varchar)] }
+        LogicalProject { exprs: [$0:Int32, (($1:Int32 + $2:Int32) + 10:Int32), ConcatOp($2:Int32::Varchar, '~':Varchar), ',':Varchar] }
+          LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [:Int32, :Int32, :Int32] } }
+- sql: |
     select 1 + (select 2 from t);
   binder_error: 'Catalog error: table or source not found: t'
 - sql: |
