@@ -25,7 +25,7 @@ use crate::optimizer::property::FieldOrder;
 
 /// # `IndexCatalog` Example:
 /// create table t (a int, b int, c int, d int);
-/// create index idx on t(a,b,a) include(a,c,d,b);
+/// create index idx on t(a,b) include(c,d);
 ///
 /// Table t (called indexed table)
 /// columns:
@@ -44,13 +44,15 @@ use crate::optimizer::property::FieldOrder;
 /// 4: `t._row_id`
 ///
 /// `TableDesc` columns of index table
-/// | index columns | include columns | hidden(pk columns) |
-/// If index columns and include columns contain pk columns of the indexed table,
-/// then the hidden pk columns can be removed.
+/// | index columns | include columns | hidden(order key columns) |
+/// If index columns and include columns contain order key columns of the indexed table,
+/// and then the hidden order key columns can be removed.
 ///
-/// The index of `InputRef` is the index of the indexed `TableDesc` columns.
+/// The index of `InputRef` is the index of the indexed table's columns.
 /// `index_columns`: InputRef(1),InputRef(2)
 /// `include_columns`: InputRef(3),InputRef(4)
+/// The index of `OrderPart` is the index of the index table's columns.
+/// `indexed_table_order_key`: OrderPart(4)
 
 #[derive(Clone, Debug)]
 pub struct IndexCatalog {
