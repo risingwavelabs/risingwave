@@ -148,7 +148,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
             tokio::spawn(cmd_impl::meta::cluster_info()).await??
         }
         Commands::Stream(StreamCommands::Trace { actor_id }) => {
-            tokio::spawn(cmd_impl::stream::trace(actor_id)).await??
+            cmd_impl::stream::trace(actor_id).await?
         }
     }
     Ok(())

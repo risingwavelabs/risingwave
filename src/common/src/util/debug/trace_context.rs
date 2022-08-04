@@ -174,7 +174,18 @@ impl std::fmt::Display for TraceContext {
 
             let inner = node.inner.borrow();
             f.write_str(inner.value.as_ref())?;
-            f.write_fmt(format_args!(" [{:?}]", inner.start_time.elapsed()))?;
+
+            let elapsed = inner.start_time.elapsed();
+            f.write_fmt(format_args!(
+                " [{}{:?}]",
+                if depth > 0 && elapsed.as_secs() >= 1 {
+                    "!!! "
+                } else {
+                    ""
+                },
+                elapsed
+            ))?;
+
             f.write_char('\n')?;
             for child in inner
                 .children
