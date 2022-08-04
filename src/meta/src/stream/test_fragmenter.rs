@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::vec;
 
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
-use risingwave_common::error::Result;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -38,6 +37,7 @@ use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
+use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
     ExprNode {
@@ -347,9 +347,7 @@ fn make_stream_graph() -> StreamFragmentGraph {
 // NOTE: frontend is not yet available with madsim
 #[cfg(not(madsim))]
 #[tokio::test]
-async fn test_fragmenter() -> Result<()> {
-    use crate::model::FragmentId;
-
+async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
@@ -357,27 +355,10 @@ async fn test_fragmenter() -> Result<()> {
     let graph = make_stream_graph();
 
     let mut actor_graph_builder =
-        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, &mut ctx).await?;
-
-    let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
-        .list_fragment_ids()
-        .into_iter()
-        .map(|(fragment_id, is_singleton)| {
-            if is_singleton {
-                (fragment_id, 1)
-            } else {
-                (fragment_id, parallel_degree as u32)
-            }
-        })
-        .collect();
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, parallel_degree, &mut ctx).await?;
 
     let graph = actor_graph_builder
-        .generate_graph(
-            env.id_gen_manager_ref(),
-            fragment_manager,
-            parallelisms.clone(),
-            &mut ctx,
-        )
+        .generate_graph(env.id_gen_manager_ref(), fragment_manager, &mut ctx)
         .await?;
 
     let internal_table_id_set = ctx

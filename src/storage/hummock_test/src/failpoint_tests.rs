@@ -122,6 +122,7 @@ async fn test_failpoints_state_store_read_upload() {
         .await;
     // clear block cache
     sstable_store.clear_block_cache();
+    sstable_store.clear_meta_cache();
     fail::cfg(mem_read_err, "return").unwrap();
 
     let result = hummock_storage
@@ -137,6 +138,7 @@ async fn test_failpoints_state_store_read_upload() {
     assert!(result.is_err());
     let result = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: 2,
@@ -194,6 +196,7 @@ async fn test_failpoints_state_store_read_upload() {
     assert_eq!(value, Bytes::from("111"));
     let mut iters = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: 5,

@@ -15,9 +15,10 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
+use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, Scalar};
-use risingwave_expr::expr::AggKind;
+use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_expr::expr::{build_from_prost, AggKind};
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
@@ -36,11 +37,8 @@ mod utils;
 
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
-pub use function_call::{FunctionCall, FunctionCallVerboseDisplay};
-pub use input_ref::{
-    as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay,
-    InputRefVerboseDisplay,
-};
+pub use function_call::{FunctionCall, FunctionCallDisplay};
+pub use input_ref::{as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
@@ -50,8 +48,8 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive,
-    AggFuncSig, CastContext, DataTypeName, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
+    least_restrictive, AggFuncSig, CastContext, CastSig, DataTypeName, FuncSign,
 };
 pub use utils::*;
 
@@ -119,7 +117,7 @@ impl ExprImpl {
         visitor.into()
     }
 
-    /// Check whether self is NULL.
+    /// Check whether self is literal NULL.
     pub fn is_null(&self) -> bool {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
     }
@@ -161,6 +159,21 @@ impl ExprImpl {
         // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
         // check and there is no difference.
         self.cast_assign(DataType::Varchar)
+    }
+
+    /// Evaluate the expression on the given input.
+    ///
+    /// TODO: This is a naive implementation. We should avoid proto ser/de.
+    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/3479>
+    fn eval_row(&self, input: &Row) -> Result<Datum> {
+        let backend_expr = build_from_prost(&self.to_expr_proto())?;
+        backend_expr.eval_row(input).map_err(Into::into)
+    }
+
+    /// Evaluate a constant expression.
+    pub fn eval_row_const(&self) -> Result<Datum> {
+        assert!(self.is_const());
+        self.eval_row(Row::empty())
     }
 }
 
@@ -396,12 +409,12 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_eq_literal(&self) -> Option<(InputRef, Literal)> {
+    pub fn as_eq_const(&self) -> Option<(InputRef, ExprImpl)> {
         if let ExprImpl::FunctionCall(function_call) = self &&
         function_call.get_expr_type() == ExprType::Equal{
             match function_call.clone().decompose_as_binary() {
-                (_, ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, *y)),
-                (_, ExprImpl::Literal(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
+                (_, ExprImpl::InputRef(x), y) if y.is_const() => Some((*x, y)),
+                (_, x, ExprImpl::InputRef(y)) if x.is_const() => Some((*y, x)),
                 _ => None,
             }
         } else {
@@ -409,7 +422,7 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_comparison_literal(&self) -> Option<(InputRef, ExprType, Literal)> {
+    pub fn as_comparison_const(&self) -> Option<(InputRef, ExprType, ExprImpl)> {
         fn reverse_comparison(comparison: ExprType) -> ExprType {
             match comparison {
                 ExprType::LessThan => ExprType::GreaterThan,
@@ -428,9 +441,9 @@ impl ExprImpl {
                 | ExprType::GreaterThanOrEqual) => {
                     let (_, op1, op2) = function_call.clone().decompose_as_binary();
                     match (op1, op2) {
-                        (ExprImpl::InputRef(x), ExprImpl::Literal(y)) => Some((*x, ty, *y)),
-                        (ExprImpl::Literal(x), ExprImpl::InputRef(y)) => {
-                            Some((*y, reverse_comparison(ty), *x))
+                        (ExprImpl::InputRef(x), y) if y.is_const() => Some((*x, ty, y)),
+                        (x, ExprImpl::InputRef(y)) if x.is_const() => {
+                            Some((*y, reverse_comparison(ty), x))
                         }
                         _ => None,
                     }
@@ -442,20 +455,21 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_in_literal_list(&self) -> Option<(InputRef, Vec<Literal>)> {
+    pub fn as_in_const_list(&self) -> Option<(InputRef, Vec<ExprImpl>)> {
         if let ExprImpl::FunctionCall(function_call) = self &&
         function_call.get_expr_type() == ExprType::In {
             let mut inputs = function_call.inputs().iter().cloned();
             let input_ref= match inputs.next().unwrap() {
                 ExprImpl::InputRef(i) => *i,
-                _ => unreachable!()
+                _ => { return None }
             };
-            let list: Option<Vec<_>> = inputs.map(|expr| match expr {
-                ExprImpl::Literal(x) => Some(*x),
-             _ => None ,
+            let list: Vec<_> = inputs.map(|expr|{
+                // Non constant IN will be bount to OR
+                assert!(expr.is_const());
+                expr
             }).collect();
 
-            list.map(|list| (input_ref, list))
+           Some((input_ref, list))
         } else {
             None
         }
@@ -583,19 +597,19 @@ impl std::fmt::Debug for ExprImpl {
     }
 }
 
-pub struct ExprVerboseDisplay<'a> {
+pub struct ExprDisplay<'a> {
     pub expr: &'a ExprImpl,
     pub input_schema: &'a Schema,
 }
 
-impl std::fmt::Debug for ExprVerboseDisplay<'_> {
+impl std::fmt::Debug for ExprDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.expr;
         match that {
             ExprImpl::InputRef(x) => write!(
                 f,
                 "{:?}",
-                InputRefVerboseDisplay {
+                InputRefDisplay {
                     input_ref: x,
                     input_schema: self.input_schema
                 }
@@ -604,7 +618,7 @@ impl std::fmt::Debug for ExprVerboseDisplay<'_> {
             ExprImpl::FunctionCall(x) => write!(
                 f,
                 "{:?}",
-                FunctionCallVerboseDisplay {
+                FunctionCallDisplay {
                     function_call: x,
                     input_schema: self.input_schema
                 }
@@ -617,6 +631,12 @@ impl std::fmt::Debug for ExprVerboseDisplay<'_> {
                 write!(f, "{:?}", x)
             }
         }
+    }
+}
+
+impl std::fmt::Display for ExprDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (self as &dyn std::fmt::Debug).fmt(f)
     }
 }
 

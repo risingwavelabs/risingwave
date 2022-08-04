@@ -15,41 +15,42 @@
 use assert_matches::assert_matches;
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 
-use super::{Key, Result as MetaResult, Value};
-use crate::storage::{Error, MemStore, MetaStore, Operation, Snapshot, Transaction};
+use crate::storage::{
+    Key, MemStore, MetaStore, MetaStoreError, MetaStoreResult, Operation, Snapshot, Transaction,
+    Value,
+};
 
 const TEST_DEFAULT_CF: &str = "TEST_DEFAULT";
 
 #[async_trait]
 trait MetaStoreTestExt: MetaStore {
-    async fn put(&self, key: Key, value: Value) -> MetaResult<()>;
-    async fn get(&self, key: &[u8]) -> MetaResult<Value>;
-    async fn delete(&self, key: &[u8]) -> MetaResult<()>;
-    async fn list(&self) -> MetaResult<Vec<Vec<u8>>>;
+    async fn put(&self, key: Key, value: Value) -> MetaStoreResult<()>;
+    async fn get(&self, key: &[u8]) -> MetaStoreResult<Value>;
+    async fn delete(&self, key: &[u8]) -> MetaStoreResult<()>;
+    async fn list(&self) -> MetaStoreResult<Vec<Vec<u8>>>;
 }
 
 #[async_trait]
 impl<S: MetaStore> MetaStoreTestExt for S {
-    async fn put(&self, key: Key, value: Value) -> MetaResult<()> {
+    async fn put(&self, key: Key, value: Value) -> MetaStoreResult<()> {
         self.put_cf(TEST_DEFAULT_CF, key, value).await
     }
 
-    async fn get(&self, key: &[u8]) -> MetaResult<Value> {
+    async fn get(&self, key: &[u8]) -> MetaStoreResult<Value> {
         self.get_cf(TEST_DEFAULT_CF, key).await
     }
 
-    async fn delete(&self, key: &[u8]) -> MetaResult<()> {
+    async fn delete(&self, key: &[u8]) -> MetaStoreResult<()> {
         self.delete_cf(TEST_DEFAULT_CF, key).await
     }
 
-    async fn list(&self) -> MetaResult<Vec<Vec<u8>>> {
+    async fn list(&self) -> MetaStoreResult<Vec<Vec<u8>>> {
         self.list_cf(TEST_DEFAULT_CF).await
     }
 }
 
-async fn test_meta_store_basic<S: MetaStore>(store: &S) -> MetaResult<()> {
+async fn test_meta_store_basic<S: MetaStore>(store: &S) -> MetaStoreResult<()> {
     let (k, v) = (b"key_1", b"value_1");
     assert!(store.put(k.to_vec(), v.to_vec()).await.is_ok());
     let val = store.get(k).await.unwrap();
@@ -114,7 +115,7 @@ async fn test_meta_store_basic<S: MetaStore>(store: &S) -> MetaResult<()> {
     Ok(())
 }
 
-async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()> {
+async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> MetaStoreResult<()> {
     let cf = "test_trx_cf";
     let mut kvs = vec![];
     for i in 1..=5 {
@@ -172,14 +173,14 @@ async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()>
     trx.put(cf.to_owned(), kvs[3].0.to_owned(), kvs[3].1.to_owned());
     assert_matches!(
         meta_store.txn(trx).await.unwrap_err(),
-        Error::TransactionAbort()
+        MetaStoreError::TransactionAbort()
     );
     assert_eq!(0, meta_store.list_cf(cf).await.unwrap().len());
 
     Ok(())
 }
 
-async fn test_meta_store_keys_share_prefix<S: MetaStore>(meta_store: &S) -> Result<()> {
+async fn test_meta_store_keys_share_prefix<S: MetaStore>(meta_store: &S) -> MetaStoreResult<()> {
     let cf = "test_overlapped_key_cf";
     let batch = vec![
         (
@@ -211,7 +212,7 @@ async fn test_meta_store_keys_share_prefix<S: MetaStore>(meta_store: &S) -> Resu
     Ok(())
 }
 
-async fn test_meta_store_overlapped_cf<S: MetaStore>(meta_store: &S) -> Result<()> {
+async fn test_meta_store_overlapped_cf<S: MetaStore>(meta_store: &S) -> MetaStoreResult<()> {
     let cf1 = "test_overlapped_cf1";
     let cf2 = "test_overlapped_cf11";
     let cf3 = "test_overlapped_cf111";
@@ -243,7 +244,7 @@ async fn test_meta_store_overlapped_cf<S: MetaStore>(meta_store: &S) -> Result<(
 }
 
 #[tokio::test]
-async fn test_mem_store() -> Result<()> {
+async fn test_mem_store() -> MetaStoreResult<()> {
     let store = MemStore::default();
     test_meta_store_basic(&store).await.unwrap();
     test_meta_store_keys_share_prefix(&store).await.unwrap();

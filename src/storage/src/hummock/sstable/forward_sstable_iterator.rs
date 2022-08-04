@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
@@ -104,22 +104,51 @@ impl SstableIterator {
 
         Ok(())
     }
-}
 
-#[async_trait]
-impl HummockIterator for SstableIterator {
-    type Direction = Forward;
-
-    async fn next(&mut self) -> HummockResult<()> {
+    // Only for compaction because it would not load block from sstablestore.
+    pub fn next_for_compact(&mut self) -> HummockResult<()> {
         self.stats.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
-
         if block_iter.is_valid() {
             Ok(())
         } else {
             // seek to next block
-            self.seek_idx(self.cur_idx + 1, None).await
+            if self.cur_idx + 1 >= self.sst.value().block_count() {
+                self.block_iter = None;
+            } else {
+                debug_assert!(!self.sst.value().blocks.is_empty());
+                let block =
+                    BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx + 1].clone());
+                let mut block_iter = BlockIterator::new(block);
+                block_iter.seek_to_first();
+                self.block_iter = Some(block_iter);
+                self.cur_idx += 1;
+            }
+            Ok(())
+        }
+    }
+}
+
+impl HummockIterator for SstableIterator {
+    type Direction = Forward;
+
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            self.stats.scan_key_count += 1;
+            let block_iter = self.block_iter.as_mut().expect("no block iter");
+            block_iter.next();
+
+            if block_iter.is_valid() {
+                Ok(())
+            } else {
+                // seek to next block
+                self.seek_idx(self.cur_idx + 1, None).await
+            }
         }
     }
 
@@ -137,32 +166,35 @@ impl HummockIterator for SstableIterator {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(0, None).await
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move { self.seek_idx(0, None).await }
     }
 
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .value()
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
-                ord == Less || ord == Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        async move {
+            let block_idx = self
+                .sst
+                .value()
+                .meta
+                .block_metas
+                .partition_point(|block_meta| {
+                    // compare by version comparator
+                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                    // partition point should be `prev(<=)` instead of `<`.
+                    let ord =
+                        VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                    ord == Less || ord == Equal
+                })
+                .saturating_sub(1); // considering the boundary of 0
 
-        self.seek_idx(block_idx, Some(key)).await?;
-        if !self.is_valid() {
-            // seek to next block
-            self.seek_idx(block_idx + 1, None).await?;
+            self.seek_idx(block_idx, Some(key)).await?;
+            if !self.is_valid() {
+                // seek to next block
+                self.seek_idx(block_idx + 1, None).await?;
+            }
+
+            Ok(())
         }
-
-        Ok(())
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use bytes::{Buf, Bytes};
 use risingwave_common::array::Row;
 use risingwave_common::error::{ErrorCode, Result};
@@ -19,19 +21,16 @@ use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::cell_based_encoding_util::parse_raw_key_to_vnode_and_key;
-use super::RowDeserialize;
+use super::{ColumnDescMapping, RowDeserialize};
 
 #[derive(Clone)]
 pub struct RowBasedDeserializer {
-    data_types: Vec<DataType>,
+    column_mapping: Arc<ColumnDescMapping>,
 }
 
 impl RowDeserialize for RowBasedDeserializer {
-    fn create_row_deserializer(
-        _column_mapping: std::sync::Arc<super::ColumnDescMapping>,
-        data_types: Vec<DataType>,
-    ) -> Self {
-        Self { data_types }
+    fn create_row_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self {
+        Self { column_mapping }
     }
 
     fn take(&mut self) -> Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)> {
@@ -65,25 +64,28 @@ impl RowBasedDeserializer {
         }
 
         let (vnode, key_bytes) = parse_raw_key_to_vnode_and_key(raw_key);
-        Ok(Some((
-            vnode,
-            key_bytes.to_vec(),
-            row_based_deserialize_inner(self.data_types.clone(), value.as_ref())?,
-        )))
+        let mut origin_row =
+            row_based_deserialize_inner(&self.column_mapping.all_data_types, value.as_ref())?;
+
+        let mut output_row = Vec::with_capacity(self.column_mapping.output_index.len());
+        for col_idx in &self.column_mapping.output_index {
+            output_row.push(origin_row.0[*col_idx].take());
+        }
+        Ok(Some((vnode, key_bytes.to_vec(), Row(output_row))))
     }
 }
 
-fn row_based_deserialize_inner(data_types: Vec<DataType>, mut row: impl Buf) -> Result<Row> {
+fn row_based_deserialize_inner(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
     // value encoding
     let mut values = Vec::with_capacity(data_types.len());
-    for ty in &data_types {
+    for ty in data_types {
         values.push(deserialize_datum(&mut row, ty)?);
     }
     Ok(Row(values))
 }
 #[cfg(test)]
 mod tests {
-
+    use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
@@ -94,7 +96,7 @@ mod tests {
     use crate::table::storage_table::DEFAULT_VNODE;
 
     #[test]
-    fn test_row_based_serialize_and_deserialize_with_null() {
+    fn test_row_based_serialize_and_deserialize_full_row() {
         let row = Row(vec![
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
@@ -106,34 +108,104 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        let column_descs = vec![ColumnDesc::new_atomic(DataType::Varchar, "unused", 2)];
-        let mut se = RowBasedSerializer::create_row_serializer(
-            &[],
-            &[ColumnDesc::new_atomic(DataType::Varchar, "unused", 2)],
-            &[ColumnId::new(1)],
-        );
+
+        let data_types = vec![
+            DataType::Varchar,
+            DataType::Boolean,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal,
+            DataType::Interval,
+        ];
+        let column_ids = (0..=row.size() - 1)
+            .map(|i| ColumnId::new(i as _))
+            .collect_vec();
+
+        let column_descs = data_types
+            .iter()
+            .zip_eq(column_ids.iter())
+            .map(|(d, i)| ColumnDesc::unnamed(*i, d.clone()))
+            .collect_vec();
+
+        let mut se = RowBasedSerializer::create_row_serializer(&[], &column_descs, &column_ids);
         let value_bytes = se.serialize(DEFAULT_VNODE, &[], row.clone()).unwrap();
         // each cell will add a is_none flag (u8)
 
-        let mut de = RowBasedDeserializer::create_row_deserializer(
-            ColumnDescMapping::new(column_descs),
-            vec![
-                DataType::Varchar,
-                DataType::Boolean,
-                DataType::Int16,
-                DataType::Int32,
-                DataType::Int64,
-                DataType::Float32,
-                DataType::Float64,
-                DataType::Decimal,
-                DataType::Interval,
-            ],
-        );
+        let mut de =
+            RowBasedDeserializer::create_row_deserializer(ColumnDescMapping::new(column_descs));
         for (pk, value) in value_bytes {
             assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
             let row1 = de.deserialize(pk, value).unwrap();
             assert_eq!(DEFAULT_VNODE, row1.clone().unwrap().0);
             assert_eq!(row, row1.unwrap().2);
+        }
+    }
+
+    #[test]
+    fn test_row_based_serialize_and_deserialize_partial_row() {
+        let row = Row(vec![
+            Some(ScalarImpl::Utf8("string".into())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
+            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
+            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+        ]);
+
+        let data_types = vec![
+            DataType::Varchar,
+            DataType::Boolean,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal,
+            DataType::Interval,
+        ];
+        let column_ids = (0..=row.size() - 1)
+            .map(|i| ColumnId::new(i as _))
+            .collect_vec();
+
+        // remove the first two columns
+        let output_column_ids = (2..=row.size() - 1)
+            .map(|i| ColumnId::new(i as _))
+            .collect_vec();
+        let column_descs = data_types
+            .iter()
+            .zip_eq(column_ids.iter())
+            .map(|(d, i)| ColumnDesc::unnamed(*i, d.clone()))
+            .collect_vec();
+
+        let mut se = RowBasedSerializer::create_row_serializer(&[], &column_descs, &column_ids);
+        let value_bytes = se.serialize(DEFAULT_VNODE, &[], row).unwrap();
+        // each cell will add a is_none flag (u8)
+
+        let mut de = RowBasedDeserializer::create_row_deserializer(ColumnDescMapping::new_partial(
+            &column_descs,
+            &output_column_ids,
+        ));
+
+        let partial_row = Row(vec![
+            Some(ScalarImpl::Int16(1)),
+            Some(ScalarImpl::Int32(2)),
+            Some(ScalarImpl::Int64(3)),
+            Some(ScalarImpl::Float32(4.0.into())),
+            Some(ScalarImpl::Float64(5.0.into())),
+            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
+            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+        ]);
+        for (pk, value) in value_bytes {
+            assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
+            let deser_row = de.deserialize(pk, value).unwrap();
+            assert_eq!(DEFAULT_VNODE, deser_row.clone().unwrap().0);
+            assert_eq!(partial_row, deser_row.unwrap().2);
         }
     }
 }

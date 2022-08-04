@@ -15,9 +15,12 @@
 use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_pb::hummock::{Level, SstableInfo};
+use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
 
@@ -120,4 +123,108 @@ where
         ord == Ordering::Less || ord == Ordering::Equal
     })
     .saturating_sub(1) // considering the boundary of 0
+}
+
+struct MemoryLimiterInner {
+    total_size: AtomicU64,
+    notify: Notify,
+    quota: u64,
+}
+
+impl MemoryLimiterInner {
+    pub fn release_quota(&self, quota: u64) {
+        self.total_size.fetch_sub(quota, AtomicOrdering::Release);
+        self.notify.notify_waiters();
+    }
+}
+
+pub struct MemoryLimiter {
+    inner: Arc<MemoryLimiterInner>,
+}
+
+pub struct MemoryTracker {
+    limiter: Arc<MemoryLimiterInner>,
+    quota: u64,
+}
+
+use std::sync::atomic::Ordering as AtomicOrdering;
+
+impl MemoryLimiter {
+    pub fn new(quota: u64) -> Self {
+        Self {
+            inner: Arc::new(MemoryLimiterInner {
+                total_size: AtomicU64::new(0),
+                notify: Notify::new(),
+                quota,
+            }),
+        }
+    }
+
+    pub fn can_require_memory(&self, quota: u64) -> bool {
+        if quota > self.inner.quota {
+            return false;
+        }
+        self.inner.total_size.load(AtomicOrdering::Acquire) + quota < self.inner.quota
+    }
+
+    pub async fn require_memory(&self, quota: u64) -> Option<MemoryTracker> {
+        if quota > self.inner.quota {
+            return None;
+        }
+        let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+        if current_quota + quota <= self.inner.quota
+            && self
+                .inner
+                .total_size
+                .compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                )
+                .is_ok()
+        {
+            // fast path.
+            return Some(MemoryTracker {
+                limiter: self.inner.clone(),
+                quota,
+            });
+        }
+        loop {
+            let notified = self.inner.notify.notified();
+            let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+            if current_quota + quota <= self.inner.quota {
+                match self.inner.total_size.compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                ) {
+                    Ok(_) => break,
+                    Err(old_quota) => {
+                        // The quota is enough but just changed by other threads. So just try to
+                        // update again without waiting notify.
+                        if old_quota + quota <= self.inner.quota {
+                            continue;
+                        }
+                    }
+                }
+            }
+            notified.await;
+        }
+        Some(MemoryTracker {
+            limiter: self.inner.clone(),
+            quota,
+        })
+    }
+
+    pub fn get_memory_usage(&self) -> u64 {
+        self.inner.total_size.load(AtomicOrdering::Acquire)
+    }
+}
+
+impl Drop for MemoryTracker {
+    fn drop(&mut self) {
+        self.limiter.release_quota(self.quota);
+    }
 }

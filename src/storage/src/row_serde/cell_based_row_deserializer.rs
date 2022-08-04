@@ -28,39 +28,56 @@ use crate::row_serde::ColumnDescMapping;
 
 #[allow(clippy::len_without_is_empty)]
 impl ColumnDescMapping {
-    /// Create a mapping with given `output_columns`.
-    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
-        let id_to_column_index = output_columns
+    fn new_inner(
+        output_columns: Vec<ColumnDesc>,
+        all_data_types: Vec<DataType>,
+        output_index: Vec<usize>,
+    ) -> Arc<Self> {
+        let output_id_to_index = output_columns
             .iter()
             .enumerate()
             .map(|(index, d)| (d.column_id, index))
             .collect();
-
         Self {
             output_columns,
-            id_to_column_index,
+            output_id_to_index,
+            all_data_types,
+            output_index,
         }
         .into()
     }
 
+    /// Create a mapping with given `output_columns`.
+    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
+        let all_data_types = output_columns.iter().map(|d| d.data_type.clone()).collect();
+        let output_index: Vec<usize> = output_columns
+            .iter()
+            .map(|c| c.column_id.get_id() as usize)
+            .collect();
+        Self::new_inner(output_columns, all_data_types, output_index)
+    }
+
     /// Create a mapping with given `table_columns` projected on the `column_ids`.
-    pub fn new_partial(table_columns: &[ColumnDesc], column_ids: &[ColumnId]) -> Arc<Self> {
+    pub fn new_partial(table_columns: &[ColumnDesc], output_column_ids: &[ColumnId]) -> Arc<Self> {
+        let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
         let mut table_columns = table_columns
             .iter()
-            .map(|c| (c.column_id, c.clone()))
+            .enumerate()
+            .map(|(index, c)| (c.column_id, (c.clone(), index)))
             .collect::<HashMap<_, _>>();
-
-        let output_columns = column_ids
+        let (output_columns, output_index): (
+            Vec<risingwave_common::catalog::ColumnDesc>,
+            Vec<usize>,
+        ) = output_column_ids
             .iter()
             .map(|id| table_columns.remove(id).unwrap())
-            .collect();
-
-        Self::new(output_columns)
+            .unzip();
+        Self::new_inner(output_columns, all_data_types, output_index)
     }
 
     /// Get the [`ColumnDesc`] and its index in the output with given `id`.
     pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
-        self.id_to_column_index
+        self.output_id_to_index
             .get(&id)
             .map(|&index| (&self.output_columns[index], index))
     }
@@ -161,10 +178,7 @@ impl CellBasedRowDeserializer {
 
 impl RowDeserialize for CellBasedRowDeserializer {
     /// Constructs a new serializer.
-    fn create_row_deserializer(
-        column_mapping: Arc<ColumnDescMapping>,
-        _data_types: Vec<DataType>,
-    ) -> Self {
+    fn create_row_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self {
         Self::new(column_mapping)
     }
 

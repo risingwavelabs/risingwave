@@ -1,7 +1,3 @@
-onlyif risingwave
-statement ok
-SET enable_new_subquery_batch_planner TO on
-
 query TI
 select
     s_name,
@@ -45,7 +41,3 @@ order by
 LIMIT 100;
 ----
 Supplier#000000005 15
-
-onlyif risingwave
-statement ok
-SET enable_new_subquery_batch_planner TO off

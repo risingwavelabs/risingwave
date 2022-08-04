@@ -196,7 +196,7 @@ message MergeSortExchangeNode {
 message LookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
-  repeated int32 build_side_key = 3;
+  repeated uint32 build_side_key = 3;
   plan_common.CellBasedTableDesc probe_side_table_desc = 4;
   repeated uint32 probe_side_vnode_mapping = 5;
   repeated int32 probe_side_column_ids = 6;
@@ -241,9 +241,10 @@ message PlanNode {
 message ExchangeInfo {
   enum DistributionMode {
     // No partitioning at all, used for root segment which aggregates query results
-    SINGLE = 0;
-    BROADCAST = 1;
-    HASH = 2;
+    UNSPECIFIED = 0;
+    SINGLE = 1;
+    BROADCAST = 2;
+    HASH = 3;
   }
   message BroadcastInfo {
     uint32 count = 1;

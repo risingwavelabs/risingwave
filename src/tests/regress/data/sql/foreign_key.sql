@@ -769,14 +769,14 @@ DROP TABLE pktable, fktable;
 
 CREATE TEMP TABLE pktable (
         id1     INT4 PRIMARY KEY,
-        id2     VARCHAR(4) UNIQUE,
+        id2     VARCHAR UNIQUE,
         id3     REAL UNIQUE,
         UNIQUE(id1, id2, id3)
 );
 
 CREATE TEMP TABLE fktable (
         x1      INT4 REFERENCES pktable(id1),
-        x2      VARCHAR(4) REFERENCES pktable(id2),
+        x2      VARCHAR REFERENCES pktable(id2),
         x3      REAL REFERENCES pktable(id3),
         x4      TEXT,
         x5      INT2

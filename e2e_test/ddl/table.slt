@@ -31,6 +31,9 @@ create materialized view ddl_mv as select v2 from ddl_t;
 statement ok
 explain select v2 from ddl_t;
 
+statement ok
+explain create sink sink_t from ddl_t with ( sink_type = 'kafka' );
+
 # Create a mview with duplicated name.
 statement error
 create materialized view ddl_mv as select v2 from ddl_t;
@@ -106,3 +109,6 @@ create table "T2" ("V1" int);
 
 statement ok
 insert into "T2" ("V1") values (1);
+
+statement error
+create tabke C1 (c1 varchar(5));

@@ -19,10 +19,10 @@ use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
-use tracing::{debug, info};
+use tracing::debug;
 
-use crate::binder::{Binder, BoundSetExpr, BoundStatement};
-use crate::handler::util::{to_pg_field, to_pg_rows};
+use crate::binder::{Binder, BoundStatement};
+use crate::handler::util::{force_local_mode, to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{
     BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
@@ -38,25 +38,17 @@ pub async fn handle_query(
     let session = context.session_ctx.clone();
 
     let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
+        let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
 
-    let mut query_mode = session.config().get_query_mode();
-
-    debug!("query_mode:{:?}", query_mode);
-    let BoundStatement::Query(query) = &bound else {
-        unreachable!();
+    let query_mode = if force_local_mode(&bound) {
+        debug!("force query mode to local");
+        QueryMode::Local
+    } else {
+        session.config().get_query_mode()
     };
-    if let BoundSetExpr::Select(select) = &query.body
-        && let Some(relation) = &select.from
-        && relation.contains_sys_table() {
-        debug!("force query mode to local when contains system table");
-        query_mode = QueryMode::Local;
-    }
+    debug!("query_mode:{:?}", query_mode);
 
     let (data_stream, pg_descs) = match query_mode {
         QueryMode::Local => local_execute(context, bound)?,
@@ -141,11 +133,6 @@ fn local_execute(
             .collect::<Vec<PgFieldDescriptor>>();
 
         let plan = root.gen_batch_local_plan()?;
-
-        info!(
-            "Generated local execution plan: {:?}",
-            plan.explain_to_string()?
-        );
 
         let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
         let query = plan_fragmenter.split(plan)?;

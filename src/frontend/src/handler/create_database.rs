@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
@@ -27,6 +28,18 @@ pub async fn handle_create_database(
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let database_name = Binder::resolve_database_name(database_name)?;
+
+    {
+        let user_reader = session.env().user_info_reader();
+        let reader = user_reader.read_guard();
+        if let Some(info) = reader.get_user_by_name(session.user_name()) {
+            if !info.can_create_db && !info.is_supper {
+                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+            }
+        } else {
+            return Err(PermissionDenied("Session user is invalid".to_string()).into());
+        }
+    }
 
     {
         let catalog_reader = session.env().catalog_reader();
@@ -63,12 +76,51 @@ mod tests {
         let catalog_reader = session.env().catalog_reader();
 
         frontend.run_sql("CREATE DATABASE database").await.unwrap();
+        {
+            let reader = catalog_reader.read_guard();
+            assert!(reader.get_database_by_name("database").is_ok());
+        }
 
-        let database = catalog_reader
-            .read_guard()
-            .get_database_by_name("database")
-            .ok()
-            .cloned();
-        assert!(database.is_some());
+        frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .unwrap()
+                .id
+        };
+        let res = frontend
+            .run_user_sql(
+                "CREATE DATABASE database2",
+                "dev".to_string(),
+                "user".to_string(),
+                user_id,
+            )
+            .await;
+        assert!(res.is_err());
+
+        frontend.run_sql("CREATE USER user2 WITH NOSUPERUSER CREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("user2")
+                .unwrap()
+                .id
+        };
+        frontend
+            .run_user_sql(
+                "CREATE DATABASE database2",
+                "dev".to_string(),
+                "user2".to_string(),
+                user_id,
+            )
+            .await
+            .unwrap();
+        {
+            let reader = catalog_reader.read_guard();
+            assert!(reader.get_database_by_name("database2").is_ok());
+        }
     }
 }

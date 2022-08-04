@@ -21,28 +21,34 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ParallelUnitId;
+use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Schema, Source, Table};
+use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
-use crate::manager::{MetaSrvEnv, NotificationVersion};
+use crate::manager::{MetaSrvEnv, NotificationVersion, Relation};
 use crate::model::{MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
+use crate::{MetaError, MetaResult};
 
 pub type DatabaseId = u32;
 pub type SchemaId = u32;
 pub type TableId = u32;
 pub type SourceId = u32;
+pub type SinkId = u32;
 pub type RelationId = u32;
 
-pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
+pub type Catalog = (
+    Vec<Database>,
+    Vec<Schema>,
+    Vec<Table>,
+    Vec<Source>,
+    Vec<Sink>,
+);
 
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -55,7 +61,7 @@ impl<S> CatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let catalog_manager = Self {
             core: Mutex::new(CatalogManagerCore::new(env.clone()).await?),
             env,
@@ -65,7 +71,7 @@ where
     }
 
     // Create default database and schema.
-    async fn init(&self) -> Result<()> {
+    async fn init(&self) -> MetaResult<()> {
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
             owner: DEFAULT_SUPER_USER_ID,
@@ -111,12 +117,12 @@ where
         self.core.lock().await
     }
 
-    pub async fn get_catalog(&self) -> Result<Catalog> {
+    pub async fn get_catalog(&self) -> MetaResult<Catalog> {
         let core = self.core.lock().await;
         core.get_catalog().await
     }
 
-    pub async fn create_database(&self, database: &Database) -> Result<NotificationVersion> {
+    pub async fn create_database(&self, database: &Database) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
             let mut transaction = Transaction::default();
@@ -155,13 +161,11 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "database already exists".to_string(),
-            )))
+            bail!("database already exists");
         }
     }
 
-    pub async fn drop_database(&self, database_id: DatabaseId) -> Result<NotificationVersion> {
+    pub async fn drop_database(&self, database_id: DatabaseId) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
@@ -188,13 +192,11 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "database doesn't exist".to_string(),
-            )))
+            bail!("database doesn't exist");
         }
     }
 
-    pub async fn create_schema(&self, schema: &Schema) -> Result<NotificationVersion> {
+    pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_schema(schema) {
             schema.insert(self.env.meta_store()).await?;
@@ -208,13 +210,11 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "schema already exists".to_string(),
-            )))
+            bail!("schema already exists");
         }
     }
 
-    pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<NotificationVersion> {
+    pub async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let schema = Schema::select(self.env.meta_store(), &schema_id).await?;
         if let Some(schema) = schema {
@@ -229,13 +229,39 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "schema doesn't exist".to_string(),
-            )))
+            bail!("schema doesn't exist");
         }
     }
 
-    pub async fn start_create_table_procedure(&self, table: &Table) -> Result<()> {
+    pub async fn start_create_procedure(&self, relation: &Relation) -> MetaResult<()> {
+        match relation {
+            Relation::Table(table) => self.start_create_table_procedure(table).await,
+            Relation::Sink(sink) => self.start_create_sink_procedure(sink).await,
+        }
+    }
+
+    pub async fn cancel_create_procedure(&self, relation: &Relation) -> MetaResult<()> {
+        match relation {
+            Relation::Table(table) => self.cancel_create_table_procedure(table).await,
+            Relation::Sink(sink) => self.cancel_create_sink_procedure(sink).await,
+        }
+    }
+
+    pub async fn finish_create_procedure(
+        &self,
+        internal_tables: Option<Vec<Table>>,
+        relation: &Relation,
+    ) -> MetaResult<NotificationVersion> {
+        match relation {
+            Relation::Table(table) => {
+                self.finish_create_table_procedure(internal_tables.unwrap(), table)
+                    .await
+            }
+            Relation::Sink(sink) => self.finish_create_sink_procedure(sink).await,
+        }
+    }
+
+    pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && !core.has_in_progress_creation(&key) {
@@ -245,9 +271,7 @@ where
             }
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "table already exists or in creating procedure".to_string(),
-            )))
+            bail!("table already exists or in creating procedure");
         }
     }
 
@@ -255,7 +279,7 @@ where
         &self,
         internal_tables: Vec<Table>,
         table: &Table,
-    ) -> Result<NotificationVersion> {
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
@@ -280,13 +304,11 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "table already exist or not in creating procedure".to_string(),
-            )))
+            bail!("table already exist or not in creating procedure");
         }
     }
 
-    pub async fn cancel_create_table_procedure(&self, table: &Table) -> Result<()> {
+    pub async fn cancel_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
@@ -296,22 +318,19 @@ where
             }
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "table already exist or not in creating procedure".to_string(),
-            )))
+            bail!("table already exist or not in creating procedure");
         }
     }
 
-    pub async fn drop_table(&self, table_id: TableId) -> Result<NotificationVersion> {
+    pub async fn drop_table(&self, table_id: TableId) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
             match core.get_ref_count(table_id) {
-                Some(ref_count) => Err(PermissionDenied(format!(
+                Some(ref_count) => Err(MetaError::permission_denied(format!(
                     "Fail to delete table `{}` because {} other relation(s) depend on it",
                     table.name, ref_count
-                ))
-                .into()),
+                ))),
                 None => {
                     Table::delete(self.env.meta_store(), &table_id).await?;
                     core.drop_table(&table);
@@ -327,29 +346,25 @@ where
                 }
             }
         } else {
-            Err(RwError::from(InternalError(
-                "table doesn't exist".to_string(),
-            )))
+            bail!("table doesn't exist");
         }
     }
 
-    pub async fn start_create_source_procedure(&self, source: &Source) -> Result<()> {
+    pub async fn start_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && !core.has_in_progress_creation(&key) {
             core.mark_creating(&key);
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source already exists or in creating procedure".to_string(),
-            )))
+            bail!("source already exists or in creating procedure");
         }
     }
 
     pub async fn finish_create_source_procedure(
         &self,
         source: &Source,
-    ) -> Result<NotificationVersion> {
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && core.has_in_progress_creation(&key) {
@@ -363,22 +378,18 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure");
         }
     }
 
-    pub async fn cancel_create_source_procedure(&self, source: &Source) -> Result<()> {
+    pub async fn cancel_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure");
         }
     }
 
@@ -386,7 +397,7 @@ where
         &self,
         fragments: &Vec<TableFragments>,
         migrate_map: &HashMap<ParallelUnitId, ParallelUnit>,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
         let mut tables = Vec::new();
@@ -423,16 +434,15 @@ where
         Ok(())
     }
 
-    pub async fn drop_source(&self, source_id: SourceId) -> Result<NotificationVersion> {
+    pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let source = Source::select(self.env.meta_store(), &source_id).await?;
         if let Some(source) = source {
             match core.get_ref_count(source_id) {
-                Some(ref_count) => Err(PermissionDenied(format!(
+                Some(ref_count) => Err(MetaError::permission_denied(format!(
                     "Fail to delete source `{}` because {} other relation(s) depend on it",
                     source.name, ref_count
-                ))
-                .into()),
+                ))),
                 None => {
                     Source::delete(self.env.meta_store(), &source_id).await?;
                     core.drop_source(&source);
@@ -445,9 +455,7 @@ where
                 }
             }
         } else {
-            Err(RwError::from(InternalError(
-                "source doesn't exist".to_string(),
-            )))
+            bail!("source doesn't exist");
         }
     }
 
@@ -455,7 +463,7 @@ where
         &self,
         source: &Source,
         mview: &Table,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
@@ -469,9 +477,7 @@ where
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source or table already exist".to_string(),
-            )))
+            bail!("source or table already exist");
         }
     }
 
@@ -480,7 +486,7 @@ where
         source: &Source,
         mview: &Table,
         tables: Vec<Table>,
-    ) -> Result<NotificationVersion> {
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
@@ -517,9 +523,7 @@ where
                 .await;
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure");
         }
     }
 
@@ -527,7 +531,7 @@ where
         &self,
         source: &Source,
         mview: &Table,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
@@ -540,9 +544,7 @@ where
             core.unmark_creating(&mview_key);
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure");
         }
     }
 
@@ -550,7 +552,7 @@ where
         &self,
         source_id: SourceId,
         mview_id: TableId,
-    ) -> Result<NotificationVersion> {
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let mview = Table::select(self.env.meta_store(), &mview_id).await?;
         let source = Source::select(self.env.meta_store(), &source_id).await?;
@@ -561,29 +563,23 @@ where
                     mview.optional_associated_source_id
                 {
                     if associated_source_id != source_id {
-                        return Err(RwError::from(InternalError(
-                            "mview's associated source id doesn't match source id".to_string(),
-                        )));
+                        bail!("mview's associated source id doesn't match source id");
                     }
                 } else {
-                    return Err(RwError::from(InternalError(
-                        "mview do not have associated source id".to_string(),
-                    )));
+                    bail!("mview do not have associated source id");
                 }
                 // check ref count
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
-                    return Err(PermissionDenied(format!(
+                    return Err(MetaError::permission_denied(format!(
                         "Fail to delete table `{}` because {} other relation(s) depend on it",
                         mview.name, ref_count
-                    ))
-                    .into());
+                    )));
                 }
                 if let Some(ref_count) = core.get_ref_count(source_id) {
-                    return Err(PermissionDenied(format!(
+                    return Err(MetaError::permission_denied(format!(
                         "Fail to delete source `{}` because {} other relation(s) depend on it",
                         source.name, ref_count
-                    ))
-                    .into());
+                    )));
                 }
 
                 // now is safe to delete both mview and source
@@ -606,13 +602,99 @@ where
                 Ok(version)
             }
 
-            _ => Err(RwError::from(InternalError(
-                "table or source doesn't exist".to_string(),
-            ))),
+            _ => bail!("table or source doesn't exist"),
         }
     }
 
-    pub async fn list_tables(&self, schema_id: SchemaId) -> Result<Vec<TableId>> {
+    pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
+        let mut core = self.core.lock().await;
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        if !core.has_sink(sink) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            for &dependent_relation_id in &sink.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            bail!("sink already exists or in creating procedure");
+        }
+    }
+
+    pub async fn finish_create_sink_procedure(
+        &self,
+        sink: &Sink,
+    ) -> MetaResult<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            sink.insert(self.env.meta_store()).await?;
+            core.add_sink(sink);
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            bail!("sink already exist or not in creating procedure");
+        }
+    }
+
+    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
+        let mut core = self.core.lock().await;
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            Ok(())
+        } else {
+            bail!("sink already exist or not in creating procedure");
+        }
+    }
+
+    pub async fn create_sink(&self, sink: &Sink) -> MetaResult<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        if !core.has_sink(sink) {
+            sink.insert(self.env.meta_store()).await?;
+            core.add_sink(sink);
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            bail!("sink already exists");
+        }
+    }
+
+    pub async fn drop_sink(&self, sink_id: SinkId) -> MetaResult<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
+        if let Some(sink) = sink {
+            Sink::delete(self.env.meta_store(), &sink_id).await?;
+            core.drop_sink(&sink);
+            for &dependent_relation_id in &sink.dependent_relations {
+                core.decrease_ref_count(dependent_relation_id);
+            }
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Delete, Info::Sink(sink))
+                .await;
+
+            Ok(version)
+        } else {
+            bail!("sink doesn't exist");
+        }
+    }
+
+    pub async fn list_tables(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
         let core = self.core.lock().await;
         let tables = Table::list(core.env.meta_store()).await?;
         Ok(tables
@@ -622,7 +704,7 @@ where
             .collect())
     }
 
-    pub async fn list_sources(&self, schema_id: SchemaId) -> Result<Vec<SourceId>> {
+    pub async fn list_sources(&self, schema_id: SchemaId) -> MetaResult<Vec<SourceId>> {
         let core = self.core.lock().await;
         let sources = Source::list(core.env.meta_store()).await?;
         Ok(sources
@@ -644,6 +726,7 @@ type DatabaseKey = String;
 type SchemaKey = (DatabaseId, String);
 type TableKey = (DatabaseId, SchemaId, String);
 type SourceKey = (DatabaseId, SchemaId, String);
+type SinkKey = (DatabaseId, SchemaId, String);
 type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`CatalogManagerCore`] caches meta catalog information and maintains dependent relationship
@@ -656,6 +739,8 @@ pub struct CatalogManagerCore<S: MetaStore> {
     schemas: HashSet<SchemaKey>,
     /// Cached source key information.
     sources: HashSet<SourceKey>,
+    /// Cached sink key information.
+    sinks: HashSet<SinkKey>,
     /// Cached table key information.
     tables: HashSet<TableKey>,
     /// Relation refer count mapping.
@@ -669,10 +754,11 @@ impl<S> CatalogManagerCore<S>
 where
     S: MetaStore,
 {
-    async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+    async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let databases = Database::list(env.meta_store()).await?;
         let schemas = Schema::list(env.meta_store()).await?;
         let sources = Source::list(env.meta_store()).await?;
+        let sinks = Sink::list(env.meta_store()).await?;
         let tables = Table::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
@@ -688,6 +774,11 @@ where
                 .into_iter()
                 .map(|source| (source.database_id, source.schema_id, source.name)),
         );
+        let sinks = HashSet::from_iter(
+            sinks
+                .into_iter()
+                .map(|sink| (sink.database_id, sink.schema_id, sink.name)),
+        );
         let tables = HashSet::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
                 relation_ref_count.entry(*depend_relation_id).or_insert(0);
@@ -702,23 +793,27 @@ where
             databases,
             schemas,
             sources,
+            sinks,
             tables,
             relation_ref_count,
             in_progress_creation_tracker,
         })
     }
 
-    pub async fn get_catalog(&self) -> Result<Catalog> {
+    pub async fn get_catalog(&self) -> MetaResult<Catalog> {
         Ok((
             Database::list(self.env.meta_store()).await?,
             Schema::list(self.env.meta_store()).await?,
             Table::list(self.env.meta_store()).await?,
             Source::list(self.env.meta_store()).await?,
+            Sink::list(self.env.meta_store()).await?,
         ))
     }
 
-    pub async fn list_sources(&self) -> Result<Vec<Source>> {
-        Source::list(self.env.meta_store()).await
+    pub async fn list_sources(&self) -> MetaResult<Vec<Source>> {
+        Source::list(self.env.meta_store())
+            .await
+            .map_err(Into::into)
     }
 
     fn has_database(&self, database: &Database) -> bool {
@@ -778,8 +873,31 @@ where
             .remove(&(source.database_id, source.schema_id, source.name.clone()))
     }
 
-    pub async fn get_source(&self, id: SourceId) -> Result<Option<Source>> {
-        Source::select(self.env.meta_store(), &id).await
+    pub async fn get_source(&self, id: SourceId) -> MetaResult<Option<Source>> {
+        Source::select(self.env.meta_store(), &id)
+            .await
+            .map_err(Into::into)
+    }
+
+    fn has_sink(&self, sink: &Sink) -> bool {
+        self.sinks
+            .contains(&(sink.database_id, sink.schema_id, sink.name.clone()))
+    }
+
+    fn add_sink(&mut self, sink: &Sink) {
+        self.sinks
+            .insert((sink.database_id, sink.schema_id, sink.name.clone()));
+    }
+
+    fn drop_sink(&mut self, sink: &Sink) -> bool {
+        self.sinks
+            .remove(&(sink.database_id, sink.schema_id, sink.name.clone()))
+    }
+
+    pub async fn get_sink(&self, id: SinkId) -> MetaResult<Option<Sink>> {
+        Sink::select(self.env.meta_store(), &id)
+            .await
+            .map_err(Into::into)
     }
 
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {

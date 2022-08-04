@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_sqlparser::ast::{ObjectName, Query, WithProperties};
+use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_sqlparser::ast::{ObjectName, Query};
 
-use super::util::handle_with_properties;
+use super::privilege::{check_privileges, resolve_relation_privileges};
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
@@ -34,21 +34,30 @@ pub fn gen_create_mv_plan(
     context: OptimizerContextRef,
     query: Box<Query>,
     name: ObjectName,
-    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
+    let (database_id, schema_id) = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+
+        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        check_privileges(
+            session,
+            &vec![ObjectCheckItem::new(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            )],
+        )?;
+        catalog_reader.check_relation_name_duplicated(
+            session.database(),
+            &schema_name,
+            &table_name,
+        )?
+    };
 
     let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
+        let mut binder = Binder::new(session);
         binder.bind_query(*query)?
     };
 
@@ -61,6 +70,11 @@ pub fn gen_create_mv_plan(
             )
             .into());
         }
+        if let Some(relation) = &select.from {
+            let mut check_items = Vec::new();
+            resolve_relation_privileges(relation, Action::Select, &mut check_items);
+            check_privileges(session, &check_items)?;
+        }
     }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
@@ -69,7 +83,6 @@ pub fn gen_create_mv_plan(
     let mut table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
     table.owner = session.user_id();
-    table.properties = properties;
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -85,18 +98,11 @@ pub async fn handle_create_mv(
     context: OptimizerContext,
     name: ObjectName,
     query: Box<Query>,
-    with_options: WithProperties,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (table, graph) = {
-        let (plan, table) = gen_create_mv_plan(
-            &session,
-            context.into(),
-            query,
-            name,
-            handle_with_properties("create_mv", with_options.0)?,
-        )?;
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
         let stream_plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(stream_plan);
 

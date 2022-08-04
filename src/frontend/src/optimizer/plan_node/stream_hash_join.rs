@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, Field, Schema, SchemaId};
+use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
@@ -26,7 +28,8 @@ use super::utils::TableCatalogBuilder;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateVerboseDisplay};
+use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
@@ -132,40 +135,44 @@ impl fmt::Display for StreamHashJoin {
         let verbose = self.base.ctx.is_explain_verbose();
         builder.field("type", &format_args!("{:?}", self.logical.join_type()));
 
-        if verbose {
-            let mut concat_schema = self.left().schema().fields.clone();
-            concat_schema.extend(self.right().schema().fields.clone());
-            let concat_schema = Schema::new(concat_schema);
-            builder.field(
-                "predicate",
-                &format_args!(
-                    "{}",
-                    EqJoinPredicateVerboseDisplay {
-                        eq_join_predicate: self.eq_join_predicate(),
-                        input_schema: &concat_schema
-                    }
-                ),
-            );
-        } else {
-            builder.field("predicate", &format_args!("{}", self.eq_join_predicate()));
-        }
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "predicate",
+            &format_args!(
+                "{}",
+                EqJoinPredicateDisplay {
+                    eq_join_predicate: self.eq_join_predicate(),
+                    input_schema: &concat_schema
+                }
+            ),
+        );
 
         if self.append_only() {
             builder.field("append_only", &format_args!("{}", true));
         }
-        if self
-            .logical
-            .output_indices()
-            .iter()
-            .copied()
-            .eq(0..self.logical.internal_column_num())
-        {
-            builder.field("output_indices", &format_args!("all"));
-        } else {
-            builder.field(
-                "output_indices",
-                &format_args!("{:?}", self.logical.output_indices()),
-            );
+        if verbose {
+            if self
+                .logical
+                .output_indices()
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                builder.field("output", &format_args!("all"));
+            } else {
+                builder.field(
+                    "output",
+                    &format_args!(
+                        "{:?}",
+                        &IndicesDisplay {
+                            indices: self.logical.output_indices(),
+                            input_schema: &concat_schema,
+                        }
+                    ),
+                );
+            }
         }
 
         builder.finish()
@@ -260,6 +267,21 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
     pk_indices.iter().for_each(|idx| {
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
+
+    if !base.ctx.inner().with_properties.is_empty() {
+        let properties: HashMap<_, _> = base
+            .ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
+        if !properties.is_empty() {
+            internal_table_catalog_builder.add_properties(properties);
+        }
+    }
 
     internal_table_catalog_builder.build(dist_keys, append_only)
 }

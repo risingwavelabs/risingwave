@@ -55,6 +55,7 @@ pub mod exchange;
 mod expand;
 mod filter;
 mod global_simple_agg;
+mod group_top_n;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
@@ -72,9 +73,9 @@ mod receiver;
 mod simple;
 mod sink;
 mod source;
+mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
-mod top_n_new;
 mod union;
 
 #[cfg(test)]
@@ -108,8 +109,8 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use source::*;
+pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use top_n_new::TopNExecutorNew;
 pub use union::UnionExecutor;
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -572,7 +573,10 @@ pub fn pk_input_array_refs<'a>(
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
-    let message = stream.next().await.unwrap()?;
+    let message = stream
+        .next()
+        .await
+        .expect("failed to extract the first message: stream closed unexpectedly")?;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");

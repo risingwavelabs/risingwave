@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{CorrelatedId, Expr as _, ExprImpl, InputRef};
+use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -165,17 +165,14 @@ impl Binder {
                 }
                 SelectItem::QualifiedWildcard(obj_name) => {
                     let table_name = &obj_name.0.last().unwrap().real_value();
-                    let (mut begin, end) =
-                        self.context.range_of.get(table_name).ok_or_else(|| {
-                            ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
-                        })?;
-                    // Here we make the assumption that the hidden columns are always at the
-                    // beginning.
-                    while begin < *end && self.context.columns[begin].is_hidden {
-                        begin += 1;
-                    }
-                    let (exprs, names) =
-                        Self::iter_bound_columns(self.context.columns[begin..*end].iter());
+                    let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
+                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                    })?;
+                    let (exprs, names) = Self::iter_bound_columns(
+                        self.context.columns[*begin..*end]
+                            .iter()
+                            .filter(|c| !c.is_hidden),
+                    );
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -185,11 +182,33 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
-                    let (exprs, names) = Self::iter_bound_columns(
-                        self.context.columns[..].iter().filter(|c| !c.is_hidden),
-                    );
+                    // Bind the column groups
+                    // In psql, the USING and NATURAL columns come before the rest of the columns in
+                    // a SELECT * statement
+                    let (exprs, names) = self.iter_column_groups();
                     select_list.extend(exprs);
                     aliases.extend(names);
+
+                    // Bind columns that are not in groups
+                    let (exprs, names) =
+                        Self::iter_bound_columns(self.context.columns[..].iter().filter(|c| {
+                            !c.is_hidden
+                                && !self
+                                    .context
+                                    .column_group_context
+                                    .mapping
+                                    .contains_key(&c.index)
+                        }));
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+
+                    // TODO: we will need to be able to handle wildcard expressions bound to aliases
+                    // in the future. We'd then need a `NaturalGroupContext`
+                    // bound to each alias to correctly disambiguate column
+                    // references
+                    //
+                    // We may need to refactor `NaturalGroupContext` to become span aware in that
+                    // case.
                 }
             }
         }
@@ -205,6 +224,41 @@ impl Binder {
                     InputRef::new(c.index, c.field.data_type.clone()).into(),
                     Some(c.field.name.clone()),
                 )
+            })
+            .unzip()
+    }
+
+    pub fn iter_column_groups(&self) -> (Vec<ExprImpl>, Vec<Option<String>>) {
+        self.context
+            .column_group_context
+            .groups
+            .values()
+            .rev() // ensure that the outermost col group gets put first in the list
+            .map(|g| {
+                if let Some(col) = &g.non_nullable_column {
+                    let c = &self.context.columns[*col];
+                    (
+                        InputRef::new(c.index, c.field.data_type.clone()).into(),
+                        Some(c.field.name.clone()),
+                    )
+                } else {
+                    let mut input_idxes = g.indices.iter().collect::<Vec<_>>();
+                    input_idxes.sort();
+                    let inputs = input_idxes
+                        .into_iter()
+                        .map(|index| {
+                            let column = &self.context.columns[*index];
+                            InputRef::new(column.index, column.field.data_type.clone()).into()
+                        })
+                        .collect::<Vec<_>>();
+                    let c = &self.context.columns[*g.indices.iter().next().unwrap()];
+                    (
+                        FunctionCall::new(ExprType::Coalesce, inputs)
+                            .expect("Failure binding COALESCE function call")
+                            .into(),
+                        Some(c.field.name.clone()),
+                    )
+                }
             })
             .unzip()
     }

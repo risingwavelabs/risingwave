@@ -5,6 +5,7 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
+  { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/test_runner/planner_test.toml" },
 ]
@@ -271,6 +272,7 @@ dependencies = [
   "download-prometheus",
   "download-jaeger",
   "download-kafka",
+  "download-redis",
   "build-risingwave",
   "post-build-risingwave",
   "extract-dashboard-artifact",
@@ -289,6 +291,7 @@ dependencies = [
   "download-prometheus",
   "download-jaeger",
   "download-kafka",
+  "download-redis",
 ]
 
 [tasks.p]
@@ -366,9 +369,6 @@ category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster and clean the data"
 dependencies = ["k", "clean-data"]
 
-[tasks.fill-kafka]
-command = "scripts/source/prepare_source.sh"
-
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """
@@ -391,16 +391,16 @@ echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
 tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
 echo
 
-echo "check: $(tput setaf 4)yq >= 4$(tput sgr0)"
-yq -V || echo "$(tput setaf 3)yq$(tput sgr0) not found."
-echo
-
 echo "check: $(tput setaf 4)psql >= 14$(tput sgr0)"
 psql -V || echo "$(tput setaf 3)psql$(tput sgr0) not found."
 echo
 
 echo "check: $(tput setaf 4)cmake$(tput sgr0)"
 cmake --version || echo "$(tput setaf 3)cmake$(tput sgr0) not found."
+echo
+
+echo "check: $(tput setaf 4)protoc$(tput sgr0)"
+protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
 """
 description = "Install required tools to do pre-CI check and run e2e tests"
@@ -438,24 +438,24 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo build --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
+cargo build "$@"
 """
 
 [tasks.stest]
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo nextest run --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
+cargo nextest run "$@"
 """
 
 [tasks.check-hakari]
@@ -503,7 +503,7 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --workspace --all-targets
+cargo clippy --all-targets --features failpoints --locked -- -D warnings
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 

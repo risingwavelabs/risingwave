@@ -167,6 +167,14 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
+
+    /// Capacity of sstable meta cache.
+    #[serde(default = "default::compactor_memory_limit_mb")]
+    pub compactor_memory_limit_mb: usize,
+
+    /// Number of SST ids fetched from meta per RPC
+    #[serde(default = "default::sstable_id_remote_fetch_number")]
+    pub sstable_id_remote_fetch_number: u32,
 }
 
 impl Default for StorageConfig {
@@ -211,6 +219,7 @@ mod default {
         1000
     }
 
+    #[expect(dead_code)]
     pub fn chunk_size() -> u32 {
         1024
     }
@@ -235,6 +244,7 @@ mod default {
         4
     }
 
+    #[expect(dead_code)]
     pub fn shared_buffer_threshold() -> u32 {
         // 192MB
         201326592
@@ -286,6 +296,14 @@ mod default {
 
     pub fn worker_node_parallelism() -> usize {
         num_cpus::get()
+    }
+
+    pub fn compactor_memory_limit_mb() -> usize {
+        512
+    }
+
+    pub fn sstable_id_remote_fetch_number() -> u32 {
+        10
     }
 }
 

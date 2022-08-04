@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::clone::Clone;
+use std::mem::size_of;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use fail::fail_point;
@@ -86,20 +88,45 @@ impl SstableStore {
     }
 
     pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
-        self.put_sst_data(sst.id, data.clone()).await?;
-
+        let charge = sst
+            .blocks
+            .iter()
+            .map(|block| block.restart_point_len())
+            .sum::<usize>()
+            * size_of::<usize>()
+            + sst.meta.encoded_size()
+            + data.len();
+        self.put_sst_data(sst.id, data).await?;
         fail_point!("metadata_upload_err");
         if let Err(e) = self.put_meta(&sst).await {
             self.delete_sst_data(sst.id).await?;
             return Err(e);
         }
-
         if let CachePolicy::Fill = policy {
             self.meta_cache
-                .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
+                .insert(sst.id, sst.id, charge, Box::new(sst));
         }
 
         Ok(())
+    }
+
+    pub async fn delete(&self, sst_id: HummockSstableId) -> HummockResult<()> {
+        // Meta
+        self.store
+            .delete(self.get_sst_meta_path(sst_id).as_str())
+            .await
+            .map_err(HummockError::object_io_error)?;
+        // Data
+        self.store
+            .delete(self.get_sst_data_path(sst_id).as_str())
+            .await
+            .map_err(HummockError::object_io_error)?;
+        self.meta_cache.erase(sst_id, &sst_id);
+        Ok(())
+    }
+
+    pub fn delete_cache(&self, sst_id: HummockSstableId) {
+        self.meta_cache.erase(sst_id, &sst_id);
     }
 
     async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
@@ -229,6 +256,11 @@ impl SstableStore {
         self.block_cache.clear();
     }
 
+    #[cfg(any(test, feature = "test"))]
+    pub fn clear_meta_cache(&self) {
+        self.meta_cache.clear();
+    }
+
     pub async fn load_table(
         &self,
         sst_id: HummockSstableId,
@@ -245,8 +277,9 @@ impl SstableStore {
                     let meta_path = self.get_sst_meta_path(sst_id);
                     let data_path = self.get_sst_data_path(sst_id);
                     stats.cache_meta_block_miss += 1;
-
+                    let stats_ptr = stats.remote_io_time.clone();
                     async move {
+                        let now = Instant::now();
                         let meta = match meta_data {
                             Some(data) => data,
                             None => {
@@ -259,16 +292,24 @@ impl SstableStore {
                         };
                         let mut size = meta.encoded_size();
                         let sst = if load_data {
-                            size = meta.estimated_size as usize;
-
                             let block_data = store
                                 .read(&data_path, None)
                                 .await
                                 .map_err(HummockError::object_io_error)?;
-                            Sstable::new_with_data(sst_id, meta, block_data)?
+                            size += block_data.len();
+                            let sst = Sstable::new_with_data(sst_id, meta, block_data)?;
+                            size += sst
+                                .blocks
+                                .iter()
+                                .map(|block| block.restart_point_len())
+                                .sum::<usize>()
+                                * size_of::<usize>();
+                            sst
                         } else {
                             Sstable::new(sst_id, meta)
                         };
+                        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                         Ok((Box::new(sst), size))
                     }
                 })

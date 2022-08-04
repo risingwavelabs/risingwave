@@ -26,6 +26,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{SqlOption, Value};
 
+use crate::binder::{BoundSetExpr, BoundStatement};
+
 /// Format scalars according to postgres convention.
 fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
     // format == false means TEXT format
@@ -38,22 +40,7 @@ fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
             _ => d.to_string().into(),
         }
     } else {
-        match d {
-            ScalarRefImpl::Int16(d) => d.to_be_bytes().to_vec().into(),
-            ScalarRefImpl::Int32(d) => d.to_be_bytes().to_vec().into(),
-            ScalarRefImpl::Int64(d) => d.to_be_bytes().to_vec().into(),
-            ScalarRefImpl::Float32(_) => todo!(),
-            ScalarRefImpl::Float64(_) => todo!(),
-            ScalarRefImpl::Utf8(d) => d.to_string().into(),
-            ScalarRefImpl::Bool(_) => todo!(),
-            ScalarRefImpl::Decimal(_) => todo!(),
-            ScalarRefImpl::Interval(_) => todo!(),
-            ScalarRefImpl::NaiveDate(_) => todo!(),
-            ScalarRefImpl::NaiveDateTime(_) => todo!(),
-            ScalarRefImpl::NaiveTime(_) => todo!(),
-            ScalarRefImpl::Struct(_) => todo!(),
-            ScalarRefImpl::List(_) => todo!(),
-        }
+        d.binary_serialize()
     }
 }
 
@@ -146,6 +133,18 @@ pub fn handle_with_properties(
             )))),
         })
         .collect()
+}
+
+/// Check whether need to force query mode to local.
+pub fn force_local_mode(bound: &BoundStatement) -> bool {
+    if let BoundStatement::Query(query) = bound {
+        if let BoundSetExpr::Select(select) = &query.body
+            && let Some(relation) = &select.from
+            && relation.contains_sys_table() {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::collections::HashMap;
 use std::fmt;
 
 use risingwave_common::catalog::{DatabaseId, Schema, SchemaId};
+use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -23,7 +25,7 @@ use crate::catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::PlanRef;
-use crate::utils::{Condition, ConditionVerboseDisplay};
+use crate::utils::{Condition, ConditionDisplay};
 
 #[derive(Clone, Debug)]
 pub struct StreamDynamicFilter {
@@ -59,22 +61,17 @@ impl StreamDynamicFilter {
 
 impl fmt::Display for StreamDynamicFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            let mut concat_schema = self.left().schema().fields.clone();
-            concat_schema.extend(self.right().schema().fields.clone());
-            let concat_schema = Schema::new(concat_schema);
-            write!(
-                f,
-                "StreamDynamicFilter {{ predicate: {} }}",
-                ConditionVerboseDisplay {
-                    condition: &self.predicate,
-                    input_schema: &concat_schema
-                }
-            )
-        } else {
-            write!(f, "StreamDynamicFilter {{ predicate: {} }}", self.predicate)
-        }
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        write!(
+            f,
+            "StreamDynamicFilter {{ predicate: {} }}",
+            ConditionDisplay {
+                condition: &self.predicate,
+                input_schema: &concat_schema
+            }
+        )
     }
 }
 
@@ -131,6 +128,20 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     pk_indices.extend(&base.pk_indices);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    if !base.ctx.inner().with_properties.is_empty() {
+        let properties: HashMap<_, _> = base
+            .ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
+        if !properties.is_empty() {
+            internal_table_catalog_builder.add_properties(properties);
+        }
+    }
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -139,6 +150,21 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     pk_indices.iter().for_each(|idx| {
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
+
+    if !base.ctx.inner().with_properties.is_empty() {
+        let properties: HashMap<_, _> = base
+            .ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
+        if !properties.is_empty() {
+            internal_table_catalog_builder.add_properties(properties);
+        }
+    }
 
     internal_table_catalog_builder.build(dist_keys, append_only)
 }

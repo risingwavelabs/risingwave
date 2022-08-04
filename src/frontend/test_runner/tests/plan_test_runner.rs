@@ -18,6 +18,7 @@ use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 use risingwave_frontend_test_runner::run_test_file;
 use walkdir::WalkDir;
 
+#[cfg(not(madsim))]
 fn main() {
     let run_tests_args = &Arguments::from_args();
     let mut tests = vec![];
@@ -66,6 +67,15 @@ fn main() {
             .build()
             .unwrap()
             .block_on(run_test_file(&test_case_name, &file_content));
+        Outcome::Passed
+    })
+    .exit();
+}
+
+#[cfg(madsim)]
+fn main() {
+    // println!("planner test is not supported yet in simulation");
+    run_tests(&Arguments::from_args(), vec![], |_: &Test<()>| {
         Outcome::Passed
     })
     .exit();

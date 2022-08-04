@@ -17,12 +17,14 @@
 
 mod resolve_id;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
+use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table,
 };
@@ -31,7 +33,7 @@ use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
 use risingwave_frontend::FrontendOpts;
-use risingwave_sqlparser::ast::{ObjectName, Statement, WithProperties};
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +83,12 @@ pub struct TestCase {
 
     /// Error of optimizer
     pub optimizer_error: Option<String>,
+
+    /// Error of `.gen_batch_query_plan()`
+    pub batch_error: Option<String>,
+
+    /// Error of `.gen_batch_local_plan()`
+    pub batch_local_error: Option<String>,
 
     /// Support using file content or file location to create source.
     pub create_source: Option<CreateSource>,
@@ -132,6 +140,12 @@ pub struct TestCaseResult {
 
     /// Error of optimizer
     pub optimizer_error: Option<String>,
+
+    /// Error of `.gen_batch_query_plan()`
+    pub batch_error: Option<String>,
+
+    /// Error of `.gen_batch_local_plan()`
+    pub batch_local_error: Option<String>,
 }
 
 impl TestCaseResult {
@@ -161,6 +175,8 @@ impl TestCaseResult {
             batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
+            batch_error: self.batch_error,
+            batch_local_error: self.batch_local_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
@@ -247,7 +263,8 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(session.clone(), Arc::from(sql));
+            let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
+            context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -268,7 +285,9 @@ impl TestCase {
                     with_options,
                     ..
                 } => {
-                    create_table::handle_create_table(context, name, columns, with_options).await?;
+                    context.with_properties =
+                        handle_with_properties("handle_create_table", with_options.clone())?;
+                    create_table::handle_create_table(context, name, columns).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
@@ -293,8 +312,9 @@ impl TestCase {
                     with_options,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, query, WithProperties(with_options))
-                        .await?;
+                    context.with_properties =
+                        handle_with_properties("handle_create_mv", with_options.clone())?;
+                    create_mv::handle_create_mv(context, name, query).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -314,10 +334,7 @@ impl TestCase {
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(
-                session.env().catalog_reader().read_guard(),
-                session.database().to_string(),
-            );
+            let mut binder = Binder::new(&session);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
@@ -348,8 +365,17 @@ impl TestCase {
                 Some(explain_plan(&logical_plan.gen_optimized_logical_plan()));
         }
 
-        if self.batch_plan.is_some() || self.batch_plan_proto.is_some() {
-            let batch_plan = logical_plan.gen_batch_query_plan()?;
+        if self.batch_plan.is_some()
+            || self.batch_plan_proto.is_some()
+            || self.batch_error.is_some()
+        {
+            let batch_plan = match logical_plan.gen_batch_query_plan() {
+                Ok(batch_plan) => batch_plan,
+                Err(err) => {
+                    ret.batch_error = Some(err.to_string());
+                    return Ok(ret);
+                }
+            };
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_plan.is_some() {
@@ -364,8 +390,14 @@ impl TestCase {
             }
         }
 
-        if self.batch_local_plan.is_some() {
-            let batch_plan = logical_plan.gen_batch_local_plan()?;
+        if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
+            let batch_plan = match logical_plan.gen_batch_local_plan() {
+                Ok(batch_plan) => batch_plan,
+                Err(err) => {
+                    ret.batch_local_error = Some(err.to_string());
+                    return Ok(ret);
+                }
+            };
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_local_plan.is_some() {
@@ -385,7 +417,6 @@ impl TestCase {
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
-                HashMap::new(),
             )?;
 
             // Only generate stream_plan if it is specified in test case
@@ -417,6 +448,12 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         "optimizer",
         &expected.optimizer_error,
         &actual.optimizer_error,
+    )?;
+    check_err("batch", &expected.batch_error, &actual.batch_error)?;
+    check_err(
+        "batch_local",
+        &expected.batch_local_error,
+        &actual.batch_local_error,
     )?;
     check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
     check_option_plan_eq(

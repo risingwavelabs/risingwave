@@ -77,7 +77,7 @@ impl fmt::Display for StreamIndexScan {
                 self.logical.column_names()
             }
             .join(", "),
-            self.base.pk_indices
+            self.base.pk_indices,
         )
     }
 }
@@ -143,12 +143,13 @@ impl StreamIndexScan {
                     })
                     .collect(),
                 // The column idxs need to be forwarded to the downstream
-                column_ids: self
+                upstream_column_indices: self
                     .logical
-                    .column_descs()
+                    .output_column_indices()
                     .iter()
-                    .map(|x| x.column_id.get_id())
+                    .map(|&i| i as _)
                     .collect(),
+                is_singleton: false,
             })),
             pk_indices,
             operator_id: if auto_fields {
