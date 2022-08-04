@@ -22,6 +22,7 @@ use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::RequiredDist;
 
+/// Streaming local simple agg, only for stateless agg.
 #[derive(Debug, Clone)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
@@ -57,7 +58,8 @@ impl StreamLocalSimpleAgg {
 
 impl fmt::Display for StreamLocalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamLocalSimpleAgg")
+        self.logical
+            .fmt_with_name(f, "StreamStatelessLocalSimpleAgg")
     }
 }
 

@@ -264,6 +264,9 @@ impl PlanRoot {
                 // merge should be applied before eliminate
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
+                // project-join merge should be applied after merge
+                // and eliminate
+                ProjectJoinRule::create(),
             ],
             ApplyOrder::BottomUp,
         );

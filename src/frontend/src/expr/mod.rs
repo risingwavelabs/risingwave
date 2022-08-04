@@ -48,8 +48,8 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive,
-    AggFuncSig, CastContext, DataTypeName, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
+    least_restrictive, AggFuncSig, CastContext, CastSig, DataTypeName, FuncSign,
 };
 pub use utils::*;
 
@@ -631,6 +631,12 @@ impl std::fmt::Debug for ExprDisplay<'_> {
                 write!(f, "{:?}", x)
             }
         }
+    }
+}
+
+impl std::fmt::Display for ExprDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (self as &dyn std::fmt::Debug).fmt(f)
     }
 }
 
