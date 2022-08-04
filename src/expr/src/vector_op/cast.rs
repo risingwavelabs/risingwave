@@ -30,7 +30,7 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
-const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] or YYYY-MM-DD HH:MM or YYYY-MM-DD)";
+const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.MS] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.MS] or HH:MM)";
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
@@ -60,6 +60,10 @@ pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
         return Ok(NaiveDateTimeWrapper::new(timestamp));
     }
     if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M") {
+        return Ok(NaiveDateTimeWrapper::new(timestamp));
+    }
+    if let Ok(timestamp) = NaiveDateTime::parse_from_str(elem, "%+") {
+        // ISO 8601 format
         return Ok(NaiveDateTimeWrapper::new(timestamp));
     }
     if let Ok(date) = NaiveDate::parse_from_str(elem, "%Y-%m-%d") {
@@ -197,6 +201,10 @@ mod tests {
         use super::*;
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
+        assert_eq!(
+            str_to_timestamp("2022-08-03T10:34:02Z").unwrap(),
+            str_to_timestamp("2022-08-03 10:34:02").unwrap()
+        );
         str_to_date("1999-01-08").unwrap();
         str_to_time("04:05").unwrap();
         str_to_time("04:05:06").unwrap();
