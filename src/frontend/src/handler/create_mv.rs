@@ -83,7 +83,6 @@ pub fn gen_create_mv_plan(
     let mut table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
     table.owner = session.user_id();
-    table.properties = context.inner().with_properties.clone();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
