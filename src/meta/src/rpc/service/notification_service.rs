@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{tonic_err, RwError};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -23,8 +22,10 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::{ClusterManagerRef, WorkerKey};
+use crate::error::meta_error_to_tonic;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
+use crate::MetaError;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -55,7 +56,7 @@ where
     async fn build_snapshot_by_type(
         &self,
         worker_type: WorkerType,
-    ) -> Result<MetaSnapshot, RwError> {
+    ) -> Result<MetaSnapshot, MetaError> {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
         let (database, schema, table, source, sink) = catalog_guard.get_catalog().await?;
 
@@ -111,8 +112,8 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let host_address = req.get_host().map_err(tonic_err)?.clone();
+        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
+        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 

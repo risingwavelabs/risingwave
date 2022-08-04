@@ -106,6 +106,32 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
     (tables, setup_sql)
 }
 
+async fn test_stream_query(
+    session: Arc<SessionImpl>,
+    tables: Vec<Table>,
+    seed: u64,
+    setup_sql: &str,
+) {
+    let mut rng;
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+        rng = SmallRng::from_entropy();
+    } else {
+        rng = SmallRng::seed_from_u64(seed);
+    }
+
+    let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+    reproduce_failing_queries(setup_sql, &sql);
+    // The generated SQL must be parsable.
+    let statements = parse_sql(&sql);
+    let stmt = statements[0].clone();
+    handle(session.clone(), stmt, &sql).await;
+
+    let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
+    let drop_stmts = parse_sql(&drop_sql);
+    let drop_stmt = drop_stmts[0].clone();
+    handle(session.clone(), drop_stmt, &drop_sql).await;
+}
+
 fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, setup_sql: &str) {
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
@@ -125,10 +151,7 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
 
     match stmt.clone() {
         Statement::Query(_) => {
-            let mut binder = Binder::new(
-                session.env().catalog_reader().read_guard(),
-                session.database().to_string(),
-            );
+            let mut binder = Binder::new(&session);
             let bound = binder
                 .bind(stmt.clone())
                 .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
@@ -194,6 +217,13 @@ pub fn run() {
             setup_sql,
         } = &*SQLSMITH_ENV;
         test_batch_query(session.clone(), tables.clone(), test.data, &setup_sql);
+        let test_stream_query =
+            test_stream_query(session.clone(), tables.clone(), test.data, &setup_sql);
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(test_stream_query);
         Outcome::Passed
     })
     .exit();

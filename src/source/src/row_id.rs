@@ -15,13 +15,13 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
-const WORKER_ID_SHIFT_BITS: u8 = 12;
+const VNODE_ID_SHIFT_BITS: u8 = 12;
 const SEQUENCE_UPPER_BOUND: u16 = 1 << 12;
-const WORKER_ID_UPPER_BOUND: u32 = 1 << 10;
+const VNODE_ID_UPPER_BOUND: u32 = 1 << 10;
 
 /// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
 ///
-/// | timestamp | worker id | sequence |
+/// | timestamp | vnode id | sequence |
 /// |-----------|-----------|----------|
 /// |  41 bits  | 10 bits   | 12 bits  |
 #[derive(Debug)]
@@ -31,8 +31,8 @@ pub struct RowIdGenerator {
 
     /// Last timestamp part of row id.
     last_duration_ms: i64,
-    /// Current worker id.
-    worker_id: u32,
+    /// Current vnode id.
+    vnode_id: u32,
     /// Last sequence part of row id.
     sequence: u16,
 }
@@ -40,23 +40,23 @@ pub struct RowIdGenerator {
 pub type RowId = i64;
 
 impl RowIdGenerator {
-    pub fn new(worker_id: u32) -> Self {
-        assert!(worker_id < WORKER_ID_UPPER_BOUND);
-        Self::with_epoch(worker_id, UNIX_EPOCH)
+    pub fn new(vnode_id: u32) -> Self {
+        assert!(vnode_id < VNODE_ID_UPPER_BOUND);
+        Self::with_epoch(vnode_id, UNIX_EPOCH)
     }
 
-    pub fn with_epoch(worker_id: u32, epoch: SystemTime) -> Self {
+    pub fn with_epoch(vnode_id: u32, epoch: SystemTime) -> Self {
         Self {
             epoch,
             last_duration_ms: epoch.elapsed().unwrap().as_millis() as i64,
-            worker_id,
+            vnode_id,
             sequence: 0,
         }
     }
 
     fn row_id(&self) -> RowId {
         self.last_duration_ms << TIMESTAMP_SHIFT_BITS
-            | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
+            | (self.vnode_id << VNODE_ID_SHIFT_BITS) as i64
             | self.sequence as i64
     }
 
@@ -101,6 +101,7 @@ impl RowIdGenerator {
         ret
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> RowId {
         self.try_update_duration();
         if self.sequence < SEQUENCE_UPPER_BOUND {

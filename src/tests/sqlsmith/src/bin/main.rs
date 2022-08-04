@@ -113,13 +113,18 @@ async fn create_tables(
     (tables, mviews, setup_sql)
 }
 
+async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
+    client
+        .execute(&format!("DROP MATERIALIZED VIEW {}", mview.name), &[])
+        .await
+        .unwrap();
+}
+
 async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgres::Client) {
     log::info!("Cleaning tables...");
-    for Table { name, .. } in mviews.iter().rev() {
-        client
-            .execute(&format!("DROP MATERIALIZED VIEW {}", name), &[])
-            .await
-            .unwrap();
+
+    for mview in mviews.iter().rev() {
+        drop_mview_table(mview, client).await;
     }
 
     let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
@@ -218,11 +223,21 @@ async fn main() {
 
     let (tables, mviews, setup_sql) = create_tables(&mut rng, &opt, &client).await;
 
+    // Test batch
     for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         log::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
         validate_response(&setup_sql, &format!("{};", sql), response);
+    }
+
+    // Test stream
+    for _ in 0..opt.count {
+        let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+        log::info!("Executing: {}", sql);
+        let response = client.execute(&sql, &[]).await;
+        validate_response(&setup_sql, &format!("{};", sql), response);
+        drop_mview_table(&table, &client).await;
     }
 
     drop_tables(&mviews, &opt, &client).await;

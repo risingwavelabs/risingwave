@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::error::{internal_error, ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -33,6 +33,7 @@ use tokio::task::JoinHandle;
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
+use crate::MetaResult;
 
 pub type WorkerId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
@@ -71,7 +72,7 @@ impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
 
@@ -97,7 +98,7 @@ where
         r#type: WorkerType,
         host_address: HostAddress,
         worker_node_parallelism: usize,
-    ) -> Result<WorkerNode> {
+    ) -> MetaResult<WorkerNode> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
             // TODO(zehua): update parallelism when the worker exists.
@@ -137,7 +138,7 @@ where
         }
     }
 
-    pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
+    pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
         if worker.worker_node.state == State::Running as i32 {
@@ -159,7 +160,7 @@ where
         Ok(())
     }
 
-    pub async fn delete_worker_node(&self, host_address: HostAddress) -> Result<()> {
+    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
@@ -189,7 +190,7 @@ where
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(&self, worker_id: WorkerId) -> Result<()> {
+    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
 
@@ -197,7 +198,7 @@ where
             core.update_worker_ttl(worker.key().unwrap(), self.max_heartbeat_interval);
             Ok(())
         } else {
-            Err(ErrorCode::UnknownWorker.into())
+            bail!("unknown worker id: {}", worker_id);
         }
     }
 
@@ -305,7 +306,7 @@ where
         &self,
         parallel_degree: usize,
         worker_id: WorkerId,
-    ) -> Result<Vec<ParallelUnit>> {
+    ) -> MetaResult<Vec<ParallelUnit>> {
         let start_id = self
             .env
             .id_gen_manager()
@@ -334,7 +335,7 @@ pub struct ClusterManagerCore {
 }
 
 impl ClusterManagerCore {
-    async fn new<S>(meta_store: Arc<S>) -> Result<Self>
+    async fn new<S>(meta_store: Arc<S>) -> MetaResult<Self>
     where
         S: MetaStore,
     {
@@ -354,9 +355,9 @@ impl ClusterManagerCore {
     }
 
     /// If no worker exists, return an error.
-    fn get_worker_by_host_checked(&self, host_address: HostAddress) -> Result<Worker> {
+    fn get_worker_by_host_checked(&self, host_address: HostAddress) -> MetaResult<Worker> {
         self.get_worker_by_host(host_address)
-            .ok_or_else(|| internal_error("Worker node does not exist!"))
+            .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!").into())
     }
 
     fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
@@ -442,7 +443,7 @@ mod tests {
     use crate::storage::MemStore;
 
     #[tokio::test]
-    async fn test_cluster_manager() -> Result<()> {
+    async fn test_cluster_manager() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(

@@ -4919,6 +4919,7 @@ dependencies = [
  "madsim-tokio",
  "num-derive",
  "num-traits",
+ "parking_lot",
  "prost",
  "risingwave_common",
  "risingwave_pb",

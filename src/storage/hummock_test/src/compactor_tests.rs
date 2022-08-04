@@ -20,7 +20,6 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
-    use parking_lot::RwLock;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -28,6 +27,7 @@ mod tests {
     use risingwave_common::util::epoch::Epoch;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
     use risingwave_hummock_sdk::key::get_table_id;
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::{
@@ -120,7 +120,7 @@ mod tests {
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: None,
-            table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
+            filter_key_extractor_manager: Arc::new(FilterKeyExtractorManager::default()),
             memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
@@ -175,10 +175,7 @@ mod tests {
             .unwrap();
 
         // assert compact_task
-        assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
-            128
-        );
+        assert_eq!(compact_task.input_ssts.len(), 128);
 
         // 3. compact
         Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
@@ -187,6 +184,10 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
             .last()
             .unwrap()
             .table_infos
@@ -274,9 +275,14 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
             128
         );
+        compact_task.target_level = 6;
 
         // 3. compact
         Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
@@ -285,6 +291,7 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .levels
             .last()
             .unwrap()
             .table_infos
@@ -402,8 +409,12 @@ mod tests {
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
-            kv_count
+            compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
+            128
         );
 
         // 3. compact
@@ -413,6 +424,7 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_level_info = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .levels
             .last()
             .unwrap();
         assert_eq!(0, output_level_info.total_file_size);
@@ -442,7 +454,7 @@ mod tests {
 
         let drop_table_id = 1;
         let existing_table_ids = 2;
-        let kv_count = 128;
+        let kv_count: usize = 128;
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let table_id = if index % 2 == 0 {
@@ -510,7 +522,12 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            compact_task
+                .input_ssts
+                .iter()
+                .filter(|level| level.level_idx != compact_task.target_level)
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
             kv_count
         );
 
@@ -519,12 +536,11 @@ mod tests {
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let table_ids_from_version: Vec<_> = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
-            .collect::<Vec<_>>();
+        let mut table_ids_from_version = vec![];
+        version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
+            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            true
+        });
 
         let mut key_count = 0;
         for table_id in table_ids_from_version {
@@ -555,6 +571,7 @@ mod tests {
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
+                None,
                 ..,
                 None,
                 ReadOptions {
@@ -660,7 +677,11 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
             kv_count,
         );
 
@@ -669,12 +690,11 @@ mod tests {
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let table_ids_from_version: Vec<_> = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
-            .collect::<Vec<_>>();
+        let mut table_ids_from_version = vec![];
+        version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
+            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            true
+        });
 
         let mut key_count = 0;
         for table_id in table_ids_from_version {
@@ -706,6 +726,7 @@ mod tests {
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
+                None,
                 ..,
                 None,
                 ReadOptions {
