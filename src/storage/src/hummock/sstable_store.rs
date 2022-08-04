@@ -30,7 +30,7 @@ const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
-pub type TableHolder = CachableEntry<HummockSstableId, Box<Sstable>>;
+pub type TableHolder = Arc<CachableEntry<HummockSstableId, Box<Sstable>>>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -321,7 +321,7 @@ impl SstableStore {
                     ))
                 })??;
             if !load_data || !entry.value().blocks.is_empty() {
-                return Ok(entry);
+                return Ok(Arc::new(entry));
             }
             // remove sst from cache to avoid multiple thread acquire the same sstable.
             meta_data = Some(entry.value().meta.clone());

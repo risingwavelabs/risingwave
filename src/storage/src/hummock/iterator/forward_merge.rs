@@ -173,12 +173,12 @@ mod test {
         > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(
             vec![
                 SstableIterator::create(
-                    cache.insert(table0.id, table0.id, 1, table0),
+                    Arc::new(cache.insert(table0.id, table0.id, 1, table0)),
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
                 SstableIterator::create(
-                    cache.insert(table1.id, table1.id, 1, table1),
+                    Arc::new(cache.insert(table1.id, table1.id, 1, table1)),
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
@@ -192,12 +192,12 @@ mod test {
         > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(
             vec![
                 SstableIterator::create(
-                    cache.lookup(0, &0).unwrap(),
+                    Arc::new(cache.lookup(0, &0).unwrap()),
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
                 SstableIterator::create(
-                    cache.lookup(1, &1).unwrap(),
+                    Arc::new(cache.lookup(1, &1).unwrap()),
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
@@ -281,32 +281,32 @@ mod test {
         let mut iter = OrderedMergeIteratorInner::new(
             vec![
                 SstableIterator::create(
-                    cache.insert(
+                    Arc::new(cache.insert(
                         non_overlapped_sstable.id,
                         non_overlapped_sstable.id,
                         1,
                         non_overlapped_sstable,
-                    ),
+                    )),
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
                 SstableIterator::create(
-                    cache.insert(
+                    Arc::new(cache.insert(
                         overlapped_new_sstable.id,
                         overlapped_new_sstable.id,
                         1,
                         overlapped_new_sstable,
-                    ),
+                    )),
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
                 SstableIterator::create(
-                    cache.insert(
+                    Arc::new(cache.insert(
                         overlapped_old_sstable.id,
                         overlapped_old_sstable.id,
                         1,
                         overlapped_old_sstable,
-                    ),
+                    )),
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
