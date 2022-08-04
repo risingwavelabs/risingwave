@@ -59,7 +59,6 @@ pub fn build_from_prost(prost: &TableFunctionProst) -> Result<BoxedTableFunction
         Generate => new_generate_series(prost),
         Unnest => new_unnest(prost),
         RegexpMatches => new_regexp_matches(prost),
-        RawTable => unreachable!(),
         Unspecified => unreachable!(),
     }
 }

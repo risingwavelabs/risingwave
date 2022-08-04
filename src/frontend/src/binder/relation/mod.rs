@@ -18,7 +18,7 @@ use std::str::FromStr;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result};
-use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
+use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::{Binder, BoundSetExpr};
@@ -259,11 +259,35 @@ impl Binder {
     pub(super) fn bind_relation_by_id(
         &mut self,
         table_id: TableId,
+        schema_name: String,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let table_name = self.catalog.get_table_name_by_id(TableId::from(table_id))?;
-        let schema_name = DEFAULT_SCHEMA_NAME;
-        self.bind_table_or_source(schema_name, &table_name, alias)
+        let table_name = self.catalog.get_table_name_by_id(table_id)?;
+        self.bind_table_or_source(&schema_name, &table_name, alias)
+    }
+
+    fn bind_rw_table(
+        &mut self,
+        args: Vec<FunctionArg>,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
+        if args.is_empty() || args.len() > 3 {
+            return Err(ErrorCode::BindError(
+                "usage: __rw_table(table_id[,schema_name])".to_string(),
+            )
+            .into());
+        }
+        let table_id = if let Ok(id) = args[0].to_string().parse::<u32>() {
+            TableId::from(id)
+        } else {
+            return Err(ErrorCode::BindError("invalid table_id".to_string()).into());
+        };
+        let schema = if args.len() > 1 {
+            args[1].to_string()
+        } else {
+            DEFAULT_SCHEMA_NAME.to_string()
+        };
+        self.bind_relation_by_id(table_id, schema, alias)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
@@ -273,22 +297,15 @@ impl Binder {
                     self.bind_relation_by_name(name, alias)
                 } else {
                     let func_name = &name.0[0].value;
+                    if func_name == "__rw_table" {
+                        return self.bind_rw_table(args, alias);
+                    }
                     if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                         let args: Vec<ExprImpl> = args
                             .into_iter()
                             .map(|arg| self.bind_function_arg(arg))
                             .flatten_ok()
                             .try_collect()?;
-                        if table_function_type == TableFunctionType::RawTable {
-                            if args.len() != 1 {
-                                return Err(ErrorCode::BindError("should give only table id when using debug function __rw_table".to_string()).into());
-                            }
-                            if let ExprImpl::Literal(literal) = &args[0] {
-                                let table_id =
-                                    literal.get_data().clone().unwrap().into_int32() as u32;
-                                return self.bind_relation_by_id(TableId::from(table_id), alias);
-                            }
-                        }
                         let tf = TableFunction::new(table_function_type, args)?;
                         let columns = [(
                             false,
