@@ -46,6 +46,14 @@ fn alter_prost_user_info(
                 user_info.can_create_db = false;
                 update_fields.push(UpdateField::CreateDb as i32);
             }
+            UserOption::CreateUser => {
+                user_info.can_create_user = true;
+                update_fields.push(UpdateField::CreateUser as i32);
+            }
+            UserOption::NoCreateUser => {
+                user_info.can_create_user = false;
+                update_fields.push(UpdateField::CreateUser as i32);
+            }
             UserOption::Login => {
                 user_info.can_login = true;
                 update_fields.push(UpdateField::Login as i32);
