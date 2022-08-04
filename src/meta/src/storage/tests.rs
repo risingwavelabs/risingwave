@@ -15,7 +15,6 @@
 use assert_matches::assert_matches;
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::error::Result;
 
 use crate::storage::{
     Key, MemStore, MetaStore, MetaStoreError, MetaStoreResult, Operation, Snapshot, Transaction,
@@ -116,7 +115,7 @@ async fn test_meta_store_basic<S: MetaStore>(store: &S) -> MetaStoreResult<()> {
     Ok(())
 }
 
-async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()> {
+async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> MetaStoreResult<()> {
     let cf = "test_trx_cf";
     let mut kvs = vec![];
     for i in 1..=5 {
@@ -181,7 +180,7 @@ async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()>
     Ok(())
 }
 
-async fn test_meta_store_keys_share_prefix<S: MetaStore>(meta_store: &S) -> Result<()> {
+async fn test_meta_store_keys_share_prefix<S: MetaStore>(meta_store: &S) -> MetaStoreResult<()> {
     let cf = "test_overlapped_key_cf";
     let batch = vec![
         (
@@ -213,7 +212,7 @@ async fn test_meta_store_keys_share_prefix<S: MetaStore>(meta_store: &S) -> Resu
     Ok(())
 }
 
-async fn test_meta_store_overlapped_cf<S: MetaStore>(meta_store: &S) -> Result<()> {
+async fn test_meta_store_overlapped_cf<S: MetaStore>(meta_store: &S) -> MetaStoreResult<()> {
     let cf1 = "test_overlapped_cf1";
     let cf2 = "test_overlapped_cf11";
     let cf3 = "test_overlapped_cf111";
@@ -245,7 +244,7 @@ async fn test_meta_store_overlapped_cf<S: MetaStore>(meta_store: &S) -> Result<(
 }
 
 #[tokio::test]
-async fn test_mem_store() -> Result<()> {
+async fn test_mem_store() -> MetaStoreResult<()> {
     let store = MemStore::default();
     test_meta_store_basic(&store).await.unwrap();
     test_meta_store_keys_share_prefix(&store).await.unwrap();

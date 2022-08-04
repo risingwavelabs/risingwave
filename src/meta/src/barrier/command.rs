@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -39,6 +38,7 @@ use crate::barrier::CommandChanges;
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
+use crate::{MetaError, MetaResult};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -188,7 +188,7 @@ where
     S: MetaStore,
 {
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> Result<Option<Mutation>> {
+    pub async fn to_mutation(&self) -> MetaResult<Option<Mutation>> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
@@ -322,7 +322,7 @@ where
     }
 
     /// Do some stuffs after barriers are collected, for the given command.
-    pub async fn post_collect(&self) -> Result<()> {
+    pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
             Command::Plain(_) => {}
 
@@ -341,7 +341,7 @@ where
                         };
                         client.drop_actors(request).await?;
 
-                        Ok::<_, RwError>(())
+                        Ok::<_, MetaError>(())
                     }
                 });
 
