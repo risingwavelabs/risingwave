@@ -10,5 +10,5 @@ futures = "0.3"
 futures-async-stream = "0.2"
 itertools = "0.10"
 pin-project = "1"
-tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tracing = { version = "0.1" }

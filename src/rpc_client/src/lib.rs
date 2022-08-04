@@ -38,6 +38,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
 use moka::future::Cache;
+use stack_trace::StackTrace;
 use tonic::transport::{Channel, Endpoint};
 mod compute_client;
 pub use compute_client::*;
@@ -101,6 +102,7 @@ where
                 );
                 Ok::<_, RpcError>(client)
             })
+            .stack_trace("rpc_client_init")
             .await
             .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
     }

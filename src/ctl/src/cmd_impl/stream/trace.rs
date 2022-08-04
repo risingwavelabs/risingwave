@@ -30,7 +30,7 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = StreamClientPool::new();
+    let clients = StreamClientPool::new(u64::MAX);
 
     let mut all_traces = BTreeMap::new();
 
