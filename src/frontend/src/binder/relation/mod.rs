@@ -16,8 +16,8 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{internal_error, ErrorCode, Result};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME, RW_TABLE_FUNCTION_NAME};
+use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
@@ -276,25 +276,18 @@ impl Binder {
             .into());
         }
 
-        let table_id = if let Ok(id) = args[0].to_string().parse::<u32>() {
-            TableId::from(id)
-        } else {
-            return Err(ErrorCode::BindError("invalid table_id".to_string()).into());
-        };
+        let table_id: TableId = args[0]
+            .to_string()
+            .parse::<u32>()
+            .map_err(|err| {
+                RwError::from(ErrorCode::BindError(format!("invalid table id: {}", err)))
+            })?
+            .into();
 
         let schema = args
             .get(1)
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
         Ok((schema, table_id))
-    }
-
-    fn bind_rw_table(
-        &mut self,
-        args: Vec<FunctionArg>,
-        alias: Option<TableAlias>,
-    ) -> Result<Relation> {
-        let (schema, table_id) = self.resolve_table_id(args)?;
-        self.bind_relation_by_id(table_id, schema, alias)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
@@ -304,8 +297,9 @@ impl Binder {
                     self.bind_relation_by_name(name, alias)
                 } else {
                     let func_name = &name.0[0].value;
-                    if func_name.eq_ignore_ascii_case("__rw_table") {
-                        return self.bind_rw_table(args, alias);
+                    if func_name.eq_ignore_ascii_case(RW_TABLE_FUNCTION_NAME) {
+                        let (schema, table_id) = self.resolve_table_id(args)?;
+                        return self.bind_relation_by_id(table_id, schema, alias);
                     }
                     if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                         let args: Vec<ExprImpl> = args

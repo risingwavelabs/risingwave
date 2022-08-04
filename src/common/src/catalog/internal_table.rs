@@ -15,6 +15,8 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
+pub const RW_TABLE_FUNCTION_NAME: &str = "__rw_table";
+
 pub fn generate_intertable_name_with_type(
     mview_name: &str,
     table_id: u32,
