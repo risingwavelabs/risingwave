@@ -31,6 +31,7 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::Barrier;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -62,6 +63,11 @@ mod progress;
 mod recovery;
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
+type PostCheckpoint<S> = (
+    Arc<CommandContext<S>>,
+    SmallVec<[Notifier; 1]>,
+    Vec<CreateMviewProgress>,
+);
 
 /// A buffer or queue for scheduling barriers.
 ///
@@ -204,7 +210,7 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     env: MetaSrvEnv<S>,
 
-    sync_queue: Arc<RwLock<Vec<(Arc<CommandContext<S>>, SmallVec<[Notifier; 1]>)>>>,
+    sync_queue: Arc<RwLock<Vec<PostCheckpoint<S>>>>,
 }
 
 /// Controls the concurrent execution of commands.
@@ -366,9 +372,6 @@ where
             .position(|x| !matches!(x.state, Completed(_)))
             .unwrap_or(self.command_ctx_queue.len());
         let complete_nodes = self.command_ctx_queue.drain(..index).collect_vec();
-        // complete_nodes
-        //     .iter()
-        //     .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
         complete_nodes
     }
 
@@ -832,9 +835,20 @@ where
                         .await?;
                 }
                 node.timer.take().unwrap().observe_duration();
+                let notifiers = take(&mut node.notifiers);
+                let command_ctx = node.command_ctx.clone();
+                let create_mv_progress = resps
+                    .iter()
+                    .flat_map(|r| r.create_mview_progress.clone())
+                    .collect_vec();
+                self.sync_queue
+                    .write()
+                    .await
+                    .push((command_ctx, notifiers, create_mv_progress));
 
+                // If not sync , we can't notify collection completion
                 if resps.iter().all(|node| node.is_sync) {
-                    while let Some((command_ctx, mut notifiers)) =
+                    while let Some((command_ctx, mut notifiers, create_mv_progress)) =
                         self.sync_queue.write().await.pop()
                     {
                         checkpoint_control.remove_changes(command_ctx.command.changes());
@@ -846,42 +860,11 @@ where
                         // Then try to finish the barrier for Create MVs.
                         let actors_to_finish = command_ctx.actors_to_track();
                         tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
-                        for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                            tracker.update(progress);
+                        for progress in create_mv_progress {
+                            tracker.update(&progress);
                         }
                     }
-                    checkpoint_control.remove_changes(node.command_ctx.command.changes());
-                    node.command_ctx.post_collect().await?;
-
-                    // Notify about collected first.
-                    let mut notifiers = take(&mut node.notifiers);
-                    notifiers.iter_mut().for_each(Notifier::notify_collected);
-
-                    // Then try to finish the barrier for Create MVs.
-                    let actors_to_finish = node.command_ctx.actors_to_track();
-                    tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
-                    for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                        tracker.update(progress);
-                    }
-                } else {
-                    let notifiers = take(&mut node.notifiers);
-                    let command_ctx = node.command_ctx.clone();
-                    self.sync_queue.write().await.push((command_ctx, notifiers));
                 }
-
-                // node.command_ctx.post_collect().await?;
-                //
-                // // Notify about collected first.
-                // let mut notifiers = take(&mut node.notifiers);
-                // notifiers.iter_mut().for_each(Notifier::notify_collected);
-                //
-                // // Then try to finish the barrier for Create MVs.
-                // let actors_to_finish = node.command_ctx.actors_to_track();
-                // tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
-                // for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                //     tracker.update(progress);
-                // }
-
                 Ok(())
             }
 
