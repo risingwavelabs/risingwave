@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -310,8 +311,18 @@ impl LogicalAgg {
          -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
             if !self.ctx().inner().with_properties.is_empty() {
-                internal_table_catalog_builder
-                    .add_properties(self.ctx().inner().with_properties.clone());
+                let ctx = self.ctx();
+                let properties: HashMap<_, _> = ctx
+                    .inner()
+                    .with_properties
+                    .iter()
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+
+                if !properties.is_empty() {
+                    internal_table_catalog_builder.add_properties(properties);
+                }
             }
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
@@ -351,8 +362,18 @@ impl LogicalAgg {
          -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
             if !self.ctx().inner().with_properties.is_empty() {
-                internal_table_catalog_builder
-                    .add_properties(self.ctx().inner().with_properties.clone());
+                let ctx = self.ctx();
+                let properties: HashMap<_, _> = ctx
+                    .inner()
+                    .with_properties
+                    .iter()
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+
+                if !properties.is_empty() {
+                    internal_table_catalog_builder.add_properties(properties);
+                }
             }
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
