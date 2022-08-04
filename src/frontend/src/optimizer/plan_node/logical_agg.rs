@@ -1143,6 +1143,7 @@ impl ToStream for LogicalAgg {
         drop(input); // to prevent accidental use of logical input
 
         let input_dist = stream_input.distribution().clone();
+        let input_append_only = stream_input.append_only();
 
         let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
             matches!(
@@ -1150,10 +1151,10 @@ impl ToStream for LogicalAgg {
                 AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
             ) && c.order_by_fields.is_empty()
         });
-        let agg_calls_are_stateless = self
-            .agg_calls
-            .iter()
-            .all(|c| matches!(c.agg_kind, AggKind::Sum | AggKind::Count));
+        let agg_calls_are_stateless = self.agg_calls.iter().all(|c| {
+            matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
+                || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
+        });
         let is_simple_agg = self.group_key().is_empty();
 
         if is_simple_agg
