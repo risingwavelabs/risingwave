@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
-    SchemaFilterKeyExtractor,
 };
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -48,23 +48,19 @@ impl ObserverNodeImpl for CompactorObserverNode {
                 panic!("error type notification");
             }
         }
+        assert!(
+            resp.version > self.version,
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            self.version
+        );
+        self.version = resp.version;
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        if self.version > resp.version {
-            return Err(ErrorCode::InternalError(format!(
-                "the SnapshotVersion is incorrect local {} snapshot {}",
-                self.version, resp.version
-            ))
-            .into());
-        }
-
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
-                for table in snapshot.table {
-                    self.handle_catalog_notification(Operation::Add, table);
-                }
-
+                self.handle_catalog_snapshot(snapshot.table);
                 self.version = resp.version;
             }
             _ => {
@@ -88,18 +84,22 @@ impl CompactorObserverNode {
         }
     }
 
+    fn handle_catalog_snapshot(&mut self, tables: Vec<Table>) {
+        let all_filter_key_extractors: HashMap<u32, Arc<FilterKeyExtractorImpl>> = tables
+            .iter()
+            .map(|t| (t.id, Arc::new(FilterKeyExtractorImpl::from_table(t))))
+            .collect();
+        self.filter_key_extractor_manager
+            .sync(all_filter_key_extractors);
+    }
+
     fn handle_catalog_notification(&mut self, operation: Operation, table_catalog: Table) {
         match operation {
             Operation::Add | Operation::Update => {
-                let filter_key_extractor = if table_catalog.read_pattern_prefix_column < 1 {
-                    // for now frontend had not infer the table_id_to_filter_key_extractor, so we
-                    // use FullKeyFilterKeyExtractor
-                    FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
-                } else {
-                    FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(&table_catalog))
-                };
-                self.filter_key_extractor_manager
-                    .update(table_catalog.id, Arc::new(filter_key_extractor));
+                self.filter_key_extractor_manager.update(
+                    table_catalog.id,
+                    Arc::new(FilterKeyExtractorImpl::from_table(&table_catalog)),
+                );
             }
 
             Operation::Delete => {
