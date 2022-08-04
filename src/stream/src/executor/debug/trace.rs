@@ -121,17 +121,14 @@ pub async fn stack_trace(
 ) {
     pin_mut!(input);
 
-    while let Some(message) = input
-        .next()
-        .stack_trace(format!(
-            "{} (actor {}, executor {})",
-            info.identity,
-            actor_id,
-            executor_id as u32 // Use the lower 32 bit to match the dashboard.
-        ))
-        .await
-        .transpose()?
-    {
+    let span = Arc::<str>::from(format!(
+        "{} (actor {}, executor {})",
+        info.identity,
+        actor_id,
+        executor_id as u32 // Use the lower 32 bit to match the dashboard.
+    ));
+
+    while let Some(message) = input.next().stack_trace(span.clone()).await.transpose()? {
         yield message;
     }
 }

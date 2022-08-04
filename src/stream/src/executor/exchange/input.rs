@@ -73,11 +73,8 @@ impl LocalInput {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(mut channel: Receiver<Message>, actor_id: ActorId) {
-        while let Some(msg) = channel
-            .recv()
-            .stack_trace(format!("LocalInput (actor {actor_id})"))
-            .await
-        {
+        let span = Arc::<str>::from(format!("LocalInput (actor {actor_id})"));
+        while let Some(msg) = channel.recv().stack_trace(span.clone()).await {
             yield msg;
         }
     }
@@ -153,12 +150,10 @@ impl RemoteInput {
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
 
+        let span = Arc::<str>::from(format!("RemoteInput (actor {up_actor_id})"));
+
         pin_mut!(stream);
-        while let Some(data_res) = stream
-            .next()
-            .stack_trace(format!("RemoteInput (actor {up_actor_id})"))
-            .await
-        {
+        while let Some(data_res) = stream.next().stack_trace(span.clone()).await {
             match data_res {
                 Ok(stream_msg) => {
                     let bytes = Message::get_encoded_len(&stream_msg);
