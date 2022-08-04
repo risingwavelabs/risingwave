@@ -26,6 +26,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
+use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -575,6 +576,7 @@ pub async fn expect_first_barrier(
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
+        .stack_trace("expect_first_barrier")
         .await
         .expect("failed to extract the first message: stream closed unexpectedly")?;
     let barrier = message

@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::addr::is_local_address;
+use risingwave_common::util::debug::trace_context::StackTrace;
 use tokio::sync::mpsc::Sender;
 
 use crate::executor::Message;
@@ -66,6 +67,7 @@ impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         self.ch
             .send(message)
+            .stack_trace(format!("LocalOutput (actor {:?})", self.actor_id))
             .await
             .map_err(|_| internal_error("failed to send"))
     }
@@ -110,6 +112,7 @@ impl Output for RemoteOutput {
 
         self.ch
             .send(message)
+            .stack_trace(format!("RemoteOutput (actor {:?})", self.actor_id))
             .await
             .map_err(|_| internal_error("failed to send"))
     }
