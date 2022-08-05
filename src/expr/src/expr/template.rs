@@ -21,9 +21,10 @@ use itertools::{multizip, Itertools};
 use paste::paste;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk,
-    Row, Utf8Array,
+    Utf8Array,
 };
 use risingwave_common::for_all_variants;
+use risingwave_common::row::Row;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar, ScalarImpl};
 
 use crate::expr::{BoxedExpression, Expression};

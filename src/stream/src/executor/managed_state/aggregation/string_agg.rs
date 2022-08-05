@@ -20,9 +20,10 @@ use async_trait::async_trait;
 use futures::pin_mut;
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::ArrayImpl;
 use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
-use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair, OrderType};
 use risingwave_storage::table::state_table::RowBasedStateTable;
@@ -249,8 +250,9 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
+    use risingwave_common::array::{StreamChunk, StreamChunkTestExt};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;

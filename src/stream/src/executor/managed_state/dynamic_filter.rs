@@ -18,7 +18,7 @@ use std::ops::Bound::{self, *};
 use std::ops::RangeBounds;
 
 use anyhow::anyhow;
-use risingwave_common::array::Row;
+use risingwave_common::row::Row;
 use risingwave_common::types::ScalarImpl;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;

@@ -25,9 +25,10 @@ use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-    RowRef, NULL_VAL_FOR_HASH,
+    NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::row::RowRef;
 use crate::types::{
     display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
 };

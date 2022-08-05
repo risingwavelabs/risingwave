@@ -19,8 +19,9 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 use super::expect_first_barrier;

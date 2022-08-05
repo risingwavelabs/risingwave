@@ -16,8 +16,8 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::table::state_table::RowBasedStateTable;

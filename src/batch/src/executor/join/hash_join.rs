@@ -20,13 +20,14 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Array, DataChunk, RowRef};
+use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{
     calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
+use risingwave_common::row::RowRef;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};

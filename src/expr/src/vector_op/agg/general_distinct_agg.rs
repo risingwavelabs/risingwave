@@ -17,6 +17,7 @@ use std::marker::PhantomData;
 
 use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::row::Row;
 use risingwave_common::types::*;
 
 use crate::expr::ExpressionRef;

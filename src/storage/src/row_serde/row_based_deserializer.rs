@@ -15,8 +15,8 @@
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes};
-use risingwave_common::array::Row;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
@@ -86,8 +86,8 @@ fn row_based_deserialize_inner(data_types: &[DataType], mut row: impl Buf) -> Re
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 
     use crate::row_serde::row_based_deserializer::RowBasedDeserializer;

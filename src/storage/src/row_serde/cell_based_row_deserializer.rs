@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_cell;
 
@@ -144,8 +144,8 @@ impl RowDeserialize for CellBasedRowDeserializer {
 mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::make_cell_based_row_deserializer;

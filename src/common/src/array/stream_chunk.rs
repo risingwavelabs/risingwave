@@ -21,8 +21,9 @@ use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use super::ArrayResult;
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, DataChunk, Row, Vis};
+use crate::array::{ArrayBuilderImpl, DataChunk, Vis};
 use crate::buffer::Bitmap;
+use crate::row::Row;
 use crate::types::{DataType, NaiveDateTimeWrapper};
 use crate::util::hash_util::finalize_hashers;
 

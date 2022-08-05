@@ -24,9 +24,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;

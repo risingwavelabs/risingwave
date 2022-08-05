@@ -18,9 +18,9 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
-use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::row::Row;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::state_table::RowBasedStateTable;
@@ -192,8 +192,8 @@ mod tests {
 
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;

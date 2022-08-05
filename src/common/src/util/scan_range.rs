@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
-use crate::array::Row;
+use crate::row::Row;
 use crate::types::{ScalarImpl, VirtualNode};
 use crate::util::hash_util::CRC32FastBuilder;
 

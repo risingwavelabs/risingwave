@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
-use crate::array::{Array, ArrayImpl, DataChunk, Row};
+use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use crate::row::Row;
 use crate::types::ScalarImpl;
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
@@ -293,7 +294,8 @@ mod tests {
     use std::cmp::Ordering;
 
     use super::{compare_rows, OrderPair, OrderType};
-    use crate::array::{DataChunk, Row};
+    use crate::array::DataChunk;
+    use crate::row::Row;
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 

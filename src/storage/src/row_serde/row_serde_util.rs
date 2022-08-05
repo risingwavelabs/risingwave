@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use memcomparable::from_slice;
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::{OrderedRowSerializer, SENTINEL_CELL_ID};
 use risingwave_common::util::value_encoding::serialize_cell;

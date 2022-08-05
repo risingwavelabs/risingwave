@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::VirtualNode;
 
 use super::row_serde_util::{serialize_column_id, serialize_pk_and_row};

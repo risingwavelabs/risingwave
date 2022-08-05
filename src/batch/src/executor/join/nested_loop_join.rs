@@ -15,11 +15,11 @@
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
-use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::RowRef;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{

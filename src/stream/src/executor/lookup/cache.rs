@@ -14,8 +14,9 @@
 
 use std::collections::BTreeSet;
 
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::collection::evictable::EvictableHashMap;
+use risingwave_common::row::Row;
 
 use crate::executor::JOIN_CACHE_SIZE;
 

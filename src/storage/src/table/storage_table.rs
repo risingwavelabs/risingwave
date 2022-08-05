@@ -24,12 +24,12 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use log::trace;
-use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId, TableOption,
 };
 use risingwave_common::error::RwError;
+use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;

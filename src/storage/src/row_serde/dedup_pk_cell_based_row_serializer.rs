@@ -15,9 +15,9 @@
 use std::collections::HashSet;
 use std::iter::Iterator;
 
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::VirtualNode;
 
 use super::cell_based_row_serializer::CellBasedRowSerializer;
@@ -127,8 +127,8 @@ impl RowSerialize for DedupPkCellBasedRowSerializer {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::row::Row;
     use risingwave_common::types::DataType;
 
     use super::*;

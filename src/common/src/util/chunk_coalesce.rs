@@ -19,9 +19,10 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk, RowRef};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::RwError;
+use crate::row::RowRef;
 use crate::types::{DataType, Datum, DatumRef};
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;

@@ -15,8 +15,9 @@
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
 use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};

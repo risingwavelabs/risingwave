@@ -112,7 +112,8 @@ for_all_utf8_utf8_op! { impl_utf8_utf8 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{Datum, ScalarImpl};
 
     use super::*;

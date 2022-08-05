@@ -15,9 +15,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, VirtualNode};
 use risingwave_common::util::ordered::OrderedRowSerializer;
 

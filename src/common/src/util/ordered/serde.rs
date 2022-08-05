@@ -19,9 +19,10 @@ use itertools::Itertools;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
-use crate::array::{ArrayImpl, Row, RowRef};
+use crate::array::ArrayImpl;
 use crate::catalog::ColumnId;
 use crate::error::Result;
+use crate::row::{Row, RowRef};
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     DatumRef,

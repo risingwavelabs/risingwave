@@ -14,9 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::Row;
 use risingwave_common::catalog::OrderedColumnDesc;
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::OrderedRowDeserializer;
 
@@ -154,8 +154,8 @@ impl DedupPkCellBasedRowDeserializer {
 mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
-    use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc};
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, VIRTUAL_NODE_SIZE};
     use risingwave_common::util::ordered::OrderedRowSerializer;
     use risingwave_common::util::sort_util::OrderType;

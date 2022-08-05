@@ -17,10 +17,11 @@ use std::collections::HashMap;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, DataChunk, Row, RowRef};
+use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
+use risingwave_common::row::{Row, RowRef};
 use risingwave_common::types::{
     DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode,
 };

@@ -16,8 +16,8 @@ use std::iter::once;
 
 use auto_enums::auto_enum;
 
-use super::RowRef;
 use crate::array::{Op, StreamChunk};
+use crate::row::RowRef;
 
 impl StreamChunk {
     /// Return an iterator on stream records of this stream chunk.

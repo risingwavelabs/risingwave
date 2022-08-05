@@ -137,7 +137,7 @@ macro_rules! row_nonnull {
     [$( $value:expr ),*] => {
         {
             use risingwave_common::types::Scalar;
-            use risingwave_common::array::Row;
+            use risingwave_common::row::Row;
             Row(vec![$(Some($value.to_scalar_value()), )*])
         }
     };

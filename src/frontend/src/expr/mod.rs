@@ -15,8 +15,8 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
-use risingwave_common::array::Row;
 use risingwave_common::error::Result;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};

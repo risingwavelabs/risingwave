@@ -22,10 +22,10 @@ use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use super::ArrayResult;
 use crate::array::column::Column;
-use crate::array::data_chunk_iter::{Row, RowRef};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
+use crate::row::{Row, RowRef};
 use crate::types::{DataType, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 

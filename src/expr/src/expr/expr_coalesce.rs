@@ -15,7 +15,8 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -109,7 +110,8 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
