@@ -345,25 +345,19 @@ impl ColIndexMapping {
 
     /// Rewrite the indices in a functional dependency.
     ///
-    /// If either the `from` and `to` **becomes** empty after mapping, this function will return
-    /// [`None`]
+    /// If some columns in the `from` side are removed, then this fd is no longer valid. For
+    /// example, for ABC --> D, it means that A, B, and C together can determine C. But if B is
+    /// removed, this fd is not valid. For this case, we will return [`None`]
     ///
-    /// If the `from` side of a functional dependency becomes empty, this indicates that these
-    /// columns are removed, so columns in the `to` side are free now. Similarly, If the `to` side
-    /// of a functional dependency becomes empty after rewriting, it means that this dependency is
-    /// no longer valid.
+    /// Additionally, If the `to` side of a functional dependency becomes empty after rewriting, it
+    /// means that this dependency is unneeded so we also return [`None`].
     pub fn rewrite_functional_dependency(
         &self,
         fd: &FunctionalDependency,
     ) -> Option<FunctionalDependency> {
-        if fd.to().is_clear() {
-            return None;
-        }
         let new_from = self.rewrite_bitset(fd.from());
         let new_to = self.rewrite_bitset(fd.to());
-        if (!fd.from().is_clear() && new_from.is_clear())
-            || (!fd.to().is_clear() && new_to.is_clear())
-        {
+        if new_from.count_ones(..) != fd.from().count_ones(..) || new_to.is_clear() {
             None
         } else {
             Some(FunctionalDependency::new(new_from, new_to))
@@ -470,14 +464,17 @@ mod tests {
         let fd_set = FunctionalDependencySet::with_dependencies(
             4,
             vec![
+                // removed
                 new_fd(&[0, 1], &[2, 3]),
                 new_fd(&[2], &[0, 1]),
-                new_fd(&[1], &[0]),
+                new_fd(&[0, 1, 2], &[3]),
                 // empty mappings will be removed
                 new_fd(&[], &[]),
                 new_fd(&[1], &[]),
                 // constant column mapping will be kept
                 new_fd(&[], &[0]),
+                // kept
+                new_fd(&[1], &[0]),
             ],
         );
         let mapping = ColIndexMapping::with_remaining_columns(&[1, 0], 4);
@@ -485,8 +482,8 @@ mod tests {
         let expected = FunctionalDependencySet::with_dependencies(
             2,
             vec![
-                FunctionalDependency::with_indices(2, &[0], &[1]),
                 FunctionalDependency::with_indices(2, &[], &[1]),
+                FunctionalDependency::with_indices(2, &[0], &[1]),
             ],
         );
         assert_eq!(result, expected);
