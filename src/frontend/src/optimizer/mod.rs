@@ -235,6 +235,14 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // Push down the calculation of inputs of join's condition.
+        plan = self.optimize_by_rules(
+            plan,
+            "Push Down the Calculation of Inputs of Join's Condition".to_string(),
+            vec![PushCalculationOfJoinRule::create()],
+            ApplyOrder::TopDown,
+        );
+
         // Convert distinct aggregates.
         plan = self.optimize_by_rules(
             plan,

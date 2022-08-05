@@ -161,7 +161,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
-    use crate::row_serde::cell_based_encoding_util::serialize_pk_and_row;
+    use crate::row_serde::row_serde_util::serialize_pk_and_row;
     use crate::row_serde::ColumnDescMapping;
 
     #[test]

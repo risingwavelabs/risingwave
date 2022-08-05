@@ -28,7 +28,7 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
-use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
+use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
 
 use crate::common::HummockServiceOpts;
 
