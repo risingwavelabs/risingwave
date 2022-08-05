@@ -22,7 +22,10 @@ use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::RequiredDist;
 
-/// Streaming local simple agg, only for stateless agg.
+/// Streaming local simple agg.
+/// Should only be used for stateless agg, including sum, count and append-only min/max.
+/// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
+/// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
 #[derive(Debug, Clone)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
@@ -37,16 +40,12 @@ impl StreamLocalSimpleAgg {
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        // Although output are only inserts,
-        // this stream cannot be materialized,
-        // so its `append_only` property is false.
-        let append_only = false;
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
             input_dist.clone(),
-            append_only,
+            input.append_only(),
         );
         StreamLocalSimpleAgg { base, logical }
     }

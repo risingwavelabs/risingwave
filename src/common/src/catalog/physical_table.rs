@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnOrder};
+use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
 
 use super::{ColumnDesc, ColumnId, TableId};
 use crate::types::ParallelUnitId;
@@ -61,8 +61,8 @@ impl TableDesc {
             .collect()
     }
 
-    pub fn to_protobuf(&self) -> CellBasedTableDesc {
-        CellBasedTableDesc {
+    pub fn to_protobuf(&self) -> StorageTableDesc {
+        StorageTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
             order_key: self.order_key.iter().map(|v| v.to_protobuf()).collect(),

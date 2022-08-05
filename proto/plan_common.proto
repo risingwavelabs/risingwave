@@ -30,7 +30,7 @@ message ColumnCatalog {
   bool is_hidden = 2;
 }
 
-message CellBasedTableDesc {
+message StorageTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
   // TODO: may refactor primary key representations
