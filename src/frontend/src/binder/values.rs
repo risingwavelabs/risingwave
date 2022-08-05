@@ -74,7 +74,16 @@ impl Binder {
                 .try_collect()?,
         };
 
-        let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
+        let values_id = self.next_values_id();
+        let schema = Schema::new(
+            types
+                .into_iter()
+                .zip_eq(0..num_columns)
+                .map(|(ty, col_id)| {
+                    Field::with_name(ty, format!("VALUES_{}.{}", values_id, col_id))
+                })
+                .collect(),
+        );
         Ok(BoundValues {
             rows: bound,
             schema,
