@@ -118,9 +118,9 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     /// Generate a row ID column.
-    fn gen_row_id_column(&mut self, len: usize) -> Column {
+    async fn gen_row_id_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len);
-        let row_ids = self.row_id_generator.next_batch(len);
+        let row_ids = self.row_id_generator.next_batch(len).await;
 
         for row_id in row_ids {
             builder.append(Some(row_id)).unwrap();
@@ -130,14 +130,16 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     /// Generate a row ID column according to ops.
-    fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
+    async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
         let len = column.array_ref().len();
         let mut builder = I64ArrayBuilder::new(len);
 
         for i in 0..len {
             // Only refill row_id for insert operation.
             if ops.get(i) == Some(&Op::Insert) {
-                builder.append(Some(self.row_id_generator.next())).unwrap();
+                builder
+                    .append(Some(self.row_id_generator.next().await))
+                    .unwrap();
             } else {
                 builder
                     .append(Some(
@@ -150,7 +152,7 @@ impl<S: StateStore> SourceExecutor<S> {
         Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
     }
 
-    fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
+    async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
         let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
@@ -161,9 +163,9 @@ impl<S: StateStore> SourceExecutor<S> {
         {
             let (ops, mut columns, bitmap) = chunk.into_inner();
             if append_only {
-                columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
             } else {
-                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops);
+                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
             }
             return StreamChunk::new(ops, columns, bitmap);
         }
@@ -341,8 +343,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
-                        SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true),
-                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false),
+                        SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
+                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false).await,
                     };
 
                     self.metrics

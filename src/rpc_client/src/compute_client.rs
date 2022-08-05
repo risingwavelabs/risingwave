@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::util::addr::HostAddr;
@@ -26,6 +27,7 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
 use crate::error::Result;
+use crate::{RpcClient, RpcClientPool};
 
 #[derive(Clone)]
 pub struct ComputeClient {
@@ -40,13 +42,17 @@ impl ComputeClient {
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
+        Ok(Self::new_with_channel(addr, channel))
+    }
+
+    pub fn new_with_channel(addr: HostAddr, channel: Channel) -> Self {
         let exchange_client = ExchangeServiceClient::new(channel.clone());
         let task_client = TaskServiceClient::new(channel);
-        Ok(Self {
+        Self {
             exchange_client,
             task_client,
             addr,
-        })
+        }
     }
 
     pub async fn get_data(&self, output_id: TaskOutputId) -> Result<Streaming<GetDataResponse>> {
@@ -112,3 +118,12 @@ impl ComputeClient {
         Ok(self.task_client.to_owned().execute(req).await?.into_inner())
     }
 }
+
+impl RpcClient for ComputeClient {
+    fn new_client(host_addr: HostAddr, channel: Channel) -> Self {
+        Self::new_with_channel(host_addr, channel)
+    }
+}
+
+pub type ComputeClientPool = RpcClientPool<ComputeClient>;
+pub type ComputeClientPoolRef = Arc<ComputeClientPool>;

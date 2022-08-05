@@ -333,11 +333,10 @@
     select min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
     StreamMaterialize { columns: [sum(count)(hidden), a1, a2], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v2))] }
+      StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v2))] }
         StreamExchange { dist: Single }
-          StreamAppendOnlyHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v2)] }
-            StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id)] }
-              StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+          StreamStatelessLocalSimpleAgg { aggs: [count, min(t.v1), max(t.v2)] }
+            StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
 - sql: |
     /* simple-stream-agg with non-append-only min-max should use 1-phase agg */
     create table t(v1 int, v2 int) with (appendonly = false);

@@ -34,8 +34,7 @@
     select max(v1) as max_v1 from t1;
   stream_plan: |
     StreamMaterialize { columns: [sum(count)(hidden), max_v1], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t1.v1))] }
+      StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), max(max(t1.v1))] }
         StreamExchange { dist: Single }
-          StreamAppendOnlyHashAgg { group_key: [Vnode(t1._row_id)], aggs: [count, max(t1.v1)] }
-            StreamProject { exprs: [t1.v1, t1._row_id, Vnode(t1._row_id)] }
-              StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
+          StreamStatelessLocalSimpleAgg { aggs: [count, max(t1.v1)] }
+            StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }

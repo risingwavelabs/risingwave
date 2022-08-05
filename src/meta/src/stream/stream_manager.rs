@@ -704,7 +704,6 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
-    use std::thread::sleep;
     use std::time::Duration;
 
     use risingwave_common::catalog::TableId;
@@ -723,6 +722,7 @@ mod tests {
     #[cfg(feature = "failpoints")]
     use tokio::sync::Notify;
     use tokio::task::JoinHandle;
+    use tokio::time::sleep;
     use tonic::{Request, Response, Status};
 
     use super::*;
@@ -878,7 +878,7 @@ mod tests {
                     .unwrap();
             });
 
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true, false))).await;
             let cluster_manager =
