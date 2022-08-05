@@ -275,7 +275,7 @@ message ChainNode {
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan_common.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
-  plan_common.CellBasedTableDesc table_desc = 1;
+  plan_common.StorageTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
 }
 

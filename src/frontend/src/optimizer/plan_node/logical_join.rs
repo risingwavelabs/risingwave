@@ -474,7 +474,7 @@ impl LogicalJoin {
     fn convert_to_lookup_join(
         &self,
         logical_join: LogicalJoin,
-        predicate: EqJoinPredicate,
+        mut predicate: EqJoinPredicate,
     ) -> Option<PlanRef> {
         if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
             log::warn!(
@@ -508,6 +508,12 @@ impl LogicalJoin {
                 return None;
             }
         }
+
+        let new_other = predicate
+            .other_cond()
+            .clone()
+            .and(logical_scan.predicate().clone());
+        *predicate.other_cond_mut() = new_other;
 
         Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
     }
@@ -893,12 +899,7 @@ impl ToStream for LogicalJoin {
                 return Err(nested_loop_join_error);
             };
 
-            let left = self
-                .left()
-                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.left().schema().len(),
-                    &[left_ref_index],
-                ))?;
+            let left = self.left().to_stream()?;
 
             let right = self
                 .right()
