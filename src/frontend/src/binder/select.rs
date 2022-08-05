@@ -182,7 +182,7 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
-                    if self.context.range_of.is_empty() || self.context.columns.is_empty() {
+                    if self.context.range_of.is_empty() {
                         return Err(ErrorCode::BindError(
                             "SELECT * with no tables specified is not valid".into(),
                         )

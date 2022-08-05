@@ -141,3 +141,9 @@
 - sql: |
     select * where x = 1;
   binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    create table t ();
+    select * from t;
+  logical_plan: |
+    LogicalProject { exprs: [] }
+      LogicalScan { table: t, columns: [t._row_id] }
