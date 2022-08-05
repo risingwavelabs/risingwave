@@ -350,7 +350,7 @@ impl StageRunner {
 
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr((&worker_node_addr).into())
+            .get_by_addr((&worker_node_addr).into())
             .await
             .map_err(|e| anyhow!(e))?;
 

@@ -25,11 +25,12 @@ message UserInfo {
   string name = 2;
   bool is_supper = 3;
   bool can_create_db = 4;
-  bool can_login = 5;
-  AuthInfo auth_info = 6;
+  bool can_create_user = 5;
+  bool can_login = 6;
+  AuthInfo auth_info = 7;
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
-  repeated GrantPrivilege grant_privileges = 7;
+  repeated GrantPrivilege grant_privileges = 8;
 }
 
 // GrantPrivilege defines a privilege granted to a user.
@@ -88,6 +89,7 @@ message UpdateUserRequest {
     CREATE_DB = 3;
     AUTH_INFO = 4;
     RENAME = 5;
+    CREATE_USER = 6;
   }
   UserInfo user = 1;
   repeated UpdateField update_fields = 2;
