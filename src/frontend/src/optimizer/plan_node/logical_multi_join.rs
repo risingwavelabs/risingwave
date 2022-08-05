@@ -528,6 +528,8 @@ impl PredicatePushdown for LogicalMultiJoin {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::expr::expr_node::Type;
@@ -539,6 +541,12 @@ mod test {
     use crate::session::OptimizerContext;
     #[tokio::test]
     async fn fd_derivation_multi_join() {
+        // left: [v0, v1], right: [v2, v3, v4]
+        // FD: v0 --> v1, v2 --> { v3, v4 }
+        // On: v0 = 0 AND v1 = v3
+        //
+        // Output: [v0, v1, v2,v 3, v4]
+        // FD: v0 --> v1, v2 --> { v3, v4 }, {} --> v0, v1 --> v3, v3 --> v1
         let ctx = OptimizerContext::mock().await;
         let left = {
             let fields: Vec<Field> = vec![
@@ -555,9 +563,9 @@ mod test {
         };
         let right = {
             let fields: Vec<Field> = vec![
-                Field::with_name(DataType::Int32, "v0"),
-                Field::with_name(DataType::Int32, "v1"),
                 Field::with_name(DataType::Int32, "v2"),
+                Field::with_name(DataType::Int32, "v3"),
+                Field::with_name(DataType::Int32, "v4"),
             ];
             let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
             // 0 --> 1, 2
@@ -602,31 +610,39 @@ mod test {
         let expected_fd_set = [
             (
                 JoinType::LeftSemi,
-                vec![
+                [
                     // inherit from left
                     FunctionalDependency::with_indices(2, &[0], &[1]),
-                ],
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
             ),
             (
                 JoinType::LeftAnti,
-                vec![
+                [
                     // inherit from left
                     FunctionalDependency::with_indices(2, &[0], &[1]),
-                ],
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
             ),
             (
                 JoinType::RightSemi,
-                vec![
+                [
                     // inherit from right
                     FunctionalDependency::with_indices(3, &[0], &[1, 2]),
-                ],
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
             ),
             (
                 JoinType::RightAnti,
-                vec![
+                [
                     // inherit from right
                     FunctionalDependency::with_indices(3, &[0], &[1, 2]),
-                ],
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
             ),
         ];
 
@@ -637,11 +653,13 @@ mod test {
                 join_type,
                 Condition::with_expr(on.clone()),
             );
-            let fd_set = join.functional_dependency();
-            assert_eq!(fd_set.as_dependencies().len(), expected_res.len());
-            for i in fd_set.as_dependencies() {
-                assert!(expected_res.contains(i), "{} should be in expected_res", i);
-            }
+            let fd_set = join
+                .functional_dependency()
+                .as_dependencies()
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
+            assert_eq!(fd_set, expected_res);
         }
     }
 }
