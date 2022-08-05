@@ -47,7 +47,7 @@ pub enum PsqlError {
     ExecuteError(BoxedError),
 
     #[error("DescribeError: {0}.")]
-    DescribeError(IoError),
+    DescribeError(String),
 
     #[error("CloseError: {0}.")]
     CloseError(IoError),

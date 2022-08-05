@@ -21,7 +21,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstIdRange};
-use risingwave_rpc_client::HummockMetaClient;
+use risingwave_pb::meta::heartbeat_request::extra_info::Info;
+use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::hummock::{HummockError, HummockResult};
@@ -120,6 +121,13 @@ impl SstableIdManager {
             .into_iter()
             .min()
             .unwrap_or(HummockSstableId::MAX)
+    }
+}
+
+impl ExtraInfoSource for SstableIdManager {
+    fn get_extra_info(&self) -> Option<Info> {
+        // TODO: use correct value after #4369
+        None
     }
 }
 

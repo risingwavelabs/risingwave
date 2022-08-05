@@ -21,13 +21,13 @@ use bytes::{Buf, BufMut};
 use tokio::sync::{mpsc, Mutex};
 
 use super::cache::FlushBufferHook;
-use super::coding::CacheKey;
 use super::error::Result;
+use crate::hummock::{TieredCacheKey, TieredCacheValue};
 
 #[derive(Clone, Hash, Debug, PartialEq, Eq)]
 pub struct TestCacheKey(pub u64);
 
-impl CacheKey for TestCacheKey {
+impl TieredCacheKey for TestCacheKey {
     fn encoded_len() -> usize {
         8
     }
@@ -38,6 +38,26 @@ impl CacheKey for TestCacheKey {
 
     fn decode(mut buf: &[u8]) -> Self {
         Self(buf.get_u64())
+    }
+}
+
+pub type TestCacheValue = Vec<u8>;
+
+impl TieredCacheValue for Vec<u8> {
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.len()
+    }
+
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_slice(self)
+    }
+
+    fn decode(buf: Vec<u8>) -> Self {
+        buf.to_vec()
     }
 }
 
