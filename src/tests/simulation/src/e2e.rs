@@ -135,8 +135,11 @@ async fn main() {
             });
             let files = glob::glob(&args.files).expect("failed to read glob pattern");
             for file in files {
+                let file = file.unwrap();
+                let path = file.as_path();
+                println!("{}", path.display());
                 tester
-                    .run_file_async(file.unwrap().as_path())
+                    .run_file_async(path)
                     .await
                     .unwrap();
             }
