@@ -19,8 +19,8 @@ use itertools::Itertools;
 
 /// [`FunctionalDependency`] represent a dependency of from --> to.
 ///
-/// For columns ABCD, the FD AC --> B is represented as {0, 2} --> {1} using [`FixedBitset`].
-#[derive(Debug, PartialEq, Clone, Default)]
+/// For columns ABCD, the FD AC --> B is represented as {0, 2} --> {1} using `FixedBitset`.
+#[derive(Debug, PartialEq, Eq, Clone, Default, Hash)]
 pub struct FunctionalDependency {
     from: FixedBitSet,
     to: FixedBitSet,
@@ -54,7 +54,7 @@ impl FunctionalDependency {
         &self.to
     }
 
-    /// Grow the capacity of [`FunctionalDepdency`] to **columns**, all new columns initialized to
+    /// Grow the capacity of [`FunctionalDependency`] to **columns**, all new columns initialized to
     /// zero.
     pub fn grow(&mut self, columns: usize) {
         self.from.grow(columns);
