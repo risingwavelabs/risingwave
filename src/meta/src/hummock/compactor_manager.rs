@@ -15,11 +15,12 @@
 use std::sync::Arc;
 
 use rand::Rng;
-use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::SubscribeCompactTasksResponse;
 use tokio::sync::mpsc::{Receiver, Sender};
+
+use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
 
@@ -29,16 +30,16 @@ pub type CompactorManagerRef = Arc<CompactorManager>;
 /// Compactor node will re-establish the stream when the previous one fails.
 pub struct Compactor {
     context_id: HummockContextId,
-    sender: Sender<Result<SubscribeCompactTasksResponse>>,
+    sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
 }
 
 impl Compactor {
-    pub async fn send_task(&self, task: Task) -> Result<()> {
+    pub async fn send_task(&self, task: Task) -> MetaResult<()> {
         // TODO: compactor node backpressure
         self.sender
             .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
-            .map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
+            .map_err(|e| anyhow::anyhow!(e).into())
     }
 
     pub fn context_id(&self) -> HummockContextId {
@@ -116,7 +117,7 @@ impl CompactorManager {
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
-    ) -> Receiver<Result<SubscribeCompactTasksResponse>> {
+    ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         let mut guard = self.inner.write();
         guard.compactors.retain(|c| c.context_id != context_id);
@@ -147,9 +148,11 @@ mod tests {
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::test_utils::{
         commit_from_meta_node, generate_test_tables, get_sst_ids,
-        register_sstable_infos_to_compaction_group, setup_compute_env, to_local_sstable_info,
+        register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
+        to_local_sstable_info,
     };
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
@@ -191,6 +194,7 @@ mod tests {
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
             current_epoch_time: 0,
+            target_sub_level_id: 0,
         }
     }
 
@@ -241,7 +245,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_compactor() {
-        let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(1)
+            .max_bytes_for_level_base(1)
+            .build();
+        let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;
         let compactor_manager = CompactorManager::new();
         add_compact_task(hummock_manager.as_ref(), context_id, 1).await;
@@ -268,6 +276,7 @@ mod tests {
             .send_task(Task::CompactTask(task.clone()))
             .await
             .unwrap();
+
         // Get a compact task.
         let received_task = receiver.try_recv().unwrap().unwrap().task.unwrap();
         let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();

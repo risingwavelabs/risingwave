@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{Result, RwError};
 use tokio::sync::oneshot;
+
+use crate::{MetaError, MetaResult};
 
 /// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
@@ -22,7 +23,7 @@ pub(super) struct Notifier {
     pub to_send: Option<oneshot::Sender<()>>,
 
     /// Get notified when scheduled barrier is collected or failed.
-    pub collected: Option<oneshot::Sender<Result<()>>>,
+    pub collected: Option<oneshot::Sender<MetaResult<()>>>,
 
     /// Get notified when scheduled barrier is finished.
     pub finished: Option<oneshot::Sender<()>>,
@@ -44,7 +45,7 @@ impl Notifier {
     }
 
     /// Notify when we failed to collect a barrier. This function consumes `self`.
-    pub fn notify_collection_failed(self, err: RwError) {
+    pub fn notify_collection_failed(self, err: MetaError) {
         if let Some(tx) = self.collected {
             tx.send(Err(err)).ok();
         }

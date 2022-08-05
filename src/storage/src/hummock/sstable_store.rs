@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::clone::Clone;
 use std::mem::size_of;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use fail::fail_point;
@@ -99,7 +100,6 @@ impl SstableStore {
             + sst.meta.encoded_size()
             + data.len();
         self.put_sst_data(sst.id, data).await?;
-
         fail_point!("metadata_upload_err");
         if let Err(e) = self.put_meta(&sst).await {
             self.delete_sst_data(sst.id).await?;
@@ -289,8 +289,9 @@ impl SstableStore {
                     let meta_path = self.get_sst_meta_path(sst_id);
                     let data_path = self.get_sst_data_path(sst_id);
                     stats.cache_meta_block_miss += 1;
-
+                    let stats_ptr = stats.remote_io_time.clone();
                     async move {
+                        let now = Instant::now();
                         let meta = match meta_data {
                             Some(data) => data,
                             None => {
@@ -319,6 +320,8 @@ impl SstableStore {
                         } else {
                             Sstable::new(sst_id, meta)
                         };
+                        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                         Ok((Box::new(sst), size))
                     }
                 })

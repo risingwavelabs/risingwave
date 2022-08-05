@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(backtrace)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -45,6 +46,7 @@ extern crate core;
 mod barrier;
 pub mod cluster;
 mod dashboard;
+mod error;
 pub mod hummock;
 pub mod manager;
 mod model;
@@ -56,6 +58,7 @@ pub mod test_utils;
 use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
+pub use error::{MetaError, MetaResult};
 use risingwave_common::config::ComputeNodeConfig;
 
 use crate::manager::MetaOpts;

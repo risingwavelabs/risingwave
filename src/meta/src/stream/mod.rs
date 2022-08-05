@@ -21,7 +21,6 @@ mod stream_manager;
 mod test_fragmenter;
 
 pub use meta::*;
-use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 pub use scheduler::*;
@@ -31,13 +30,14 @@ pub use stream_manager::*;
 
 use crate::manager::HashMappingManagerRef;
 use crate::model::FragmentId;
+use crate::MetaResult;
 
 /// Record vnode mapping for stateful operators in meta.
 pub fn record_table_vnode_mappings(
     hash_mapping_manager: &HashMappingManagerRef,
     stream_node: &StreamNode,
     fragment_id: FragmentId,
-) -> Result<()> {
+) -> MetaResult<()> {
     // We only consider stateful operators with multiple parallel degrees here. Singleton stateful
     // operators will not have vnode mappings, so that compactors could omit the unnecessary probing
     // on vnode mappings.

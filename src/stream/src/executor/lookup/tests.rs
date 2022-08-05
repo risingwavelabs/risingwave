@@ -25,7 +25,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::store::ReadOptions;
-use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -40,14 +40,14 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
         ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(1),
+            column_id: ColumnId::new(0),
             name: "rowid_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
         },
         ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(2),
+            column_id: ColumnId::new(1),
             name: "join_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
@@ -213,8 +213,8 @@ fn build_state_table_helper<S: StateStore>(
     columns: Vec<ColumnDesc>,
     order_types: Vec<OrderPair>,
     pk_indices: Vec<usize>,
-) -> StorageTable<S, READ_ONLY> {
-    StorageTable::new_partial(
+) -> RowBasedStorageTable<S, READ_ONLY> {
+    RowBasedStorageTable::new_partial(
         s,
         table_id,
         columns.clone(),
@@ -267,6 +267,7 @@ async fn test_lookup_this_epoch() {
 
     for (k, v) in store
         .scan::<_, Vec<u8>>(
+            None,
             ..,
             None,
             ReadOptions {

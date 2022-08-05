@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::{tonic_err, ErrorCode, Result as RwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -30,6 +30,7 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
+use crate::error::meta_error_to_tonic;
 use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, Relation, SourceId, TableId};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -37,6 +38,7 @@ use crate::stream::{
     ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
     SourceManagerRef,
 };
+use crate::MetaResult;
 
 #[derive(Clone)]
 pub struct DdlServiceImpl<S: MetaStore> {
@@ -91,14 +93,10 @@ where
             .id_gen_manager()
             .generate::<{ IdCategory::Database }>()
             .await
-            .map_err(tonic_err)? as u32;
-        let mut database = req.get_db().map_err(tonic_err)?.clone();
+            .map_err(meta_error_to_tonic)? as u32;
+        let mut database = req.get_db().map_err(meta_error_to_tonic)?.clone();
         database.id = id;
-        let version = self
-            .catalog_manager
-            .create_database(&database)
-            .await
-            .map_err(tonic_err)?;
+        let version = self.catalog_manager.create_database(&database).await?;
 
         Ok(Response::new(CreateDatabaseResponse {
             status: None,
@@ -113,11 +111,7 @@ where
     ) -> Result<Response<DropDatabaseResponse>, Status> {
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let version = self
-            .catalog_manager
-            .drop_database(database_id)
-            .await
-            .map_err(tonic_err)?;
+        let version = self.catalog_manager.drop_database(database_id).await?;
         Ok(Response::new(DropDatabaseResponse {
             status: None,
             version,
@@ -134,14 +128,10 @@ where
             .id_gen_manager()
             .generate::<{ IdCategory::Schema }>()
             .await
-            .map_err(tonic_err)? as u32;
-        let mut schema = req.get_schema().map_err(tonic_err)?.clone();
+            .map_err(meta_error_to_tonic)? as u32;
+        let mut schema = req.get_schema().map_err(meta_error_to_tonic)?.clone();
         schema.id = id;
-        let version = self
-            .catalog_manager
-            .create_schema(&schema)
-            .await
-            .map_err(tonic_err)?;
+        let version = self.catalog_manager.create_schema(&schema).await?;
 
         Ok(Response::new(CreateSchemaResponse {
             status: None,
@@ -156,11 +146,7 @@ where
     ) -> Result<Response<DropSchemaResponse>, Status> {
         let req = request.into_inner();
         let schema_id = req.get_schema_id();
-        let version = self
-            .catalog_manager
-            .drop_schema(schema_id)
-            .await
-            .map_err(tonic_err)?;
+        let version = self.catalog_manager.drop_schema(schema_id).await?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
             version,
@@ -179,28 +165,25 @@ where
             .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
             .await
-            .map_err(tonic_err)? as u32;
+            .map_err(meta_error_to_tonic)? as u32;
         source.id = id;
 
         self.catalog_manager
             .start_create_source_procedure(&source)
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         // QUESTION(patrick): why do we need to contact compute node on create source
         if let Err(e) = self.source_manager.create_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
-                .await
-                .map_err(tonic_err)?;
+                .await?;
             return Err(e.into());
         }
 
         let version = self
             .catalog_manager
             .finish_create_source_procedure(&source)
-            .await
-            .map_err(tonic_err)?;
+            .await?;
         Ok(Response::new(CreateSourceResponse {
             status: None,
             source_id: id,
@@ -216,17 +199,10 @@ where
         let source_id = request.into_inner().source_id;
 
         // 1. Drop source in catalog. Ref count will be checked.
-        let version = self
-            .catalog_manager
-            .drop_source(source_id)
-            .await
-            .map_err(tonic_err)?;
+        let version = self.catalog_manager.drop_source(source_id).await?;
 
         // 2. Drop source on compute nodes.
-        self.source_manager
-            .drop_source(source_id)
-            .await
-            .map_err(tonic_err)?;
+        self.source_manager.drop_source(source_id).await?;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -242,13 +218,15 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let sink = req.get_sink().map_err(tonic_err)?.clone();
-        let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
+        let sink = req.get_sink().map_err(meta_error_to_tonic)?.clone();
+        let fragment_graph = req
+            .get_fragment_graph()
+            .map_err(meta_error_to_tonic)?
+            .clone();
 
         let (sink_id, version) = self
             .create_relation(&mut Relation::Sink(sink), fragment_graph)
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         Ok(Response::new(CreateSinkResponse {
             status: None,
@@ -261,14 +239,16 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
+        use risingwave_common::catalog::TableId;
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
-        let version = self
-            .catalog_manager
-            .drop_sink(sink_id)
-            .await
-            .map_err(tonic_err)?;
+        let version = self.catalog_manager.drop_sink(sink_id).await?;
+
+        // 2. drop sink in stream manager
+        self.stream_manager
+            .drop_materialized_view(&TableId::new(sink_id))
+            .await?;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -284,13 +264,18 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let mview = req.get_materialized_view().map_err(tonic_err)?.clone();
-        let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
+        let mview = req
+            .get_materialized_view()
+            .map_err(meta_error_to_tonic)?
+            .clone();
+        let fragment_graph = req
+            .get_fragment_graph()
+            .map_err(meta_error_to_tonic)?
+            .clone();
 
         let (table_id, version) = self
             .create_relation(&mut Relation::Table(mview), fragment_graph)
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
@@ -310,17 +295,12 @@ where
 
         let table_id = request.into_inner().table_id;
         // 1. Drop table in catalog. Ref count will be checked.
-        let version = self
-            .catalog_manager
-            .drop_table(table_id)
-            .await
-            .map_err(tonic_err)?;
+        let version = self.catalog_manager.drop_table(table_id).await?;
 
         // 2. drop mv in stream manager
         self.stream_manager
             .drop_materialized_view(&TableId::new(table_id))
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -340,8 +320,7 @@ where
 
         let (source_id, table_id, version) = self
             .create_materialized_source_inner(source, mview, fragment_graph)
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         Ok(Response::new(CreateMaterializedSourceResponse {
             status: None,
@@ -362,8 +341,7 @@ where
 
         let version = self
             .drop_materialized_source_inner(source_id, table_id)
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         Ok(Response::new(DropMaterializedSourceResponse {
             status: None,
@@ -378,7 +356,7 @@ where
         use crate::model::MetadataModel;
         let tables = Table::list(self.env.meta_store())
             .await
-            .map_err(tonic_err)?;
+            .map_err(meta_error_to_tonic)?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 }
@@ -387,7 +365,7 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    fn get_internal_table(&self, ctx: &CreateMaterializedViewContext) -> RwResult<Vec<Table>> {
+    fn get_internal_table(&self, ctx: &CreateMaterializedViewContext) -> MetaResult<Vec<Table>> {
         let mut internal_table = ctx
             .internal_table_id_map
             .iter()
@@ -396,7 +374,7 @@ where
             .collect_vec();
 
         for inner_table in &mut internal_table {
-            self.set_table_mapping(inner_table).map_err(tonic_err)?;
+            self.set_table_mapping(inner_table)?;
         }
         Ok(internal_table)
     }
@@ -406,14 +384,14 @@ where
         &self,
         relation: &mut Relation,
         fragment_graph: StreamFragmentGraph,
-    ) -> RwResult<(u32, u64)> {
+    ) -> MetaResult<(u32, u64)> {
         // 0. Generate an id from relation.
         let id = self
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
             .await
-            .map_err(tonic_err)? as u32;
+            .map_err(meta_error_to_tonic)? as u32;
         relation.set_id(id);
 
         // 1. Resolve the dependent relations.
@@ -427,8 +405,7 @@ where
         // 2. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
             .start_create_procedure(relation)
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         // 3. Create relation in stream manager. The id in stream node will be filled.
         let mut ctx = CreateMaterializedViewContext {
@@ -446,13 +423,12 @@ where
             Err(e) => {
                 self.catalog_manager
                     .cancel_create_procedure(relation)
-                    .await
-                    .map_err(tonic_err)?;
+                    .await?;
                 return Err(e);
             }
             Ok(()) => {
                 if let Relation::Table(table) = relation {
-                    self.set_table_mapping(table).map_err(tonic_err)?;
+                    self.set_table_mapping(table)?;
                 }
                 self.get_internal_table(&ctx)?
             }
@@ -479,8 +455,7 @@ where
                 },
                 relation,
             )
-            .await
-            .map_err(tonic_err)?;
+            .await?;
 
         Ok((id, version))
     }
@@ -491,7 +466,7 @@ where
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
         ctx: &mut CreateMaterializedViewContext,
-    ) -> RwResult<()> {
+    ) -> MetaResult<()> {
         use risingwave_common::catalog::TableId;
 
         // Get relation_id and make fragment_graph immutable.
@@ -572,7 +547,7 @@ where
         mut source: Source,
         mut mview: Table,
         mut fragment_graph: StreamFragmentGraph,
-    ) -> RwResult<(SourceId, TableId, CatalogVersion)> {
+    ) -> MetaResult<(SourceId, TableId, CatalogVersion)> {
         // Generate source id.
         let source_id = self
             .env
@@ -656,7 +631,7 @@ where
                 return Err(e);
             }
             Ok(()) => {
-                self.set_table_mapping(&mut mview).map_err(tonic_err)?;
+                self.set_table_mapping(&mut mview)?;
                 self.get_internal_table(&ctx)?
             }
         };
@@ -674,7 +649,7 @@ where
         &self,
         source_id: SourceId,
         table_id: TableId,
-    ) -> RwResult<CatalogVersion> {
+    ) -> MetaResult<CatalogVersion> {
         use risingwave_common::catalog::TableId;
 
         // 1. Drop materialized source in catalog, source_id will be checked if it is
@@ -697,7 +672,7 @@ where
     }
 
     /// Fill in mview's vnode mapping so that frontend will know the data distribution.
-    fn set_table_mapping(&self, table: &mut Table) -> RwResult<()> {
+    fn set_table_mapping(&self, table: &mut Table) -> MetaResult<()> {
         let vnode_mapping = self
             .env
             .hash_mapping_manager_ref()
@@ -712,21 +687,20 @@ where
                 });
                 Ok(())
             }
-            None => Err(ErrorCode::InternalError(format!(
+            None => bail!(
                 "no data distribution found for materialized view table_id = {}",
                 table.id
-            ))
-            .into()),
+            ),
         }
     }
 }
 
-fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> RwResult<Vec<TableId>> {
+fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> MetaResult<Vec<TableId>> {
     // TODO: distinguish SourceId and TableId
     fn resolve_dependent_relations(
         stream_node: &StreamNode,
         dependent_relations: &mut HashSet<TableId>,
-    ) -> RwResult<()> {
+    ) -> MetaResult<()> {
         match stream_node.node_body.as_ref().unwrap() {
             NodeBody::Source(source_node) => {
                 dependent_relations.insert(source_node.get_table_id());
@@ -744,8 +718,7 @@ fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> RwResult<Vec
 
     let mut dependent_relations = Default::default();
     for fragment in fragment_graph.fragments.values() {
-        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)
-            .map_err(tonic_err)?;
+        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)?;
     }
     Ok(dependent_relations.into_iter().collect())
 }

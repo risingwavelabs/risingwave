@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::DataChunk;
-use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
@@ -23,8 +22,6 @@ use crate::expr::expr_binary_bytes::{
 };
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
-use crate::expr::expr_case::{CaseExpression, WhenClause};
-use crate::expr::expr_in::InExpression;
 use crate::expr::expr_quaternary_bytes::new_overlay_for_exp;
 use crate::expr::expr_ternary_bytes::{
     new_overlay_exp, new_replace_expr, new_split_part_expr, new_substr_start_end,
@@ -187,62 +184,6 @@ pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_like_default(expr_ia1, expr_ia2, ret_type))
 }
 
-pub fn build_in_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_children_and_return_type(prost)?;
-    ensure!(ret_type == DataType::Boolean);
-    let left_expr = expr_build_from_prost(&children[0])?;
-    let mut data = Vec::new();
-    // Used for const expression below to generate datum.
-    // Frontend has made sure these can all be folded to constants.
-    let data_chunk = DataChunk::new_dummy(1);
-    for child in &children[1..] {
-        let const_expr = expr_build_from_prost(child)?;
-        let array = const_expr.eval(&data_chunk)?;
-        let datum = array.value_at(0).to_owned_datum();
-        data.push(datum);
-    }
-    Ok(Box::new(InExpression::new(
-        left_expr,
-        data.into_iter(),
-        ret_type,
-    )))
-}
-
-pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_children_and_return_type(prost)?;
-    // children: (when, then)+, (else_clause)?
-    let len = children.len();
-    let else_clause = if len % 2 == 1 {
-        let else_clause = expr_build_from_prost(&children[len - 1])?;
-        if else_clause.return_type() != ret_type {
-            bail!("Type mismatched between else and case.");
-        }
-        Some(else_clause)
-    } else {
-        None
-    };
-    let mut when_clauses = vec![];
-    for i in 0..len / 2 {
-        let when_index = i * 2;
-        let then_index = i * 2 + 1;
-        let when_expr = expr_build_from_prost(&children[when_index])?;
-        let then_expr = expr_build_from_prost(&children[then_index])?;
-        if when_expr.return_type() != DataType::Boolean {
-            bail!("Type mismatched between when clause and condition");
-        }
-        if then_expr.return_type() != ret_type {
-            bail!("Type mismatched between then clause and case");
-        }
-        let when_clause = WhenClause::new(when_expr, then_expr);
-        when_clauses.push(when_clause);
-    }
-    Ok(Box::new(CaseExpression::new(
-        ret_type,
-        when_clauses,
-        else_clause,
-    )))
-}
-
 pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 3);
@@ -279,11 +220,11 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 mod tests {
     use std::vec;
 
-    use risingwave_common::array::{ArrayImpl, Utf8Array};
+    use risingwave_common::array::{ArrayImpl, DataChunk, Utf8Array};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
+    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
 
     use super::*;
 
@@ -355,88 +296,6 @@ mod tests {
             *res,
             ArrayImpl::Utf8(Utf8Array::from_slice(&[Some("foo")]).unwrap())
         );
-    }
-
-    #[test]
-    fn test_build_in_expr() {
-        let input_ref = InputRefExpr { column_idx: 0 };
-        let input_ref_expr_node = ExprNode {
-            expr_type: Type::InputRef as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Varchar as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::InputRef(input_ref)),
-        };
-        let constant_values = vec![
-            ExprNode {
-                expr_type: Type::ConstantValue as i32,
-                return_type: Some(ProstDataType {
-                    type_name: TypeName::Varchar as i32,
-                    ..Default::default()
-                }),
-                rex_node: Some(RexNode::Constant(ConstantValue {
-                    body: "ABC".as_bytes().to_vec(),
-                })),
-            },
-            ExprNode {
-                expr_type: Type::ConstantValue as i32,
-                return_type: Some(ProstDataType {
-                    type_name: TypeName::Varchar as i32,
-                    ..Default::default()
-                }),
-                rex_node: Some(RexNode::Constant(ConstantValue {
-                    body: "def".as_bytes().to_vec(),
-                })),
-            },
-        ];
-        let mut in_children = vec![input_ref_expr_node];
-        in_children.extend(constant_values.into_iter());
-        let call = FunctionCall {
-            children: in_children,
-        };
-        let p = ExprNode {
-            expr_type: Type::In as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Boolean as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(call)),
-        };
-        assert!(build_in_expr(&p).is_ok());
-    }
-
-    #[test]
-    fn test_build_case_expr() {
-        let call = FunctionCall {
-            children: vec![
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Boolean as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: None,
-                },
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: None,
-                },
-            ],
-        };
-        let p = ExprNode {
-            expr_type: Type::Case as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(call)),
-        };
-        assert!(build_case_expr(&p).is_ok());
     }
 
     #[test]
