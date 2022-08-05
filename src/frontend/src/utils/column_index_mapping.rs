@@ -364,6 +364,13 @@ impl ColIndexMapping {
         }
     }
 
+    /// Rewrite functional dependencies in `fd_set` one by one, using
+    /// `[ColIndexMapping::rewrite_functional_dependency]`.
+    ///
+    /// Note that this rewrite process handles each function dependency independently.
+    /// Relationships within function dependencies are not considered.
+    /// For example, if we have `fd_set` { AB --> C, A --> B }, and column B is removed.
+    /// The result would be an empty `fd_set`, rather than { A --> C }.
     pub fn rewrite_functional_dependency_set(
         &self,
         fd_set: FunctionalDependencySet,
