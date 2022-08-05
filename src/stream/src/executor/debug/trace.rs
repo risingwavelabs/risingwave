@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
@@ -121,12 +121,13 @@ pub async fn stack_trace(
 ) {
     pin_mut!(input);
 
-    let span = Arc::<str>::from(format!(
+    let span: SpanValue = format!(
         "{} (actor {}, executor {})",
         info.identity,
         actor_id,
         executor_id as u32 // Use the lower 32 bit to match the dashboard.
-    ));
+    )
+    .into();
 
     while let Some(message) = input.next().stack_trace(span.clone()).await.transpose()? {
         yield message;

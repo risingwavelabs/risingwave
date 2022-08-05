@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::addr::is_local_address;
@@ -46,7 +45,7 @@ pub type BoxedOutput = Box<dyn Output>;
 pub struct LocalOutput {
     actor_id: ActorId,
 
-    span: Arc<str>,
+    span: SpanValue,
 
     ch: Sender<Message>,
 }
@@ -92,7 +91,7 @@ impl Output for LocalOutput {
 pub struct RemoteOutput {
     actor_id: ActorId,
 
-    span: Arc<str>,
+    span: SpanValue,
 
     ch: Sender<Message>,
 }

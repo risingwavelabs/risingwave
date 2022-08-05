@@ -16,7 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use async_stack_trace::StackTrace;
+use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
@@ -73,7 +73,7 @@ impl LocalInput {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(mut channel: Receiver<Message>, actor_id: ActorId) {
-        let span = Arc::<str>::from(format!("LocalInput (actor {actor_id})"));
+        let span: SpanValue = format!("LocalInput (actor {actor_id})").into();
         while let Some(msg) = channel.recv().stack_trace(span.clone()).await {
             yield msg;
         }
@@ -150,7 +150,7 @@ impl RemoteInput {
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
 
-        let span = Arc::<str>::from(format!("RemoteInput (actor {up_actor_id})"));
+        let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
 
         pin_mut!(stream);
         while let Some(data_res) = stream.next().stack_trace(span.clone()).await {

@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
-use async_stack_trace::StackTrace;
+use async_stack_trace::{SpanValue, StackTrace};
 use futures::pin_mut;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
@@ -161,7 +160,7 @@ where
         while let Some(barrier) = stream
             .next()
             .instrument(span)
-            .stack_trace(last_epoch.map_or(Cow::Borrowed("Epoch <initial>"), |e| {
+            .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
                 format!("Epoch {}", e.curr).into()
             }))
             .await

@@ -17,7 +17,6 @@
 #![feature(lint_reasons)]
 
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::Poll;
 
 use context::ContextId;
@@ -25,6 +24,7 @@ use futures::future::Fuse;
 use futures::{Future, FutureExt};
 use indextree::NodeId;
 use pin_project::{pin_project, pinned_drop};
+use triomphe::{Arc, OffsetArc};
 
 use crate::context::{with_context, TRACE_CONTEXT};
 
@@ -32,7 +32,53 @@ mod context;
 mod manager;
 
 pub use manager::{StackTraceManager, StackTraceReport, TraceReporter};
-pub type SpanValue = Arc<str>;
+
+/// A cheaply-cloneable span string.
+#[derive(Debug, Clone)]
+pub enum SpanValue {
+    Slice(&'static str),
+    Shared(OffsetArc<String>),
+}
+
+impl Default for SpanValue {
+    fn default() -> Self {
+        Self::Slice("")
+    }
+}
+impl From<&'static str> for SpanValue {
+    fn from(s: &'static str) -> Self {
+        Self::Slice(s)
+    }
+}
+impl From<String> for SpanValue {
+    fn from(s: String) -> Self {
+        Self::Shared(Arc::into_raw_offset(Arc::new(s)))
+    }
+}
+impl AsRef<str> for SpanValue {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Slice(s) => s,
+            Self::Shared(s) => s.as_str(),
+        }
+    }
+}
+impl PartialEq for SpanValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+impl Eq for SpanValue {}
+impl Ord for SpanValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_ref().cmp(other.as_ref())
+    }
+}
+impl PartialOrd for SpanValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 /// State for stack traced future.
 enum StackTracedState {
@@ -82,7 +128,7 @@ impl<F: Future> Future for StackTraced<F> {
                     // First polled
                     Ok(current_context) => {
                         // First polled, push a new span to the context.
-                        let node = with_context(|mut c| c.push(span.clone()));
+                        let node = with_context(|mut c| c.push(std::mem::take(span)));
                         *this.state = StackTracedState::Polled {
                             this_node: node,
                             this_context: current_context,

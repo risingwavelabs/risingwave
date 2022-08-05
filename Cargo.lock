@@ -241,6 +241,7 @@ dependencies = [
  "madsim-tokio",
  "pin-project",
  "tracing",
+ "triomphe",
  "workspace-hack",
 ]
 
@@ -6632,6 +6633,10 @@ name = "triomphe"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fe1b3800b35f9b936c28dc59dbda91b195371269396784d931fe2a5a2be3d2f"
+dependencies = [
+ "serde",
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "try-lock"
@@ -7074,6 +7079,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "socket2",
+ "stable_deref_trait",
  "syn",
  "tokio",
  "tokio-stream",
