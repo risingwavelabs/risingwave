@@ -20,7 +20,7 @@ risingwave_expr = { path = "../../expr" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_sqlparser = { path = "../../sqlparser" }
 tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio" }
-tokio-postgres = "0.7"
+tokio-postgres = { version = "=0.2.0-alpha.6", package = "madsim-tokio-postgres" }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [[bin]]

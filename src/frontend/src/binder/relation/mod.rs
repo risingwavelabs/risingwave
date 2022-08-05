@@ -181,44 +181,47 @@ impl Binder {
             Some(TableAlias { name, columns }) => (name.real_value(), columns),
         };
 
+        let num_col_aliases = column_aliases.len();
+
         let begin = self.context.columns.len();
         // Column aliases can be less than columns, but not more.
         // It also needs to skip hidden columns.
         let mut alias_iter = column_aliases.into_iter().fuse();
-        columns
-            .into_iter()
-            .enumerate()
-            .for_each(|(index, (is_hidden, mut field))| {
-                let name = match is_hidden {
-                    true => field.name.to_string(),
-                    false => alias_iter
-                        .next()
-                        .map(|t| t.value)
-                        .unwrap_or_else(|| field.name.to_string()),
-                };
-                field.name = name.clone();
-                self.context.columns.push(ColumnBinding::new(
-                    table_name.clone(),
-                    begin + index,
-                    is_hidden,
-                    field,
-                ));
-                self.context
-                    .indexs_of
-                    .entry(name)
-                    .or_default()
-                    .push(self.context.columns.len() - 1);
-            });
-        if alias_iter.next().is_some() {
+        let mut index = 0;
+        columns.into_iter().for_each(|(is_hidden, mut field)| {
+            let name = match is_hidden {
+                true => field.name.to_string(),
+                false => alias_iter
+                    .next()
+                    .map(|t| t.value)
+                    .unwrap_or_else(|| field.name.to_string()),
+            };
+            field.name = name.clone();
+            self.context.columns.push(ColumnBinding::new(
+                table_name.clone(),
+                begin + index,
+                is_hidden,
+                field,
+            ));
+            self.context
+                .indexs_of
+                .entry(name)
+                .or_default()
+                .push(self.context.columns.len() - 1);
+            index += 1;
+        });
+
+        let num_cols = index;
+        if num_cols < num_col_aliases {
             return Err(ErrorCode::BindError(format!(
-                "table \"{table_name}\" has less columns available but more aliases specified",
+                "table \"{table_name}\" has {num_cols} columns available but {num_col_aliases} column aliases specified",
             ))
             .into());
         }
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
-                "Duplicated table name while binding context: {}",
+                "Duplicated table name while binding table to context: {}",
                 table_name
             ))
             .into()),
@@ -239,7 +242,19 @@ impl Binder {
         if !has_schema_name
             && let Some(bound_query) = self.cte_to_relation.get(&table_name)
         {
-            let (query, alias) = bound_query.clone();
+            let (query, mut original_alias) = bound_query.clone();
+            debug_assert_eq!(original_alias.name.value, table_name); // The original CTE alias ought to be its table name.
+
+            if let Some(from_alias) = alias {
+                original_alias.name = from_alias.name;
+                let mut alias_iter = from_alias.columns.into_iter();
+                original_alias.columns = original_alias.columns.into_iter().map(|ident| {
+                    alias_iter
+                        .next()
+                        .unwrap_or(ident)
+                }).collect();
+            }
+
             self.bind_table_to_context(
                 query
                     .body
@@ -248,7 +263,7 @@ impl Binder {
                     .iter()
                     .map(|f| (false, f.clone())),
                 table_name,
-                Some(alias),
+                Some(original_alias),
             )?;
             Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
         } else {

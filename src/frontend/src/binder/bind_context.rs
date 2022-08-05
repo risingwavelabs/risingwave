@@ -306,7 +306,7 @@ impl BindContext {
             match self.range_of.entry(k) {
                 Entry::Occupied(e) => {
                     return Err(ErrorCode::InternalError(format!(
-                        "Duplicated table name while binding context {}",
+                        "Duplicated table name while merging adjacent contexts: {}",
                         e.key()
                     ))
                     .into());
