@@ -574,6 +574,7 @@ impl LocalStreamManagerCore {
                         actor.run().await.expect("actor failed");
                     },
                     format!("Actor {actor_id}"),
+                    false,
                     Duration::from_millis(1000),
                 ))),
             );

@@ -58,6 +58,9 @@ pub(crate) struct TraceContext {
     /// The id of the context.
     id: ContextId,
 
+    /// Whether to report the detached spans, that is, spans that are not able to be polled now.
+    report_detached: bool,
+
     /// The arena for allocating span nodes in this context.
     arena: Arena<SpanNode>,
 
@@ -105,16 +108,20 @@ impl std::fmt::Display for TraceContext {
 
         fmt_node(f, &self.arena, self.root, 0)?;
 
-        // Print all detached spans. May hurt the performance so disable it by default.
-        #[cfg(any())]
-        for node in self.arena.iter().filter(|n| !n.is_removed()) {
-            let id = self.arena.get_node_id(node).unwrap();
-            if id == self.root {
-                continue;
-            }
-            if node.parent().is_none() {
-                f.write_str("[??? Detached]\n")?;
-                fmt_node(f, &self.arena, id, 1)?;
+        // Print all detached spans. May hurt the performance so make it optional.
+        if self.report_detached {
+            for node in self.arena.iter().filter(|n| !n.is_removed()) {
+                let id = self.arena.get_node_id(node).unwrap();
+                if id == self.root {
+                    continue;
+                }
+                if node.parent().is_none()
+                    && node.next_sibling().is_none()
+                    && node.previous_sibling().is_none()
+                {
+                    f.write_str("[??? Detached]\n")?;
+                    fmt_node(f, &self.arena, id, 1)?;
+                }
             }
         }
 
@@ -124,7 +131,7 @@ impl std::fmt::Display for TraceContext {
 
 impl TraceContext {
     /// Create a new stack trace context with the given root span.
-    pub fn new(root_span: SpanValue) -> Self {
+    pub fn new(root_span: SpanValue, report_detached: bool) -> Self {
         static ID: AtomicU64 = AtomicU64::new(0);
         let id = ID.fetch_add(1, Ordering::SeqCst);
 
@@ -133,6 +140,7 @@ impl TraceContext {
 
         Self {
             id,
+            report_detached,
             arena,
             root,
             current: root,

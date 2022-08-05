@@ -28,7 +28,10 @@ pub(crate) type TraceReceiver = watch::Receiver<StackTraceReport>;
 /// The report of a stack trace.
 #[derive(Debug, Clone)]
 pub struct StackTraceReport {
+    /// The content of the report, which is structured as a tree with indentation.
     pub report: String,
+
+    /// The time when the report is captured or reported.
     pub capture_time: std::time::Instant,
 }
 
@@ -52,23 +55,29 @@ impl std::fmt::Display for StackTraceReport {
     }
 }
 
+/// Used to start a reporter along with the traced future.
 pub struct TraceReporter {
+    /// Used to send the report periodically to the manager.
     pub(crate) tx: TraceSender,
 }
 
 impl TraceReporter {
     /// Provide a stack tracing context with the `root_span` for the given future. The reporter will
     /// be started along with this future in the current task and update the captured stack trace
-    /// report through the given `trace_sender` every `interval` time.
+    /// report every `interval` time.
+    ///
+    /// If `report_detached` is true, the reporter will also report the futures that are not able to
+    /// be polled now.
     pub async fn trace<F: Future>(
         self,
         future: F,
         root_span: impl Into<SpanValue>,
+        report_detached: bool,
         interval: Duration,
     ) -> F::Output {
         TRACE_CONTEXT
             .scope(
-                RefCell::new(TraceContext::new(root_span.into())),
+                RefCell::new(TraceContext::new(root_span.into(), report_detached)),
                 async move {
                     let reporter = async move {
                         let mut interval = tokio::time::interval(interval);
@@ -118,7 +127,8 @@ where
     /// Get all trace reports registered in this manager.
     ///
     /// Note that the reports might not be updated if the traced task is doing some computation
-    /// heavy work and never yields, one may see the captured time to check this.
+    /// heavy work and never yields, one may check how long the captured time has elapsed to confirm
+    /// this.
     pub fn get_all(&mut self) -> impl Iterator<Item = (&K, watch::Ref<StackTraceReport>)> {
         self.rxs.retain(|_, rx| rx.has_changed().is_ok());
         self.rxs.iter_mut().map(|(k, v)| (k, v.borrow_and_update()))
