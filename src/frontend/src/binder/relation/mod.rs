@@ -246,12 +246,12 @@ impl Binder {
             debug_assert_eq!(original_alias.name.value, table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
-                original_alias.name = from_alias.name.clone();
-                let mut alias_iter = from_alias.columns.iter();
-                original_alias.columns = original_alias.columns.iter().map(|ident| {
+                original_alias.name = from_alias.name;
+                let mut alias_iter = from_alias.columns.into_iter();
+                original_alias.columns = original_alias.columns.into_iter().map(|ident| {
                     alias_iter
                         .next()
-                        .unwrap_or(ident).clone()
+                        .unwrap_or(ident)
                 }).collect();
             }
 
