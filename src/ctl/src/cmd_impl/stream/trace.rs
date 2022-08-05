@@ -50,10 +50,10 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
         if let Some(trace) = all_traces.get(&actor_id) {
             println!("{trace}");
         } else {
-            bail!("actor {actor_id} not found");
+            bail!("Actor {actor_id} not found. Not running, or `RW_ASYNC_STACK_TRACE` is not set?");
         }
     } else if all_traces.is_empty() {
-        println!("No traces found");
+        println!("No traces found. No actors are running, or `RW_ASYNC_STACK_TRACE` is not set?");
     } else {
         for (key, trace) in all_traces {
             println!(">> Actor {key}\n{trace}");
