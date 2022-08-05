@@ -89,16 +89,14 @@ pub fn trigger_sst_stat(
         .with_label_values(&[&level_label])
         .set(sst_num as i64);
 
-    use std::sync::atomic::AtomicU64;
-
-    static TIME_AFTER_LAST_OBSERVATION: AtomicU64 = AtomicU64::new(0);
-    let previous_time = TIME_AFTER_LAST_OBSERVATION.load(Ordering::Relaxed);
+    let previous_time = metrics.time_after_last_observation.load(Ordering::Relaxed);
     let current_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
     if current_time - previous_time > 600
-        && TIME_AFTER_LAST_OBSERVATION
+        && metrics
+            .time_after_last_observation
             .compare_exchange(
                 previous_time,
                 current_time,

@@ -367,6 +367,8 @@ pub enum UserOption {
     NoSuperUser,
     CreateDB,
     NoCreateDB,
+    CreateUser,
+    NoCreateUser,
     Login,
     NoLogin,
     EncryptedPassword(AstString),
@@ -380,6 +382,8 @@ impl fmt::Display for UserOption {
             UserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
             UserOption::CreateDB => write!(f, "CREATEDB"),
             UserOption::NoCreateDB => write!(f, "NOCREATEDB"),
+            UserOption::CreateUser => write!(f, "CREATEUSER"),
+            UserOption::NoCreateUser => write!(f, "NOCREATEUSER"),
             UserOption::Login => write!(f, "LOGIN"),
             UserOption::NoLogin => write!(f, "NOLOGIN"),
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
@@ -396,47 +400,48 @@ pub struct UserOptions(pub Vec<UserOption>);
 impl ParseTo for UserOptions {
     fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
         let mut options = vec![];
-        if parser.parse_keyword(Keyword::WITH) {
-            loop {
-                let token = parser.peek_token();
-                if token == Token::EOF || token == Token::SemiColon {
-                    break;
-                }
+        let _ = parser.parse_keyword(Keyword::WITH);
+        loop {
+            let token = parser.peek_token();
+            if token == Token::EOF || token == Token::SemiColon {
+                break;
+            }
 
-                if let Token::Word(ref w) = token {
-                    parser.next_token();
-                    let option = match w.keyword {
-                        Keyword::SUPERUSER => UserOption::SuperUser,
-                        Keyword::NOSUPERUSER => UserOption::NoSuperUser,
-                        Keyword::CREATEDB => UserOption::CreateDB,
-                        Keyword::NOCREATEDB => UserOption::NoCreateDB,
-                        Keyword::LOGIN => UserOption::Login,
-                        Keyword::NOLOGIN => UserOption::NoLogin,
-                        Keyword::PASSWORD => {
-                            if parser.parse_keyword(Keyword::NULL) {
-                                UserOption::Password(None)
-                            } else {
-                                UserOption::Password(Some(AstString::parse_to(parser)?))
-                            }
+            if let Token::Word(ref w) = token {
+                parser.next_token();
+                let option = match w.keyword {
+                    Keyword::SUPERUSER => UserOption::SuperUser,
+                    Keyword::NOSUPERUSER => UserOption::NoSuperUser,
+                    Keyword::CREATEDB => UserOption::CreateDB,
+                    Keyword::NOCREATEDB => UserOption::NoCreateDB,
+                    Keyword::CREATEUSER => UserOption::CreateUser,
+                    Keyword::NOCREATEUSER => UserOption::NoCreateUser,
+                    Keyword::LOGIN => UserOption::Login,
+                    Keyword::NOLOGIN => UserOption::NoLogin,
+                    Keyword::PASSWORD => {
+                        if parser.parse_keyword(Keyword::NULL) {
+                            UserOption::Password(None)
+                        } else {
+                            UserOption::Password(Some(AstString::parse_to(parser)?))
                         }
-                        Keyword::ENCRYPTED => {
-                            parser.expect_keyword(Keyword::PASSWORD)?;
-                            UserOption::EncryptedPassword(AstString::parse_to(parser)?)
-                        }
-                        _ => parser.expected(
-                            "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | ENCRYPTED | PASSWORD | NULL",
-                            token,
-                        )?,
-                    };
-                    options.push(option);
-                } else {
-                    parser.expected(
-                        "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | ENCRYPTED | PASSWORD | NULL",
+                    }
+                    Keyword::ENCRYPTED => {
+                        parser.expect_keyword(Keyword::PASSWORD)?;
+                        UserOption::EncryptedPassword(AstString::parse_to(parser)?)
+                    }
+                    _ => parser.expected(
+                        "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | ENCRYPTED | PASSWORD | NULL",
                         token,
-                    )?
-                }
+                    )?,
+                };
+                options.push(option);
+            } else {
+                parser.expected(
+                    "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
+                        | CREATEUSER | NOCREATEUSER | ENCRYPTED| PASSWORD | NULL",
+                    token,
+                )?
             }
         }
         Ok(Self(options))

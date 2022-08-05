@@ -42,7 +42,7 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::plan_common::CellBasedTableDesc;
+use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
 
 use crate::executor::join::{
@@ -81,7 +81,7 @@ impl DummyExecutor {
 
 /// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
-    table_desc: CellBasedTableDesc,
+    table_desc: StorageTableDesc,
     vnode_mapping: Vec<ParallelUnitId>,
     build_side_key_types: Vec<DataType>,
     probe_side_schema: Schema,

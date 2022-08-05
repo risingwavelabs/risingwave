@@ -23,8 +23,8 @@ use risingwave_sqlparser::ast::Statement;
 
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
+use super::create_sink::gen_sink_plan;
 use super::create_table::gen_create_table_plan;
-use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::handler::util::force_local_mode;
 use crate::planner::Planner;
@@ -47,33 +47,13 @@ pub(super) fn handle_explain(
             materialized: true,
             query,
             name,
-            with_options,
             ..
-        } => {
-            gen_create_mv_plan(
-                &session,
-                planner.ctx(),
-                query,
-                name,
-                handle_with_properties("explain create_mv", with_options)?,
-            )?
-            .0
-        }
+        } => gen_create_mv_plan(&session, planner.ctx(), query, name)?.0,
 
-        Statement::CreateTable {
-            name,
-            columns,
-            with_options,
-            ..
-        } => {
-            gen_create_table_plan(
-                &session,
-                planner.ctx(),
-                name,
-                columns,
-                handle_with_properties("explain create_table", with_options)?,
-            )?
-            .0
+        Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
+
+        Statement::CreateTable { name, columns, .. } => {
+            gen_create_table_plan(&session, planner.ctx(), name, columns)?.0
         }
 
         Statement::CreateIndex {
