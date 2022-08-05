@@ -20,8 +20,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
-use super::cell_based_encoding_util::serialize_column_id;
 use super::cell_based_row_serializer::CellBasedRowSerializer;
+use super::row_serde_util::serialize_column_id;
 use super::{KeyBytes, RowSerialize, ValueBytes};
 #[derive(Clone)]
 /// [`DedupPkCellBasedRowSerializer`] is identical to [`CellBasedRowSerializer`].
