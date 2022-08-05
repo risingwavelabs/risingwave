@@ -19,12 +19,14 @@ pub const RW_TABLE_FUNCTION_NAME: &str = "__rw_table";
 
 pub fn generate_intertable_name_with_type(
     mview_name: &str,
+    fragmen_id: u32,
     table_id: u32,
     table_type: &str,
 ) -> String {
     format!(
-        "__internal_{}_{}_{}",
+        "__internal_{}_{}_{}_{}",
         mview_name,
+        fragmen_id,
         table_type.to_lowercase(),
         table_id
     )
