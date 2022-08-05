@@ -117,7 +117,6 @@ impl TableCatalog {
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
-        // use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 
         let table_options = TableOption::build_table_option(&self.properties);
 
