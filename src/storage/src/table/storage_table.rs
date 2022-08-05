@@ -17,6 +17,7 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
 use bytes::BufMut;
 use futures::future::try_join_all;
@@ -36,7 +37,6 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
-use stack_trace::StackTrace;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};

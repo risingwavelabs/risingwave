@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use async_stack_trace::{StackTraceManager, StackTraceReport};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
@@ -28,7 +29,6 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use stack_trace::{StackTraceManager, StackTraceReport};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -568,7 +568,7 @@ impl LocalStreamManagerCore {
 
             self.handles.insert(
                 actor_id,
-                tokio::spawn(monitor.instrument(stack_trace::stack_traced(
+                tokio::spawn(monitor.instrument(async_stack_trace::stack_traced(
                     async move {
                         // unwrap the actor result to panic on error
                         actor.run().await.expect("actor failed");

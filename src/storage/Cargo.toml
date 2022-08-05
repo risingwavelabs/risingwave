@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 auto_enums = { version = "0.7", features = ["futures"] }
 bitvec = "1"
 byteorder = "1"
@@ -55,7 +56,6 @@ risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
-stack_trace = { path = "../utils/stack_trace" }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
@@ -79,7 +79,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 
 [dev-dependencies]
-criterion = { version = "0.3", features = ["async_futures"]}
+criterion = { version = "0.3", features = ["async_futures"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 

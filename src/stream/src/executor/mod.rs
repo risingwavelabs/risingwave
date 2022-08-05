@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
@@ -38,7 +39,6 @@ use risingwave_pb::stream_plan::{
     UpdateMutation,
 };
 use smallvec::SmallVec;
-use stack_trace::StackTrace;
 use tracing::trace_span;
 
 use crate::task::{ActorId, ENABLE_BARRIER_AGGREGATION};

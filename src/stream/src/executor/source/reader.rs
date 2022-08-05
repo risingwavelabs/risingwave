@@ -15,6 +15,7 @@
 use std::pin::Pin;
 use std::task::Poll;
 
+use async_stack_trace::StackTrace;
 use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt};
@@ -22,7 +23,6 @@ use futures_async_stream::{stream, try_stream};
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_source::*;
-use stack_trace::StackTrace;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};

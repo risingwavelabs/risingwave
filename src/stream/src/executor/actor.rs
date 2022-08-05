@@ -17,10 +17,10 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
+use async_stack_trace::StackTrace;
 use futures::pin_mut;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
-use stack_trace::StackTrace;
 use tokio_stream::StreamExt;
 use tracing_futures::Instrument;
 

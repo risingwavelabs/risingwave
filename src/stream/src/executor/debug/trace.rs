@@ -14,10 +14,10 @@
 
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
-use stack_trace::StackTrace;
 use tracing::event;
 use tracing_futures::Instrument;
 

@@ -18,6 +18,7 @@ use std::future::Future;
 use std::iter::repeat_with;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -29,7 +30,6 @@ use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
-use stack_trace::StackTrace;
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};

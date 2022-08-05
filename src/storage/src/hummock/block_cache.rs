@@ -17,10 +17,10 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use risingwave_hummock_sdk::HummockSstableId;
-use stack_trace::StackTrace;
 
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;

@@ -36,9 +36,9 @@ mod meta_client;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use async_stack_trace::StackTrace;
 pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
 use moka::future::Cache;
-use stack_trace::StackTrace;
 use tonic::transport::{Channel, Endpoint};
 mod compute_client;
 pub use compute_client::*;

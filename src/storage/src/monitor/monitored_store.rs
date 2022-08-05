@@ -15,10 +15,10 @@
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_hummock_sdk::LocalSstableInfo;
-use stack_trace::StackTrace;
 use tracing::error;
 
 use super::StateStoreMetrics;

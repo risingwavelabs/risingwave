@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_stack_trace::StackTrace;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
@@ -19,7 +20,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
-use stack_trace::StackTrace;
 
 use super::error::StreamExecutorError;
 use super::{Executor, ExecutorInfo, Message};

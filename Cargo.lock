@@ -230,6 +230,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_stack_trace"
+version = "0.1.0"
+dependencies = [
+ "coarsetime",
+ "futures",
+ "futures-async-stream",
+ "indextree",
+ "itertools",
+ "madsim-tokio",
+ "pin-project",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5085,6 +5100,7 @@ name = "risingwave_object_store"
 version = "0.1.11"
 dependencies = [
  "async-trait",
+ "async_stack_trace",
  "aws-config 0.46.0",
  "aws-endpoint 0.46.0",
  "aws-sdk-s3 0.16.0",
@@ -5101,7 +5117,6 @@ dependencies = [
  "prometheus",
  "risingwave_common",
  "spin 0.9.4",
- "stack_trace",
  "tempfile",
  "thiserror",
  "tracing",
@@ -5146,6 +5161,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
+ "async_stack_trace",
  "futures",
  "log",
  "madsim",
@@ -5156,7 +5172,6 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_pb",
- "stack_trace",
  "thiserror",
  "tokio-retry",
  "tracing",
@@ -5317,6 +5332,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
+ "async_stack_trace",
  "auto_enums",
  "bitvec",
  "byteorder",
@@ -5364,7 +5380,6 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.4",
- "stack_trace",
  "tempfile",
  "thiserror",
  "tokio-metrics",
@@ -5386,6 +5401,7 @@ dependencies = [
  "assert_matches",
  "async-stream",
  "async-trait",
+ "async_stack_trace",
  "byteorder",
  "bytes",
  "chrono",
@@ -5426,7 +5442,6 @@ dependencies = [
  "serde-value",
  "serde_json",
  "smallvec",
- "stack_trace",
  "static_assertions",
  "stats_alloc",
  "thiserror",
@@ -5933,21 +5948,6 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
-
-[[package]]
-name = "stack_trace"
-version = "0.1.0"
-dependencies = [
- "coarsetime",
- "futures",
- "futures-async-stream",
- "indextree",
- "itertools",
- "madsim-tokio",
- "pin-project",
- "tracing",
- "workspace-hack",
-]
 
 [[package]]
 name = "static_assertions"

@@ -8,6 +8,7 @@ edition = "2021"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -46,7 +47,6 @@ serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"
 serde_json = "1"
 smallvec = "1"
-stack_trace = { path = "../utils/stack_trace" }
 static_assertions = "1"
 stats_alloc = { path = "../utils/stats_alloc" }
 thiserror = "1"

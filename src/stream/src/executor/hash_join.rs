@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -26,7 +27,6 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
-use stack_trace::StackTrace;
 
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};

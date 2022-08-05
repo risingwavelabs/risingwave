@@ -16,6 +16,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
+use async_stack_trace::StackTrace;
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
@@ -23,7 +24,6 @@ use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPool;
-use stack_trace::StackTrace;
 use tokio::sync::mpsc::Receiver;
 
 use crate::executor::error::StreamExecutorError;

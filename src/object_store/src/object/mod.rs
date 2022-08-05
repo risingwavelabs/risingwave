@@ -20,8 +20,8 @@ pub mod mem;
 pub use mem::*;
 
 pub mod s3;
+use async_stack_trace::StackTrace;
 pub use s3::*;
-use stack_trace::StackTrace;
 
 mod disk;
 pub mod error;
