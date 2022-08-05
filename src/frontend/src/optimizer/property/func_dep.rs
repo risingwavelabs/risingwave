@@ -329,7 +329,7 @@ impl FunctionalDependencySet {
     /// fd.add_functional_dependency_by_column_indices(&[3], &[4]); // (3) --> (4)
     /// let from = FixedBitSet::from_iter([1usize, 2usize].into_iter());
     /// let to = FixedBitSet::from_iter([4usize].into_iter());
-    /// assert!(fd.is_determined_by(from, to)); // (1, 2) --> (4) holds
+    /// assert!(fd.is_determined_by(&from, &to)); // (1, 2) --> (4) holds
     /// ```
     pub fn is_determined_by(&self, determinant: &FixedBitSet, dependant: &FixedBitSet) -> bool {
         self.get_closure(determinant).is_superset(dependant)
