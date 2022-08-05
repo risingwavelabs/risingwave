@@ -422,12 +422,7 @@ where
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
                 // Using the preserved meta id is allowed.
-            } else if self
-                .cluster_manager
-                .get_worker_by_id(context_id)
-                .await
-                .is_none()
-            {
+            } else if !self.check_context(context_id).await {
                 // The worker is not found in cluster.
                 return Err(Error::InvalidContext(context_id));
             }
@@ -1028,12 +1023,7 @@ where
                     continue;
                 }
             }
-            if self
-                .cluster_manager
-                .get_worker_by_id(*context_id)
-                .await
-                .is_none()
-            {
+            if !self.check_context(*context_id).await {
                 return Err(Error::InvalidSst(*sst_id));
             }
         }
