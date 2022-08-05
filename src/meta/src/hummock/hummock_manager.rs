@@ -1221,6 +1221,7 @@ where
     }
 
     /// Tries to checkpoint at min_pinned_version_id
+    ///
     /// Returns the diff between new and old checkpoint id.
     #[named]
     pub async fn proceed_version_checkpoint(&self) -> Result<u64> {
@@ -1273,21 +1274,15 @@ where
              versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
                 let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
                 let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-                let current_version_copy = versioning_guard.current_version.clone();
                 let pinned_versions_copy = versioning_guard.pinned_versions.clone();
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
-                let ssts_to_delete_copy = versioning_guard.ssts_to_delete.clone();
-                let deltas_to_delete_copy = versioning_guard.deltas_to_delete.clone();
                 let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 (
                     compact_statuses_copy,
                     compact_task_assignment_copy,
-                    current_version_copy,
                     pinned_versions_copy,
                     pinned_snapshots_copy,
-                    ssts_to_delete_copy,
-                    deltas_to_delete_copy,
                     checkpoint_version_copy,
                     hummock_version_deltas_copy,
                 )
@@ -1561,31 +1556,30 @@ where
 
     /// Extends `ssts_to_delete` according to object store full scan result.
     /// Caller should ensure `sst_ids` doesn't include any SSTs belong to a on-going version write.
-    /// That's to say, these sst_ids won't be seen in either `commit_epoch` or
+    /// That's to say, these sst_ids won't appear in either `commit_epoch` or
     /// `report_compact_task`.
     #[named]
-    pub async fn extend_ssts_to_delete_from_scan(&self, sst_ids: &[HummockSstableId]) {
-        let tracked_sst_ids: HashSet<HummockSstableId> = HashSet::from_iter({
+    pub async fn extend_ssts_to_delete_from_scan(&self, sst_ids: &[HummockSstableId]) -> usize {
+        let tracked_sst_ids: HashSet<HummockSstableId> = {
             let versioning_guard = read_lock!(self, versioning).await;
-            let mut tracked_sst_ids = versioning_guard.current_version.get_sst_ids();
+            let mut tracked_sst_ids =
+                HashSet::from_iter(versioning_guard.current_version.get_sst_ids());
             for delta in versioning_guard.hummock_version_deltas.values() {
-                tracked_sst_ids.extend(delta.get_inserted_sst_ids());
+                tracked_sst_ids.extend(delta.get_removed_sst_ids());
             }
             tracked_sst_ids
-        });
-        tracing::info!("Full scan results: {:#?}", sst_ids);
-        tracing::info!(
-            "SST to delete in full GC: {:#?}",
-            sst_ids
-                .iter()
-                .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
-                .collect_vec()
-        );
+        };
+        let to_delete = sst_ids
+            .iter()
+            .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
+            .collect_vec();
+        tracing::info!("SST full scan results: {:#?}", sst_ids);
+        tracing::info!("SST to delete in full GC: {:#?}", to_delete);
         write_lock!(self, versioning).await.ssts_to_delete.extend(
-            sst_ids
+            to_delete
                 .iter()
-                .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
-                .map(|sst_id| (*sst_id, INVALID_VERSION_ID)),
+                .map(|sst_id| (**sst_id, INVALID_VERSION_ID)),
         );
+        to_delete.len()
     }
 }
