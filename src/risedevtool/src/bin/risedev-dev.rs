@@ -118,7 +118,7 @@ fn task_main(
             ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
             ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::FrontendV2(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Compactor(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
@@ -203,7 +203,7 @@ fn task_main(
                     c.address, c.port, c.address, c.dashboard_port
                 ));
             }
-            ServiceConfig::FrontendV2(c) => {
+            ServiceConfig::Frontend(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = FrontendService::new(c.clone())?;
