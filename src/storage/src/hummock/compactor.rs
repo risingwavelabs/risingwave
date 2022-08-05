@@ -23,7 +23,9 @@ use dyn_clone::DynClone;
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
+use risingwave_common::config::constant::hummock::{
+    CompactionFilterFlag, TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -176,7 +178,7 @@ impl CompactionFilter for TTLCompactionFilter {
                 }
                 match self.table_id_to_ttl.get(&table_id) {
                     Some(ttl_second_u32) => {
-                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
+                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETAINTION_SECOND);
                         // default to zero.
                         let ttl_mill = (*ttl_second_u32 * 1000) as u64;
                         let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
@@ -538,9 +540,9 @@ impl Compactor {
                 .iter()
                 .filter(|id_to_option| {
                     let table_option: TableOption = id_to_option.1.into();
-                    table_option.ttl.is_some()
+                    table_option.retaintion_second.is_some()
                 })
-                .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.retaintion_second))
                 .collect();
             let ttl_filter = Box::new(TTLCompactionFilter::new(
                 id_to_ttl,

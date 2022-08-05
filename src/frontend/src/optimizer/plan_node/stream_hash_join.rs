@@ -17,7 +17,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, Field, Schema, SchemaId};
-use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
@@ -274,7 +274,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
             .inner()
             .with_properties
             .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
 

@@ -325,7 +325,7 @@ mod tests {
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -344,7 +344,7 @@ mod tests {
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -360,7 +360,7 @@ mod tests {
                     ReadOptions {
                         epoch: 1,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -374,7 +374,7 @@ mod tests {
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -388,7 +388,7 @@ mod tests {
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -402,7 +402,7 @@ mod tests {
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -416,7 +416,7 @@ mod tests {
                     ReadOptions {
                         epoch: 1,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -430,7 +430,7 @@ mod tests {
                     ReadOptions {
                         epoch: 1,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -444,7 +444,7 @@ mod tests {
                     ReadOptions {
                         epoch: 1,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await

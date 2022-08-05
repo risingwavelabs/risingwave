@@ -152,7 +152,7 @@ message KeyRange {
 }
 
 message TableOption {
-  uint32 ttl = 1;
+  uint32 retaintion_second = 1;
 }
 
 message CompactTask {

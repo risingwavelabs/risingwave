@@ -488,7 +488,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         ReadOptions {
             epoch,
             table_id: Some(self.keyspace.table_id()),
-            ttl: self.table_option.ttl,
+            retaintion_second: self.table_option.retaintion_second,
         }
     }
 }

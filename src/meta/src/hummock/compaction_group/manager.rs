@@ -373,6 +373,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
     use crate::hummock::compaction_group::manager::{
@@ -406,7 +407,10 @@ mod tests {
         assert!(inner.read().await.index.is_empty());
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
         let table_option = TableOption::build_table_option(&table_properties);
 
         // Test register
@@ -471,7 +475,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
                 .unwrap();
-            assert_eq!(300, table_option.ttl.unwrap());
+            assert_eq!(300, table_option.retaintion_second.unwrap());
         }
 
         {
@@ -481,7 +485,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
             assert!(table_option_default.is_ok());
-            assert_eq!(None, table_option_default.unwrap().ttl);
+            assert_eq!(None, table_option_default.unwrap().retaintion_second);
         }
     }
 
@@ -507,7 +511,10 @@ mod tests {
                 .sum::<usize>()
         };
         assert_eq!(registered_number().await, 0);
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
 
         compaction_group_manager
             .register_table_fragments(&table_fragment_1, &table_properties)

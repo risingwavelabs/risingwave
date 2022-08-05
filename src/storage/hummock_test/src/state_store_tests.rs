@@ -102,7 +102,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -115,7 +115,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -130,7 +130,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -157,7 +157,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -185,7 +185,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -199,7 +199,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -214,7 +214,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -229,7 +229,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -244,7 +244,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -259,7 +259,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -275,7 +275,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -299,7 +299,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -312,7 +312,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -520,7 +520,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -535,7 +535,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -562,7 +562,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -578,7 +578,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -593,7 +593,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -608,7 +608,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -623,7 +623,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             },
         )
         .await
@@ -674,7 +674,7 @@ async fn test_write_anytime() {
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
-                            ttl: None,
+                            retaintion_second: None,
                         }
                     )
                     .await
@@ -689,7 +689,7 @@ async fn test_write_anytime() {
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
-                            ttl: None,
+                            retaintion_second: None,
                         }
                     )
                     .await
@@ -704,7 +704,7 @@ async fn test_write_anytime() {
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
-                            ttl: None,
+                            retaintion_second: None,
                         }
                     )
                     .await
@@ -719,7 +719,7 @@ async fn test_write_anytime() {
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     },
                 )
                 .await
@@ -770,7 +770,7 @@ async fn test_write_anytime() {
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
-                            ttl: None,
+                            retaintion_second: None,
                         }
                     )
                     .await
@@ -783,7 +783,7 @@ async fn test_write_anytime() {
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     }
                 )
                 .await
@@ -797,7 +797,7 @@ async fn test_write_anytime() {
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
-                            ttl: None,
+                            retaintion_second: None,
                         }
                     )
                     .await
@@ -811,7 +811,7 @@ async fn test_write_anytime() {
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),
-                        ttl: None,
+                        retaintion_second: None,
                     },
                 )
                 .await
@@ -950,7 +950,7 @@ async fn test_delete_get() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retaintion_second: None,
             }
         )
         .await

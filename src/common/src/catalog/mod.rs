@@ -128,25 +128,28 @@ impl fmt::Display for TableId {
 // directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
-    pub ttl: Option<u32>, // second
+    pub retaintion_second: Option<u32>, // second
 }
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let ttl = if table_option.ttl == hummock::TABLE_OPTION_DUMMY_TTL {
-            None
-        } else {
-            Some(table_option.ttl)
-        };
+        let retaintion_second =
+            if table_option.retaintion_second == hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND {
+                None
+            } else {
+                Some(table_option.retaintion_second)
+            };
 
-        Self { ttl }
+        Self { retaintion_second }
     }
 }
 
 impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
-            ttl: table_option.ttl.unwrap_or(hummock::TABLE_OPTION_DUMMY_TTL),
+            retaintion_second: table_option
+                .retaintion_second
+                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND),
         }
     }
 }
@@ -155,16 +158,16 @@ impl TableOption {
     pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
         // now we only support ttl for TableOption
         let mut result = TableOption::default();
-        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_TTL_KEY) {
+        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_RETAINTION_SECOND_KEY) {
             match ttl_string.trim().parse::<u32>() {
-                Ok(ttl_u32) => result.ttl = Some(ttl_u32),
+                Ok(retaintion_second_u32) => result.retaintion_second = Some(retaintion_second_u32),
                 Err(e) => {
                     tracing::info!(
                         "build_table_option parse option ttl_string {} fail {}",
                         ttl_string,
                         e
                     );
-                    result.ttl = None;
+                    result.retaintion_second = None;
                 }
             };
         }
