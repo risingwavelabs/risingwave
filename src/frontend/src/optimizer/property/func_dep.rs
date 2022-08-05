@@ -43,6 +43,7 @@ impl FunctionalDependency {
             to.len(),
             "from and to should have the same length"
         );
+        assert!(!to.is_clear(), "`to` should contains at least one element");
         FunctionalDependency { from, to }
     }
 
