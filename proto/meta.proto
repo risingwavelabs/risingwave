@@ -164,6 +164,7 @@ message MetaSnapshot {
   repeated catalog.Sink sink = 5;
   repeated catalog.Table table = 6;
   repeated user.UserInfo users = 7;
+  hummock.HummockVersion hummock_version = 8;
 }
 
 message SubscribeResponse {
