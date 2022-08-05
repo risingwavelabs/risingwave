@@ -20,7 +20,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
-use super::cell_based_encoding_util::parse_raw_key_to_vnode_and_key;
+use super::row_serde_util::parse_raw_key_to_vnode_and_key;
 use super::{ColumnDescMapping, RowDeserialize};
 
 #[derive(Clone)]
