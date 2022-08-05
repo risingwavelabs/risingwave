@@ -17,7 +17,7 @@
 // https://github.com/rust-lang/rust-clippy/issues/8493
 #![expect(clippy::declare_interior_mutable_const)]
 
-use std::cell::{RefCell};
+use std::cell::RefCell;
 use std::fmt::{Debug, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
