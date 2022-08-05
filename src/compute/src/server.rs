@@ -201,6 +201,7 @@ pub async fn compute_node_serve(
     // periodically.
     //
     // Comment out the following line to enable.
+    // TODO: may optionally enable based on the features
     #[cfg(any())]
     stream_mgr.clone().spawn_print_trace();
 

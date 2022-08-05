@@ -111,7 +111,7 @@ pub async fn metrics(
     }
 }
 
-/// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
+/// Streams wrapped by `stack_trace` will print the async stack trace of the executors.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn stack_trace(
     info: Arc<ExecutorInfo>,

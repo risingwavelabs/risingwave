@@ -28,7 +28,9 @@ fn main() -> Result<()> {
 
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-    // Use current thread runtime for ctl.
+    // Note: Use a simple current thread runtime for ctl.
+    // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
+    // further investigation.
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

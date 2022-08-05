@@ -114,7 +114,7 @@ impl<F: Future> StackTraced<F> {
 impl<F: Future> Future for StackTraced<F> {
     type Output = F::Output;
 
-    // TODO: may disable based on features
+    // TODO: may optionally enable based on the features
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let current_context = try_with_context(|c| c.id());
