@@ -15,6 +15,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
@@ -24,7 +25,6 @@ use super::{
 use crate::expr::{
     Expr, ExprDisplay, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
 };
-use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
