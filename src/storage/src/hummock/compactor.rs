@@ -357,6 +357,7 @@ impl Compactor {
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
             current_epoch_time: 0,
+            target_sub_level_id: 0,
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -454,9 +455,11 @@ impl Compactor {
         use risingwave_common::catalog::TableOption;
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
-        let compaction_read_bytes = compact_task.input_ssts[0]
-            .table_infos
+        let compaction_read_bytes = compact_task
+            .input_ssts
             .iter()
+            .filter(|level| level.level_idx != compact_task.target_level)
+            .flat_map(|level| level.table_infos.iter())
             .map(|t| t.file_size)
             .sum::<u64>();
         context
@@ -476,12 +479,13 @@ impl Compactor {
             .inc();
 
         if compact_task.input_ssts.len() > 1 {
-            let sec_level_read_bytes: u64 = compact_task.input_ssts[1]
+            let target_input_level = compact_task.input_ssts.last().unwrap();
+            let sec_level_read_bytes: u64 = target_input_level
                 .table_infos
                 .iter()
                 .map(|t| t.file_size)
                 .sum();
-            let next_level_label = compact_task.input_ssts[1].level_idx.to_string();
+            let next_level_label = target_input_level.level_idx.to_string();
             context
                 .stats
                 .compact_read_next_level
