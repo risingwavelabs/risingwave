@@ -175,9 +175,31 @@ pub struct StorageConfig {
     /// Number of SST ids fetched from meta per RPC
     #[serde(default = "default::sstable_id_remote_fetch_number")]
     pub sstable_id_remote_fetch_number: u32,
+
+    #[serde(default)]
+    pub file_cache: FileCacheConfig,
 }
 
 impl Default for StorageConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileCacheConfig {
+    #[serde(default = "default::file_cache_capacity")]
+    pub capacity: usize,
+
+    #[serde(default = "default::file_cache_total_buffer_capacity")]
+    pub total_buffer_capacity: usize,
+
+    #[serde(default = "default::file_cache_cache_file_fallocate_unit")]
+    pub cache_file_fallocate_unit: usize,
+}
+
+impl Default for FileCacheConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -304,6 +326,21 @@ mod default {
 
     pub fn sstable_id_remote_fetch_number() -> u32 {
         10
+    }
+
+    pub fn file_cache_capacity() -> usize {
+        // 1 GiB
+        1024 * 1024 * 1024
+    }
+
+    pub fn file_cache_total_buffer_capacity() -> usize {
+        // 128 MiB
+        128 * 1024 * 1024
+    }
+
+    pub fn file_cache_cache_file_fallocate_unit() -> usize {
+        // 96 MiB
+        96 * 1024 * 1024
     }
 }
 

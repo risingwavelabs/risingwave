@@ -73,6 +73,11 @@ pub struct ComputeNodeOpts {
     /// Enable reporting tracing information to jaeger
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
+
+    /// Path to file cache data directory.
+    /// Left empty to disable file cache.
+    #[clap(long, default_value = "")]
+    pub file_cache_dir: String,
 }
 
 use std::future::Future;

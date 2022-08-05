@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -47,6 +47,8 @@ impl ComputeNodeService {
         config: &ComputeNodeConfig,
         hummock_in_memory_strategy: HummockInMemoryStrategy,
     ) -> Result<()> {
+        let prefix_data = env::var("PERFIX_DATA")?;
+
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
@@ -58,6 +60,14 @@ impl ComputeNodeService {
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1");
+
+        if config.enable_tiered_cache {
+            cmd.arg("--file-cache-dir").arg(
+                PathBuf::from(prefix_data)
+                    .join("filecache")
+                    .join(config.port.to_string()),
+            );
+        }
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {

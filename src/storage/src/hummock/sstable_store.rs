@@ -22,7 +22,7 @@ use fail::fail_point;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStore, ObjectStoreRef};
 
-use super::{Block, BlockCache, Sstable, SstableMeta};
+use super::{Block, BlockCache, Sstable, SstableMeta, TieredCache};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StoreLocalStatistic;
 
@@ -56,6 +56,7 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
+        tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
     ) -> Self {
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
@@ -65,7 +66,7 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS),
+            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS, tiered_cache),
             meta_cache,
         }
     }
@@ -82,7 +83,7 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 2),
+            block_cache: BlockCache::new(block_cache_capacity, 2, TieredCache::none()),
             meta_cache,
         }
     }
@@ -215,7 +216,7 @@ impl SstableStore {
                     .get_or_insert_with(sst.id, block_index, fetch_block)
                     .await
             }
-            CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
+            CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index).await {
                 Some(block) => Ok(block),
                 None => fetch_block().await.map(BlockHolder::from_owned_block),
             },
