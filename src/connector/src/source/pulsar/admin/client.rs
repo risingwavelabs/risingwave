@@ -106,7 +106,6 @@ pub struct PartitionedTopicMetadata {
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))] // MockServer is not supported in simulation.
 mod test {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -131,6 +130,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
     async fn test_get_topic_metadata() {
         let server = mock_server(
             "/admin/v2/persistent/public/default/t2/partitions",
