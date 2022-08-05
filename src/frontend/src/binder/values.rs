@@ -80,7 +80,7 @@ impl Binder {
                 .into_iter()
                 .zip_eq(0..num_columns)
                 .map(|(ty, col_id)| {
-                    Field::with_name(ty, format!("VALUES_{}.{}", values_id, col_id))
+                    Field::with_name(ty, format!("*VALUES*_{}.column_{}", values_id, col_id))
                 })
                 .collect(),
         );
