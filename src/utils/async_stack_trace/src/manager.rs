@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -77,7 +76,7 @@ impl TraceReporter {
     ) -> F::Output {
         TRACE_CONTEXT
             .scope(
-                RefCell::new(TraceContext::new(root_span.into(), report_detached)),
+                TraceContext::new(root_span.into(), report_detached).into(),
                 async move {
                     let reporter = async move {
                         let mut interval = tokio::time::interval(interval);

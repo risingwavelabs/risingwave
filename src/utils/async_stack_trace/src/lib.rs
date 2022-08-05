@@ -26,7 +26,7 @@ use indextree::NodeId;
 use pin_project::{pin_project, pinned_drop};
 use triomphe::{Arc, OffsetArc};
 
-use crate::context::{with_context, TRACE_CONTEXT};
+use crate::context::{try_with_context, with_context};
 
 mod context;
 mod manager;
@@ -117,18 +117,18 @@ impl<F: Future> Future for StackTraced<F> {
     // TODO: may disable based on features
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let current_context = TRACE_CONTEXT.try_with(|c| c.borrow().id());
+        let current_context = try_with_context(|c| c.id());
 
         // For assertion.
-        let old_current = TRACE_CONTEXT.try_with(|c| c.borrow().current());
+        let old_current = try_with_context(|c| c.current());
 
         let this_node = match this.state {
             StackTracedState::Initial(span) => {
                 match current_context {
                     // First polled
-                    Ok(current_context) => {
+                    Some(current_context) => {
                         // First polled, push a new span to the context.
-                        let node = with_context(|mut c| c.push(std::mem::take(span)));
+                        let node = with_context(|c| c.push(std::mem::take(span)));
                         *this.state = StackTracedState::Polled {
                             this_node: node,
                             this_context: current_context,
@@ -136,7 +136,7 @@ impl<F: Future> Future for StackTraced<F> {
                         node
                     }
                     // Not in a context
-                    Err(_) => return this.inner.poll(cx),
+                    None => return this.inner.poll(cx),
                 }
             }
             StackTracedState::Polled {
@@ -145,18 +145,18 @@ impl<F: Future> Future for StackTraced<F> {
             } => {
                 match current_context {
                     // Context correct
-                    Ok(current_context) if current_context == *this_context => {
+                    Some(current_context) if current_context == *this_context => {
                         // Polled before, just step in.
-                        with_context(|mut c| c.step_in(*this_node));
+                        with_context(|c| c.step_in(*this_node));
                         *this_node
                     }
                     // Context changed
-                    Ok(_) => {
+                    Some(_) => {
                         tracing::warn!("stack traced future is polled in a different context as it was first polled, won't be traced now");
                         return this.inner.poll(cx);
                     }
                     // Out of context
-                    Err(_) => {
+                    None => {
                         tracing::warn!("stack traced future is not polled in a traced context, while it was when first polled, won't be traced now");
                         return this.inner.poll(cx);
                     }
@@ -171,13 +171,13 @@ impl<F: Future> Future for StackTraced<F> {
         let r = match this.inner.poll(cx) {
             // The future is ready, clean-up this span by popping from the context.
             Poll::Ready(output) => {
-                with_context(|mut c| c.pop());
+                with_context(|c| c.pop());
                 *this.state = StackTracedState::Ready;
                 Poll::Ready(output)
             }
             // Still pending, just step out.
             Poll::Pending => {
-                with_context(|mut c| c.step_out());
+                with_context(|c| c.step_out());
                 Poll::Pending
             }
         };
@@ -193,7 +193,7 @@ impl<F: Future> Future for StackTraced<F> {
 impl<F: Future> PinnedDrop for StackTraced<F> {
     fn drop(self: Pin<&mut Self>) {
         let this = self.project();
-        let current_context = TRACE_CONTEXT.try_with(|c| c.borrow().id());
+        let current_context = try_with_context(|c| c.id());
 
         match this.state {
             StackTracedState::Polled {
@@ -201,15 +201,15 @@ impl<F: Future> PinnedDrop for StackTraced<F> {
                 this_context,
             } => match current_context {
                 // Context correct
-                Ok(current_context) if current_context == *this_context => {
-                    with_context(|mut c| c.remove_and_detach(*this_node));
+                Some(current_context) if current_context == *this_context => {
+                    with_context(|c| c.remove_and_detach(*this_node));
                 }
                 // Context changed
-                Ok(_) => {
+                Some(_) => {
                     tracing::warn!("stack traced future is dropped in a different context as it was first polled, cannot clean up!");
                 }
                 // Out of context
-                Err(_) => {
+                None => {
                     tracing::warn!("stack traced future is not in a traced context, while it was when first polled, cannot clean up!");
                 }
             },

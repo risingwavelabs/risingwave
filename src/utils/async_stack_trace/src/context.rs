@@ -17,7 +17,7 @@
 // https://github.com/rust-lang/rust-clippy/issues/8493
 #![expect(clippy::declare_interior_mutable_const)]
 
-use std::cell::{RefCell, RefMut};
+use std::cell::{RefCell};
 use std::fmt::{Debug, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -233,10 +233,22 @@ tokio::task_local! {
 
 pub(crate) fn with_context<F, R>(f: F) -> R
 where
-    F: FnOnce(RefMut<TraceContext>) -> R,
+    F: FnOnce(&mut TraceContext) -> R,
 {
     TRACE_CONTEXT.with(|trace_context| {
-        let trace_context = trace_context.borrow_mut();
-        f(trace_context)
+        let mut trace_context = trace_context.borrow_mut();
+        f(&mut trace_context)
     })
+}
+
+pub(crate) fn try_with_context<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce(&mut TraceContext) -> R,
+{
+    TRACE_CONTEXT
+        .try_with(|trace_context| {
+            let mut trace_context = trace_context.borrow_mut();
+            f(&mut trace_context)
+        })
+        .ok()
 }
