@@ -338,10 +338,14 @@ impl MetaClient {
                         return;
                     }
                 }
-                let extra_info = extra_info_sources
-                    .iter()
-                    .filter_map(|s| s.get_extra_info())
-                    .collect::<Vec<_>>();
+                let mut extra_info = Vec::with_capacity(extra_info_sources.len());
+                for extra_info_source in extra_info_sources.iter() {
+                    if let Some(info) = extra_info_source.get_extra_info().await {
+                        // None means the info is not available at the moment, and won't be sent to
+                        // meta.
+                        extra_info.push(info);
+                    }
+                }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout

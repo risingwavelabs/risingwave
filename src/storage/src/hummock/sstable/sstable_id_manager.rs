@@ -113,7 +113,9 @@ impl SstableIdManager {
         self.sst_id_tracker.remove_tracker(tracker_id).await;
     }
 
-    /// Returns minimum of all effective watermark sst ids.
+    /// Returns GC watermark. It equals
+    /// - min(effective watermarks), if number of effective watermarks > 0.
+    /// - HummockSstableId::MAX, if no effective watermark.
     pub async fn global_watermark_sst_id(&self) -> HummockSstableId {
         self.sst_id_tracker
             .tracking_sst_ids()
@@ -124,10 +126,12 @@ impl SstableIdManager {
     }
 }
 
+#[async_trait::async_trait]
 impl ExtraInfoSource for SstableIdManager {
-    fn get_extra_info(&self) -> Option<Info> {
-        // TODO: use correct value after #4369
-        None
+    async fn get_extra_info(&self) -> Option<Info> {
+        Some(Info::HummockGcWatermark(
+            self.global_watermark_sst_id().await,
+        ))
     }
 }
 
