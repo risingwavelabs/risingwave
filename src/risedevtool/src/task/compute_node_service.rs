@@ -47,7 +47,7 @@ impl ComputeNodeService {
         config: &ComputeNodeConfig,
         hummock_in_memory_strategy: HummockInMemoryStrategy,
     ) -> Result<()> {
-        let prefix_data = env::var("PERFIX_DATA")?;
+        let prefix_data = env::var("PREFIX_DATA")?;
 
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
