@@ -617,7 +617,7 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 vnode_mapping: Some(vec![]),
-                retaintion_second: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
             }),
             vec![],
             ctx,

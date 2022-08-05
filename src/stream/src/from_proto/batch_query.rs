@@ -79,8 +79,8 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         };
 
         let table_option = TableOption {
-            retaintion_second: if table_desc.retaintion_second > 0 {
-                Some(table_desc.retaintion_second)
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
             } else {
                 None
             },

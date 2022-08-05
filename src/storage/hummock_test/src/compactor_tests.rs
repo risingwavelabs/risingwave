@@ -167,7 +167,7 @@ mod tests {
         compact_task.table_options = HashMap::from([(
             1,
             TableOption {
-                retaintion_second: 64,
+                retention_seconds: 64,
             },
         )]);
         compact_task.current_epoch_time = 0;
@@ -217,7 +217,7 @@ mod tests {
                 ReadOptions {
                     epoch: (32 * 1000) << 16,
                     table_id: Default::default(),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await
@@ -232,7 +232,7 @@ mod tests {
                 ReadOptions {
                     epoch: (31 * 1000) << 16,
                     table_id: Default::default(),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await;
@@ -327,7 +327,7 @@ mod tests {
                 ReadOptions {
                     epoch: 129,
                     table_id: Default::default(),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await
@@ -582,7 +582,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await
@@ -597,7 +597,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_compaction_drop_key_by_retaintion_second() {
+    async fn test_compaction_drop_key_by_retention_seconds() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -666,11 +666,11 @@ mod tests {
         compact_task.existing_table_ids.push(existing_table_id);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        let retaintion_second_expire_second = 1;
+        let retention_seconds_expire_second = 1;
         compact_task.table_options = HashMap::from_iter([(
             existing_table_id,
             TableOption {
-                retaintion_second: retaintion_second_expire_second,
+                retention_seconds: retention_seconds_expire_second,
             },
         )]);
         compact_task.current_epoch_time = epoch;
@@ -712,8 +712,8 @@ mod tests {
                 .meta
                 .key_count;
         }
-        let expect_count = kv_count as u32 - retaintion_second_expire_second;
-        assert_eq!(expect_count, key_count); // retaintion_second will clean the key (which epoch < epoch - retaintion_second)
+        let expect_count = kv_count as u32 - retention_seconds_expire_second;
+        assert_eq!(expect_count, key_count); // retention_seconds will clean the key (which epoch < epoch - retention_seconds)
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
@@ -737,7 +737,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await

@@ -540,9 +540,9 @@ impl Compactor {
                 .iter()
                 .filter(|id_to_option| {
                     let table_option: TableOption = id_to_option.1.into();
-                    table_option.retaintion_second.is_some()
+                    table_option.retention_seconds.is_some()
                 })
-                .map(|id_to_option| (*id_to_option.0, id_to_option.1.retaintion_second))
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
                 .collect();
             let ttl_filter = Box::new(TTLCompactionFilter::new(
                 id_to_ttl,

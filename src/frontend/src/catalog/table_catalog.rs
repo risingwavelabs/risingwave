@@ -132,8 +132,8 @@ impl TableCatalog {
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
             vnode_mapping: self.vnode_mapping.clone(),
-            retaintion_second: table_options
-                .retaintion_second
+            retention_seconds: table_options
+                .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
         }
     }

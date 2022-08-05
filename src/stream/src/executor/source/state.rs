@@ -101,7 +101,7 @@ impl<S: StateStore> SourceStateHandler<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.keyspace.table_id()),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await
@@ -219,7 +219,7 @@ mod tests {
                 ReadOptions {
                     epoch: current_epoch,
                     table_id: Some(state_store_handler.keyspace.table_id()),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await

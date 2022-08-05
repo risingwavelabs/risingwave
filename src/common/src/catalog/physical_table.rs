@@ -43,7 +43,7 @@ pub struct TableDesc {
     /// table.
     pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
-    pub retaintion_second: u32,
+    pub retention_seconds: u32,
 }
 
 impl TableDesc {
@@ -69,7 +69,7 @@ impl TableDesc {
             columns: self.columns.iter().map(Into::into).collect(),
             order_key: self.order_key.iter().map(|v| v.to_protobuf()).collect(),
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
-            retaintion_second: self.retaintion_second,
+            retention_seconds: self.retention_seconds,
         }
     }
 }

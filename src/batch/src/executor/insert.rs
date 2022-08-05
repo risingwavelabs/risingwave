@@ -303,7 +303,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
-                    retaintion_second: None,
+                    retention_seconds: None,
                 },
             )
             .await?;

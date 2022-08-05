@@ -475,7 +475,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
                 .unwrap();
-            assert_eq!(300, table_option.retaintion_second.unwrap());
+            assert_eq!(300, table_option.retention_seconds.unwrap());
         }
 
         {
@@ -485,7 +485,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
             assert!(table_option_default.is_ok());
-            assert_eq!(None, table_option_default.unwrap().retaintion_second);
+            assert_eq!(None, table_option_default.unwrap().retention_seconds);
         }
     }
 

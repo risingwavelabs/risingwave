@@ -107,7 +107,7 @@ impl Operations {
                             ReadOptions {
                                 epoch: u64::MAX,
                                 table_id: None,
-                                retaintion_second: None,
+                                retention_seconds: None,
                             },
                         )
                         .await
