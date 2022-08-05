@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use madsim::time::Instant;
 
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk};

@@ -67,9 +67,8 @@ async fn test_hummock_pin_unpin() {
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
         assert_eq!(version_id, hummock_version.id);
-        assert_eq!(7, levels.len());
-        assert_eq!(0, levels[0].table_infos.len());
-        assert_eq!(0, levels[1].table_infos.len());
+        assert_eq!(6, levels.levels.len());
+        assert_eq!(0, levels.levels[0].table_infos.len());
 
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
@@ -146,7 +145,7 @@ async fn test_unpin_snapshot_before() {
 async fn test_hummock_compaction_task() {
     let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2usize;
+    let sst_num = 2;
 
     // Construct vnode mappings for generating compaction tasks.
     let parallel_units = cluster_manager.list_parallel_units().await;
@@ -265,11 +264,17 @@ async fn test_hummock_table() {
         .unwrap()
         .2
         .unwrap();
+    let levels =
+        pinned_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
     assert_eq!(
         Ordering::Equal,
-        pinned_version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+        levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
             .iter()
+            .chain(levels.levels.iter())
             .flat_map(|level| level.table_infos.iter())
             .map(|info| info.id)
             .sorted()
@@ -659,13 +664,7 @@ async fn test_pin_snapshot_response_lost() {
     let context_id = worker_node.id;
 
     let mut epoch: u64 = 1;
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -691,13 +690,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -732,13 +725,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -764,13 +751,7 @@ async fn test_pin_snapshot_response_lost() {
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
 
-    let test_tables = generate_test_tables(
-        epoch,
-        vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
-        ],
-    );
+    let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &test_tables,
@@ -833,7 +814,8 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    assert!(s.contains("Compaction task id: 1, target level: 6"));
+    println!("{:?}", s);
+    assert!(s.contains("Compaction task id: 1, target level: 0"));
 }
 
 #[tokio::test]
@@ -871,7 +853,7 @@ async fn test_invalid_sst_id() {
 async fn test_trigger_manual_compaction() {
     let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2usize;
+    let sst_num = 2;
 
     // Construct vnode mappings for generating compaction tasks.
     let parallel_units = cluster_manager.list_parallel_units().await;
@@ -906,23 +888,7 @@ async fn test_trigger_manual_compaction() {
         assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
     }
 
-    // Add some sstables and commit.
-    let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
-        &original_tables,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    commit_from_meta_node(
-        hummock_manager.borrow(),
-        epoch,
-        to_local_sstable_info(&original_tables),
-    )
-    .await
-    .unwrap();
-
+    let _ = add_test_tables(&hummock_manager, context_id).await;
     {
         // to check compactor send task fail
         drop(receiver);
@@ -940,7 +906,7 @@ async fn test_trigger_manual_compaction() {
 
     {
         let option = ManualCompactionOption {
-            level: 0,
+            level: 6,
             key_range: KeyRange {
                 inf: true,
                 ..Default::default()
@@ -954,7 +920,7 @@ async fn test_trigger_manual_compaction() {
         assert!(result.is_ok());
     }
 
-    let task_id: u64 = 3;
+    let task_id: u64 = 4;
     let compact_task = hummock_manager
         .compaction_task_from_assignment_for_test(task_id)
         .await

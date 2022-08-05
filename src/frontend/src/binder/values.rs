@@ -92,8 +92,8 @@ mod tests {
     use crate::binder::test_utils::mock_binder;
     use crate::expr::Expr as _;
 
-    #[test]
-    fn test_bind_values() {
+    #[tokio::test]
+    async fn test_bind_values() {
         let mut binder = mock_binder();
 
         // Test i32 -> decimal.

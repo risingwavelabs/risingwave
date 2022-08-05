@@ -17,7 +17,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +50,7 @@ use itertools::Itertools;
 pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
+use postgres_types::{ToSql, Type};
 use prost::Message;
 use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
 
@@ -651,6 +652,67 @@ pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
 }
 
 impl ScalarRefImpl<'_> {
+    /// Encode the scalar to postgresql binary format.
+    /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
+    pub fn binary_serialize(&self) -> Bytes {
+        let placeholder = Type::ANY;
+        let mut output = BytesMut::new();
+        match self {
+            Self::Int64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Utf8(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Bool(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int16(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Decimal(v) => match v {
+                Decimal::Normalized(v) => {
+                    v.to_sql(&placeholder, &mut output).unwrap();
+                }
+                Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF => {
+                    output.reserve(8);
+                    output.put_u16(0);
+                    output.put_i16(0);
+                    output.put_u16(0xC000);
+                    output.put_i16(0);
+                }
+            },
+            Self::NaiveDate(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveDateTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Struct(_) => {
+                todo!("Don't support struct serialization yet")
+            }
+            Self::List(_) => {
+                todo!("Don't support list serialization yet")
+            }
+            Self::Interval(_) => {
+                todo!("Don't support interval serialization yet")
+            }
+        };
+        output.freeze()
+    }
+
     /// Serialize the scalar.
     pub fn serialize(
         &self,

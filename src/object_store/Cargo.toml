@@ -17,13 +17,13 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 lazy_static = "1"
-madsim = "=0.2.0-alpha.5"
+madsim = "=0.2.0-alpha.6"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { path = "../common" }
 spin = "0.9"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = [
+tokio = { version = "=0.2.0-alpha.6", package = "madsim-tokio", features = [
     "fs",
 ] }
 tracing = { version = "0.1" }

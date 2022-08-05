@@ -250,8 +250,8 @@ mod tests {
     use crate::binder::test_utils::mock_binder;
     use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
 
-    #[test]
-    fn test_bind_value() {
+    #[tokio::test]
+    async fn test_bind_value() {
         use std::str::FromStr;
 
         use super::*;
@@ -337,8 +337,8 @@ mod tests {
         assert_eq!(expr.return_type(), DataType::Int32);
     }
 
-    #[test]
-    fn test_bind_interval() {
+    #[tokio::test]
+    async fn test_bind_interval() {
         use super::*;
 
         let mut binder = mock_binder();
