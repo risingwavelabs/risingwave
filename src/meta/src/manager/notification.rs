@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::hummock::{HummockVersionDelta, HummockVersionDeltas};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::{self, UnboundedSender};
@@ -41,6 +44,8 @@ struct Task {
     callback_tx: Option<oneshot::Sender<NotificationVersion>>,
     operation: Operation,
     info: Info,
+    host2pin: Vec<(WorkerKey, u64)>,
+    current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
@@ -65,7 +70,13 @@ impl NotificationManager {
                 let version = match task.target {
                     WorkerType::Generic => guard.notify_all(task.operation, &task.info),
 
-                    _ => guard.notify(task.target, task.operation, &task.info),
+                    _ => guard.notify(
+                        task.target,
+                        task.operation,
+                        &task.info,
+                        task.host2pin,
+                        task.current_version_deltas,
+                    ),
                 };
                 if let Some(tx) = task.callback_tx {
                     tx.send(version).unwrap();
@@ -80,12 +91,21 @@ impl NotificationManager {
     }
 
     /// Add a notification to the waiting queue and return immediately
-    fn notify_asynchronously(&self, target: WorkerType, operation: Operation, info: Info) {
+    fn notify_asynchronously(
+        &self,
+        target: WorkerType,
+        operation: Operation,
+        info: Info,
+        host2pin: Vec<(WorkerKey, u64)>,
+        current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
+    ) {
         let task = Task {
             target,
             callback_tx: None,
             operation,
             info,
+            host2pin,
+            current_version_deltas,
         };
         self.task_tx.send(task).unwrap();
     }
@@ -104,13 +124,21 @@ impl NotificationManager {
             callback_tx: Some(callback_tx),
             operation,
             info,
+            host2pin: vec![],
+            current_version_deltas: BTreeMap::new(),
         };
         self.task_tx.send(task).unwrap();
         callback_rx.await.unwrap()
     }
 
     pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(WorkerType::Frontend, operation, info);
+        self.notify_asynchronously(
+            WorkerType::Frontend,
+            operation,
+            info,
+            vec![],
+            BTreeMap::new(),
+        );
     }
 
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
@@ -125,8 +153,20 @@ impl NotificationManager {
         self.notify(WorkerType::Compactor, operation, info).await
     }
 
-    pub fn notify_compute_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
+    pub fn notify_compute_asynchronously(
+        &self,
+        operation: Operation,
+        info: Info,
+        host2pin: Vec<(WorkerKey, u64)>,
+        current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
+    ) {
+        self.notify_asynchronously(
+            WorkerType::ComputeNode,
+            operation,
+            info,
+            host2pin,
+            current_version_deltas,
+        );
     }
 
     /// To notify all the `worker_type` sender
@@ -219,6 +259,8 @@ impl NotificationManagerCore {
         worker_type: WorkerType,
         operation: Operation,
         info: &Info,
+        host2pin: Vec<(WorkerKey, u64)>,
+        current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
     ) -> NotificationVersion {
         self.current_version += 1;
 
@@ -230,11 +272,29 @@ impl NotificationManagerCore {
             _ => unreachable!(),
         };
 
+        let mut worker2pin: HashMap<WorkerKey, u64> = HashMap::new();
+        worker2pin.extend(host2pin.into_iter());
+
         for (worker_key, sender) in senders {
+            let specific_info = if matches!(worker_type, WorkerType::ComputeNode)
+                && matches!(info, Info::HummockVersionDeltas(_))
+            {
+                Info::HummockVersionDeltas(HummockVersionDeltas {
+                    version_deltas: match worker2pin.get(worker_key) {
+                        Some(min_pinned) => current_version_deltas
+                            .range((Excluded(*min_pinned), Unbounded))
+                            .map(|(_, version_delta)| version_delta.clone())
+                            .collect_vec(),
+                        None => current_version_deltas.values().cloned().collect_vec(),
+                    },
+                })
+            } else {
+                info.clone()
+            };
             if let Err(err) = sender.send(Ok(SubscribeResponse {
                 status: None,
                 operation: operation as i32,
-                info: Some(info.clone()),
+                info: Some(specific_info),
                 version: self.current_version,
             })) {
                 tracing::warn!(
