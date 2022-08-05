@@ -25,8 +25,7 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-use crate::hummock::file_cache::cache::FileCacheOptions;
-use crate::hummock::{HummockError, HummockStorage, SstableStore, TieredCache, TieredCacheOptions};
+use crate::hummock::{HummockStorage, SstableStore, TieredCache};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
 use crate::StateStore;
@@ -90,7 +89,7 @@ macro_rules! dispatch_state_store {
 impl StateStoreImpl {
     pub async fn new(
         s: &str,
-        file_cache_dir: &str,
+        #[allow(unused)] file_cache_dir: &str,
         config: Arc<StorageConfig>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
@@ -104,6 +103,9 @@ impl StateStoreImpl {
         let tiered_cache = if file_cache_dir.is_empty() {
             TieredCache::none()
         } else {
+            use crate::hummock::file_cache::cache::FileCacheOptions;
+            use crate::hummock::{HummockError, TieredCacheOptions};
+
             let options = TieredCacheOptions::FileCache(FileCacheOptions {
                 dir: file_cache_dir.to_string(),
                 capacity: config.file_cache.capacity,
