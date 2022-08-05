@@ -279,6 +279,10 @@ mod tests {
 
     #[tokio::test]
     async fn fd_derivation_expand() {
+        // input: [v1, v2, v3]
+        // FD: v1 --> { v2, v3 }
+        // output: [v1, v2, v3, flag],
+        // FD: { v1, flag } --> { v2, v3 }
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),

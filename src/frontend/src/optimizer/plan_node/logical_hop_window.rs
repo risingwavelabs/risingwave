@@ -482,6 +482,12 @@ mod test {
 
     #[tokio::test]
     async fn fd_derivation_hop_window() {
+        // input: [date, v1, v2]
+        // FD: { date, v1 } --> { v2 }
+        // output: [date, v1, v2, window_start, window_end],
+        // FD: { date, v1, window_start } --> { v2 }, { date, v1, window_end } --> v2
+        //     window_start --> { date, v1, v2, window_end }
+        //     window_end --> { date, v1, v2, window_start }
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Date, "date"),

@@ -375,6 +375,8 @@ impl ToStream for LogicalProjectSet {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -386,6 +388,11 @@ mod test {
 
     #[tokio::test]
     async fn fd_derivation_project_set() {
+        // input: [v1, v2, v3]
+        // FD: v2 --> v3
+        // output: [projected_row_id, v3, v2, generate_series(v1, v2, v3)],
+        // FD: { projected_row_id, v2 } --> v3
+
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
@@ -415,15 +422,16 @@ mod test {
                 )),
             ],
         );
-        let fd_set = project_set.base.functional_dependency;
-        let expected_fd_set = vec![FunctionalDependency::with_indices(4, &[0, 2], &[1])];
-        assert_eq!(fd_set.as_dependencies().len(), expected_fd_set.len());
-        for i in fd_set.as_dependencies() {
-            assert!(
-                expected_fd_set.contains(i),
-                "{} should be in expected_fd_set",
-                i
-            );
-        }
+        let fd_set: HashSet<FunctionalDependency> = project_set
+            .base
+            .functional_dependency
+            .into_dependencies()
+            .into_iter()
+            .collect();
+        let expected_fd_set: HashSet<FunctionalDependency> =
+            [FunctionalDependency::with_indices(4, &[0, 2], &[1])]
+                .into_iter()
+                .collect();
+        assert_eq!(fd_set, expected_fd_set);
     }
 }

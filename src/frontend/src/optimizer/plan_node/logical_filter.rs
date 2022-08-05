@@ -401,6 +401,11 @@ mod tests {
 
     #[tokio::test]
     async fn fd_derivation_filter() {
+        // input: [v1, v2, v3, v4]
+        // FD: v4 --> { v2, v3 }
+        // Condition: v1 = 0 AND v2 = v3
+        // output: [v1, v2, v3, v4],
+        // FD: v4 --> { v2, v3 }, {} --> v1, v2 --> v3, v3 --> v2
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
