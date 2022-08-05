@@ -68,17 +68,15 @@ impl fmt::Display for InputRefDisplay<'_> {
 
 impl fmt::Debug for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let field = self.input_schema.fields.get(self.input_ref.index).unwrap();
-        if field.name.is_empty() {
-            write!(
-                f,
-                "{}:{:?}",
-                RawInputRefDisplay(self.input_ref.index),
-                self.input_ref.data_type
-            )
-        } else {
-            write!(f, "{}", field.name)
-        }
+        write!(
+            f,
+            "{}",
+            self.input_schema
+                .fields
+                .get(self.input_ref.index)
+                .unwrap()
+                .name
+        )
     }
 }
 
