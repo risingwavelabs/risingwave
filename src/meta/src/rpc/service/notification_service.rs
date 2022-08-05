@@ -26,6 +26,7 @@ use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
+use crate::stream::GlobalStreamManagerRef;
 use crate::MetaError;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
@@ -35,6 +36,7 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     user_manager: UserInfoManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -47,6 +49,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         user_manager: UserInfoManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
     ) -> Self {
         Self {
             env,
@@ -54,6 +57,7 @@ where
             cluster_manager,
             user_manager,
             hummock_manager,
+            stream_manager,
         }
     }
 
@@ -62,7 +66,9 @@ where
         worker_type: WorkerType,
     ) -> Result<MetaSnapshot, MetaError> {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let (database, schema, table, source, sink, index) = catalog_guard.get_catalog().await?;
+
+        let (database, schema, mut table, source, sink, index) =
+            catalog_guard.get_catalog().await?;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
@@ -89,16 +95,24 @@ where
                 index,
             },
 
-            WorkerType::Compactor => MetaSnapshot {
-                table,
-                ..Default::default()
-            },
+            WorkerType::Compactor => {
+                let processing_table = self.stream_manager.processing_table();
+                table.extend(processing_table.into_iter().map(|(_, table)| table));
+                MetaSnapshot {
+                    table,
+                    ..Default::default()
+                }
+            }
 
-            WorkerType::ComputeNode => MetaSnapshot {
-                table,
-                hummock_version,
-                ..Default::default()
-            },
+            WorkerType::ComputeNode => {
+                let processing_table = self.stream_manager.processing_table();
+                table.extend(processing_table.into_iter().map(|(_, table)| table));
+                MetaSnapshot {
+                    table,
+                    hummock_version,
+                    ..Default::default()
+                }
+            }
 
             _ => unreachable!(),
         };

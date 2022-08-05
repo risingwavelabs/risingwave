@@ -307,8 +307,11 @@ where
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
 
-                self.broadcast_info_op(Operation::Add, Info::Table(internal_table.to_owned()))
-                    .await;
+                self.notify_frontend_info_op(
+                    Operation::Add,
+                    Info::Table(internal_table.to_owned()),
+                )
+                .await;
             }
             core.add_table(table);
             let version = self
@@ -572,7 +575,7 @@ where
 
             for table in tables {
                 core.add_table(&table);
-                self.broadcast_info_op(Operation::Add, Info::Table(table.to_owned()))
+                self.notify_frontend_info_op(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
             self.broadcast_info_op(Operation::Add, Info::Table(mview.to_owned()))
@@ -853,6 +856,17 @@ where
             .filter(|s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect())
+    }
+
+    async fn notify_frontend_info_op(
+        &self,
+        operation: Operation,
+        info: Info,
+    ) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend(operation, info)
+            .await
     }
 
     async fn broadcast_info_op(&self, operation: Operation, info: Info) -> NotificationVersion {

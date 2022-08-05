@@ -503,6 +503,8 @@ where
             ctx.internal_table_id_map.len()
         );
 
+        let internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+
         // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
@@ -514,6 +516,11 @@ where
                 relation,
             )
             .await?;
+
+        let _defer_func = scopeguard::guard(internal_table_ids, |internal_table_ids| {
+            self.stream_manager
+                .remove_processing_table(internal_table_ids);
+        });
 
         Ok((id, version))
     }
@@ -694,11 +701,18 @@ where
             }
         };
 
+        let internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+
         // Finally, update the catalog.
         let version = self
             .catalog_manager
             .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
             .await?;
+
+        let _defer_func = scopeguard::guard(internal_table_ids, |internal_table_ids| {
+            self.stream_manager
+                .remove_processing_table(internal_table_ids);
+        });
 
         Ok((source_id, mview_id, version))
     }

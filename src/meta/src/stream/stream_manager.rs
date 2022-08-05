@@ -16,11 +16,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -35,7 +37,9 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
+use crate::manager::{
+    DatabaseId, HashMappingManagerRef, MetaSrvEnv, NotificationManagerRef, SchemaId,
+};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
@@ -93,6 +97,10 @@ pub struct GlobalStreamManager<S: MetaStore> {
     client_pool: StreamClientPoolRef,
 
     compaction_group_manager: CompactionGroupManagerRef<S>,
+
+    notification_manager: NotificationManagerRef,
+
+    processing_table: Mutex<HashMap<u32, Table>>, // mutex for immutable self
 }
 
 impl<S> GlobalStreamManager<S>
@@ -116,6 +124,8 @@ where
             _hash_mapping_manager: env.hash_mapping_manager_ref(),
             client_pool: env.stream_client_pool_ref(),
             compaction_group_manager,
+            notification_manager: env.notification_manager_ref(),
+            processing_table: Mutex::new(HashMap::default()),
         })
     }
 
@@ -309,6 +319,7 @@ where
             table_sink_map,
             dependent_table_ids,
             table_properties,
+            internal_table_id_map,
             ..
         }: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
@@ -581,16 +592,36 @@ where
         }
 
         // Register to compaction group beforehand.
-        let registered_table_ids = self
-            .compaction_group_manager
+        let compaction_group_manager_ref = self.compaction_group_manager.clone();
+        let registered_table_ids = compaction_group_manager_ref
             .register_table_fragments(&table_fragments, table_properties)
             .await?;
-        let compaction_group_manager_ref = self.compaction_group_manager.clone();
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
+
+        // Success Register to compaction group, we can push catalog to CN / Compactor
+        for (table_id, table_catalog) in internal_table_id_map {
+            let table_catalog = match table_catalog {
+                Some(table_catalog) => table_catalog.to_owned(),
+
+                None => Table::default(),
+            };
+            self.notification_manager
+                .notify_compute(Operation::Add, Info::Table(table_catalog.clone()))
+                .await;
+
+            self.notification_manager
+                .notify_compactor(Operation::Add, Info::Table(table_catalog.clone()))
+                .await;
+
+            self.processing_table
+                .try_lock()
+                .unwrap()
+                .insert(*table_id, table_catalog);
+        }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
@@ -696,7 +727,34 @@ where
             );
         }
 
+        // Remove internal_tables push to CN and Compactor
+        self.remove_processing_table(table_fragments.internal_table_ids());
+        for table_id in table_fragments.internal_table_ids() {
+            let delete_table = Table {
+                id: table_id,
+                ..Default::default()
+            };
+
+            self.notification_manager
+                .notify_compute(Operation::Delete, Info::Table(delete_table.clone()))
+                .await;
+
+            self.notification_manager
+                .notify_compactor(Operation::Delete, Info::Table(delete_table))
+                .await;
+        }
+
         Ok(())
+    }
+
+    pub fn processing_table(&self) -> HashMap<u32, Table> {
+        self.processing_table.try_lock().unwrap().clone()
+    }
+
+    pub fn remove_processing_table(&self, table_ids: Vec<u32>) {
+        for table_id in table_ids {
+            self.processing_table.try_lock().unwrap().remove(&table_id);
+        }
     }
 }
 #[cfg(test)]
