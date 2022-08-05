@@ -983,7 +983,7 @@ mod tests {
             .collect_vec()
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_create_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12333).await?;
 
