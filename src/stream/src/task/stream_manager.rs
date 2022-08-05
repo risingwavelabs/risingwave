@@ -19,12 +19,14 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
+use auto_enums::auto_enum;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -566,18 +568,25 @@ impl LocalStreamManagerCore {
             let monitor = tokio_metrics::TaskMonitor::new();
             let trace_reporter = self.stack_trace_manager.register(actor_id);
 
-            self.handles.insert(
-                actor_id,
-                tokio::spawn(monitor.instrument(trace_reporter.trace(
-                    async move {
-                        // unwrap the actor result to panic on error
-                        actor.run().await.expect("actor failed");
-                    },
-                    format!("Actor {actor_id}"),
-                    false,
-                    Duration::from_millis(1000),
-                ))),
-            );
+            let handle = {
+                let actor = async move {
+                    // unwrap the actor result to panic on error
+                    actor.run().await.expect("actor failed");
+                };
+                #[auto_enum(Future)]
+                let traced = match env_var_is_true("RW_ASYNC_STACK_TRACE") {
+                    true => trace_reporter.trace(
+                        actor,
+                        format!("Actor {actor_id}"),
+                        false,
+                        Duration::from_millis(1000),
+                    ),
+                    false => actor,
+                };
+                let instrumented = monitor.instrument(traced);
+                tokio::spawn(instrumented)
+            };
+            self.handles.insert(actor_id, handle);
 
             let actor_id_str = actor_id.to_string();
 
