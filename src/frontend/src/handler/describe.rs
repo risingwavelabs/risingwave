@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -42,7 +44,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
                 catalog_reader
                     .get_schema_by_name(session.database(), &schema_name)?
                     .iter_index()
-                    .filter(|index| index.indexed_table_id == table.id)
+                    .filter(|index| index.primary_table.id == table.id)
                     .cloned()
                     .collect_vec(),
             ),
@@ -68,25 +70,31 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
 
     // Convert all indexes to rows
     rows.extend(indices.iter().filter_map(|index| {
-        let table_result = catalog_reader.get_table_by_id(
-            session.database(),
-            &schema_name,
-            &index.indexed_table_id,
-        );
+        let table_result =
+            catalog_reader.get_table_by_id(session.database(), &schema_name, &index.index_table.id);
         if table_result.is_err() {
             return None;
         }
         let table = table_result.unwrap();
 
-        let index_column_s = index
-            .index_columns
+        let index_column_s = table
+            .order_key
             .iter()
             .map(|x| table.columns[x.index].name().to_string())
             .collect_vec();
-        let include_column_s = index
-            .include_columns
+
+        let order_key_column_index_set = table
+            .order_key
             .iter()
-            .map(|x| table.columns[x.index].name().to_string())
+            .map(|x| x.index)
+            .collect::<HashSet<_>>();
+
+        let include_column_s = table
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !order_key_column_index_set.contains(i))
+            .map(|(_, x)| x.name().to_string())
             .collect_vec();
 
         Some(Row::new(vec![
@@ -155,7 +163,7 @@ mod tests {
         let expected_columns = maplit::hashmap! {
             "v1" => "Int32",
             "v2" => "Int32",
-            "idx1" => "index(v1, v2)",
+            "idx1" => "index(v1, v2, t._row_id)",
         };
 
         assert_eq!(columns, expected_columns);

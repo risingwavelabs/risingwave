@@ -144,7 +144,7 @@ impl Binder {
             .catalog
             .get_schema_by_name(&self.db_name, schema_name)?
             .iter_index()
-            .filter(|index| index.indexed_table_id == table_id)
+            .filter(|index| index.primary_table.id == table_id)
             .map(|index| index.clone().into())
             .collect())
     }

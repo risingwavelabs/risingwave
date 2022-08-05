@@ -240,14 +240,17 @@ impl LogicalScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        index_mapping: Vec<usize>,
+        primary_to_secondary_mapping: &[usize],
     ) -> LogicalScan {
-        assert_eq!(index_mapping.len(), self.table_desc.columns.len());
+        assert_eq!(
+            primary_to_secondary_mapping.len(),
+            self.table_desc.columns.len()
+        );
         let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
 
         // create index scan plan to match the output order of the current table scan
         for &col_idx in &self.required_col_idx {
-            new_required_col_idx.push(index_mapping[col_idx]);
+            new_required_col_idx.push(primary_to_secondary_mapping[col_idx]);
         }
 
         Self::new(

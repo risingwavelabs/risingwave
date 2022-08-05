@@ -51,16 +51,11 @@ message Index {
   uint32 database_id = 3;
   string name = 4;
   uint32 owner = 5;
-  // the id of the table which stores the index's data
-  uint32 table_id = 6;
-  // the indexed table's id
-  uint32 indexed_table_id = 7;
-  // index columns
+  uint32 index_table_id = 6;
+  uint32 primary_table_id = 7;
+  // Only `InputRef` type index is supported Now.
+  // The index of `InputRef` is the column index of the primary table.
   repeated expr.ExprNode index_item = 8;
-  // include columns
-  repeated expr.ExprNode include_item = 9;
-  // indexed table's order key
-  repeated plan_common.ColumnOrder indexed_table_order_key = 10;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.

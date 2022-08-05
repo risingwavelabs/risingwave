@@ -374,10 +374,10 @@ where
             transaction.delete(Index::cf_name(), index.key()?.encode_to_vec());
 
             // drop index table
-            let table_id = index.table_id;
-            let table = Table::select(self.env.meta_store(), &table_id).await?;
+            let index_table_id = index.index_table_id;
+            let table = Table::select(self.env.meta_store(), &index_table_id).await?;
             if let Some(table) = table {
-                match core.get_ref_count(table_id) {
+                match core.get_ref_count(index_table_id) {
                     Some(ref_count) => Err(MetaError::permission_denied(format!(
                         "Fail to delete table `{}` because {} other relation(s) depend on it",
                         table.name, ref_count
@@ -400,7 +400,7 @@ where
                             .broadcast_info_op(Operation::Delete, Info::Table(table.to_owned()))
                             .await;
 
-                        Ok((index.table_id, version))
+                        Ok((index.index_table_id, version))
                     }
                 }
             } else {

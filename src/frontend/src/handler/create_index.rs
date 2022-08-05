@@ -20,14 +20,13 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
-use crate::catalog::{check_schema_writable, IndexCatalog, TableCatalog};
-use crate::expr::{ExprImpl, InputRef};
+use crate::catalog::check_schema_writable;
+use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
@@ -137,29 +136,19 @@ pub(crate) fn gen_create_index_plan(
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
     index_table_prost.owner = session.user_id();
 
-    let index_prost = IndexCatalog {
-        id: IndexId::placeholder(),
+    let index_prost = ProstIndex {
+        id: IndexId::placeholder().index_id,
         schema_id: index_schema_id,
         database_id: index_database_id,
         name: index_table_name,
         owner: index_table_prost.owner,
-        table_id: TableId::placeholder(),
-        indexed_table_id: table.id,
-        index_columns: index_columns
+        index_table_id: TableId::placeholder().table_id,
+        primary_table_id: table.id.table_id,
+        index_item: build_index_item(index_table.table_desc().into(), table.name(), table_desc)
             .iter()
-            .map(|&i| InputRef::new(i, table_desc.columns.get(i).unwrap().data_type.clone()))
+            .map(InputRef::to_expr_proto)
             .collect_vec(),
-        include_columns: include_columns
-            .iter()
-            .map(|&i| InputRef::new(i, table_desc.columns.get(i).unwrap().data_type.clone()))
-            .collect_vec(),
-        indexed_table_order_key: build_indexed_table_order_key(
-            index_table,
-            table.name(),
-            table_desc,
-        ),
-    }
-    .to_prost(index_schema_id, index_database_id);
+    };
 
     let plan: PlanRef = materialize.into();
     let ctx = plan.ctx();
@@ -172,51 +161,42 @@ pub(crate) fn gen_create_index_plan(
     Ok((plan, index_table_prost, index_prost))
 }
 
-fn build_indexed_table_order_key(
-    index_table: &TableCatalog,
+fn build_index_item(
+    index_table_desc: Rc<TableDesc>,
     indexed_table_name: &str,
     indexed_table_desc: Rc<TableDesc>,
-) -> Vec<OrderPair> {
-    let index_table_desc = index_table.table_desc();
-
-    let indexed_table_order_key_name = indexed_table_desc
-        .order_key
-        .iter()
-        .map(|x| {
-            indexed_table_desc
-                .columns
-                .get(x.column_idx)
-                .unwrap()
-                .name
-                .clone()
-        })
-        .collect_vec();
-
-    let indexed_table_name_prefix = format!("{}.", indexed_table_name);
-    let index_table_desc_map = index_table_desc
+) -> Vec<InputRef> {
+    let indexed_table_desc_map = indexed_table_desc
         .columns
         .iter()
         .enumerate()
-        .map(|(x, y)| {
-            if y.name.starts_with(&indexed_table_name_prefix) {
-                (y.name[indexed_table_name_prefix.len()..].to_string(), x)
-            } else {
-                (y.name.clone(), x)
-            }
-        })
+        .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
 
-    let indexed_table_order_key = indexed_table_order_key_name
-        .iter()
-        .map(|x| index_table_desc_map.get(x).unwrap())
-        .zip_eq(indexed_table_desc.order_key.iter().map(|x| x.order_type))
-        .map(|(idx, order_type)| OrderPair {
-            column_idx: *idx,
-            order_type,
-        })
-        .collect_vec();
+    let indexed_table_name_prefix = format!("{}.", indexed_table_name);
 
-    indexed_table_order_key
+    index_table_desc
+        .columns
+        .iter()
+        .map(|x| {
+            let name = if x.name.starts_with(&indexed_table_name_prefix) {
+                x.name[indexed_table_name_prefix.len()..].to_string()
+            } else {
+                x.name.clone()
+            };
+
+            let column_index = *indexed_table_desc_map.get(&name).unwrap();
+            InputRef {
+                index: column_index,
+                data_type: indexed_table_desc
+                    .columns
+                    .get(column_index)
+                    .unwrap()
+                    .data_type
+                    .clone(),
+            }
+        })
+        .collect_vec()
 }
 
 fn assemble_materialize(

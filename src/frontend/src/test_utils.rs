@@ -252,7 +252,7 @@ impl CatalogWriter for MockCatalogWriter {
         );
 
         index.id = index_table.id;
-        index.table_id = index_table.id;
+        index.index_table_id = index_table.id;
         self.catalog.write().create_index(&index);
         Ok(())
     }
@@ -309,7 +309,7 @@ impl CatalogWriter for MockCatalogWriter {
             schema_catalog.get_index_by_id(&index_id).unwrap().clone()
         };
 
-        let index_table_id = index.table_id;
+        let index_table_id = index.index_table.id;
         let (database_id, schema_id) = self.drop_table_or_index_id(index_id.index_id);
         self.catalog
             .write()

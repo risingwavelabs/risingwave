@@ -31,7 +31,7 @@ impl Relation {
             Self::Sink(sink) => sink.id = id,
             Self::Index(index, index_table) => {
                 index.id = id;
-                index.table_id = id;
+                index.index_table_id = id;
                 index_table.id = id;
             }
         }

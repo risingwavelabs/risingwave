@@ -92,6 +92,9 @@ impl ObserverNodeImpl for FrontendObserverNode {
                 for user in snapshot.users {
                     user_guard.create_user(user)
                 }
+                for index in snapshot.index {
+                    catalog_guard.create_index(&index)
+                }
                 self.worker_node_manager.refresh_worker_node(snapshot.nodes);
             }
             _ => {

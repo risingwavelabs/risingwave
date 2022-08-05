@@ -248,12 +248,6 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table_id", table_id.to_string()).into())
     }
 
-    pub fn get_table_by_index_catalog(&self, index: &IndexCatalog) -> Result<&TableCatalog> {
-        self.get_schema_by_id(&index.database_id, &index.schema_id)?
-            .get_table_by_id(&index.table_id)
-            .ok_or_else(|| CatalogError::NotFound("table_id", index.table_id.to_string()).into())
-    }
-
     pub fn get_sys_table_by_name(
         &self,
         db_name: &str,

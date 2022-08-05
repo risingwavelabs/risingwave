@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -57,73 +56,47 @@ impl Rule for IndexDeltaJoinRule {
             }
 
             for index in table_scan.logical().indexes() {
+
+                if !index.full_covering() {
+                    continue;
+                }
+
                 // 1. Check if distribution keys are the same.
                 // We don't assume the hash function we are using satisfies commutativity
                 // `Hash(A, B) == Hash(B, A)`, so we consider order of each item in distribution
                 // keys here.
-                let join_indices_ref_to_table_desc = join_indices
+                let join_indices_ref_to_primary_table = join_indices
                     .iter()
                     .map(|&i| *table_scan.logical().output_col_idx().get(i).unwrap())
                     .collect_vec();
 
-                let index_column = index.index_columns.iter().map(|x| x.index).collect_vec();
-                if index_column != join_indices_ref_to_table_desc {
+                let index_dist_ref_to_primary_table = index
+                    .index_table
+                    .distribution_key
+                    .iter()
+                    .map(|x| index.to_primary(*x).unwrap())
+                    .collect_vec();
+
+                if index_dist_ref_to_primary_table != join_indices_ref_to_primary_table {
                     continue;
                 }
 
-                let (index_table_name, index_table_desc) = {
-                    let reader = table_scan
-                        .base
-                        .ctx
-                        .inner()
-                        .session_ctx
-                        .env()
-                        .catalog_reader()
-                        .read_guard();
-                    let index_table_result = reader.get_table_by_index_catalog(index);
-                    if index_table_result.is_err() {
-                        // maybe concurrent ddl happen.
-                        continue;
-                    }
-                    let index_table = index_table_result.unwrap();
-                    (index_table.name.clone(), index_table.table_desc())
-                };
-
-                let primary_table_desc = table_scan.logical().table_desc();
-                // check index is a fully covering index
-                let mut primary_to_secondary: HashMap<usize, usize> = HashMap::new();
-                index
-                    .index_columns
-                    .iter()
-                    .chain(index.include_columns.iter())
-                    .enumerate()
-                    .for_each(|(i, input_ref)| {
-                        primary_to_secondary.insert(input_ref.index, i);
-                    });
-                primary_table_desc
-                    .order_key
-                    .iter()
-                    .zip_eq(index.indexed_table_order_key.iter())
-                    .for_each(|(i, j)| {
-                        primary_to_secondary.insert(i.column_idx, j.column_idx);
-                    });
-
-                if primary_to_secondary.len() == primary_table_desc.columns.len() {
-                    let len = primary_table_desc.columns.len();
-                    let mut index_mapping = Vec::with_capacity(len);
-                    for i in 0..len {
-                        index_mapping.push(*primary_to_secondary.get(&i).unwrap());
-                    }
-                    return Some(
-                        table_scan
-                            .to_index_scan(
-                                index_table_name.as_str(),
-                                index_table_desc.into(),
-                                index_mapping,
-                            )
-                            .into(),
-                    );
+                let primary_to_secondary_mapping = index.primary_to_secondary_mapping();
+                let len = primary_to_secondary_mapping.len();
+                assert_eq!(len, index.primary_table.columns.len());
+                let mut index_mapping = Vec::with_capacity(len);
+                for i in 0..len {
+                    index_mapping.push(*primary_to_secondary_mapping.get(&i).unwrap());
                 }
+                return Some(
+                    table_scan
+                        .to_index_scan(
+                            index.index_table.name.as_str(),
+                            index.index_table.table_desc().into(),
+                            &index_mapping,
+                        )
+                        .into(),
+                );
             }
 
             None

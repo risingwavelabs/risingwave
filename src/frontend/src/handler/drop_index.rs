@@ -37,33 +37,33 @@ pub async fn handle_drop_index(
         // Currently index_name is the same as the table_name
         let table_result = reader.get_table_by_name(session.database(), &schema_name, &index_name);
 
-        if index_result.is_ok() {
-            assert!(table_result.is_ok());
-            let table = table_result.unwrap();
-            if session.user_id() != table.owner {
-                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
-            }
-        } else if table_result.is_ok() {
-            let table = table_result.unwrap();
-            // If associated source is `Some`, then it is a actually a materialized source / table
-            // v2.
-            if table.associated_source_id().is_some() {
+        if index_result.is_err() {
+            if table_result.is_ok() {
+                let table = table_result.unwrap();
+                // If associated source is `Some`, then it is a actually a materialized source /
+                // table v2.
+                if table.associated_source_id().is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        "Use `DROP TABLE` to drop a table.".to_owned(),
+                    )));
+                }
+
+                // If is index on is `None`, then it is a actually a materialized view.
+                assert!(table.is_index_on.is_none());
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP TABLE` to drop a table.".to_owned(),
+                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
                 )));
             }
 
-            // If is index on is `None`, then it is a actually a materialized view.
-            assert!(table.is_index_on.is_none());
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-            )));
-        } else {
-            // table_result.is_err
-            return Err(index_result.expect_err("must fail"));
+            return Err(index_result.unwrap_err());
         }
 
-        index_result.unwrap().id
+        let index = index_result.unwrap();
+        if session.user_id() != index.index_table.owner {
+            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+        }
+
+        index.id
     };
 
     let catalog_writer = session.env().catalog_writer();

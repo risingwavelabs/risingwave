@@ -78,12 +78,12 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        index_mapping: Vec<usize>,
+        primary_to_secondary_mapping: &[usize],
     ) -> StreamIndexScan {
         StreamIndexScan::new(self.logical.to_index_scan(
             index_name,
             index_table_desc,
-            index_mapping,
+            primary_to_secondary_mapping,
         ))
     }
 }

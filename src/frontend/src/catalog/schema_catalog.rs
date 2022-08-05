@@ -83,7 +83,12 @@ impl SchemaCatalog {
     pub fn create_index(&mut self, prost: &ProstIndex) {
         let name = prost.name.clone();
         let id = prost.id.into();
-        let index: IndexCatalog = prost.into();
+
+        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let primary_table = self
+            .get_table_by_id(&prost.primary_table_id.into())
+            .unwrap();
+        let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
 
         self.index_by_name.try_insert(name.clone(), index).unwrap();
         self.index_name_by_id.try_insert(id, name).unwrap();
