@@ -17,7 +17,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -222,6 +222,7 @@ fn build_state_table_helper<S: StateStore>(
         order_types.iter().map(|pair| pair.order_type).collect_vec(),
         pk_indices,
         Distribution::fallback(),
+        TableOption::default(),
     )
 }
 #[tokio::test]

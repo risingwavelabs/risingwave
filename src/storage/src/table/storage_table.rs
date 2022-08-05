@@ -144,6 +144,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
     /// This is parameterized on cell based row serializer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,
         table_id: TableId,
@@ -152,6 +153,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         distribution: Distribution,
+        table_options: TableOption,
     ) -> Self {
         Self::new_inner(
             store,
@@ -161,7 +163,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
             order_types,
             pk_indices,
             distribution,
-            Default::default(),
+            table_options,
             0,
         )
     }
@@ -693,13 +695,14 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
                 .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
 
             async move {
+                let read_options = self.get_read_option(epoch);
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     prefix_hint,
                     raw_key_range,
                     wait_epoch,
-                    self.get_read_option(epoch),
+                    read_options,
                 )
                 .await?
                 .into_stream();

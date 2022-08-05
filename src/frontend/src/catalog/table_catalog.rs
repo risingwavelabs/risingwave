@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
+use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_TTL;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -115,6 +116,11 @@ impl TableCatalog {
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
+        use risingwave_common::catalog::TableOption;
+        // use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
+
+        let table_options = TableOption::build_table_option(&self.properties);
+
         TableDesc {
             table_id: self.id,
             order_key: self
@@ -127,6 +133,7 @@ impl TableCatalog {
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
             vnode_mapping: self.vnode_mapping.clone(),
+            retaintion_second: table_options.ttl.unwrap_or(TABLE_OPTION_DUMMY_TTL),
         }
     }
 
@@ -162,7 +169,7 @@ impl TableCatalog {
             appendonly: self.appendonly,
             owner: self.owner,
             mapping: None,
-            properties: HashMap::default(),
+            properties: self.properties.clone(),
             read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
     }

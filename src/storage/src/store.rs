@@ -235,7 +235,7 @@ pub struct WriteOptions {
 impl ReadOptions {
     pub fn min_epoch(&self) -> u64 {
         let epoch = Epoch(self.epoch);
-        match self.ttl {
+        match self.ttl.as_ref() {
             Some(ttl_second_u32) => epoch.subtract_ms((ttl_second_u32 * 1000) as u64).0,
             None => 0,
         }

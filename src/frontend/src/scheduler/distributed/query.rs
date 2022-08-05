@@ -352,6 +352,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_TTL;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
@@ -424,6 +425,7 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 vnode_mapping: Some(vec![]),
+                retaintion_second: TABLE_OPTION_DUMMY_TTL,
             }),
             vec![],
             ctx,
