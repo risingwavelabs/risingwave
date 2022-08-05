@@ -357,7 +357,7 @@ fn main() -> Result<()> {
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
     // shown.
     let p = manager.new_progress();
-    p.set_prefix("playground");
+    p.set_prefix("dev cluster");
     p.set_message(format!(
         "starting {} services for {}...",
         steps.len(),
