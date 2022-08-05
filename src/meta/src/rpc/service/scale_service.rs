@@ -72,14 +72,14 @@ where
 {
     #[cfg_attr(coverage, no_coverage)]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        self.ddl_lock.write().await;
+        let _ddl_lock = self.ddl_lock.write().await;
         self.barrier_manager.run_command(Command::pause()).await?;
         Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, no_coverage)]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        self.ddl_lock.write().await;
+        let _ddl_lock = self.ddl_lock.write().await;
         self.barrier_manager.run_command(Command::resume()).await?;
         Ok(Response::new(ResumeResponse {}))
     }
