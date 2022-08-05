@@ -122,6 +122,7 @@ pub async fn compactor_serve(
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            vec![sstable_id_manager.clone()],
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             storage_config,

@@ -211,6 +211,11 @@ impl LogicalScan {
         &self.indexes
     }
 
+    /// Get the logical scan's filter predicate
+    pub fn predicate(&self) -> &Condition {
+        &self.predicate
+    }
+
     /// The mapped distribution key of the scan operator.
     ///
     /// The column indices in it is the position in the `required_col_idx`, instead of the position
