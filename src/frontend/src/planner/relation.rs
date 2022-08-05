@@ -112,17 +112,39 @@ impl Planner {
     ) -> Result<PlanRef> {
         let mut args = args.into_iter();
 
-        let cols = match &input {
-            Relation::Source(s) => s.catalog.columns.to_vec(),
-            Relation::BaseTable(t) => t.table_catalog.columns().to_vec(),
-            _ => return Err(ErrorCode::BindError("the ".to_string()).into()),
+        let col_data_types: Vec<_> = match &input {
+            Relation::Source(s) => s
+                .catalog
+                .columns
+                .iter()
+                .map(|col| col.data_type().clone())
+                .collect(),
+            Relation::BaseTable(t) => t
+                .table_catalog
+                .columns
+                .iter()
+                .map(|col| col.data_type().clone())
+                .collect(),
+            Relation::Subquery(q) => q
+                .query
+                .schema()
+                .fields
+                .iter()
+                .map(|f| f.data_type())
+                .collect(),
+            r => {
+                return Err(ErrorCode::BindError(format!(
+                    "Invalid input relation to tumble: {r:?}"
+                ))
+                .into())
+            }
         };
 
         match (args.next(), args.next()) {
             (Some(window_size @ ExprImpl::Literal(_)), None) => {
-                let mut exprs = Vec::with_capacity(cols.len() + 2);
-                for (idx, col) in cols.iter().enumerate() {
-                    exprs.push(InputRef::new(idx, col.data_type().clone()).into());
+                let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
+                for (idx, col_dt) in col_data_types.iter().enumerate() {
+                    exprs.push(InputRef::new(idx, col_dt.clone()).into());
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
