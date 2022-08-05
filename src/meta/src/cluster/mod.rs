@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::ops::Add;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -25,6 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -190,12 +188,16 @@ where
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
+    pub async fn heartbeat(
+        &self,
+        worker_id: WorkerId,
+        info: Vec<heartbeat_request::extra_info::Info>,
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
-        let mut core = self.core.write().await;
-
-        if let Some(worker) = core.get_worker_by_id(worker_id) {
-            core.update_worker_ttl(worker.key().unwrap(), self.max_heartbeat_interval);
+        let core = self.core.write().await;
+        if let Some(mut worker) = core.get_worker_by_id(worker_id) {
+            worker.update_ttl(self.max_heartbeat_interval);
+            worker.update_info(info);
             Ok(())
         } else {
             bail!("unknown worker id: {}", worker_id);
@@ -233,13 +235,10 @@ where
                     .cloned()
                     .collect_vec();
                 // 1. Initialize new workers' expire_at.
-                for worker in
+                for mut worker in
                     workers_to_init_or_delete.drain_filter(|w| w.expire_at() == INVALID_EXPIRE_AT)
                 {
-                    cluster_manager.core.write().await.update_worker_ttl(
-                        worker.key().expect("illegal key"),
-                        cluster_manager.max_heartbeat_interval,
-                    );
+                    worker.update_ttl(cluster_manager.max_heartbeat_interval);
                 }
                 // 2. Delete expired workers.
                 for worker in workers_to_init_or_delete {
@@ -417,23 +416,6 @@ impl ClusterManagerCore {
     fn get_parallel_unit_count(&self) -> usize {
         self.parallel_units.len()
     }
-
-    fn update_worker_ttl(&mut self, host_address: HostAddress, ttl: Duration) {
-        match self.workers.entry(WorkerKey(host_address)) {
-            Entry::Occupied(mut worker) => {
-                let expire_at = cmp::max(
-                    worker.get().expire_at(),
-                    SystemTime::now()
-                        .add(ttl)
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .expect("Clock may have gone backwards")
-                        .as_secs(),
-                );
-                worker.get_mut().set_expire_at(expire_at);
-            }
-            Entry::Vacant(_) => {}
-        }
-    }
 }
 
 #[cfg(test)]
@@ -530,7 +512,10 @@ mod tests {
         let keep_alive_join_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(cluster_manager_ref.max_heartbeat_interval / 3).await;
-                cluster_manager_ref.heartbeat(context_id_1).await.unwrap();
+                cluster_manager_ref
+                    .heartbeat(context_id_1, vec![])
+                    .await
+                    .unwrap();
             }
         });
 
