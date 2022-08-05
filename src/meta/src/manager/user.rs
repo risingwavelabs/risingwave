@@ -90,6 +90,7 @@ impl UserManagerInner {
             UpdateField::Super => user.is_supper = update_user.is_supper,
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
+            UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
             UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
             UpdateField::Rename => {
                 self.all_users.remove(&user.name);
@@ -141,6 +142,7 @@ impl<S: MetaStore> UserManager<S> {
                     name: user.to_string(),
                     is_supper: true,
                     can_create_db: true,
+                    can_create_user: true,
                     can_login: true,
                     ..Default::default()
                 };
