@@ -44,7 +44,7 @@ struct UploadHandle {
 impl MultipartUploadHandle for UploadHandle {
     async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
         fail_point!("s3_upload_part_err", |_| Err(ObjectError::internal(
-            "s3_upload_part_err"
+            "s3 upload part error"
         )));
         let mut upload_guard = self.uploaded_parts.lock().await;
         if !upload_guard.0 {
@@ -67,8 +67,8 @@ impl MultipartUploadHandle for UploadHandle {
     }
 
     async fn finish(&self) -> ObjectResult<()> {
-        fail_point!("s3_finish_multipart_upload", |_| Err(
-            ObjectError::internal("s3_finish_multipart_upload")
+        fail_point!("s3_finish_multipart_upload_err", |_| Err(
+            ObjectError::internal("s3 finish multipart upload error")
         ));
         let mut upload_guard = self.uploaded_parts.lock().await;
         if !upload_guard.0 {
