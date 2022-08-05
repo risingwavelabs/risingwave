@@ -344,8 +344,6 @@ fn make_stream_graph() -> StreamFragmentGraph {
 }
 
 // TODO: enable this test with madsim
-// NOTE: frontend is not yet available with madsim
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;

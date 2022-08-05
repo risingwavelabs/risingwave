@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
@@ -21,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -37,7 +38,7 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -78,6 +79,8 @@ pub struct OptimizerContext {
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
     /// Store correlated id
     pub next_correlated_id: AtomicU32,
+    /// Store handle_with_properties for internal table
+    pub with_properties: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +146,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
+            with_properties: HashMap::new(),
         }
     }
 
@@ -158,6 +162,7 @@ impl OptimizerContext {
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
             next_correlated_id: AtomicU32::new(1),
+            with_properties: HashMap::new(),
         }
         .into()
     }
@@ -259,6 +264,7 @@ impl FrontendEnv {
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            vec![],
         );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
@@ -610,10 +616,49 @@ impl Session for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = infer(self, stmt, sql).map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
+        // result of run_statement().
+        let rsp = match stmt {
+            Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
+                tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+                e
+            })?,
+            Statement::ShowObjects(show_object) => match show_object {
+                ShowObject::Columns { table: _ } => {
+                    vec![
+                        PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    ]
+                }
+                _ => {
+                    vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)]
+                }
+            },
+            Statement::ShowVariable { variable } => {
+                let name = &variable[0].value.to_lowercase();
+                if name.eq_ignore_ascii_case("ALL") {
+                    vec![
+                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+                    ]
+                } else {
+                    vec![PgFieldDescriptor::new(
+                        name.to_ascii_lowercase(),
+                        TypeOid::Varchar,
+                    )]
+                }
+            }
+            Statement::Describe { name: _ } => {
+                vec![
+                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                ]
+            }
+            _ => {
+                panic!("infer_return_type only support query statement");
+            }
+        };
         Ok(rsp)
     }
 

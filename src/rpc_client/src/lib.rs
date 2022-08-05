@@ -32,14 +32,86 @@
 #![feature(associated_type_defaults)]
 
 mod meta_client;
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::anyhow;
 pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
+use moka::future::Cache;
+use tonic::transport::{Channel, Endpoint};
 mod compute_client;
-pub use compute_client::ComputeClient;
-mod compute_client_pool;
-pub use compute_client_pool::{ComputeClientPool, ComputeClientPoolRef};
+pub use compute_client::*;
 mod hummock_meta_client;
 pub use hummock_meta_client::HummockMetaClient;
-mod stream_client_pool;
-pub use stream_client_pool::{StreamClient, StreamClientPool, StreamClientPoolRef};
-
 pub mod error;
+mod stream_client;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::common::WorkerNode;
+use risingwave_pb::meta::heartbeat_request::extra_info;
+pub use stream_client::*;
+
+use crate::error::{Result, RpcError};
+
+pub trait RpcClient: Send + Sync + 'static + Clone {
+    fn new_client(host_addr: HostAddr, channel: Channel) -> Self;
+}
+
+#[derive(Clone)]
+pub struct RpcClientPool<S> {
+    clients: Cache<HostAddr, S>,
+}
+
+impl<S> Default for RpcClientPool<S>
+where
+    S: RpcClient,
+{
+    fn default() -> Self {
+        Self::new(u64::MAX)
+    }
+}
+
+impl<S> RpcClientPool<S>
+where
+    S: RpcClient,
+{
+    pub fn new(cache_capacity: u64) -> Self {
+        Self {
+            clients: Cache::new(cache_capacity),
+        }
+    }
+
+    /// Gets the RPC client for the given node. If the connection is not established, a
+    /// new client will be created and returned.
+    pub async fn get(&self, node: &WorkerNode) -> Result<S> {
+        let addr: HostAddr = node.get_host().unwrap().into();
+        self.get_by_addr(addr).await
+    }
+
+    /// Gets the RPC client for the given addr. If the connection is not established, a
+    /// new client will be created and returned.
+    pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
+        self.clients
+            .try_get_with(addr.clone(), async {
+                let endpoint = Endpoint::from_shared(format!("http://{}", addr.clone()))?;
+                let client = S::new_client(
+                    addr,
+                    endpoint
+                        .connect_timeout(Duration::from_secs(5))
+                        .connect()
+                        .await?,
+                );
+                Ok::<_, RpcError>(client)
+            })
+            .await
+            .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
+    }
+}
+
+/// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.
+pub trait ExtraInfoSource: Send + Sync {
+    /// None means the info is not available at the moment.
+    fn get_extra_info(&self) -> Option<extra_info::Info>;
+}
+
+pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;

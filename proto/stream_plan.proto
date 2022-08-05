@@ -275,7 +275,7 @@ message ChainNode {
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan_common.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
-  plan_common.CellBasedTableDesc table_desc = 1;
+  plan_common.StorageTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
 }
 
@@ -385,10 +385,11 @@ enum DispatcherType {
   // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
   // Broadcast to all downstreams.
-  // TODO: we don't need this as we now support multi-dispatcher per actor.
+  //
+  // Note a broadcast cannot be represented as multiple simple dispatchers, since they are
+  // different when we update dispatchers during scaling.
   BROADCAST = 2;
   // Only one downstream.
-  // TODO: seems that same as broadcast dispatch (with only one downstream actor).
   SIMPLE = 3;
   // A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
   // piped into the downstream actor, if there are the same number of actors. If number of actors
