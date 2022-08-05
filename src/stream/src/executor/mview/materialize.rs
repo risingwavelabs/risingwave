@@ -22,8 +22,8 @@ use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::table::Distribution;
+use risingwave_pb::catalog::Table;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -35,7 +35,7 @@ use crate::executor::{
 pub struct MaterializeExecutor<S: StateStore> {
     input: BoxedExecutor,
 
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -47,43 +47,19 @@ impl<S: StateStore> MaterializeExecutor<S> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: BoxedExecutor,
         store: S,
-        table_id: TableId,
         key: Vec<OrderPair>,
-        column_ids: Vec<ColumnId>,
         executor_id: u64,
-        distribution_key: Vec<usize>,
         vnodes: Option<Arc<Bitmap>>,
+        table_catalog: &Table,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
-        let arrange_order_types = key.iter().map(|k| k.order_type).collect();
 
         let schema = input.schema().clone();
-        let columns = column_ids
-            .into_iter()
-            .zip_eq(schema.fields.iter())
-            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
-            .collect_vec();
 
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices: distribution_key,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
-
-        let state_table = StateTable::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            arrange_order_types,
-            arrange_columns.clone(),
-            distribution,
-        );
+        let state_table = RowBasedStateTable::from_table_catalog(table_catalog, store, vnodes);
 
         Self {
             input,
@@ -106,16 +82,32 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
     ) -> Self {
-        Self::new(
-            input,
+        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
+        let schema = input.schema().clone();
+        let columns = column_ids
+            .into_iter()
+            .zip_eq(schema.fields.iter())
+            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
+            .collect_vec();
+
+        let state_table = RowBasedStateTable::new_without_distribution(
             store,
             table_id,
-            keys,
-            column_ids,
-            executor_id,
-            vec![],
-            None,
-        )
+            columns,
+            arrange_order_types,
+            arrange_columns.clone(),
+        );
+        Self {
+            input,
+            state_table,
+            arrange_columns: arrange_columns.clone(),
+            info: ExecutorInfo {
+                schema,
+                pk_indices: arrange_columns,
+                identity: format!("MaterializeExecutor {:X}", executor_id),
+            },
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -205,7 +197,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::storage_table::StorageTable;
+    use risingwave_storage::table::storage_table::RowBasedStorageTable;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -253,7 +245,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::new_for_test(
+        let table = RowBasedStorageTable::new_for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,

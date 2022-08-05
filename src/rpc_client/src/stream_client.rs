@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::error::Result;
+use std::sync::Arc;
 
-pub trait Filter: Send + Sync + 'static {
-    fn filter(&self) -> Result<bool>;
-}
+use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 
-pub struct DefaultFilter {}
+use crate::{Channel, RpcClient, RpcClientPool};
 
-impl Filter for DefaultFilter {
-    fn filter(&self) -> Result<bool> {
-        todo!()
+pub type StreamClient = StreamServiceClient<Channel>;
+
+impl RpcClient for StreamClient {
+    fn new_client(_host_addr: HostAddr, channel: Channel) -> Self {
+        Self::new(channel)
     }
 }
+
+pub type StreamClientPool = RpcClientPool<StreamClient>;
+pub type StreamClientPoolRef = Arc<StreamClientPool>;

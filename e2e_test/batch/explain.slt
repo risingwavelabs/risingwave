@@ -5,4 +5,7 @@ statement ok
 explain create index i on t(v);
 
 statement ok
+explain create sink sink_t from t with ( connector = 'kafka' )
+
+statement ok
 drop table t;

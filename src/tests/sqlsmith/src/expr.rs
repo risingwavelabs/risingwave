@@ -19,13 +19,15 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, func_sigs, AggFuncSig, DataTypeName, ExprType, FuncSign,
+    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, DataTypeName, ExprType,
+    FuncSign,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
 };
 
+use crate::utils::data_type_name_to_ast_data_type;
 use crate::SqlGenerator;
 
 lazy_static::lazy_static! {
@@ -40,6 +42,12 @@ lazy_static::lazy_static! {
     };
 }
 
+lazy_static::lazy_static! {
+    static ref CAST_TABLE: HashMap<DataTypeName, Vec<CastSig>> = {
+        init_cast_table()
+    };
+}
+
 fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
     func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
@@ -50,6 +58,22 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
     let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSig>>::new();
     agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
+}
+
+/// Build a cast map from return types to viable cast-signatures.
+/// TODO: Generate implicit casts.
+/// NOTE: We avoid cast from varchar to other datatypes apart from itself.
+/// This is because arbitrary strings may not be able to cast,
+/// creating large number of invalid queries.
+fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
+    let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
+    cast_sigs()
+        .filter(|cast| cast.context == CastContext::Explicit)
+        .filter(|cast| {
+            cast.from_type != DataTypeName::Varchar || cast.to_type == DataTypeName::Varchar
+        })
+        .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
+    casts
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -74,12 +98,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             assert!(!inside_agg);
         }
 
-        // TODO:  https://github.com/singularity-data/risingwave/issues/3989.
-        // let range = if can_agg & !inside_agg { 99 } else { 90 };
-        let range = 90;
+        let range = if can_agg & !inside_agg { 99 } else { 90 };
 
         match self.rng.gen_range(0..=range) {
-            0..=90 => self.gen_func(typ, can_agg, inside_agg),
+            0..=80 => self.gen_func(typ, can_agg, inside_agg),
+            81..=90 => self.gen_cast(typ, can_agg, inside_agg),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
@@ -113,6 +136,27 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
             Expr::Identifier(Ident::new(&col_def.name))
         }
+    }
+
+    fn gen_cast(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
+        self.gen_cast_inner(ret, can_agg, inside_agg)
+            .unwrap_or_else(|| self.gen_simple_scalar(ret))
+    }
+
+    /// Generate casts from a cast map.
+    fn gen_cast_inner(
+        &mut self,
+        ret: DataTypeName,
+        can_agg: bool,
+        inside_agg: bool,
+    ) -> Option<Expr> {
+        let casts = CAST_TABLE.get(&ret)?;
+        let cast_sig = casts.choose(&mut self.rng).unwrap();
+        let expr = self
+            .gen_expr(cast_sig.from_type, can_agg, inside_agg)
+            .into();
+        let data_type = data_type_name_to_ast_data_type(cast_sig.to_type)?;
+        Some(Expr::Cast { expr, data_type })
     }
 
     fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
@@ -283,17 +327,19 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
 /// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/singularity-data/risingwave/issues/3933>
-fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
+fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
         .collect();
 
+    // Distinct Aggregate shall be workaround until the following issue is resolved
+    // https://github.com/singularity-data/risingwave/issues/4220
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
         over: None,
-        distinct,
+        distinct: false,
         order_by: vec![],
         filter: None,
     }
@@ -363,5 +409,27 @@ pub fn print_function_table() -> String {
         })
         .join("\n");
 
-    func_str + "\n" + &agg_func_str
+    let cast_str = cast_sigs()
+        .map(|sig| {
+            format!(
+                "{:?} CAST {:?} -> {:?}",
+                sig.context, sig.to_type, sig.from_type,
+            )
+        })
+        .sorted()
+        .join("\n");
+
+    format!(
+        "
+==== FUNCTION SIGNATURES
+{}
+
+==== AGGREGATE FUNCTION SIGNATURES
+{}
+
+==== CAST SIGNATURES
+{}
+",
+        func_str, agg_func_str, cast_str
+    )
 }

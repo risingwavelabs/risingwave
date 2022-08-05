@@ -138,20 +138,6 @@ impl LogicalScan {
             .collect()
     }
 
-    pub(super) fn pk_names_with_table_prefix(&self) -> Vec<String> {
-        self.base
-            .pk_indices
-            .iter()
-            .map(|i| {
-                format!(
-                    "{}.{}",
-                    self.table_name.clone(),
-                    self.table_desc.columns[*i].name
-                )
-            })
-            .collect()
-    }
-
     pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
         self.output_col_idx
             .iter()
@@ -216,14 +202,23 @@ impl LogicalScan {
             .collect()
     }
 
+    pub fn output_column_indices(&self) -> &[usize] {
+        &self.output_col_idx
+    }
+
     /// Get all indexes on this table
     pub fn indexes(&self) -> &[(String, Rc<TableDesc>)] {
         &self.indexes
     }
 
+    /// Get the logical scan's filter predicate
+    pub fn predicate(&self) -> &Condition {
+        &self.predicate
+    }
+
     /// The mapped distribution key of the scan operator.
     ///
-    /// The column indices in it is the position in the `required_col_idx`,instead of the position
+    /// The column indices in it is the position in the `required_col_idx`, instead of the position
     /// in all the columns of the table (which is the table's distribution key).
     ///
     /// Return `None` if the table's distribution key are not all in the `required_col_idx`.

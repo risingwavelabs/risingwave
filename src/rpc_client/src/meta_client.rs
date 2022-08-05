@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
     Table as ProstTable,
@@ -31,6 +31,7 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -49,6 +50,7 @@ use tonic::{Status, Streaming};
 
 use crate::error::Result;
 use crate::hummock_meta_client::HummockMetaClient;
+use crate::ExtraInfoSourceRef;
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -121,8 +123,14 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
-        let request = HeartbeatRequest { node_id };
+    pub async fn send_heartbeat(&self, node_id: u32, info: Vec<extra_info::Info>) -> Result<()> {
+        let request = HeartbeatRequest {
+            node_id,
+            info: info
+                .into_iter()
+                .map(|info| ExtraInfo { info: Some(info) })
+                .collect(),
+        };
         self.inner.heartbeat(request).await?;
         Ok(())
     }
@@ -256,6 +264,11 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn update_user(&self, request: UpdateUserRequest) -> Result<u64> {
+        let resp = self.inner.update_user(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn grant_privilege(
         &self,
         user_ids: Vec<u32>,
@@ -304,9 +317,13 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Starts a heartbeat worker.
+    ///
+    /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
+        extra_info_sources: Vec<ExtraInfoSourceRef>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
@@ -321,11 +338,15 @@ impl MetaClient {
                         return;
                     }
                 }
+                let extra_info = extra_info_sources
+                    .iter()
+                    .filter_map(|s| s.get_extra_info())
+                    .collect::<Vec<_>>();
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
-                    meta_client.send_heartbeat(meta_client.worker_id()),
+                    meta_client.send_heartbeat(meta_client.worker_id(), extra_info),
                 )
                 .await
                 {
@@ -456,13 +477,17 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
-        Ok(resp.table_id)
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+        let resp = self
+            .inner
+            .get_new_sst_ids(GetNewSstIdsRequest { number })
+            .await?;
+        Ok(SstIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         let req = ReportCompactionTasksRequest {
+            context_id: self.worker_id(),
             compact_task: Some(compact_task),
         };
         self.inner.report_compaction_tasks(req).await?;
@@ -629,12 +654,13 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
-            ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
+            ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
+            ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }

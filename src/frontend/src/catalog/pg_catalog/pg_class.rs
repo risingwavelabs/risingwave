@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, Hash};
+use risingwave_common::types::DataType;
 
-pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
-    fn encoded_len() -> usize;
+use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 
-    fn encode(&self, buf: &mut [u8]);
-
-    fn decode(buf: &[u8]) -> Self;
-}
-
-pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
+/// The catalog `pg_user` provides access to information about database users.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
+pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
+pub const PG_CLASS_COLUMNS: &[PgCatalogColumnsDef] = &[
+    (DataType::Int32, "oid"),
+    (DataType::Varchar, "classname"),
+    (DataType::Int32, "namespaceoid"),
+    (DataType::Int32, "owneroid"),
+    (DataType::Varchar, "classkind"),
+];

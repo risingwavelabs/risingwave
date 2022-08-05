@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
@@ -99,7 +99,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    pub storage_table: StorageTable<S, READ_ONLY>,
+    pub storage_table: RowBasedStorageTable<S, READ_ONLY>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {

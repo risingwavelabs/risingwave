@@ -161,13 +161,14 @@ impl StreamService for StreamServiceImpl {
             request_id: req.request_id,
             status: None,
             create_mview_progress: collect_result.create_mview_progress,
-            sycned_sstables: synced_sstables
+            synced_sstables: synced_sstables
                 .into_iter()
                 .map(|(compaction_group_id, sst)| GroupedSstableInfo {
                     compaction_group_id,
                     sst: Some(sst),
                 })
                 .collect_vec(),
+            worker_id: self.env.worker_id(),
         }))
     }
 

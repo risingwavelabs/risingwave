@@ -16,12 +16,12 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::VacuumTask;
 
 use crate::hummock::{CompactorManager, HummockManagerRef};
 use crate::storage::MetaStore;
+use crate::MetaResult;
 
 // TODO #4037: GC orphan SSTs in object store
 pub struct VacuumTrigger<S: MetaStore> {
@@ -50,7 +50,7 @@ where
     /// Tries to make checkpoint at the minimum pinned version.
     ///
     /// Returns number of deleted deltas
-    pub async fn vacuum_version_metadata(&self) -> Result<usize> {
+    pub async fn vacuum_version_metadata(&self) -> MetaResult<usize> {
         self.hummock_manager.proceed_version_checkpoint().await?;
         let batch_size = 64usize;
         let mut total_deleted = 0;
@@ -70,7 +70,7 @@ where
     /// Schedules deletion of SSTs from object store
     ///
     /// Returns SSTs scheduled in worker node.
-    pub async fn vacuum_sst_data(&self) -> Result<Vec<HummockSstableId>> {
+    pub async fn vacuum_sst_data(&self) -> MetaResult<Vec<HummockSstableId>> {
         // Select SSTs to delete.
         let ssts_to_delete = {
             // 1. Retry the pending SSTs first.
@@ -148,7 +148,7 @@ where
     }
 
     /// Acknowledges deletion of SSTs and deletes corresponding metadata.
-    pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
+    pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> MetaResult<()> {
         let deleted_sst_ids = self
             .pending_sst_ids
             .read()

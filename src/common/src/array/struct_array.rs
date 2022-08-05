@@ -231,7 +231,7 @@ impl StructArray {
             array.values.is_empty(),
             "Must have no buffer in a struct array"
         );
-        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+        let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let cardinality = bitmap.len();
         let array_data = array.get_struct_array_data()?;
         let children = array_data

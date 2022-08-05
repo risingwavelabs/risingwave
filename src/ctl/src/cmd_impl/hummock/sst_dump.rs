@@ -28,7 +28,7 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
-use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
+use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
 
 use crate::common::HummockServiceOpts;
 
@@ -163,7 +163,7 @@ fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<(
         let humm_val = HummockValue::from_slice(block_iter.value())?;
         let (is_put, user_val) = match humm_val {
             HummockValue::Put(uval) => (true, uval),
-            HummockValue::Delete() => (false, &[] as &[u8]),
+            HummockValue::Delete => (false, &[] as &[u8]),
         };
 
         let epoch = get_epoch(full_key);

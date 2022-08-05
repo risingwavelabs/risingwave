@@ -37,6 +37,7 @@ pub(super) trait ChanSender: Send {
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_>;
 }
 
+#[derive(Debug)]
 pub enum ChanSenderImpl {
     HashShuffle(HashShuffleSender),
     Fifo(FifoSender),
@@ -89,5 +90,6 @@ pub fn create_output_channel(
         ShuffleDistributionMode::Single => Ok(new_fifo_channel()),
         ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle)),
         ShuffleDistributionMode::Broadcast => Ok(new_broadcast_channel(shuffle)),
+        ShuffleDistributionMode::Unspecified => unreachable!(),
     }
 }

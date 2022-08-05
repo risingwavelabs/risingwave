@@ -21,7 +21,8 @@ mod cast;
 mod func;
 pub use agg::{agg_func_sigs, AggFuncSig};
 pub use cast::{
-    align_types, cast_map_array, cast_ok, cast_ok_base, least_restrictive, CastContext,
+    align_types, cast_map_array, cast_ok, cast_ok_base, cast_sigs, least_restrictive, CastContext,
+    CastSig,
 };
 pub use func::{func_sigs, infer_type, FuncSign};
 /// `DataTypeName` is designed for type derivation here. In other scenarios,
@@ -90,7 +91,6 @@ impl From<&DataType> for DataTypeName {
 }
 
 impl From<DataType> for DataTypeName {
-    #[expect(clippy::needless_borrow)]
     fn from(ty: DataType) -> Self {
         (&ty).into()
     }

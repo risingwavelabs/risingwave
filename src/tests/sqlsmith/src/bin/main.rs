@@ -84,10 +84,12 @@ async fn create_tables(
     rng: &mut impl Rng,
     opt: &TestOptions,
     client: &tokio_postgres::Client,
-) -> (Vec<Table>, Vec<Table>) {
+) -> (Vec<Table>, Vec<Table>, String) {
     log::info!("Preparing tables...");
 
+    let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(opt);
+    setup_sql.push_str(&sql);
     let statements = parse_sql(&sql);
     let mut tables = statements
         .iter()
@@ -96,6 +98,7 @@ async fn create_tables(
 
     for stmt in statements.iter() {
         let create_sql = stmt.to_string();
+        setup_sql.push_str(&format!("{};", &create_sql));
         client.execute(&create_sql, &[]).await.unwrap();
     }
 
@@ -107,16 +110,21 @@ async fn create_tables(
         tables.push(table.clone());
         mviews.push(table);
     }
-    (tables, mviews)
+    (tables, mviews, setup_sql)
+}
+
+async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
+    client
+        .execute(&format!("DROP MATERIALIZED VIEW {}", mview.name), &[])
+        .await
+        .unwrap();
 }
 
 async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgres::Client) {
     log::info!("Cleaning tables...");
-    for Table { name, .. } in mviews.iter().rev() {
-        client
-            .execute(&format!("DROP MATERIALIZED VIEW {}", name), &[])
-            .await
-            .unwrap();
+
+    for mview in mviews.iter().rev() {
+        drop_mview_table(mview, client).await;
     }
 
     let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
@@ -154,7 +162,7 @@ fn is_permissible_error(db_error: &DbError) -> bool {
 }
 
 /// Validate client responses
-fn validate_response<_Row>(response: Result<_Row, PgError>) {
+fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) {
     match response {
         Ok(_) => {}
         Err(e) => {
@@ -164,7 +172,21 @@ fn validate_response<_Row>(response: Result<_Row, PgError>) {
             {
                 return;
             }
-            panic!("{}", e);
+            panic!(
+                "
+Query failed:
+---- START
+-- Setup
+{}
+-- Query
+{}
+---- END
+
+Reason:
+{}
+",
+                setup_sql, query, e
+            );
         }
     }
 }
@@ -199,13 +221,23 @@ async fn main() {
 
     let mut rng = rand::thread_rng();
 
-    let (tables, mviews) = create_tables(&mut rng, &opt, &client).await;
+    let (tables, mviews, setup_sql) = create_tables(&mut rng, &opt, &client).await;
 
+    // Test batch
     for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         log::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
-        validate_response(response);
+        validate_response(&setup_sql, &format!("{};", sql), response);
+    }
+
+    // Test stream
+    for _ in 0..opt.count {
+        let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+        log::info!("Executing: {}", sql);
+        let response = client.execute(&sql, &[]).await;
+        validate_response(&setup_sql, &format!("{};", sql), response);
+        drop_mview_table(&table, &client).await;
     }
 
     drop_tables(&mviews, &opt, &client).await;

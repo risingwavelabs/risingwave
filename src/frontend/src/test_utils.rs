@@ -33,7 +33,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::update_user_request::UpdateField;
+use risingwave_pb::user::{GrantPrivilege, UpdateUserRequest, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
@@ -116,10 +117,7 @@ impl LocalFrontend {
             let session = self.session_ref();
 
             let bound = {
-                let mut binder = Binder::new(
-                    session.env().catalog_reader().read_guard(),
-                    session.database().to_string(),
-                );
+                let mut binder = Binder::new(&session);
                 binder.bind(Statement::Query(query.clone()))?
             };
             Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
@@ -402,6 +400,31 @@ impl UserInfoWriter for MockUserInfoWriter {
         Ok(())
     }
 
+    async fn update_user(&self, request: UpdateUserRequest) -> Result<()> {
+        let mut lock = self.user_info.write();
+        let update_user = request.user.unwrap();
+        let id = update_user.get_id();
+        let old_name = lock.get_user_name_by_id(id).unwrap();
+        let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
+        request.update_fields.into_iter().for_each(|field| {
+            if field == UpdateField::Super as i32 {
+                user_info.is_supper = update_user.is_supper;
+            } else if field == UpdateField::Login as i32 {
+                user_info.can_login = update_user.can_login;
+            } else if field == UpdateField::CreateDb as i32 {
+                user_info.can_create_db = update_user.can_create_db;
+            } else if field == UpdateField::CreateUser as i32 {
+                user_info.can_create_user = update_user.can_create_user;
+            } else if field == UpdateField::AuthInfo as i32 {
+                user_info.auth_info = update_user.auth_info.clone();
+            } else if field == UpdateField::Rename as i32 {
+                user_info.name = update_user.name.clone();
+            }
+        });
+        lock.update_user(update_user);
+        Ok(())
+    }
+
     /// In `MockUserInfoWriter`, we don't support expand privilege with `GrantAllTables` and
     /// `GrantAllSources` when grant privilege to user.
     async fn grant_privilege(
@@ -480,6 +503,7 @@ impl MockUserInfoWriter {
             name: DEFAULT_SUPER_USER.to_string(),
             is_supper: true,
             can_create_db: true,
+            can_create_user: true,
             can_login: true,
             ..Default::default()
         });

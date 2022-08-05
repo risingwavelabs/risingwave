@@ -118,7 +118,7 @@ impl SharedBufferBatch {
                 k.len() + {
                     match v {
                         HummockValue::Put(val) => val.len(),
-                        HummockValue::Delete() => 0,
+                        HummockValue::Delete => 0,
                     }
                 }
             })

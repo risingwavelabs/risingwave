@@ -2,13 +2,12 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::expr::expr_node::Type;
 
+use super::BoxedRule;
 use crate::expr::{align_types, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::rule::Rule;
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
-
-use super::BoxedRule;
 
 pub struct PushCalculationOfJoinRule {}
 

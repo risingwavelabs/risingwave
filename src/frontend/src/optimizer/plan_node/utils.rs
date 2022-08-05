@@ -29,6 +29,7 @@ pub struct TableCatalogBuilder {
     column_names: HashMap<String, i32>,
     order_key: Vec<FieldOrder>,
     pk_indices: Vec<usize>,
+    properties: HashMap<String, String>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -70,6 +71,11 @@ impl TableCatalogBuilder {
         });
     }
 
+    /// Add `properties` for `TableCatalog`
+    pub fn add_properties(&mut self, properties: HashMap<String, String>) {
+        self.properties = properties;
+    }
+
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
@@ -96,7 +102,7 @@ impl TableCatalogBuilder {
             appendonly: append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
-            properties: HashMap::default(),
+            properties: self.properties,
             read_pattern_prefix_column: 0,
         }
     }
@@ -138,7 +144,7 @@ impl TableCatalogBuilder {
 
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {
-    pub vec: &'a [usize],
+    pub indices: &'a [usize],
     pub input_schema: &'a Schema,
 }
 
@@ -147,7 +153,7 @@ impl fmt::Display for IndicesDisplay<'_> {
         write!(
             f,
             "[{}]",
-            self.vec
+            self.indices
                 .iter()
                 .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
                 .collect_vec()
@@ -161,7 +167,7 @@ impl fmt::Debug for IndicesDisplay<'_> {
         write!(
             f,
             "[{}]",
-            self.vec
+            self.indices
                 .iter()
                 .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
                 .collect_vec()

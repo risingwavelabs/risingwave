@@ -85,7 +85,7 @@ impl fmt::Display for LogicalJoin {
                     &format_args!(
                         "{:?}",
                         &IndicesDisplay {
-                            vec: self.output_indices(),
+                            indices: self.output_indices(),
                             input_schema: &concat_schema,
                         }
                     ),
@@ -95,15 +95,6 @@ impl fmt::Display for LogicalJoin {
 
         builder.finish()
     }
-}
-
-fn has_duplicate_index(indices: &[usize]) -> bool {
-    for i in 1..indices.len() {
-        if indices[i..].contains(&indices[i - 1]) {
-            return true;
-        }
-    }
-    false
 }
 
 impl LogicalJoin {
@@ -120,7 +111,6 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
-        assert!(!has_duplicate_index(&output_indices));
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
         let pk_indices = Self::derive_pk(
@@ -158,6 +148,7 @@ impl LogicalJoin {
             }
             JoinType::LeftSemi | JoinType::LeftAnti => left_len,
             JoinType::RightSemi | JoinType::RightAnti => right_len,
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -181,6 +172,7 @@ impl LogicalJoin {
 
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -195,6 +187,7 @@ impl LogicalJoin {
             }
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -481,7 +474,7 @@ impl LogicalJoin {
     fn convert_to_lookup_join(
         &self,
         logical_join: LogicalJoin,
-        predicate: EqJoinPredicate,
+        mut predicate: EqJoinPredicate,
     ) -> Option<PlanRef> {
         if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
             log::warn!(
@@ -500,18 +493,27 @@ impl LogicalJoin {
         let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
         predicates must be the same as the primary key. A different join will be used instead.";
 
-        let order_col_indices = table_desc.order_column_indices();
-        if order_col_indices.len() != predicate.right_eq_indexes().len() {
+        let order_col_ids = table_desc.order_column_ids();
+        if order_col_ids.len() != predicate.right_eq_indexes().len() {
             log::warn!("{}", eq_col_warn_message);
             return None;
         }
 
-        for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
-            if order_col_indices[i] != output_column_ids[eq_idx].get_id() as usize {
+        for (order_col_id, eq_idx) in order_col_ids
+            .into_iter()
+            .zip_eq(predicate.right_eq_indexes())
+        {
+            if order_col_id != output_column_ids[eq_idx] {
                 log::warn!("{}", eq_col_warn_message);
                 return None;
             }
         }
+
+        let new_other = predicate
+            .other_cond()
+            .clone()
+            .and(logical_scan.predicate().clone());
+        *predicate.other_cond_mut() = new_other;
 
         Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
     }
@@ -613,8 +615,6 @@ impl ColPrunable for LogicalJoin {
             .map(|i| self.output_indices[*i])
             .collect_vec();
         let left_len = self.left.schema().fields.len();
-        dbg!(&required_cols);
-        dbg!(self.output_indices());
 
         let total_len = self.left().schema().len() + self.right().schema().len();
         let mut resized_required_cols = FixedBitSet::with_capacity(total_len);
@@ -911,12 +911,7 @@ impl ToStream for LogicalJoin {
                 return Err(nested_loop_join_error);
             };
 
-            let left = self
-                .left()
-                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.left().schema().len(),
-                    &[left_ref_index],
-                ))?;
+            let left = self.left().to_stream()?;
 
             let right = self
                 .right()

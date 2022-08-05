@@ -14,3 +14,11 @@
 
 #[cfg(feature = "enable_sqlsmith_unit_test")]
 mod frontend;
+
+#[cfg(feature = "enable_sqlsmith_unit_test")]
+fn main() {
+    frontend::run();
+}
+
+#[cfg(not(feature = "enable_sqlsmith_unit_test"))]
+fn main() {}

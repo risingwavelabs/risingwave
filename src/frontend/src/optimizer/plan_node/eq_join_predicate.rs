@@ -122,6 +122,11 @@ impl EqJoinPredicate {
         &self.other_cond
     }
 
+    /// Get a mutable reference to the join predicate's other cond.
+    pub fn other_cond_mut(&mut self) -> &mut Condition {
+        &mut self.other_cond
+    }
+
     /// Get a reference to the join predicate's eq keys.
     pub fn eq_keys(&self) -> &[(InputRef, InputRef)] {
         self.eq_keys.as_ref()

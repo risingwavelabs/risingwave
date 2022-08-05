@@ -48,9 +48,15 @@
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 
+- input: ALTER USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
+  formatted_sql: ALTER USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
+
+- input: ALTER USER user RENAME TO another
+  formatted_sql: ALTER USER user RENAME TO another
+
 - input: CREATE SINK snk
   error_msg: |
     sql parser error: Expected FROM, found: EOF
 
-- input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (sink = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
-  formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (sink = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+- input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+  formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')

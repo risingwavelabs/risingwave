@@ -55,6 +55,10 @@ impl UserInfoManager {
         self.user_name_by_id.get(&id).cloned()
     }
 
+    pub fn get_user_name_map(&self) -> &HashMap<UserId, String> {
+        &self.user_name_by_id
+    }
+
     pub fn create_user(&mut self, user_info: UserInfo) {
         let id = user_info.id;
         let name = user_info.name.clone();
@@ -72,7 +76,12 @@ impl UserInfoManager {
     pub fn update_user(&mut self, user_info: UserInfo) {
         let id = user_info.id;
         let name = user_info.name.clone();
-        self.user_by_name.insert(name.clone(), user_info).unwrap();
+        if let Some(old_name) = self.get_user_name_by_id(id) {
+            self.user_by_name.remove(&old_name);
+            self.user_by_name.insert(name.clone(), user_info);
+        } else {
+            self.user_by_name.insert(name.clone(), user_info).unwrap();
+        }
         self.user_name_by_id.insert(id, name).unwrap();
     }
 

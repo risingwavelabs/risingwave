@@ -939,6 +939,8 @@ pub enum Statement {
     },
     /// CREATE USER
     CreateUser(CreateUserStatement),
+    /// ALTER USER
+    AlterUser(AlterUserStatement),
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1329,6 +1331,9 @@ impl fmt::Display for Statement {
             Statement::CreateUser(statement) => {
                 write!(f, "CREATE USER {}", statement)
             }
+            Statement::AlterUser(statement) => {
+                write!(f, "ALTER USER {}", statement)
+            }
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
@@ -1597,6 +1602,19 @@ pub struct Function {
     // aggregate functions may contain order_by_clause
     pub order_by: Vec<OrderByExpr>,
     pub filter: Option<Box<Expr>>,
+}
+
+impl Function {
+    pub fn no_arg(name: ObjectName) -> Self {
+        Self {
+            name,
+            args: vec![],
+            over: None,
+            distinct: false,
+            order_by: vec![],
+            filter: None,
+        }
+    }
 }
 
 impl fmt::Display for Function {

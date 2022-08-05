@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::key::{key_with_epoch, next_key};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::LevelType;
 
@@ -75,8 +75,11 @@ impl HummockIteratorType for BackwardIter {
 }
 
 impl HummockStorage {
+    /// `iter_inner` impletements the `bloom_filter` filtering of sstable by `prefix_hint` (iff when
+    /// its Some), and builds iterator by `key_range`
     async fn iter_inner<R, B, T>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
@@ -149,34 +152,49 @@ impl HummockStorage {
                 assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
                 let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                let tables = match T::Direction::direction() {
-                    DirectionEnum::Backward => matched_table_infos
-                        .iter()
-                        .rev()
-                        .map(|&info| info.clone())
-                        .collect_vec(),
-                    DirectionEnum::Forward => matched_table_infos
-                        .iter()
-                        .map(|&info| info.clone())
-                        .collect_vec(),
+                let pruned_sstables = match T::Direction::direction() {
+                    DirectionEnum::Backward => matched_table_infos.iter().rev().collect_vec(),
+                    DirectionEnum::Forward => matched_table_infos.iter().collect_vec(),
                 };
+
+                let mut sstables = vec![];
+                for sstable_info in pruned_sstables {
+                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                        let sstable = self
+                            .sstable_store
+                            .sstable(sstable_info.id, &mut stats)
+                            .await?;
+
+                        if !sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                            sstables.push((*sstable_info).clone());
+                        }
+                    } else {
+                        sstables.push((*sstable_info).clone());
+                    }
+                }
 
                 overlapped_iters.push(HummockIteratorUnion::Third(ConcatIteratorInner::<
                     T::SstableIteratorType,
                 >::new(
-                    tables,
+                    sstables,
                     self.sstable_store(),
                     iter_read_options.clone(),
                 )));
             } else {
                 for table_info in table_infos.into_iter().rev() {
-                    let table = self
+                    let sstable = self
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
+                    if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                        if sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                            continue;
+                        }
+                    }
+
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
                         T::SstableIteratorType::create(
-                            table,
+                            sstable,
                             self.sstable_store(),
                             iter_read_options.clone(),
                         ),
@@ -184,6 +202,7 @@ impl HummockStorage {
                 }
             }
         }
+
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["sub-iter"])
@@ -264,13 +283,7 @@ impl HummockStorage {
                                 .await?;
                             table_counts += 1;
                             if let Some(v) = self
-                                .get_from_table(
-                                    table,
-                                    &internal_key,
-                                    key,
-                                    &read_options,
-                                    &mut stats,
-                                )
+                                .get_from_table(table, &internal_key, key, &mut stats)
                                 .await?
                             {
                                 return Ok(v);
@@ -287,20 +300,18 @@ impl HummockStorage {
             if level.table_infos.is_empty() {
                 continue;
             }
-            {
-                let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-                for table_info in table_infos.into_iter().rev() {
-                    let table = self
-                        .sstable_store
-                        .sstable(table_info.id, &mut stats)
-                        .await?;
-                    table_counts += 1;
-                    if let Some(v) = self
-                        .get_from_table(table, &internal_key, key, &read_options, &mut stats)
-                        .await?
-                    {
-                        return Ok(v);
-                    }
+            let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+            for table_info in table_infos {
+                let table = self
+                    .sstable_store
+                    .sstable(table_info.id, &mut stats)
+                    .await?;
+                table_counts += 1;
+                if let Some(v) = self
+                    .get_from_table(table, &internal_key, key, &mut stats)
+                    .await?
+                {
+                    return Ok(v);
                 }
             }
         }
@@ -353,6 +364,7 @@ impl StateStore for HummockStorage {
 
     fn scan<R, B>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -362,7 +374,7 @@ impl StateStore for HummockStorage {
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.iter(key_range, read_options)
+            self.iter(prefix_hint, key_range, read_options)
                 .await?
                 .collect(limit)
                 .await
@@ -447,12 +459,67 @@ impl StateStore for HummockStorage {
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(key_range, read_options)
+        if let Some(prefix_hint) = prefix_hint.as_ref() {
+            let next_key = next_key(prefix_hint);
+
+            // learn more detail about start_bound with storage_table.rs.
+            match key_range.start_bound() {
+                // it guarantees that the start bound must be included (some different case)
+                // 1. Include(pk + col_bound) => prefix_hint <= start_bound <
+                // next_key(prefix_hint)
+                //
+                // for case2, frontend need to reject this, avoid excluded start_bound and
+                // transform it to included(next_key), without this case we can just guarantee
+                // that start_bound < next_key
+                //
+                // 2. Include(next_key(pk +
+                // col_bound)) => prefix_hint <= start_bound <= next_key(prefix_hint)
+                //
+                // 3. Include(pk) => prefix_hint <= start_bound < next_key(prefix_hint)
+                Included(range_start) | Excluded(range_start) => {
+                    assert!(range_start.as_ref() >= prefix_hint.as_slice());
+                    assert!(range_start.as_ref() < next_key.as_slice() || next_key.is_empty());
+                }
+
+                _ => unreachable!(),
+            }
+
+            match key_range.end_bound() {
+                Included(range_end) => {
+                    assert!(range_end.as_ref() >= prefix_hint.as_slice());
+                    assert!(range_end.as_ref() < next_key.as_slice() || next_key.is_empty());
+                }
+
+                // 1. Excluded(end_bound_of_prefix(pk + col)) => prefix_hint < end_bound <=
+                // next_key(prefix_hint)
+                //
+                // 2. Excluded(pk + bound) => prefix_hint < end_bound <=
+                // next_key(prefix_hint)
+                Excluded(range_end) => {
+                    assert!(range_end.as_ref() > prefix_hint.as_slice());
+                    assert!(range_end.as_ref() <= next_key.as_slice() || next_key.is_empty());
+                }
+
+                std::ops::Bound::Unbounded => {
+                    assert!(next_key.is_empty());
+                }
+            }
+        } else {
+            // not check
+        }
+
+        // TODO: transfer prefix_hint to iter_inner next pr
+        self.iter_inner::<_, _, ForwardIter>(None, key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -470,7 +537,7 @@ impl StateStore for HummockStorage {
             key_range.end_bound().map(|v| v.as_ref().to_vec()),
             key_range.start_bound().map(|v| v.as_ref().to_vec()),
         );
-        self.iter_inner::<_, _, BackwardIter>(key_range, read_options)
+        self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
@@ -479,10 +546,11 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
-            self.local_version_manager()
+            let size = self
+                .local_version_manager()
                 .sync_shared_buffer(epoch)
                 .await?;
-            Ok(())
+            Ok(size)
         }
     }
 

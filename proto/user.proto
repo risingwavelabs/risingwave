@@ -9,10 +9,11 @@ option optimize_for = SPEED;
 // AuthInfo is the information required to login to a server.
 message AuthInfo {
   enum EncryptionType {
-    UNKNOWN = 0;
-    PLAINTEXT = 1;
-    SHA256 = 2;
-    MD5 = 3;
+    UNSPECIFIED = 0;
+    UNKNOWN = 1;
+    PLAINTEXT = 2;
+    SHA256 = 3;
+    MD5 = 4;
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;
@@ -24,23 +25,25 @@ message UserInfo {
   string name = 2;
   bool is_supper = 3;
   bool can_create_db = 4;
-  bool can_login = 5;
-  AuthInfo auth_info = 6;
+  bool can_create_user = 5;
+  bool can_login = 6;
+  AuthInfo auth_info = 7;
 
   /// Granted privileges will be only updated through the command of GRANT/REVOKE.
-  repeated GrantPrivilege grant_privileges = 7;
+  repeated GrantPrivilege grant_privileges = 8;
 }
 
 // GrantPrivilege defines a privilege granted to a user.
 message GrantPrivilege {
   enum Action {
-    UNKNOWN = 0;
-    SELECT = 1;
-    INSERT = 2;
-    UPDATE = 3;
-    DELETE = 4;
-    CREATE = 5;
-    CONNECT = 6;
+    UNSPECIFIED = 0;
+    UNKNOWN = 1;
+    SELECT = 2;
+    INSERT = 3;
+    UPDATE = 4;
+    DELETE = 5;
+    CREATE = 6;
+    CONNECT = 7;
   }
 
   message ActionWithGrantOption {
@@ -78,6 +81,25 @@ message DropUserResponse {
   uint64 version = 2;
 }
 
+message UpdateUserRequest {
+  enum UpdateField {
+    UNKNOWN = 0;
+    SUPER = 1;
+    LOGIN = 2;
+    CREATE_DB = 3;
+    AUTH_INFO = 4;
+    RENAME = 5;
+    CREATE_USER = 6;
+  }
+  UserInfo user = 1;
+  repeated UpdateField update_fields = 2;
+}
+
+message UpdateUserResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message GrantPrivilegeRequest {
   repeated uint32 user_ids = 1;
   repeated GrantPrivilege privileges = 2;
@@ -109,6 +131,7 @@ service UserService {
   // https://developers.google.com/protocol-buffers/docs/reference/java/com/google/protobuf/FieldMask.html.
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc DropUser(DropUserRequest) returns (DropUserResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
 
   // GrantPrivilege grants a privilege to a user.
   rpc GrantPrivilege(GrantPrivilegeRequest) returns (GrantPrivilegeResponse);
