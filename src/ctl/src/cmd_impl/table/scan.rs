@@ -14,7 +14,7 @@
 
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
-use risingwave_frontend::catalog::TableCatalog;
+use risingwave_frontend::TableCatalog;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
