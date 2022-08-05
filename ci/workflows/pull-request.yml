@@ -56,8 +56,8 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (async stack trace)"
-    command: "RW_ASYNC_STACK_TRACE=true ci/scripts/e2e-test.sh -p dev"
+  - label: "end-to-end test (parallel)"
+    command: "ci/scripts/e2e-test-parallel.sh -p dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -68,20 +68,7 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
-
-  # - label: "end-to-end test (parallel)"
-  #   command: "ci/scripts/e2e-test-parallel.sh -p dev"
-  #   depends_on: "build"
-  #   plugins:
-  #     - gencer/cache#v2.4.10: *cargo-cache
-  #     - docker-compose#v3.9.0:
-  #         run: rw-build-env
-  #         config: ci/docker-compose.yml
-  #         mount-buildkite-agent: true
-  #     - ./ci/plugins/upload-failure-logs
-  #   timeout_in_minutes: 10
-  #   retry: *auto-retry
-  #   soft_fail: true
+    soft_fail: true
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh"
