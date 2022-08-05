@@ -62,3 +62,27 @@ query I
 select count(*) from (values (1, 2), (3, 4)) as a, (values (9),(4),(1)) as b;
 ----
 6
+
+statement ok
+create table t(x int);
+
+statement ok
+create index i on t(x);
+
+statement ok
+insert into t values (1),(2),(3),(4),(5);
+
+query I rowsort
+Select * from t join i using(x)
+----
+1
+2
+3
+4
+5
+
+statement ok
+drop index i;
+
+statement ok
+drop table t;

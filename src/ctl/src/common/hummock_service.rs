@@ -86,8 +86,11 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>, Metrics)> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
-        let (heartbeat_handle, heartbeat_shutdown_sender) =
-            MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
+        let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
+            meta_client.clone(),
+            Duration::from_millis(1000),
+            vec![],
+        );
         self.heartbeat_handle = Some(heartbeat_handle);
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 

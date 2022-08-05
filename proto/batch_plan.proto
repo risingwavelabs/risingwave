@@ -10,7 +10,7 @@ import "plan_common.proto";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {
-  plan_common.CellBasedTableDesc table_desc = 1;
+  plan_common.StorageTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
   // All the ranges need to be read. i.e., they are OR'ed.
   //
@@ -197,7 +197,7 @@ message LookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
   repeated uint32 build_side_key = 3;
-  plan_common.CellBasedTableDesc probe_side_table_desc = 4;
+  plan_common.StorageTableDesc probe_side_table_desc = 4;
   repeated uint32 probe_side_vnode_mapping = 5;
   repeated int32 probe_side_column_ids = 6;
   repeated uint32 output_indices = 7;

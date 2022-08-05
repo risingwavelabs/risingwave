@@ -480,6 +480,8 @@ impl UserInfoWriter for MockUserInfoWriter {
                 user_info.can_login = update_user.can_login;
             } else if field == UpdateField::CreateDb as i32 {
                 user_info.can_create_db = update_user.can_create_db;
+            } else if field == UpdateField::CreateUser as i32 {
+                user_info.can_create_user = update_user.can_create_user;
             } else if field == UpdateField::AuthInfo as i32 {
                 user_info.auth_info = update_user.auth_info.clone();
             } else if field == UpdateField::Rename as i32 {
@@ -568,6 +570,7 @@ impl MockUserInfoWriter {
             name: DEFAULT_SUPER_USER.to_string(),
             is_supper: true,
             can_create_db: true,
+            can_create_user: true,
             can_login: true,
             ..Default::default()
         });

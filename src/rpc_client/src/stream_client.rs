@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, Hash};
+use std::sync::Arc;
 
-pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
-    fn encoded_len() -> usize;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 
-    fn encode(&self, buf: &mut [u8]);
+use crate::{Channel, RpcClient, RpcClientPool};
 
-    fn decode(buf: &[u8]) -> Self;
+pub type StreamClient = StreamServiceClient<Channel>;
+
+impl RpcClient for StreamClient {
+    fn new_client(_host_addr: HostAddr, channel: Channel) -> Self {
+        Self::new(channel)
+    }
 }
 
-pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
+pub type StreamClientPool = RpcClientPool<StreamClient>;
+pub type StreamClientPoolRef = Arc<StreamClientPool>;
