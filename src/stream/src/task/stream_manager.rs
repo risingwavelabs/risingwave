@@ -564,17 +564,16 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_sender = self.stack_trace_manager.register(actor_id);
+            let trace_reporter = self.stack_trace_manager.register(actor_id);
 
             self.handles.insert(
                 actor_id,
-                tokio::spawn(monitor.instrument(async_stack_trace::stack_traced(
+                tokio::spawn(monitor.instrument(trace_reporter.trace(
                     async move {
                         // unwrap the actor result to panic on error
                         actor.run().await.expect("actor failed");
                     },
                     format!("Actor {actor_id}"),
-                    trace_sender,
                     Duration::from_millis(1000),
                 ))),
             );
