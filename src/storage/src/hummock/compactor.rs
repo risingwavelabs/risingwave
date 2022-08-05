@@ -67,15 +67,15 @@ pub struct RemoteBuilderFactory {
 #[async_trait::async_trait]
 impl TableBuilderFactory for RemoteBuilderFactory {
     async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
-        let timer = Instant::now();
-        let table_id = self.sstable_id_manager.get_new_sst_id().await?;
-        let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-        self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let tracker = self
             .limiter
             .require_memory(self.options.capacity as u64 + self.options.block_capacity as u64)
             .await
             .unwrap();
+        let timer = Instant::now();
+        let table_id = self.sstable_id_manager.get_new_sst_id().await?;
+        let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
+        self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let builder = SstableBuilder::new(table_id, self.options.clone());
         Ok((tracker, builder))
     }

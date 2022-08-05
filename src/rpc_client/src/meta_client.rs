@@ -339,7 +339,7 @@ impl MetaClient {
                     }
                 }
                 let mut extra_info = Vec::with_capacity(extra_info_sources.len());
-                for extra_info_source in extra_info_sources.iter() {
+                for extra_info_source in &extra_info_sources {
                     if let Some(info) = extra_info_source.get_extra_info().await {
                         // None means the info is not available at the moment, and won't be sent to
                         // meta.

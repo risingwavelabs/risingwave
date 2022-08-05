@@ -15,15 +15,16 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::future::Future;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use parking_lot::Mutex;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstIdRange};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Notify, RwLock};
 
 use crate::hummock::{HummockError, HummockResult};
 
@@ -35,6 +36,7 @@ pub type SstableIdManagerRef = Arc<SstableIdManager>;
 /// During full GC, SST in object store with id >= watermark SST id will be excluded from orphan SST
 /// candidate and thus won't be deleted.
 pub struct SstableIdManager {
+    notifier: Mutex<Option<Arc<Notify>>>,
     available_sst_ids: Mutex<SstIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -44,6 +46,7 @@ pub struct SstableIdManager {
 impl SstableIdManager {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>, remote_fetch_number: u32) -> Self {
         Self {
+            notifier: Default::default(),
             available_sst_ids: Mutex::new(SstIdRange::new(
                 HummockSstableId::MIN,
                 HummockSstableId::MIN,
@@ -67,25 +70,57 @@ impl SstableIdManager {
     where
         F: Fn(&mut SstIdRange) -> Option<HummockSstableId>,
     {
-        let mut guard = self.available_sst_ids.lock().await;
-        let available_sst_ids = guard.deref_mut();
-        if available_sst_ids.peek_next_sst_id().is_none() {
-            let new_sst_ids = self
+        loop {
+            // 1. Try to get
+            if let Some(new_id) = f(self.available_sst_ids.lock().deref_mut()) {
+                return Ok(new_id);
+            }
+            // 2. Otherwise either fetch new ids, or wait for previous fetch if any.
+            let (notify, to_fetch) = {
+                let mut guard = self.notifier.lock();
+                if let Some(new_id) = f(self.available_sst_ids.lock().deref_mut()) {
+                    return Ok(new_id);
+                }
+                match guard.deref() {
+                    None => {
+                        let notify = Arc::new(Notify::new());
+                        *guard = Some(notify.clone());
+                        (notify, true)
+                    }
+                    Some(notify) => (notify.clone(), false),
+                }
+            };
+            if !to_fetch {
+                // Wait for previous fetch
+                notify.notified().await;
+                notify.notify_one();
+                continue;
+            }
+            // Fetch new ids.
+            let new_sst_ids = match self
                 .hummock_meta_client
                 .get_new_sst_ids(self.remote_fetch_number)
                 .await
-                .map_err(HummockError::meta_error)?;
-
+                .map_err(HummockError::meta_error)
+            {
+                Ok(new_sst_ids) => new_sst_ids,
+                Err(err) => {
+                    self.notifier.lock().take().unwrap().notify_one();
+                    return Err(err);
+                }
+            };
+            let mut guard = self.available_sst_ids.lock();
+            let available_sst_ids = guard.deref_mut();
             if new_sst_ids.start_id < available_sst_ids.end_id {
+                self.notifier.lock().take().unwrap().notify_one();
                 return Err(HummockError::meta_error(format!(
                     "SST id moves backwards. new {} < old {}",
                     new_sst_ids.start_id, available_sst_ids.end_id
                 )));
             }
             *available_sst_ids = new_sst_ids;
+            self.notifier.lock().take().unwrap().notify_one();
         }
-        f(available_sst_ids)
-            .ok_or_else(|| HummockError::meta_error("get_new_sst_ids RPC returns empty result"))
     }
 
     /// Adds a new watermark SST id using the next unused SST id.
@@ -115,7 +150,7 @@ impl SstableIdManager {
 
     /// Returns GC watermark. It equals
     /// - min(effective watermarks), if number of effective watermarks > 0.
-    /// - HummockSstableId::MAX, if no effective watermark.
+    /// - `HummockSstableId::MAX`, if no effective watermark.
     pub async fn global_watermark_sst_id(&self) -> HummockSstableId {
         self.sst_id_tracker
             .tracking_sst_ids()
