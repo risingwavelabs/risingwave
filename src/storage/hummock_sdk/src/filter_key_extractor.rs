@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
@@ -234,6 +235,8 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
 struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
     notify: Notify,
+    total_file_size_kb: AtomicUsize,
+    total_bloom_filter: AtomicUsize,
 }
 
 impl FilterKeyExtractorManagerInner {
@@ -286,6 +289,24 @@ impl FilterKeyExtractorManagerInner {
 
         multi_filter_key_extractor
     }
+
+    fn update_bloom_filter_avg_size(&self, sst_size: usize, bloom_filter_size: usize) {
+        // store KB to avoid small result of div
+        self.total_file_size_kb
+            .fetch_add(sst_size / 1024, Ordering::SeqCst);
+        self.total_bloom_filter
+            .fetch_add(bloom_filter_size, Ordering::SeqCst);
+    }
+
+    pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> size {
+        let sst_size_mb = sst_size >> 20;
+        let total_bloom_filter = self.total_bloom_filter.load(Ordering::Acquire);
+        let total_file_size_mb = self.total_file_size_kb.load(Ordering::Acquire) / 1024;
+        if total_file_size_mb == 0 {
+            return 0;
+        }
+        total_bloom_filter / total_file_size_mb * sst_size_mb
+    }
 }
 
 /// FilterKeyExtractorManager is a wrapper for inner, and provide a protected read and write
@@ -316,6 +337,15 @@ impl FilterKeyExtractorManager {
     /// table_id does not util version update (notify), and retry to get
     pub async fn acquire(&self, table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
         self.inner.acquire(table_id_set).await
+    }
+
+    pub fn update_bloom_filter_avg_size(&self, sst_size: usize, bloom_filter_size: usize) {
+        self.inner
+            .update_bloom_filter_avg_size(sst_size, bloom_filter_size);
+    }
+
+    pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> usize {
+        self.inner.estimate_bloom_filter_size(sst_size_mb)
     }
 }
 

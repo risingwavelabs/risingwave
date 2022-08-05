@@ -41,16 +41,20 @@ pub struct SstableBuilderOptions {
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
+    /// Approximate bloom filter capacity.
+    pub estimate_bloom_filter_capacity: usize,
 }
 
 impl From<&StorageConfig> for SstableBuilderOptions {
     fn from(options: &StorageConfig) -> SstableBuilderOptions {
+        let capacity = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
-            capacity: (options.sstable_size_mb as usize) * (1 << 20),
+            capacity,
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
+            estimate_bloom_filter_capacity: capacity / DEFAULT_ENTRY_SIZE,
         }
     }
 }
@@ -63,6 +67,7 @@ impl Default for SstableBuilderOptions {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
+            estimate_bloom_filter_capacity: DEFAULT_SSTABLE_SIZE / DEFAULT_ENTRY_SIZE,
         }
     }
 }
@@ -169,7 +174,7 @@ impl SstableBuilder {
                     self.user_key_hashes.len(),
                     self.options.bloom_false_positive,
                 );
-                Bloom::build_from_key_hashes(&self.user_key_hashes, bits_per_key).to_vec()
+                Bloom::build_from_key_hashes(&self.user_key_hashes, bits_per_key)
             } else {
                 vec![]
             },
