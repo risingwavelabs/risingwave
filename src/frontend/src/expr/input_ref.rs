@@ -37,7 +37,7 @@ pub fn input_ref_to_column_indices(input_refs: &[InputRef]) -> Vec<usize> {
 
 impl fmt::Display for RawInputRefDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${}", self.0)
+        (self as &dyn fmt::Debug).fmt(f)
     }
 }
 
@@ -55,15 +55,7 @@ pub struct InputRefDisplay<'a> {
 
 impl fmt::Display for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.input_schema
-                .fields
-                .get(self.input_ref.index)
-                .unwrap()
-                .name
-        )
+        (self as &dyn fmt::Debug).fmt(f)
     }
 }
 
