@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::ColumnCatalog;
 use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use super::create_source::make_prost_source;
-use crate::binder::expr::{bind_data_type, bind_struct_field};
+use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Order, RequiredDist};
