@@ -194,14 +194,15 @@ where
         info: Vec<heartbeat_request::extra_info::Info>,
     ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
-        let core = self.core.write().await;
-        if let Some(mut worker) = core.get_worker_by_id(worker_id) {
-            worker.update_ttl(self.max_heartbeat_interval);
-            worker.update_info(info);
-            Ok(())
-        } else {
-            bail!("unknown worker id: {}", worker_id);
+        let mut core = self.core.write().await;
+        for worker in core.workers.values_mut() {
+            if worker.worker_id() == worker_id {
+                worker.update_ttl(self.max_heartbeat_interval);
+                worker.update_info(info);
+                return Ok(());
+            }
         }
+        bail!("unknown worker id: {}", worker_id);
     }
 
     pub async fn start_heartbeat_checker(
@@ -211,6 +212,7 @@ where
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(check_interval);
+            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
                     // Wait for interval
@@ -221,27 +223,32 @@ where
                         return;
                     }
                 }
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("Clock may have gone backwards")
-                    .as_secs();
-                let mut workers_to_init_or_delete = cluster_manager
-                    .core
-                    .read()
-                    .await
-                    .workers
-                    .values()
-                    .filter(|worker| worker.expire_at() < now)
-                    .cloned()
-                    .collect_vec();
-                // 1. Initialize new workers' expire_at.
-                for mut worker in
-                    workers_to_init_or_delete.drain_filter(|w| w.expire_at() == INVALID_EXPIRE_AT)
-                {
-                    worker.update_ttl(cluster_manager.max_heartbeat_interval);
-                }
-                // 2. Delete expired workers.
-                for worker in workers_to_init_or_delete {
+                let (workers_to_delete, now) = {
+                    let mut core = cluster_manager.core.write().await;
+                    let workers = &mut core.workers;
+                    // 1. Initialize new workers' TTL.
+                    for worker in workers
+                        .values_mut()
+                        .filter(|worker| worker.expire_at() == INVALID_EXPIRE_AT)
+                    {
+                        worker.update_ttl(cluster_manager.max_heartbeat_interval);
+                    }
+                    // 2. Collect expired workers.
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Clock may have gone backwards")
+                        .as_secs();
+                    (
+                        workers
+                            .values()
+                            .filter(|worker| worker.expire_at() < now)
+                            .cloned()
+                            .collect_vec(),
+                        now,
+                    )
+                };
+                // 3. Delete expired workers.
+                for worker in workers_to_delete {
                     let key = worker.key().expect("illegal key");
                     match cluster_manager.delete_worker_node(key.clone()).await {
                         Ok(_) => {
@@ -251,21 +258,15 @@ where
                                 .delete_sender(WorkerKey(key.clone()))
                                 .await;
                             tracing::warn!(
-                                "Deleted expired worker {} {}:{}; expired at {}, now {}",
-                                worker.worker_id(),
-                                key.host,
-                                key.port,
-                                worker.expire_at(),
+                                "Deleted expired worker {:#?}, current timestamp {}",
+                                worker,
                                 now,
                             );
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {:?}",
-                                worker.worker_id(),
-                                key.host,
-                                key.port,
-                                worker.expire_at(),
+                                "Failed to delete expired worker {:#?}, current timestamp {}. {:?}",
+                                worker,
                                 now,
                                 err,
                             );
