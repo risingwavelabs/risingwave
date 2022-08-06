@@ -261,9 +261,9 @@ cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
-[tasks.pre-start-playground]
+[tasks.pre-start-dev]
 category = "RiseDev - Prepare"
-description = "Prepare playground by downloading necessary tools and build required components"
+description = "Prepare dev cluster by downloading necessary tools and build required components"
 dependencies = [
   "download-minio",
   "download-mcli",
@@ -336,10 +336,10 @@ alias = "dev"
 
 [tasks.dev]
 category = "RiseDev - Start"
-dependencies = ["pre-start-playground"]
-command = "target/${BUILD_MODE_DIR}/risedev-playground"
+dependencies = ["pre-start-dev"]
+command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
-description = "Start a full RisingWave dev cluster using risedev-playground"
+description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]
 category = "RiseDev - Start"
@@ -384,7 +384,7 @@ do
 done
 
 echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
 echo
 
 echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
@@ -559,10 +559,10 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 
 [tasks.ci-start]
 category = "RiseDev - CI"
-dependencies = ["clean-data", "pre-start-playground"]
-command = "target/${BUILD_MODE_DIR}/risedev-playground"
+dependencies = ["clean-data", "pre-start-dev"]
+command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
-description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
+description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.ci-kill]
 category = "RiseDev - CI"

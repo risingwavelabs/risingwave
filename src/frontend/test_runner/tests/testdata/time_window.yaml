@@ -174,9 +174,9 @@
 - sql: |
     with t(ts) as (values ('2020-01-01 12:00:00'::timestamp)) select * from tumble(t, ts, interval '10' second) as z;
   logical_plan: |
-    LogicalProject { exprs: [, TumbleStart(, '00:00:10':Interval), (TumbleStart(, '00:00:10':Interval) + '00:00:10':Interval)] }
-      LogicalProject { exprs: [, TumbleStart(, '00:00:10':Interval), (TumbleStart(, '00:00:10':Interval) + '00:00:10':Interval)] }
-        LogicalValues { rows: [['2020-01-01 12:00:00':Varchar::Timestamp]], schema: Schema { fields: [:Timestamp] } }
+    LogicalProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval), (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval)] }
+      LogicalProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval), (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval)] }
+        LogicalValues { rows: [['2020-01-01 12:00:00':Varchar::Timestamp]], schema: Schema { fields: [*VALUES*_0.column_0:Timestamp] } }
   batch_plan: |
-    BatchProject { exprs: [, TumbleStart(, '00:00:10':Interval), (TumbleStart(, '00:00:10':Interval) + '00:00:10':Interval)] }
+    BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval), (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval)] }
       BatchValues { rows: [['2020-01-01 12:00:00':Varchar::Timestamp]] }
