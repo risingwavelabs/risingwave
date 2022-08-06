@@ -34,7 +34,7 @@ use crate::hummock::iterator::{
     HummockIteratorUnion,
 };
 use crate::hummock::local_version::PinnedVersion;
-use crate::hummock::local_version::SyncUncommittedSstState::{SyncSst, SyncTask};
+use crate::hummock::local_version::SyncUncommittedSstState::{SyncSst, SyncTask,NoneData};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
@@ -426,7 +426,7 @@ impl HummockStorage {
                     })
                     .cloned()
                     .collect()],
-                _ => unreachable!(),
+                NoneData => {vec![]},
             })
             .collect();
         Ok((

@@ -47,10 +47,7 @@ use crate::hummock::local_version::SyncUncommittedSstState::{NoneData, SyncSst, 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::UploadTaskType::FlushWriteBatch;
-use crate::hummock::shared_buffer::{
-    get_sst_key_range, to_order_sorted, OrderIndex, SharedBufferEvent, UncommittedData,
-    WriteRequest,
-};
+use crate::hummock::shared_buffer::{get_sst_key_range, to_order_sorted, OrderIndex, SharedBufferEvent, UncommittedData, WriteRequest, KeyIndexedUncommittedData};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef,
@@ -146,6 +143,7 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
+    max_sync_epoch: RwLock<u64>,
 }
 
 impl LocalVersionManager {
@@ -202,6 +200,7 @@ impl LocalVersionManager {
                 sstable_id_manager,
                 filter_key_extractor_manager.clone(),
             )),
+            max_sync_epoch:RwLock::new(0),
         });
 
         // Pin and get the latest version.
@@ -486,15 +485,9 @@ impl LocalVersionManager {
         &self,
         epoch: HummockEpoch,
     ) -> HummockResult<(usize, Vec<LocalSstableInfo>)> {
-        self.local_version.write().add_sync_state(epoch, NoneData);
-        let (size, ssts) = self.sync_shared_buffer_epoch(epoch).await?;
-        Ok((size, ssts))
-    }
-
-    pub async fn sync_shared_buffer_epoch(
-        &self,
-        epoch: HummockEpoch,
-    ) -> HummockResult<(usize, Vec<LocalSstableInfo>)> {
+        if self.local_version.read().get_shared_buffer(epoch).is_none(){
+            return Ok((0,vec![]));
+        }
         tracing::trace!("sync epoch {}", epoch);
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
@@ -503,21 +496,47 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        let (uncommitted_data, task_write_batch_size) = match self
-            .local_version
-            .read()
-            .get_shared_buffer(epoch)
-            .and_then(|shared_buffer| shared_buffer.write().get_uncommitted_data())
-        {
-            Some(task) => task,
-            None => {
-                tracing::trace!("sync epoch {} has no more task to do", epoch);
-                return Ok((0, vec![]));
+        loop{
+            let max_sync_epoch_guard = self.max_sync_epoch.read();
+            let local_version_guard = self.local_version.read();
+            let epoch1 = local_version_guard.iter_shared_buffer().find(|(key,_)|{
+                key > &&max_sync_epoch_guard.clone()
+            });
+            if epoch1.is_none() || epoch1.unwrap().0 == &epoch{
+                break;
             }
+        }
+        let (uncommitted_data,task_write_batch_size) = {
+            let mut max_sync_epoch_guard = self.max_sync_epoch.write();
+            *max_sync_epoch_guard = epoch;
+            tracing::info!("epoch{:?}",epoch);
+            self.local_version.write().add_sync_state(epoch, NoneData);
+            let (uncommitted_data, task_write_batch_size) = match self
+                .local_version
+                .read()
+                .get_shared_buffer(epoch)
+                .and_then(|shared_buffer| shared_buffer.write().get_uncommitted_data())
+            {
+                Some(task) => task,
+                None => {
+                    tracing::trace!("sync epoch {} has no more task to do", epoch);
+                    return Ok((0, vec![]));
+                }
+            };
+            self.local_version.write()
+                .add_sync_state(epoch, SyncTask(uncommitted_data.clone()));
+            (uncommitted_data,task_write_batch_size)
         };
-        self.local_version
-            .write()
-            .add_sync_state(epoch, SyncTask(uncommitted_data.clone()));
+        let (size, ssts) = self.sync_shared_buffer_epoch(epoch,uncommitted_data,task_write_batch_size).await?;
+        Ok((size, ssts))
+    }
+
+    pub async fn sync_shared_buffer_epoch(
+        &self,
+        epoch: HummockEpoch,
+        uncommitted_data: KeyIndexedUncommittedData,
+        task_write_batch_size:usize,
+    ) -> HummockResult<(usize, Vec<LocalSstableInfo>)> {
         let task_payload = to_order_sorted(&uncommitted_data);
 
         let ssts = self.run_sync_upload_task(epoch, task_payload).await?;

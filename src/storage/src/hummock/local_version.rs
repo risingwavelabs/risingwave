@@ -79,6 +79,11 @@ impl LocalVersion {
                     uncommitted_sst_state,
                     SyncUncommittedSstState::NoneData
                 ));
+                if let Some(last) = self.sync_uncommitted_sst_vec.last() {
+                    assert!(
+                        last.0 < sync_epoch
+                    )
+                }
                 self.sync_uncommitted_sst_vec
                     .push((sync_epoch, uncommitted_sst_state));
                 return;
@@ -106,17 +111,6 @@ impl LocalVersion {
         &self,
     ) -> impl Iterator<Item = (&HummockEpoch, &Arc<RwLock<SharedBuffer>>)> {
         self.shared_buffer.iter()
-    }
-
-    /// Returns all shared buffer less than or equal to epoch
-    pub fn scan_shared_buffer<R>(
-        &self,
-        epoch_range: R,
-    ) -> impl Iterator<Item = (&HummockEpoch, &Arc<RwLock<SharedBuffer>>)>
-    where
-        R: RangeBounds<u64>,
-    {
-        self.shared_buffer.range(epoch_range)
     }
 
     pub fn new_shared_buffer(
@@ -166,7 +160,7 @@ impl LocalVersion {
                     let result_sync: Vec<SyncUncommittedSstState> = guard
                         .sync_uncommitted_sst_vec
                         .iter()
-                        .filter(|&node| node.0 <= read_epoch)
+                        .filter(|&node| node.0 <= read_epoch && node.0 > smallest_uncommitted_epoch)
                         .map(|(_, value)| value.clone())
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
