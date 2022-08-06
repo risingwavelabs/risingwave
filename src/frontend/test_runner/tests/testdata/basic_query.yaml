@@ -111,14 +111,14 @@
     delete from t;
   batch_plan: |
     BatchDelete { table: t }
-      BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: HashShard(t._row_id) }
+      BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |
     BatchDelete { table: t }
       BatchFilter { predicate: (t.v1 = 1:Int32) }
-        BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: HashShard(t._row_id) }
+        BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: SomeShard }
 - sql: |
     select * from generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: |
@@ -131,3 +131,19 @@
     select * from unnest(Array[Array[1,2,3], Array[4,5,6]]);
   batch_plan: |
     BatchTableFunction { Unnest(Array(Array(1:Int32, 2:Int32, 3:Int32), Array(4:Int32, 5:Int32, 6:Int32))) }
+- sql: |
+    create table t1 (x int);
+    select * from t1 where EXISTS(select * where t1.x=1);
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    select *;
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    select * where x = 1;
+  binder_error: 'Bind error: SELECT * with no tables specified is not valid'
+- sql: |
+    create table t ();
+    select * from t;
+  logical_plan: |
+    LogicalProject { exprs: [] }
+      LogicalScan { table: t, columns: [t._row_id] }

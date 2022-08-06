@@ -14,10 +14,10 @@
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Instant;
 
 use futures::Stream;
 use futures_async_stream::try_stream;
-use madsim::time::Instant;
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
@@ -122,7 +122,7 @@ impl RemoteInput {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
     ) {
-        let client = client_pool.get_client_for_addr(upstream_addr).await?;
+        let client = client_pool.get_by_addr(upstream_addr).await?;
         let stream = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
             .await?;

@@ -20,7 +20,7 @@ use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
-use crate::scheduler::SchedulerResult;
+use crate::scheduler::{SchedulerError, SchedulerResult};
 
 /// `WorkerNodeManager` manages live worker nodes.
 pub struct WorkerNodeManager {
@@ -69,7 +69,7 @@ impl WorkerNodeManager {
         let current_nodes = self.worker_nodes.read().unwrap();
         if current_nodes.is_empty() {
             tracing::error!("No worker node available.");
-            bail!("No worker node available");
+            return Err(SchedulerError::EmptyWorkerNodes);
         }
 
         Ok(current_nodes
@@ -82,10 +82,16 @@ impl WorkerNodeManager {
         self.worker_nodes.read().unwrap().len()
     }
 
+    /// If parallel unit ids is empty, the scheduler may fail to schedule any task and stuck at
+    /// schedule next stage. If we do not return error in this case, needs more complex control
+    /// logic above. Report in this function makes the schedule root fail reason more clear.
     pub fn get_workers_by_parallel_unit_ids(
         &self,
         parallel_unit_ids: &[ParallelUnitId],
     ) -> SchedulerResult<Vec<WorkerNode>> {
+        if parallel_unit_ids.is_empty() {
+            return Err(SchedulerError::EmptyWorkerNodes);
+        }
         let pu_to_worker = get_pu_to_worker_mapping(&self.worker_nodes.read().unwrap());
 
         let mut workers = Vec::with_capacity(parallel_unit_ids.len());

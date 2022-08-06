@@ -546,7 +546,7 @@ pub(crate) mod test {
         println!("list_curr_entries = {:?}", curr_entries);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[tokio::test]
     #[ignore]
     async fn test_s3_directory_entries_change() {
         let shared_config = new_share_config(TEST_REGION_NAME.to_string(), AwsCredential::Default)

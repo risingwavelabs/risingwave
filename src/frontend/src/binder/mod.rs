@@ -18,9 +18,9 @@ use std::sync::Arc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 
-pub mod bind_context;
+mod bind_context;
 mod delete;
-pub(crate) mod expr;
+mod expr;
 mod insert;
 mod query;
 mod relation;
@@ -33,7 +33,7 @@ mod values;
 
 pub use bind_context::{BindContext, LateralBindContext};
 pub use delete::BoundDelete;
-pub use expr::bind_data_type;
+pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{

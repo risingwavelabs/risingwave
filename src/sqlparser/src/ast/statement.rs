@@ -367,6 +367,8 @@ pub enum UserOption {
     NoSuperUser,
     CreateDB,
     NoCreateDB,
+    CreateUser,
+    NoCreateUser,
     Login,
     NoLogin,
     EncryptedPassword(AstString),
@@ -380,6 +382,8 @@ impl fmt::Display for UserOption {
             UserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
             UserOption::CreateDB => write!(f, "CREATEDB"),
             UserOption::NoCreateDB => write!(f, "NOCREATEDB"),
+            UserOption::CreateUser => write!(f, "CREATEUSER"),
+            UserOption::NoCreateUser => write!(f, "NOCREATEUSER"),
             UserOption::Login => write!(f, "LOGIN"),
             UserOption::NoLogin => write!(f, "NOLOGIN"),
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
@@ -410,6 +414,8 @@ impl ParseTo for UserOptions {
                     Keyword::NOSUPERUSER => UserOption::NoSuperUser,
                     Keyword::CREATEDB => UserOption::CreateDB,
                     Keyword::NOCREATEDB => UserOption::NoCreateDB,
+                    Keyword::CREATEUSER => UserOption::CreateUser,
+                    Keyword::NOCREATEUSER => UserOption::NoCreateUser,
                     Keyword::LOGIN => UserOption::Login,
                     Keyword::NOLOGIN => UserOption::NoLogin,
                     Keyword::PASSWORD => {
@@ -425,7 +431,7 @@ impl ParseTo for UserOptions {
                     }
                     _ => parser.expected(
                         "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | ENCRYPTED | PASSWORD | NULL",
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | ENCRYPTED | PASSWORD | NULL",
                         token,
                     )?,
                 };
@@ -433,7 +439,7 @@ impl ParseTo for UserOptions {
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | ENCRYPTED | PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | ENCRYPTED| PASSWORD | NULL",
                     token,
                 )?
             }

@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
@@ -38,7 +38,7 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -56,7 +56,6 @@ use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
-use crate::test_utils::MockUserInfoWriter;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -212,7 +211,7 @@ impl FrontendEnv {
     }
 
     pub fn mock() -> Self {
-        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient};
+        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
@@ -264,6 +263,7 @@ impl FrontendEnv {
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            vec![],
         );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
@@ -468,8 +468,8 @@ impl SessionImpl {
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,
-    observer_join_handle: JoinHandle<()>,
-    heartbeat_join_handle: JoinHandle<()>,
+    _observer_join_handle: JoinHandle<()>,
+    _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: Sender<()>,
 }
 
@@ -548,16 +548,10 @@ impl SessionManagerImpl {
             FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
-            observer_join_handle: join_handle,
-            heartbeat_join_handle,
+            _observer_join_handle: join_handle,
+            _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
         })
-    }
-
-    /// Used in unit test. Called before `LocalMeta::stop`.
-    pub fn terminate(&self) {
-        self.observer_join_handle.abort();
-        self.heartbeat_join_handle.abort();
     }
 }
 
@@ -615,10 +609,49 @@ impl Session for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = infer(self, stmt, sql).map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
+        // result of run_statement().
+        let rsp = match stmt {
+            Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
+                tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+                e
+            })?,
+            Statement::ShowObjects(show_object) => match show_object {
+                ShowObject::Columns { table: _ } => {
+                    vec![
+                        PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    ]
+                }
+                _ => {
+                    vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)]
+                }
+            },
+            Statement::ShowVariable { variable } => {
+                let name = &variable[0].value.to_lowercase();
+                if name.eq_ignore_ascii_case("ALL") {
+                    vec![
+                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+                    ]
+                } else {
+                    vec![PgFieldDescriptor::new(
+                        name.to_ascii_lowercase(),
+                        TypeOid::Varchar,
+                    )]
+                }
+            }
+            Statement::Describe { name: _ } => {
+                vec![
+                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                ]
+            }
+            _ => {
+                panic!("infer_return_type only support query statement");
+            }
+        };
         Ok(rsp)
     }
 

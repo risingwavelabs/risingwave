@@ -23,6 +23,7 @@ use tonic::{Request, Response, Status};
 
 use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::error::meta_error_to_tonic;
+use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
 use crate::MetaError;
@@ -33,6 +34,7 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     user_manager: UserInfoManagerRef<S>,
+    hummock_manager: HummockManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -44,12 +46,14 @@ where
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         user_manager: UserInfoManagerRef<S>,
+        hummock_manager: HummockManagerRef<S>,
     ) -> Self {
         Self {
             env,
             catalog_manager,
             cluster_manager,
             user_manager,
+            hummock_manager,
         }
     }
 
@@ -69,6 +73,7 @@ where
             .values()
             .cloned()
             .collect::<Vec<_>>();
+        let hummock_version = Some(self.hummock_manager.get_current_version().await);
 
         // Send the snapshot on subscription. After that we will send only updates.
         let result = match worker_type {
@@ -80,6 +85,7 @@ where
                 sink,
                 table,
                 users,
+                hummock_version: None,
             },
 
             WorkerType::Compactor => MetaSnapshot {
@@ -89,6 +95,7 @@ where
 
             WorkerType::ComputeNode => MetaSnapshot {
                 table,
+                hummock_version,
                 ..Default::default()
             },
 

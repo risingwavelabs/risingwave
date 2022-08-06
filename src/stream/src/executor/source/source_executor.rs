@@ -118,9 +118,9 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     /// Generate a row ID column.
-    fn gen_row_id_column(&mut self, len: usize) -> Column {
+    async fn gen_row_id_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len);
-        let row_ids = self.row_id_generator.next_batch(len);
+        let row_ids = self.row_id_generator.next_batch(len).await;
 
         for row_id in row_ids {
             builder.append(Some(row_id)).unwrap();
@@ -130,14 +130,16 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     /// Generate a row ID column according to ops.
-    fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
+    async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
         let len = column.array_ref().len();
         let mut builder = I64ArrayBuilder::new(len);
 
         for i in 0..len {
             // Only refill row_id for insert operation.
             if ops.get(i) == Some(&Op::Insert) {
-                builder.append(Some(self.row_id_generator.next())).unwrap();
+                builder
+                    .append(Some(self.row_id_generator.next().await))
+                    .unwrap();
             } else {
                 builder
                     .append(Some(
@@ -150,7 +152,7 @@ impl<S: StateStore> SourceExecutor<S> {
         Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
     }
 
-    fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
+    async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
         let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
@@ -161,9 +163,9 @@ impl<S: StateStore> SourceExecutor<S> {
         {
             let (ops, mut columns, bitmap) = chunk.into_inner();
             if append_only {
-                columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
             } else {
-                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops);
+                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
             }
             return StreamChunk::new(ops, columns, bitmap);
         }
@@ -341,8 +343,8 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
-                        SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true),
-                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false),
+                        SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true).await,
+                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false).await,
                     };
 
                     self.metrics
@@ -494,34 +496,28 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let source = source.clone();
-            tokio::spawn(async move {
-                let table_source = source.as_table_v2().unwrap();
-                table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            let table_source = source.as_table_v2().unwrap();
+            table_source.write_chunk(chunk).unwrap();
         };
 
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
+        let msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(msg.into_barrier().unwrap().epoch, Epoch::new_test_epoch(1));
+
         // Write 1st chunk
         write_chunk(chunk1);
 
-        for _ in 0..2 {
-            match executor.next().await.unwrap().unwrap() {
-                Message::Chunk(chunk) => assert_eq!(
-                    chunk,
-                    StreamChunk::from_pretty(
-                        " I i T
-                        U+ 1 1 foo
-                        U+ 2 2 bar
-                        U+ 3 3 baz",
-                    )
-                ),
-                Message::Barrier(barrier) => {
-                    assert_eq!(barrier.epoch, Epoch::new_test_epoch(1))
-                }
-            }
-        }
+        let msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I i T
+                U+ 1 1 foo
+                U+ 2 2 bar
+                U+ 3 3 baz",
+            )
+        );
 
         // Write 2nd chunk
         write_chunk(chunk2);
@@ -618,20 +614,16 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let source = source.clone();
-            tokio::spawn(async move {
-                let table_source = source.as_table_v2().unwrap();
-                table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            let table_source = source.as_table_v2().unwrap();
+            table_source.write_chunk(chunk).unwrap();
         };
-
-        write_chunk(chunk.clone());
 
         barrier_sender
             .send(Barrier::new_test_barrier(1).with_stop())
             .unwrap();
-
         executor.next().await.unwrap().unwrap();
+
+        write_chunk(chunk.clone());
         executor.next().await.unwrap().unwrap();
         write_chunk(chunk);
 
@@ -682,10 +674,15 @@ mod tests {
         }
     }
 
-    fn drop_row_id(chunk: StreamChunk) -> StreamChunk {
-        let (ops, mut columns, bitmap) = chunk.into_inner();
-        columns.remove(0);
-        StreamChunk::new(ops, columns, bitmap)
+    trait StreamChunkExt {
+        fn drop_row_id(self) -> Self;
+    }
+    impl StreamChunkExt for StreamChunk {
+        fn drop_row_id(self) -> StreamChunk {
+            let (ops, mut columns, bitmap) = self.into_inner();
+            columns.remove(0);
+            StreamChunk::new(ops, columns, bitmap)
+        }
     }
 
     #[tokio::test]
@@ -767,7 +764,10 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let chunk_1 = materialize.next().await.unwrap().unwrap().into_chunk();
+        let chunk_1 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
 
         let chunk_1_truth = StreamChunk::from_pretty(
             " I i
@@ -775,9 +775,10 @@ mod tests {
             + 0 833
             + 0 738
             + 0 344",
-        );
+        )
+        .drop_row_id();
 
-        assert_eq!(drop_row_id(chunk_1.unwrap()), drop_row_id(chunk_1_truth));
+        assert_eq!(chunk_1, chunk_1_truth);
 
         let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(
             Mutation::SourceChangeSplit(hashmap! {
@@ -802,7 +803,14 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let chunk_2 = materialize.next().await.unwrap().unwrap().into_chunk();
+        let chunk_2 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
+        let chunk_3 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
 
         let chunk_2_truth = StreamChunk::from_pretty(
             " I i
@@ -810,18 +818,19 @@ mod tests {
             + 0 425
             + 0 29
             + 0 201",
-        );
-        assert_eq!(drop_row_id(chunk_2.unwrap()), drop_row_id(chunk_2_truth));
-
-        let chunk_3 = materialize.next().await.unwrap().unwrap().into_chunk();
-
+        )
+        .drop_row_id();
         let chunk_3_truth = StreamChunk::from_pretty(
             " I i
             + 0 833
             + 0 533
             + 0 344",
+        )
+        .drop_row_id();
+        assert!(
+            chunk_2 == chunk_2_truth && chunk_3 == chunk_3_truth
+                || chunk_3 == chunk_2_truth && chunk_2 == chunk_3_truth
         );
-        assert_eq!(drop_row_id(chunk_3.unwrap()), drop_row_id(chunk_3_truth));
 
         let pause_barrier =
             Barrier::new_test_barrier(curr_epoch + 2).with_mutation(Mutation::Pause);

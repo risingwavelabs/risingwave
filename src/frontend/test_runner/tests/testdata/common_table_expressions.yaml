@@ -51,3 +51,14 @@
               LogicalScan { table: t1, columns: [t1._row_id, t1.x] }
           LogicalProject { exprs: [0.1:Decimal] }
             LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* Ensure we can bind CTE with aliases in both table name and columns */
+    create table t1 (x int, y int);
+    with cte (cost) as (select * from t1) select * from cte as t2 (outflow, profit) join cte on (outflow = cost);
+  logical_plan: |
+    LogicalProject { exprs: [t1.x, t1.y, t1.x, t1.y] }
+      LogicalJoin { type: Inner, on: (t1.x = t1.x), output: all }
+        LogicalProject { exprs: [t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalProject { exprs: [t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
