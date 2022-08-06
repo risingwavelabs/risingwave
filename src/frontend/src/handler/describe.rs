@@ -75,6 +75,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
         let index_column_s = index_table
             .order_key
             .iter()
+            .filter(|x| !index_table.columns[x.index].is_hidden)
             .map(|x| index_table.columns[x.index].name().to_string())
             .collect_vec();
 
@@ -89,6 +90,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .iter()
             .enumerate()
             .filter(|(i, _)| !order_key_column_index_set.contains(i))
+            .filter(|(_, x)| !x.is_hidden)
             .map(|(_, x)| x.name().to_string())
             .collect_vec();
 
@@ -158,7 +160,7 @@ mod tests {
         let expected_columns = maplit::hashmap! {
             "v1" => "Int32",
             "v2" => "Int32",
-            "idx1" => "index(v1, v2, t._row_id)",
+            "idx1" => "index(v1, v2)",
         };
 
         assert_eq!(columns, expected_columns);
