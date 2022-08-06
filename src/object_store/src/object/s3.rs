@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
@@ -23,12 +24,46 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use super::{BlockLocation, MultipartUploadHandle, ObjectError, ObjectMetadata, PartId};
-use crate::object::{Bytes, ObjectResult, ObjectStore};
+use crate::object::multipart::{
+    MultipartUploadHandle, MultipartUploadHandleImpl, PartId, PartIdGenerator, PartIdGeneratorImpl,
+};
+use crate::object::{
+    BlockLocation, Bytes, MultipartUpload, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+};
+
+const MIN_PART_ID: i32 = 1;
+const MAX_PART_ID: i32 = 10000;
+
+/// Part number generator for S3 multipart upload.
+pub struct S3PartIdGenerator {
+    next_id: AtomicI32,
+}
+
+impl S3PartIdGenerator {
+    fn new() -> S3PartIdGenerator {
+        Self {
+            next_id: AtomicI32::new(MIN_PART_ID),
+        }
+    }
+}
+
+impl PartIdGenerator for S3PartIdGenerator {
+    fn gen(&self) -> ObjectResult<PartId> {
+        let part_id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        if part_id > MAX_PART_ID {
+            Err(ObjectError::internal(format!(
+                "reached maximum S3 part number {}",
+                MAX_PART_ID
+            )))
+        } else {
+            Ok(part_id.try_into().unwrap())
+        }
+    }
+}
 
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
-struct UploadHandle {
+pub struct S3MultipartUploadHandle {
     client: Arc<Client>,
     bucket: String,
     /// The key of the object.
@@ -41,7 +76,7 @@ struct UploadHandle {
 }
 
 #[async_trait::async_trait]
-impl MultipartUploadHandle for UploadHandle {
+impl MultipartUploadHandle for S3MultipartUploadHandle {
     async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
         fail_point!("s3_upload_part_err", |_| Err(ObjectError::internal(
             "s3 upload part error"
@@ -122,29 +157,6 @@ impl ObjectStore for S3ObjectStore {
             .send()
             .await?;
         Ok(())
-    }
-
-    async fn create_multipart_upload(
-        &self,
-        path: &str,
-    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>> {
-        fail_point!("s3_create_multipart_upload_err", |_| Err(
-            ObjectError::internal("s3 upload error")
-        ));
-        let resp = self
-            .client
-            .create_multipart_upload()
-            .bucket(&self.bucket)
-            .key(path)
-            .send()
-            .await?;
-        Ok(Box::new(UploadHandle {
-            client: self.client.clone(),
-            bucket: self.bucket.clone(),
-            key: path.to_string(),
-            upload_id: resp.upload_id.unwrap(),
-            uploaded_parts: Default::default(),
-        }))
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
@@ -262,6 +274,38 @@ impl ObjectStore for S3ObjectStore {
             }
         }
         Ok(ret)
+    }
+}
+
+#[async_trait::async_trait]
+impl MultipartUpload for S3ObjectStore {
+    type Handle = MultipartUploadHandleImpl;
+    type IdGen = PartIdGeneratorImpl;
+
+    async fn create_multipart_upload(
+        &self,
+        path: &str,
+    ) -> ObjectResult<(Self::Handle, Self::IdGen)> {
+        fail_point!("s3_create_multipart_upload_err", |_| Err(
+            ObjectError::internal("s3 upload error")
+        ));
+        let resp = self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.bucket)
+            .key(path)
+            .send()
+            .await?;
+        Ok((
+            Self::Handle::S3(S3MultipartUploadHandle {
+                client: self.client.clone(),
+                bucket: self.bucket.clone(),
+                key: path.to_string(),
+                upload_id: resp.upload_id.unwrap(),
+                uploaded_parts: Default::default(),
+            }),
+            Self::IdGen::S3(S3PartIdGenerator::new()),
+        ))
     }
 }
 

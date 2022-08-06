@@ -22,8 +22,10 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use super::{MultipartUploadHandle, ObjectError, ObjectResult};
-use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
+use crate::object::multipart::{MultipartUploadHandleImpl, PartIdGeneratorImpl};
+use crate::object::{
+    BlockLocation, MultipartUpload, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+};
 
 /// In-memory object storage, useful for testing.
 #[derive(Default, Clone)]
@@ -54,13 +56,6 @@ impl ObjectStore for InMemObjectStore {
                 .insert(path.into(), (metadata, obj));
             Ok(())
         }
-    }
-
-    async fn create_multipart_upload(
-        &self,
-        _path: &str,
-    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>> {
-        unimplemented!("memory object store does not support multipart upload for now");
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -114,6 +109,19 @@ impl ObjectStore for InMemObjectStore {
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
             .collect_vec())
+    }
+}
+
+#[async_trait::async_trait]
+impl MultipartUpload for InMemObjectStore {
+    type Handle = MultipartUploadHandleImpl;
+    type IdGen = PartIdGeneratorImpl;
+
+    async fn create_multipart_upload(
+        &self,
+        _path: &str,
+    ) -> ObjectResult<(Self::Handle, Self::IdGen)> {
+        unimplemented!("memory object store does not support multipart upload for now");
     }
 }
 

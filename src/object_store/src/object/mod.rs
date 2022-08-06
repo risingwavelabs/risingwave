@@ -22,6 +22,9 @@ pub use mem::*;
 pub mod s3;
 pub use s3::*;
 
+pub mod multipart;
+use multipart::MultipartUpload;
+
 mod disk;
 pub mod error;
 pub mod object_metrics;
@@ -96,33 +99,11 @@ impl BlockLocation {
     }
 }
 
-/// Unique identifier of a part of a multipart upload task.
-type PartId = u64;
-
-#[async_trait::async_trait]
-pub trait MultipartUploadHandle {
-    /// Upload a part of the object.
-    async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()>;
-
-    /// All the parts need to be uploaded before calling `finish`.
-    async fn finish(&self) -> ObjectResult<()>;
-}
-
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
-pub trait ObjectStore: Send + Sync {
+pub trait ObjectStore: MultipartUpload {
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
-
-    /// Initiate a multipart upload task.
-    /// The returned handle can be used to upload the parts and finish the task.
-    ///
-    /// It will be the caller's responsibility to ensure the multipart upload is
-    /// finished.
-    async fn create_multipart_upload(
-        &self,
-        path: &str,
-    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>>;
 
     /// If the `block_loc` is None, the whole object will be returned.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
@@ -216,17 +197,12 @@ macro_rules! object_store_impl_method_body {
     };
 }
 
+pub(crate) use object_store_impl_method_body;
+
 #[async_trait::async_trait]
 impl ObjectStore for ObjectStoreImpl {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         object_store_impl_method_body!(self, upload, path, obj)
-    }
-
-    async fn create_multipart_upload(
-        &self,
-        path: &str,
-    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>> {
-        object_store_impl_method_body!(self, create_multipart_upload, path)
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -247,38 +223,6 @@ impl ObjectStore for ObjectStoreImpl {
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         object_store_impl_method_body!(self, list, prefix)
-    }
-}
-
-pub struct MonitoredMultipartUploadHandle<Handle: MultipartUploadHandle> {
-    inner: Handle,
-    object_store_metrics: Arc<ObjectStoreMetrics>,
-}
-
-impl<Handle: MultipartUploadHandle> MonitoredMultipartUploadHandle<Handle> {
-    pub async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
-        self.object_store_metrics
-            .write_bytes
-            .inc_by(part.len() as u64);
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&["upload_part"])
-            .start_timer();
-        self.object_store_metrics
-            .operation_size
-            .with_label_values(&["upload_part"])
-            .observe(part.len() as f64);
-        self.inner.upload_part(part_id, part).await
-    }
-
-    pub async fn finish(&self) -> ObjectResult<()> {
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&["finish_multipart_upload"])
-            .start_timer();
-        self.inner.finish().await
     }
 }
 
@@ -310,18 +254,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&["upload"])
             .observe(obj.len() as f64);
         self.inner.upload(path, obj).await
-    }
-
-    pub async fn create_multipart_upload(
-        &self,
-        path: &str,
-    ) -> ObjectResult<Box<dyn MultipartUploadHandle + Send>> {
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&["create_multipart_upload"])
-            .start_timer();
-        self.inner.create_multipart_upload(path).await
     }
 
     pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
