@@ -616,6 +616,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
 pub static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
     package test;

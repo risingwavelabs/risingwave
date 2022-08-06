@@ -440,11 +440,13 @@
         LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
   optimized_logical_plan: |
     LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
-      LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: all }
-        LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
-          LogicalScan { table: a, columns: [a.x] }
-          LogicalScan { table: b, columns: [b.x] }
-        LogicalScan { table: c, columns: [c.x] }
+      LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: [a.x, b.x, c.x] }
+        LogicalProject { exprs: [a.x, b.x, Coalesce(a.x, b.x)] }
+          LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
+            LogicalScan { table: a, columns: [a.x] }
+            LogicalScan { table: b, columns: [b.x] }
+        LogicalProject { exprs: [c.x, c.x] }
+          LogicalScan { table: c, columns: [c.x] }
 - sql: |
     /* Ensure that nested natural joins bind and disambiguate columns */
     create table a(a int, y int);
@@ -522,3 +524,25 @@
   with_config_map:
     QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
+- sql: |
+    /* Use project to do the calculation */
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1, t2 where t1.x + t1.y = t2.x + t2.y;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: ((t1.x + t1.y) = (t2.x + t2.y)), output: [t1.x, t1.y, t2.x, t2.y] }
+      LogicalProject { exprs: [t1.x, t1.y, (t1.x + t1.y)] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y] }
+      LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y)] }
+        LogicalScan { table: t2, columns: [t2.x, t2.y] }
+- sql: |
+    /* Use project to align return types */
+    create table t1(x int, y int);
+    create table t2(x int, y decimal);
+    select * from t1, t2 where t1.x = t2.y;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (t1.x::Decimal = t2.y), output: [t1.x, t1.y, t2.x, t2.y] }
+      LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y] }
+      LogicalProject { exprs: [t2.x, t2.y, t2.y] }
+        LogicalScan { table: t2, columns: [t2.x, t2.y] }
