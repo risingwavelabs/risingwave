@@ -100,8 +100,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
-        self.stats.get_new_table_id_counts.inc();
-        let timer = self.stats.get_new_table_id_latency.start_timer();
+        self.stats.get_new_sst_ids_counts.inc();
+        let timer = self.stats.get_new_sst_ids_latency.start_timer();
         let res = self.meta_client.get_new_sst_ids(number).await;
         timer.observe_duration();
         res
