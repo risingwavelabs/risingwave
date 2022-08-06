@@ -49,7 +49,7 @@ pub enum UncommittedData {
     Batch(SharedBufferBatch),
 }
 
-fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
+pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
     let key_range = info
         .key_range
         .as_ref()
@@ -322,6 +322,27 @@ impl SharedBuffer {
     pub fn clear_replicate_batch(&mut self) {
         self.replicate_batches.clear();
         self.replicate_batches_size = 0;
+    }
+
+    pub fn get_uncommitted_data(&mut self) -> Option<(KeyIndexedUncommittedData, usize)> {
+        assert!(
+            self.uploading_tasks.is_empty(),
+            "when sync an epoch, there should not be any uploading task"
+        );
+        let mut keyed_payload = KeyIndexedUncommittedData::new();
+        swap(&mut self.uncommitted_data, &mut keyed_payload);
+        let task_write_batch_size = keyed_payload
+            .values()
+            .map(|data| match data {
+                UncommittedData::Batch(batch) => batch.size(),
+                _ => 0,
+            })
+            .sum();
+        if keyed_payload.is_empty() {
+            None
+        } else {
+            Some((keyed_payload, task_write_batch_size))
+        }
     }
 
     /// Create a new upload task

@@ -98,14 +98,8 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
 
@@ -378,8 +372,7 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            let ssts = storage.local_version_manager().get_uncommitted_ssts(epoch);
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -480,14 +473,8 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         // Mimic dropping table
@@ -631,17 +618,8 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
-        }
-
-        storage.sync(None).await.unwrap();
-        for epoch in &epoch_set {
-            hummock_meta_client
-                .commit_epoch(
-                    *epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {
