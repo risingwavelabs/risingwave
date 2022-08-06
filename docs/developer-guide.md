@@ -37,7 +37,6 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
   - [Update Grafana dashboard](#update-grafana-dashboard)
   - [Add new files](#add-new-files)
   - [Add new dependencies](#add-new-dependencies)
-  - [Check in PRs from forks](#check-in-prs-from-forks)
   - [Submit PRs](#submit-prs)
 
 
