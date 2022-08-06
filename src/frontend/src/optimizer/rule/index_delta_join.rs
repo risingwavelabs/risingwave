@@ -56,44 +56,56 @@ impl Rule for IndexDeltaJoinRule {
             }
 
             for index in table_scan.logical().indexes() {
-
+                // Only full covering index can be used in delta join
                 if !index.full_covering() {
                     continue;
                 }
+
+                let p2s_mapping = {
+                    let primary_to_secondary_mapping = index.primary_to_secondary_mapping();
+                    let len = primary_to_secondary_mapping.len();
+                    assert_eq!(len, index.primary_table.columns.len());
+                    let mut p2s_mapping = Vec::with_capacity(len);
+                    for i in 0..len {
+                        p2s_mapping.push(*primary_to_secondary_mapping.get(&i).unwrap());
+                    }
+
+                    p2s_mapping
+                };
 
                 // 1. Check if distribution keys are the same.
                 // We don't assume the hash function we are using satisfies commutativity
                 // `Hash(A, B) == Hash(B, A)`, so we consider order of each item in distribution
                 // keys here.
-                let join_indices_ref_to_primary_table = join_indices
+                let join_indices_ref_to_index_table = join_indices
                     .iter()
                     .map(|&i| *table_scan.logical().output_col_idx().get(i).unwrap())
+                    .map(|x| p2s_mapping[x])
                     .collect_vec();
 
-                let index_dist_ref_to_primary_table = index
-                    .index_table
-                    .distribution_key
-                    .iter()
-                    .map(|x| index.to_primary(*x).unwrap())
-                    .collect_vec();
-
-                if index_dist_ref_to_primary_table != join_indices_ref_to_primary_table {
+                if index.index_table.distribution_key != join_indices_ref_to_index_table {
                     continue;
                 }
 
-                let primary_to_secondary_mapping = index.primary_to_secondary_mapping();
-                let len = primary_to_secondary_mapping.len();
-                assert_eq!(len, index.primary_table.columns.len());
-                let mut index_mapping = Vec::with_capacity(len);
-                for i in 0..len {
-                    index_mapping.push(*primary_to_secondary_mapping.get(&i).unwrap());
+                // 2. Check join key is prefix of index order key
+                let index_order_key_prefix = index
+                    .index_table
+                    .order_key
+                    .iter()
+                    .map(|x| x.index)
+                    .take(index.index_table.distribution_key.len())
+                    .collect_vec();
+
+                if index_order_key_prefix != join_indices_ref_to_index_table {
+                    continue;
                 }
+
                 return Some(
                     table_scan
                         .to_index_scan(
                             index.index_table.name.as_str(),
                             index.index_table.table_desc().into(),
-                            &index_mapping,
+                            &p2s_mapping,
                         )
                         .into(),
                 );

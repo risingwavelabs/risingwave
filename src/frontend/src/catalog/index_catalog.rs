@@ -33,6 +33,7 @@ pub struct IndexCatalog {
 
     /// Only `InputRef` type index is supported Now.
     /// The index of `InputRef` is the column index of the primary table.
+    /// index_item size is equal to index table columns size
     pub index_item: Vec<InputRef>,
 
     pub index_table: Arc<TableCatalog>,
@@ -95,10 +96,7 @@ impl IndexCatalog {
         self.index_table.columns.len() == self.primary_table.columns.len()
     }
 
-    pub fn to_primary(&self, index: usize) -> Option<usize> {
-        Some(self.index_item.get(index)?.index)
-    }
-
+    /// a mapping maps column index of secondary index to column index of primary table
     pub fn secondary_to_primary_mapping(&self) -> HashMap<usize, usize> {
         self.index_item
             .iter()
@@ -107,6 +105,7 @@ impl IndexCatalog {
             .collect()
     }
 
+    /// a mapping maps column index of primary table to column index of secondary index
     pub fn primary_to_secondary_mapping(&self) -> HashMap<usize, usize> {
         self.index_item
             .iter()

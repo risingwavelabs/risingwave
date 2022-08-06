@@ -69,27 +69,22 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     let mut rows = col_descs_to_rows(columns);
 
     // Convert all indexes to rows
-    rows.extend(indices.iter().filter_map(|index| {
-        let table_result =
-            catalog_reader.get_table_by_id(session.database(), &schema_name, &index.index_table.id);
-        if table_result.is_err() {
-            return None;
-        }
-        let table = table_result.unwrap();
+    rows.extend(indices.iter().map(|index| {
+        let index_table = index.index_table.clone();
 
-        let index_column_s = table
+        let index_column_s = index_table
             .order_key
             .iter()
-            .map(|x| table.columns[x.index].name().to_string())
+            .map(|x| index_table.columns[x.index].name().to_string())
             .collect_vec();
 
-        let order_key_column_index_set = table
+        let order_key_column_index_set = index_table
             .order_key
             .iter()
             .map(|x| x.index)
             .collect::<HashSet<_>>();
 
-        let include_column_s = table
+        let include_column_s = index_table
             .columns
             .iter()
             .enumerate()
@@ -97,7 +92,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .map(|(_, x)| x.name().to_string())
             .collect_vec();
 
-        Some(Row::new(vec![
+        Row::new(vec![
             Some(index.name.clone().into()),
             if include_column_s.is_empty() {
                 Some(format!("index({})", display_comma_separated(&index_column_s)).into())
@@ -111,7 +106,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
                     .into(),
                 )
             },
-        ]))
+        ])
     }));
 
     // TODO: recover the original user statement

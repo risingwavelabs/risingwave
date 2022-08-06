@@ -34,10 +34,10 @@ pub async fn handle_drop_index(
     let index_id = {
         let reader = catalog_reader.read_guard();
         let index_result = reader.get_index_by_name(session.database(), &schema_name, &index_name);
-        // Currently index_name is the same as the table_name
-        let table_result = reader.get_table_by_name(session.database(), &schema_name, &index_name);
 
         if index_result.is_err() {
+            let table_result =
+                reader.get_table_by_name(session.database(), &schema_name, &index_name);
             if table_result.is_ok() {
                 let table = table_result.unwrap();
                 // If associated source is `Some`, then it is a actually a materialized source /

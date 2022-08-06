@@ -163,32 +163,32 @@ pub(crate) fn gen_create_index_plan(
 
 fn build_index_item(
     index_table_desc: Rc<TableDesc>,
-    indexed_table_name: &str,
-    indexed_table_desc: Rc<TableDesc>,
+    primary_table_name: &str,
+    primary_table_desc: Rc<TableDesc>,
 ) -> Vec<InputRef> {
-    let indexed_table_desc_map = indexed_table_desc
+    let primary_table_desc_map = primary_table_desc
         .columns
         .iter()
         .enumerate()
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
 
-    let indexed_table_name_prefix = format!("{}.", indexed_table_name);
+    let primary_table_name_prefix = format!("{}.", primary_table_name);
 
     index_table_desc
         .columns
         .iter()
         .map(|x| {
-            let name = if x.name.starts_with(&indexed_table_name_prefix) {
-                x.name[indexed_table_name_prefix.len()..].to_string()
+            let name = if x.name.starts_with(&primary_table_name_prefix) {
+                x.name[primary_table_name_prefix.len()..].to_string()
             } else {
                 x.name.clone()
             };
 
-            let column_index = *indexed_table_desc_map.get(&name).unwrap();
+            let column_index = *primary_table_desc_map.get(&name).unwrap();
             InputRef {
                 index: column_index,
-                data_type: indexed_table_desc
+                data_type: primary_table_desc
                     .columns
                     .get(column_index)
                     .unwrap()
