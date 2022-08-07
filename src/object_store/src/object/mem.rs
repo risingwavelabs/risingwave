@@ -12,20 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use crate::object::multipart::{MultipartUploadHandleImpl, PartIdGeneratorImpl};
+use super::multipart::{
+    MultipartUploadHandle, MultipartUploadHandleImpl, PartId, PartIdGeneratorImpl,
+};
 use crate::object::{
     BlockLocation, MultipartUpload, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
 };
+
+/// Store multiple parts in a map, and concatenate them on finish.
+pub struct InMemMultipartUploadHandle {
+    path: String,
+    parts: Mutex<BTreeMap<PartId, Bytes>>,
+    objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
+}
+
+#[async_trait::async_trait]
+impl MultipartUploadHandle for InMemMultipartUploadHandle {
+    async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
+        fail_point!("mem_upload_part_err", |_| Err(ObjectError::internal(
+            "mem upload part error"
+        )));
+        self.parts.lock().await.insert(part_id, part);
+        Ok(())
+    }
+
+    async fn finish(self) -> ObjectResult<()> {
+        fail_point!("mem_finish_multipart_upload_err", |_| Err(
+            ObjectError::internal("mem finish multipart upload error")
+        ));
+        let parts = self.parts.into_inner();
+        let object_size = parts.values().map(|p| p.len()).sum();
+        let mut buf = BytesMut::with_capacity(object_size);
+        parts.values().for_each(|p| buf.put_slice(p));
+        let obj = buf.freeze();
+        let metadata = get_obj_meta(&self.path, &obj)?;
+        self.objects.lock().await.insert(self.path, (metadata, obj));
+        Ok(())
+    }
+}
 
 /// In-memory object storage, useful for testing.
 #[derive(Default, Clone)]
@@ -42,14 +76,7 @@ impl ObjectStore for InMemObjectStore {
         if obj.is_empty() {
             Err(ObjectError::internal("upload empty object"))
         } else {
-            let metadata = ObjectMetadata {
-                key: path.to_owned(),
-                last_modified: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(ObjectError::internal)?
-                    .as_secs_f64(),
-                total_size: obj.len(),
-            };
+            let metadata = get_obj_meta(path, &obj)?;
             self.objects
                 .lock()
                 .await
@@ -119,9 +146,19 @@ impl MultipartUpload for InMemObjectStore {
 
     async fn create_multipart_upload(
         &self,
-        _path: &str,
+        path: &str,
     ) -> ObjectResult<(Self::Handle, Self::IdGen)> {
-        unimplemented!("memory object store does not support multipart upload for now");
+        fail_point!("mem_create_multipart_upload_err", |_| Err(
+            ObjectError::internal("mem create multipart upload error")
+        ));
+        Ok((
+            Self::Handle::InMem(InMemMultipartUploadHandle {
+                path: path.to_string(),
+                parts: Default::default(),
+                objects: self.objects.clone(),
+            }),
+            Self::IdGen::Local(Default::default()),
+        ))
     }
 }
 
@@ -165,12 +202,25 @@ fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
     }
 }
 
+fn get_obj_meta(path: &str, obj: &Bytes) -> ObjectResult<ObjectMetadata> {
+    Ok(ObjectMetadata {
+        key: path.to_owned(),
+        last_modified: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(ObjectError::internal)?
+            .as_secs_f64(),
+        total_size: obj.len(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use futures::future;
     use itertools::enumerate;
 
     use super::*;
+    use crate::object::multipart::PartIdGenerator;
 
     #[tokio::test]
     async fn test_upload() {
@@ -201,6 +251,39 @@ mod tests {
         s3.read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
             .await
             .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_multipart_upload() {
+        let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
+        let obj = Bytes::from("123456789");
+
+        let store = InMemObjectStore::new();
+        let (handle, id_gen) = store.create_multipart_upload("/abc").await.unwrap();
+
+        future::join_all(
+            blocks
+                .into_iter()
+                .map(|b| async {
+                    handle.upload_part(id_gen.gen().unwrap(), b).await.unwrap();
+                })
+                .collect_vec(),
+        )
+        .await;
+        handle.finish().await.unwrap();
+
+        // Read whole object.
+        let read_obj = store.read("/abc", None).await.unwrap();
+        assert!(read_obj.eq(&obj));
+
+        let read_obj = store
+            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(read_obj.to_vec()).unwrap(),
+            "56".to_string()
+        );
     }
 
     #[tokio::test]

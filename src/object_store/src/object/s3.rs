@@ -101,7 +101,7 @@ impl MultipartUploadHandle for S3MultipartUploadHandle {
         Ok(())
     }
 
-    async fn finish(&self) -> ObjectResult<()> {
+    async fn finish(self) -> ObjectResult<()> {
         fail_point!("s3_finish_multipart_upload_err", |_| Err(
             ObjectError::internal("s3 finish multipart upload error")
         ));
@@ -287,7 +287,7 @@ impl MultipartUpload for S3ObjectStore {
         path: &str,
     ) -> ObjectResult<(Self::Handle, Self::IdGen)> {
         fail_point!("s3_create_multipart_upload_err", |_| Err(
-            ObjectError::internal("s3 upload error")
+            ObjectError::internal("s3 create multipart upload error")
         ));
         let resp = self
             .client

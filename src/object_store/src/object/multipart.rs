@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
 
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
-    object_store_impl_method_body, parse_object_store_path, MonitoredObjectStore, ObjectResult,
-    ObjectStore, ObjectStoreImpl, ObjectStorePath, S3MultipartUploadHandle, S3PartIdGenerator,
+    object_store_impl_method_body, parse_object_store_path, InMemMultipartUploadHandle,
+    MonitoredObjectStore, ObjectResult, ObjectStore, ObjectStoreImpl, ObjectStorePath,
+    S3MultipartUploadHandle, S3PartIdGenerator,
 };
 
 /// Unique identifier of a part of a multipart upload task.
@@ -32,7 +34,7 @@ pub trait MultipartUpload: Send + Sync {
     type IdGen: PartIdGenerator;
 
     /// Initiate a multipart upload task.
-    /// The returned handle can be used to upload the parts and finish the task.
+    /// The returned handle can be used to upload the parts out of order and finish the task.
     ///
     /// It will be the caller's responsibility to ensure the multipart upload is
     /// finished.
@@ -42,35 +44,65 @@ pub trait MultipartUpload: Send + Sync {
     ) -> ObjectResult<(Self::Handle, Self::IdGen)>;
 }
 
-/// Generator for part id.
+/// Generator for part id in ascending order.
 pub trait PartIdGenerator: Sync {
     fn gen(&self) -> ObjectResult<PartId>;
 }
 
+pub struct LocalPartIdGenerator {
+    next_id: AtomicU64,
+}
+
+impl LocalPartIdGenerator {
+    pub fn new() -> LocalPartIdGenerator {
+        Self {
+            next_id: AtomicU64::new(0),
+        }
+    }
+}
+
+impl Default for LocalPartIdGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PartIdGenerator for LocalPartIdGenerator {
+    fn gen(&self) -> ObjectResult<PartId> {
+        Ok(self.next_id.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 /// Each handle corresponds to one object.
+///
+/// The parts can be uploaded out of order. Upon finish, the parts will be logically
+/// assembled in ascending order of `part_id`.
 #[async_trait::async_trait]
 pub trait MultipartUploadHandle: Send + Sync {
     /// Upload a part of the object.
     async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()>;
 
     /// All the parts need to be uploaded before calling `finish`.
-    async fn finish(&self) -> ObjectResult<()>;
+    async fn finish(self) -> ObjectResult<()>;
 }
 
 pub enum PartIdGeneratorImpl {
     S3(S3PartIdGenerator),
+    Local(LocalPartIdGenerator),
 }
 
 impl PartIdGenerator for PartIdGeneratorImpl {
     fn gen(&self) -> ObjectResult<PartId> {
         match self {
             Self::S3(inner) => inner.gen(),
+            Self::Local(inner) => inner.gen(),
         }
     }
 }
 
 pub enum MultipartUploadHandleImpl {
     S3(S3MultipartUploadHandle),
+    InMem(InMemMultipartUploadHandle),
 }
 
 #[async_trait::async_trait]
@@ -78,12 +110,14 @@ impl MultipartUploadHandle for MultipartUploadHandleImpl {
     async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
         match self {
             Self::S3(inner) => inner.upload_part(part_id, part).await,
+            Self::InMem(inner) => inner.upload_part(part_id, part).await,
         }
     }
 
-    async fn finish(&self) -> ObjectResult<()> {
+    async fn finish(self) -> ObjectResult<()> {
         match self {
             Self::S3(inner) => inner.finish().await,
+            Self::InMem(inner) => inner.finish().await,
         }
     }
 }
@@ -135,7 +169,7 @@ impl<Handle: MultipartUploadHandle> MultipartUploadHandle
         self.inner.upload_part(part_id, part).await
     }
 
-    async fn finish(&self) -> ObjectResult<()> {
+    async fn finish(self) -> ObjectResult<()> {
         let _timer = self
             .object_store_metrics
             .operation_latency
