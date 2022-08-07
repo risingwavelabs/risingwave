@@ -74,6 +74,7 @@ pub fn is_row_id_column_name(name: &str) -> bool {
 }
 
 pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
+#[expect(dead_code)]
 pub const TABLE_SINK_PK_COLID: ColumnId = ColumnId::new(0);
 
 /// Creates a row ID column (for implicit primary key).

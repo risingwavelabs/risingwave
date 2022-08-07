@@ -136,7 +136,7 @@ mod tests {
                         is_nullable: true,
                         ..Default::default()
                     }),
-                    name: "".to_string(),
+                    name: "*VALUES*_0.column_0".to_string(),
                 }],
             })
         );

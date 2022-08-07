@@ -41,7 +41,7 @@ use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::cell_based_encoding_util::serialize_pk_and_column_id;
+use crate::row_serde::row_serde_util::serialize_pk_and_column_id;
 use crate::row_serde::{
     serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde,
     RowSerialize,

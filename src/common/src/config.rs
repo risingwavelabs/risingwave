@@ -295,7 +295,7 @@ mod default {
     }
 
     pub fn worker_node_parallelism() -> usize {
-        num_cpus::get()
+        std::thread::available_parallelism().unwrap().get()
     }
 
     pub fn compactor_memory_limit_mb() -> usize {

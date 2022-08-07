@@ -27,7 +27,7 @@ use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
-use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
+use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::row_serde::RowBasedSerde;
 use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
@@ -139,7 +139,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             NodeBody::RowSeqScan
         )?;
 
-        let table_desc: &CellBasedTableDesc = seq_scan_node.get_table_desc()?;
+        let table_desc: &StorageTableDesc = seq_scan_node.get_table_desc()?;
         let table_id = TableId {
             table_id: table_desc.table_id,
         };
