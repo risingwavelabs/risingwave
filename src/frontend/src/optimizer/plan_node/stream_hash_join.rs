@@ -45,11 +45,6 @@ pub struct StreamHashJoin {
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 
-    /// Whether to force use delta join for this join node. If this is true, then indexes will
-    /// be created automatically when building the executors on meta service. For testing purpose
-    /// only. Will remove after we have fully support shared state and index.
-    is_delta: bool,
-
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
     is_append_only: bool,
@@ -72,8 +67,6 @@ impl StreamHashJoin {
                 .composite(&logical.i2o_col_mapping()),
         );
 
-        let force_delta = ctx.inner().session_ctx.config().get_delta_join();
-
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
@@ -87,7 +80,6 @@ impl StreamHashJoin {
             base,
             logical,
             eq_join_predicate,
-            is_delta: force_delta,
             is_append_only: append_only,
         }
     }
@@ -124,9 +116,7 @@ impl StreamHashJoin {
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.is_delta {
-            f.debug_struct("StreamDeltaHashJoin")
-        } else if self.is_append_only {
+        let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
             f.debug_struct("StreamHashJoin")
@@ -216,7 +206,6 @@ impl ToStreamProst for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            is_delta_join: self.is_delta,
             left_table: Some(
                 infer_internal_table_catalog(self.left(), left_key_indices).to_prost(
                     SchemaId::placeholder() as u32,

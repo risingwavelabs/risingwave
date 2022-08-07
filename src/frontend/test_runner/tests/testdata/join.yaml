@@ -121,20 +121,6 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t2, columns: [t2.v1, t2.v2], distribution: SomeShard }
 - sql: |
-    create table t1 (v1 int, v2 float);
-    create table t2 (v3 int, v4 numeric, v5 bigint);
-    select * from t1, t2 where t1.v1 = t2.v3;
-  stream_plan: |
-    StreamMaterialize { columns: [v1, v2, v3, v4, v5, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id] }
-      StreamExchange { dist: HashShard(t1._row_id, t2._row_id) }
-        StreamDeltaHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t2.v5, t1._row_id, t2._row_id] }
-          StreamExchange { dist: HashShard(t1.v1) }
-            StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
-          StreamExchange { dist: HashShard(t2.v3) }
-            StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2.v5, t2._row_id], pk: [t2._row_id], distribution: HashShard(t2._row_id) }
-  with_config_map:
-    RW_FORCE_DELTA_JOIN: 'true'
-- sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v3 int);
     select * from t1 join t2 using(v1);
@@ -247,7 +233,7 @@
         BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
   with_config_map:
     QUERY_MODE: local
-    RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
+    RW_BATCH_ENABLE_LOOKUP_JOIN: "true"
 - sql: |
     /* Ensure correct binding of join with USING clause */
     create table t1(v1 varchar);
@@ -306,13 +292,14 @@
     create table b(b1 int);
     create table c(c1 int);
     select * from a, b join c on a1 + b1 = c1;
-  binder_error: 'Item not found: Invalid column: a1'
+  binder_error: "Item not found: Invalid column: a1"
 - sql: |
     create table a(a1 int);
     create table b(b1 int);
     select * from a join lateral (select * from b where a1 = b1);
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported,
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
+  binder_error:
+    "Feature is not yet implemented: lateral subqueries are not yet supported,
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815"
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -465,14 +452,16 @@
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v3 int);
     select * from t1 join t2 using (v2);
-  binder_error: 'Item not found: column "v2" specified in USING clause does not exist
+  binder_error:
+    'Item not found: column "v2" specified in USING clause does not exist
     in right table'
 - sql: |
     /* Ensure error on non-existent USING col */
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v3 int);
     select * from t1 join t2 using (v3);
-  binder_error: 'Item not found: column "v3" specified in USING clause does not exist
+  binder_error:
+    'Item not found: column "v3" specified in USING clause does not exist
     in left table'
 - sql: |
     /* Ensure that non-trivial ambiguous references can be resolved */
@@ -523,7 +512,7 @@
         BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
   with_config_map:
     QUERY_MODE: local
-    RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
+    RW_BATCH_ENABLE_LOOKUP_JOIN: "true"
 - sql: |
     /* Use project to do the calculation */
     create table t1(x int, y int);
