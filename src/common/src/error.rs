@@ -86,7 +86,7 @@ pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
     #[error("connector error: {0}")]
-    ConnectorError(String),
+    ConnectorError(BoxedError),
     #[error(transparent)]
     ProstError(prost::DecodeError),
     #[error("Feature is not yet implemented: {0}, {1}")]

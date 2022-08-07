@@ -51,7 +51,7 @@ enum StreamExecutorErrorInner {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(String),
+    ConnectorError(BoxedError),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
@@ -89,7 +89,7 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::InvalidArgument(error.into()).into()
     }
 
-    pub fn connector_error(error: impl Into<String>) -> Self {
+    pub fn connector_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::ConnectorError(error.into()).into()
     }
 
@@ -168,7 +168,7 @@ impl From<StreamExecutorError> for RwError {
 /// Connector error.
 impl From<ConnectorError> for StreamExecutorError {
     fn from(s: ConnectorError) -> Self {
-        Self::connector_error(s.to_string())
+        Self::connector_error(s)
     }
 }
 

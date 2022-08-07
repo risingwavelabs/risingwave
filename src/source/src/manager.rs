@@ -152,7 +152,7 @@ impl SourceManager for MemSourceManager {
         let row_id_index = info.row_id_index as usize;
 
         let config = ConnectorProperties::extract(info.properties)
-            .map_err(|e| RwError::from(ConnectorError(e.to_string())))?;
+            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
         let source = SourceImpl::Connector(ConnectorSource {
             config,

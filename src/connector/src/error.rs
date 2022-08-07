@@ -32,6 +32,6 @@ pub enum ConnectorError {
 
 impl From<ConnectorError> for RwError {
     fn from(s: ConnectorError) -> Self {
-        ErrorCode::ConnectorError(s.to_string()).into()
+        ErrorCode::ConnectorError(Box::new(s)).into()
     }
 }
