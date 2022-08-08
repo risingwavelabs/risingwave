@@ -35,7 +35,7 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter, Sstable, SstableBuilder,
+    CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -63,6 +63,7 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
             restart_interval: 16,
             bloom_false_positive: 0.01,
             compression_algorithm: CompressionAlgorithm::None,
+            estimate_bloom_filter_capacity: 1024 * 1024,
         },
     );
     let value = b"1234567890123456789";
@@ -158,6 +159,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
                 restart_interval: 16,
                 bloom_false_positive: 0.01,
                 compression_algorithm: CompressionAlgorithm::None,
+                estimate_bloom_filter_capacity: 1024 * 1024,
             },
             limiter: MemoryLimiter::new(100000),
         },
@@ -202,32 +204,32 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let test_key_size = 256 * 1024;
     let (data1, meta1) = build_table(1, 0..test_key_size, 1);
     let (data2, meta2) = build_table(2, 0..test_key_size, 1);
+    let level1 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone()t)]);
     runtime.block_on(async move {
         sstable_store1
-            .put_sst(1, meta1.clone(), data1, CachePolicy::Fill)
+            .put_sst(1, meta1, data1, CachePolicy::Fill)
             .await
             .unwrap();
         sstable_store1
-            .put_sst1(2, meta2.clone(), data2, CachePolicy::Fill)
+            .put_sst(2, meta2, data2, CachePolicy::Fill)
             .await
             .unwrap();
     });
-    let level1 = generate_tables(vec![(1, meta1), (2, meta2)]);
 
     let (data1, meta1) = build_table(1, 0..test_key_size, 2);
     let (data2, meta2) = build_table(2, 0..test_key_size, 2);
     let sstable_store1 = sstable_store.clone();
+    let level2 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
         sstable_store1
-            .put_sst(3, meta1.clone(), data1, CachePolicy::Fill)
+            .put_sst(3, meta1, data1, CachePolicy::Fill)
             .await
             .unwrap();
         sstable_store1
-            .put_sst(4, meta2.clone(), data2, CachePolicy::Fill)
+            .put_sst(4, meta2, data2, CachePolicy::Fill)
             .await
             .unwrap();
     });
-    let level2 = generate_tables(vec![(1, meta1), (2, meta2)]);
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
