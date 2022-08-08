@@ -55,17 +55,18 @@ impl BatchManager {
         let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
-        task.clone().async_execute().await?;
-        if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
-            e.insert(task);
+        let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
+            e.insert(task.clone());
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
                 "can not create duplicate task with the same id: {:?}",
                 task_id,
             ))
-            .into())
-        }
+                .into())
+        };
+        task.clone().async_execute().await?;
+        ret
     }
 
     pub fn get_data(
