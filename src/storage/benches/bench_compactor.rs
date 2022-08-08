@@ -235,7 +235,11 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
-        b.to_async(FuturesExecutor).iter(|| {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(8)
+            .build()
+            .unwrap();
+        b.to_async(runtime).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
                 HummockIteratorUnion::First(ConcatIterator::new(
@@ -253,7 +257,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             async move { compact(iter, sstable_store1).await }
         });
     });
-    c.bench_function("bench_merge_iterator", |b| {
+    c.bench_function("bench_static_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
@@ -268,6 +272,18 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     sstable_store.clone(),
                     read_options.clone(),
                 ),
+            ];
+            let iter = UnorderedMergeIteratorInner::new(sub_iters, stats.clone());
+            async move { compact(iter, sstable_store1).await }
+        });
+    });
+    c.bench_function("bench_typed_merge_iterator", |b| {
+        let stats = Arc::new(StateStoreMetrics::unused());
+        b.to_async(FuturesExecutor).iter(|| {
+            let sstable_store1 = sstable_store.clone();
+            let sub_iters = vec![
+                ConcatIterator::new(level1.clone(), sstable_store.clone(), read_options.clone()),
+                ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
             ];
             let iter = UnorderedMergeIteratorInner::new(sub_iters, stats.clone());
             async move { compact(iter, sstable_store1).await }

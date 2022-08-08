@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::future::Future;
 use std::sync::Arc;
+use std::task::Poll;
 
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
@@ -40,6 +41,8 @@ pub struct ConcatSstableIterator {
 
     stats: StoreLocalStatistic,
     read_options: Arc<SstableIteratorReadOptions>,
+
+    is_pending: bool,
 }
 
 impl ConcatSstableIterator {
@@ -58,6 +61,7 @@ impl ConcatSstableIterator {
             sstable_store,
             stats: StoreLocalStatistic::default(),
             read_options,
+            is_pending: false,
         }
     }
 
@@ -94,21 +98,41 @@ impl ConcatSstableIterator {
 impl HummockIterator for ConcatSstableIterator {
     type Direction = Forward;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
-            let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next_for_compact()?;
-
-            if sstable_iter.is_valid() {
-                Ok(())
-            } else {
-                // seek to next table
-                self.seek_idx(self.cur_idx + 1, None).await
+            match self.poll_next() {
+                Poll::Ready(result) => result,
+                Poll::Pending => self.await_next().await,
             }
+        }
+    }
+
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        debug_assert!(!self.is_pending);
+        let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
+        sstable_iter.next_for_compact()?;
+
+        if sstable_iter.is_valid() {
+            Poll::Ready(Ok(()))
+        } else {
+            // seek to next table
+            self.is_pending = true;
+            Poll::Pending
+        }
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
+        async move {
+            if self.is_pending {
+                self.seek_idx(self.cur_idx + 1, None).await?;
+                self.is_pending = false;
+            }
+            Ok(())
         }
     }
 

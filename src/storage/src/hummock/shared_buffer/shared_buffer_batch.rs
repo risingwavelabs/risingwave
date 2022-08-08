@@ -17,6 +17,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
+use std::task::Poll;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -226,16 +227,28 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
 impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<D> {
     type Direction = D;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            assert!(self.is_valid());
-            self.current_idx += 1;
-            Ok(())
+            match self.poll_next() {
+                Poll::Ready(result) => result,
+                Poll::Pending => self.await_next().await,
+            }
         }
+    }
+
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        assert!(self.is_valid());
+        self.current_idx += 1;
+        Poll::Ready(Ok(()))
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
+        async { Ok(()) }
     }
 
     fn key(&self) -> &[u8] {

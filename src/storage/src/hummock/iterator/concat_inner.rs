@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::debug_assert_matches;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::future::Future;
 use std::sync::Arc;
+use std::task::Poll;
 
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
@@ -24,6 +26,13 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
+
+#[derive(Debug)]
+enum ConcatIteratorPendingStage {
+    None,
+    AwaitNext,
+    AwaitSeekIdx,
+}
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
 pub struct ConcatIteratorInner<TI: SstableIteratorType> {
@@ -40,6 +49,8 @@ pub struct ConcatIteratorInner<TI: SstableIteratorType> {
 
     stats: StoreLocalStatistic,
     read_options: Arc<SstableIteratorReadOptions>,
+
+    pending_stage: ConcatIteratorPendingStage,
 }
 
 impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
@@ -58,6 +69,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
             sstable_store,
             stats: StoreLocalStatistic::default(),
             read_options,
+            pending_stage: ConcatIteratorPendingStage::None,
         }
     }
 
@@ -100,21 +112,65 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
 impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     type Direction = TI::Direction;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next().await?;
-
-            if sstable_iter.is_valid() {
-                Ok(())
-            } else {
-                // seek to next table
-                self.seek_idx(self.cur_idx + 1, None).await
+            match self.poll_next() {
+                Poll::Ready(result) => result,
+                Poll::Pending => self.await_next().await,
             }
+        }
+    }
+
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        debug_assert_matches!(self.pending_stage, ConcatIteratorPendingStage::None);
+        let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
+        match sstable_iter.poll_next() {
+            Poll::Ready(result) => {
+                if result.is_err() {
+                    Poll::Ready(result)
+                } else if sstable_iter.is_valid() {
+                    Poll::Ready(Ok(()))
+                } else {
+                    // will seek to next table in await
+                    self.pending_stage = ConcatIteratorPendingStage::AwaitSeekIdx;
+                    Poll::Pending
+                }
+            }
+            Poll::Pending => {
+                self.pending_stage = ConcatIteratorPendingStage::AwaitNext;
+                Poll::Pending
+            }
+        }
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
+        async move {
+            let ret = match self.pending_stage {
+                ConcatIteratorPendingStage::None => Ok(()),
+                ConcatIteratorPendingStage::AwaitNext => {
+                    let sstable_iter = self.sstable_iter.as_mut().expect("should have table iter");
+                    match sstable_iter.await_next().await {
+                        Ok(()) => {
+                            if sstable_iter.is_valid() {
+                                Ok(())
+                            } else {
+                                self.seek_idx(self.cur_idx + 1, None).await
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                ConcatIteratorPendingStage::AwaitSeekIdx => {
+                    self.seek_idx(self.cur_idx + 1, None).await
+                }
+            };
+            self.pending_stage = ConcatIteratorPendingStage::None;
+            ret
         }
     }
 

@@ -17,6 +17,7 @@ use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
 use std::sync::Arc;
+use std::task::Poll;
 
 use risingwave_hummock_sdk::VersionedComparator;
 
@@ -103,6 +104,8 @@ pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
     /// The heap for merge sort.
     heap: BinaryHeap<Node<I, NE>>,
 
+    pending_iters: LinkedList<Node<I, NE>>,
+
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
@@ -122,6 +125,7 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
                     extra_order_info: i,
                 })
                 .collect(),
+            pending_iters: LinkedList::new(),
             heap: BinaryHeap::new(),
             stats,
         }
@@ -153,6 +157,7 @@ impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
                     extra_order_info: (),
                 })
                 .collect(),
+            pending_iters: LinkedList::new(),
             heap: BinaryHeap::new(),
             stats,
         }
@@ -183,93 +188,100 @@ where
 /// The behaviour of `next` of order aware merge iterator is different from the normal one, so we
 /// extract this trait.
 trait MergeIteratorNext {
-    type HummockResultFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
+    fn poll_next_inner(&mut self) -> Poll<HummockResult<()>>;
 }
 
 impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    fn poll_next_inner(&mut self) -> Poll<HummockResult<()>> {
+        debug_assert!(self.pending_iters.is_empty());
+        let top_node = self.heap.pop().expect("no inner iter");
+        let mut popped_nodes = vec![];
 
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
-        async {
-            let top_node = self.heap.pop().expect("no inner iter");
-            let mut popped_nodes = vec![];
-
-            // Take all nodes with the same current key as the top_node out of the heap.
-            while let Some(next_node) = self.heap.peek_mut() {
-                match VersionedComparator::compare_key(top_node.iter.key(), next_node.iter.key()) {
-                    Ordering::Equal => {
-                        popped_nodes.push(PeekMut::pop(next_node));
-                    }
-                    _ => break,
+        // Take all nodes with the same current key as the top_node out of the heap.
+        while let Some(next_node) = self.heap.peek_mut() {
+            match VersionedComparator::compare_key(top_node.iter.key(), next_node.iter.key()) {
+                Ordering::Equal => {
+                    popped_nodes.push(PeekMut::pop(next_node));
                 }
+                _ => break,
             }
+        }
 
-            popped_nodes.push(top_node);
+        popped_nodes.push(top_node);
 
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
+        // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
+        // return. Once the iterator enters an invalid state, we should remove it from heap
+        // before returning.
 
-            // Put the popped nodes back to the heap if valid or unused_iters if invalid.
-            for mut node in popped_nodes {
-                match node.iter.next().await {
+        // Put the popped nodes back to the heap if valid or unused_iters if invalid.
+        for mut node in popped_nodes {
+            match node.iter.poll_next() {
+                Poll::Ready(result) => match result {
                     Ok(_) => {}
                     Err(e) => {
                         // If the iterator returns error, we should clear the heap, so that this
                         // iterator becomes invalid.
                         self.heap.clear();
-                        return Err(e);
+                        return Poll::Ready(Err(e));
                     }
-                }
-
-                if !node.iter.is_valid() {
-                    self.unused_iters.push_back(node);
-                } else {
-                    self.heap.push(node);
+                },
+                Poll::Pending => {
+                    self.pending_iters.push_back(node);
+                    continue;
                 }
             }
 
-            Ok(())
+            if !node.iter.is_valid() {
+                self.unused_iters.push_back(node);
+            } else {
+                self.heap.push(node);
+            }
+        }
+
+        if self.pending_iters.is_empty() {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
         }
     }
 }
 
 impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    fn poll_next_inner(&mut self) -> Poll<HummockResult<()>> {
+        let mut node = self.heap.peek_mut().expect("no inner iter");
 
-    fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
-        async {
-            let mut node = self.heap.peek_mut().expect("no inner iter");
+        // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
+        // return. Once the iterator enters an invalid state, we should remove it from heap
+        // before returning.
 
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
-
-            match node.iter.next().await {
+        match node.iter.poll_next() {
+            Poll::Ready(result) => match result {
                 Ok(_) => {}
                 Err(e) => {
                     // If the iterator returns error, we should clear the heap, so that this
                     // iterator becomes invalid.
                     PeekMut::pop(node);
                     self.heap.clear();
-                    return Err(e);
+                    return Poll::Ready(Err(e));
                 }
-            }
-
-            if !node.iter.is_valid() {
-                // Put back to `unused_iters`
+            },
+            Poll::Pending => {
                 let node = PeekMut::pop(node);
-                self.unused_iters.push_back(node);
-            } else {
-                // This will update the heap top.
-                drop(node);
+                self.pending_iters.push_back(node);
+                return Poll::Pending;
             }
-
-            Ok(())
         }
+
+        if !node.iter.is_valid() {
+            // Put back to `unused_iters`
+            let node = PeekMut::pop(node);
+            self.unused_iters.push_back(node);
+        } else {
+            // This will update the heap top.
+            drop(node);
+        }
+
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -280,12 +292,47 @@ where
 {
     type Direction = I::Direction;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        self.next_inner()
+        async {
+            match self.poll_next() {
+                Poll::Ready(result) => result,
+                Poll::Pending => self.await_next().await,
+            }
+        }
+    }
+
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        self.poll_next_inner()
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
+        async move {
+            while let Some(mut node) = self.pending_iters.pop_back() {
+                match node.iter.await_next().await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        // If the iterator returns error, we should clear the heap, so that this
+                        // iterator becomes invalid.
+                        while let Some(node) = self.pending_iters.pop_back() {
+                            self.unused_iters.push_back(node);
+                        }
+                        self.heap.clear();
+                        return Err(e);
+                    }
+                }
+                if node.iter.is_valid() {
+                    self.heap.push(node);
+                } else {
+                    self.unused_iters.push_back(node);
+                }
+            }
+            Ok(())
+        }
     }
 
     fn key(&self) -> &[u8] {

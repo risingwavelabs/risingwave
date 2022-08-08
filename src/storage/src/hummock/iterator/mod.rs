@@ -15,6 +15,7 @@
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::task::Poll;
 
 use super::{HummockResult, HummockValue};
 
@@ -54,6 +55,9 @@ use crate::monitor::StoreLocalStatistic;
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
 pub trait HummockIterator: Send + Sync + 'static {
     type Direction: HummockIteratorDirection;
+    type AwaitNextFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
+    where
+        Self: 'a;
     type NextFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
     where
         Self: 'a;
@@ -75,6 +79,20 @@ pub trait HummockIterator: Send + Sync + 'static {
     /// # Panics
     /// This function will panic if the iterator is invalid.
     fn next(&mut self) -> Self::NextFuture<'_>;
+
+    /// Try simply moving a valid iterator to the next key. For the term `simple`, we mean that we
+    /// can move the iterator to the next key without any await
+    ///
+    /// This method is basically the same as `next`, except that it's not an `async` method.
+    /// Therefore, for any cases that we call an `async` method when we call `next`, we will return
+    /// `None`.
+    ///
+    /// `try_next` will make sure that the iterator will not enter an invalid state.
+    fn poll_next(&mut self) -> Poll<HummockResult<()>>;
+
+    /// Should be called when a previous `poll_next` returns `Poll::Pending` to call the
+    /// corresponding async method
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_>;
 
     /// Retrieves the current key.
     ///
@@ -135,11 +153,20 @@ pub struct PhantomHummockIterator<D: HummockIteratorDirection> {
 impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> {
     type Direction = D;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
+        async { unreachable!() }
+    }
+
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        unreachable!()
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
         async { unreachable!() }
     }
 
@@ -199,6 +226,7 @@ impl<
 {
     type Direction = D;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
@@ -210,6 +238,26 @@ impl<
                 Second(iter) => iter.next().await,
                 Third(iter) => iter.next().await,
                 Fourth(iter) => iter.next().await,
+            }
+        }
+    }
+
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        match self {
+            First(iter) => iter.poll_next(),
+            Second(iter) => iter.poll_next(),
+            Third(iter) => iter.poll_next(),
+            Fourth(iter) => iter.poll_next(),
+        }
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
+        async move {
+            match self {
+                First(iter) => iter.await_next().await,
+                Second(iter) => iter.await_next().await,
+                Third(iter) => iter.await_next().await,
+                Fourth(iter) => iter.await_next().await,
             }
         }
     }
@@ -267,12 +315,21 @@ impl<
 impl<I: HummockIterator> HummockIterator for Box<I> {
     type Direction = I::Direction;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         (*self).deref_mut().next()
+    }
+
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        (*self).deref_mut().poll_next()
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
+        (*self).deref_mut().await_next()
     }
 
     fn key(&self) -> &[u8] {

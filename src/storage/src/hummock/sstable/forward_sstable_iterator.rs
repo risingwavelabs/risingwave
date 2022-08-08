@@ -15,6 +15,7 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::future::Future;
 use std::sync::Arc;
+use std::task::Poll;
 
 use risingwave_hummock_sdk::VersionedComparator;
 
@@ -45,6 +46,8 @@ pub struct SstableIterator {
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
+
+    is_pending: bool,
 }
 
 impl SstableIterator {
@@ -59,6 +62,7 @@ impl SstableIterator {
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
+            is_pending: false,
         }
     }
 
@@ -105,6 +109,25 @@ impl SstableIterator {
         Ok(())
     }
 
+    /// Try seeking to next block without calling any async method called in `seek_idx`.
+    #[inline(always)]
+    fn try_seek_next(&mut self) -> bool {
+        let idx = self.cur_idx + 1;
+        if idx >= self.sst.value().block_count() {
+            self.block_iter = None;
+            true
+        } else if idx < self.sst.value().blocks.len() {
+            let block = BlockHolder::from_ref_block(self.sst.value().blocks[idx].clone());
+            let mut block_iter = BlockIterator::new(block);
+            block_iter.seek_to_first();
+            self.block_iter = Some(block_iter);
+            self.cur_idx = idx;
+            true
+        } else {
+            false
+        }
+    }
+
     // Only for compaction because it would not load block from sstablestore.
     pub fn next_for_compact(&mut self) -> HummockResult<()> {
         self.stats.scan_key_count += 1;
@@ -133,21 +156,45 @@ impl SstableIterator {
 impl HummockIterator for SstableIterator {
     type Direction = Forward;
 
+    type AwaitNextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            self.stats.scan_key_count += 1;
-            let block_iter = self.block_iter.as_mut().expect("no block iter");
-            block_iter.next();
+            match self.poll_next() {
+                Poll::Ready(result) => result,
+                Poll::Pending => self.await_next().await,
+            }
+        }
+    }
 
-            if block_iter.is_valid() {
-                Ok(())
+    fn poll_next(&mut self) -> Poll<HummockResult<()>> {
+        debug_assert!(!self.is_pending);
+        self.stats.scan_key_count += 1;
+        let block_iter = self.block_iter.as_mut().expect("no block iter");
+        block_iter.next();
+
+        #[allow(clippy::if_same_then_else)]
+        if block_iter.is_valid() {
+            Poll::Ready(Ok(()))
+        } else if self.try_seek_next() {
+            Poll::Ready(Ok(()))
+        } else {
+            self.is_pending = true;
+            Poll::Pending
+        }
+    }
+
+    fn await_next(&mut self) -> Self::AwaitNextFuture<'_> {
+        async move {
+            if self.is_pending {
+                let ret = self.seek_idx(self.cur_idx + 1, None).await;
+                self.is_pending = false;
+                ret
             } else {
-                // seek to next block
-                self.seek_idx(self.cur_idx + 1, None).await
+                Ok(())
             }
         }
     }
