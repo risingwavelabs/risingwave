@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Exits as soon as any line fails.
+set -euo pipefail
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -50,3 +53,13 @@ timeout 2m sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill
+
+if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
+    echo "--- e2e, ci-3cn-1fe, fuzzing"
+    cargo make ci-start ci-3cn-1fe
+    chmod +x ./target/debug/sqlsmith
+    timeout 15m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
+
+    echo "--- Kill cluster"
+    cargo make ci-kill
+fi
