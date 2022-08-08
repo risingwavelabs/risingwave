@@ -128,7 +128,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             extra: HashAggExecutorExtra {
                 schema,
                 pk_indices,
-                identity: format!("HashAggExecutor-{:X}", executor_id),
+                identity: format!("HashAggExecutor {:X}", executor_id),
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_calls,
