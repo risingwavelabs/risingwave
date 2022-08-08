@@ -28,8 +28,7 @@ macro_rules! for_all_hummock_metrics {
             unpin_version_counts: GenericCounter<AtomicU64>,
             pin_snapshot_counts: GenericCounter<AtomicU64>,
             unpin_snapshot_counts: GenericCounter<AtomicU64>,
-            add_tables_counts: GenericCounter<AtomicU64>,
-            get_new_table_id_counts: GenericCounter<AtomicU64>,
+            get_new_sst_ids_counts: GenericCounter<AtomicU64>,
             report_compaction_task_counts: GenericCounter<AtomicU64>,
 
             pin_version_latency: Histogram,
@@ -37,8 +36,7 @@ macro_rules! for_all_hummock_metrics {
             unpin_version_latency: Histogram,
             pin_snapshot_latency: Histogram,
             unpin_snapshot_latency: Histogram,
-            add_tables_latency: Histogram,
-            get_new_table_id_latency: Histogram,
+            get_new_sst_ids_latency: Histogram,
             report_compaction_task_latency: Histogram,
         }
     };
@@ -90,14 +88,8 @@ impl HummockMetrics {
             registry
         )
         .unwrap();
-        let add_tables_counts = register_int_counter_with_registry!(
-            "state_store_add_tables_counts",
-            "Total number of add_tables_counts requests that have been issued to state store",
-            registry
-        )
-        .unwrap();
-        let get_new_table_id_counts = register_int_counter_with_registry!(
-            "state_store_get_new_table_id_counts",
+        let get_new_sst_ids_counts = register_int_counter_with_registry!(
+            "state_store_get_new_sst_ids_counts",
             "Total number of get_new_table_id requests that have been issued to state store",
             registry
         )
@@ -156,22 +148,13 @@ impl HummockMetrics {
             register_histogram_with_registry!(unpin_snapshot_latency_opts, registry).unwrap();
 
         // --
-        let add_tables_latency_opts = histogram_opts!(
-            "state_store_add_tables_latency",
-            "Total latency of add tables that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
-        );
-        let add_tables_latency =
-            register_histogram_with_registry!(add_tables_latency_opts, registry).unwrap();
-
-        // --
-        let get_new_table_id_latency_opts = histogram_opts!(
-            "state_store_get_new_table_id_latency",
+        let get_new_sst_ids_latency_opts = histogram_opts!(
+            "state_store_get_new_sst_ids_latency",
             "Total latency of get new table id that have been issued to state store",
             exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
-        let get_new_table_id_latency =
-            register_histogram_with_registry!(get_new_table_id_latency_opts, registry).unwrap();
+        let get_new_sst_ids_latency =
+            register_histogram_with_registry!(get_new_sst_ids_latency_opts, registry).unwrap();
 
         // --
         let report_compaction_task_latency_opts = histogram_opts!(
@@ -189,8 +172,7 @@ impl HummockMetrics {
             unpin_version_counts,
             pin_snapshot_counts,
             unpin_snapshot_counts,
-            add_tables_counts,
-            get_new_table_id_counts,
+            get_new_sst_ids_counts,
             report_compaction_task_counts,
 
             pin_version_latency,
@@ -198,8 +180,7 @@ impl HummockMetrics {
             unpin_version_latency,
             pin_snapshot_latency,
             unpin_snapshot_latency,
-            add_tables_latency,
-            get_new_table_id_latency,
+            get_new_sst_ids_latency,
             report_compaction_task_latency,
         }
     }
