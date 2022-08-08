@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
@@ -580,6 +581,7 @@ pub async fn expect_first_barrier(
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
+        .stack_trace("expect_first_barrier")
         .await
         .expect("failed to extract the first message: stream closed unexpectedly")?;
     let barrier = message

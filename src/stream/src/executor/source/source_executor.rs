@@ -236,7 +236,11 @@ impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
-        let barrier = barrier_receiver.recv().await.unwrap();
+        let barrier = barrier_receiver
+            .recv()
+            .stack_trace("source_recv_first_barrier")
+            .await
+            .unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
@@ -262,7 +266,10 @@ impl<S: StateStore> SourceExecutor<S> {
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
 
         // todo: use epoch from msg to restore state from state store
-        let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
+        let source_chunk_reader = self
+            .build_stream_source_reader(recover_state)
+            .stack_trace("source_build_reader")
+            .await?;
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);

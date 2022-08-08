@@ -76,6 +76,8 @@ impl DebugExecutor {
             extra.metrics,
             stream,
         );
+        // Stack trace
+        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);
@@ -95,6 +97,8 @@ impl DebugExecutor {
     ) -> impl MessageStream + 'static {
         // Metrics
         let stream = trace::metrics(extra.actor_id, extra.executor_id, extra.metrics, stream);
+        // Stack trace
+        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
 
         // Epoch check
         let stream = epoch_check::epoch_check(info, stream);

@@ -45,6 +45,7 @@
 #![feature(allocator_api)]
 #![feature(map_try_insert)]
 #![feature(result_option_inspect)]
+#![feature(never_type)]
 
 #[macro_use]
 extern crate log;
