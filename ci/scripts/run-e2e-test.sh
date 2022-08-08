@@ -61,6 +61,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     chmod +x ./target/debug/sqlsmith
 
     cargo make ci-start ci-3cn-1fe
+    # This avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.
     # Use that to reproduce logs on local machine.
     RUST_LOG=off timeout 20m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
