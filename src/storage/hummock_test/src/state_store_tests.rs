@@ -425,6 +425,7 @@ async fn test_state_store_sync() {
     // );
 
     // trigger a sync
+    hummock_storage.sync(epoch - 1).await.unwrap();
     hummock_storage.sync(epoch).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
@@ -857,6 +858,7 @@ async fn test_write_anytime() {
     // Assert epoch 2 correctness
     assert_old_value(epoch2).await;
 
+    println!("aaaa");
     let (_, ssts1) = hummock_storage.sync(epoch1).await.unwrap();
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;

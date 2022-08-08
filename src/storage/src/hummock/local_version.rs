@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -32,13 +31,15 @@ pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>>,
     pinned_version: Arc<PinnedVersion>,
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
-    pub sync_uncommitted_sst_vec: Vec<(HummockEpoch, SyncUncommittedSstState)>,
+    // todo! save uncommitted data that needs to be flushed to disk.
+    /// Save uncommitted data that needs to be synced.
+    pub sync_uncommitted_tasks_ssts: Vec<(HummockEpoch, SyncUncommittedTaskSst)>,
 }
+
 #[derive(Debug, Clone)]
-pub enum SyncUncommittedSstState {
+pub enum SyncUncommittedTaskSst {
     SyncTask(KeyIndexedUncommittedData),
     SyncSst(Vec<UncommittedData>),
-    NoneData,
 }
 
 impl LocalVersion {
@@ -52,7 +53,7 @@ impl LocalVersion {
             shared_buffer: BTreeMap::default(),
             pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
             version_ids_in_use,
-            sync_uncommitted_sst_vec: Default::default(),
+            sync_uncommitted_tasks_ssts: Default::default(),
         }
     }
 
@@ -67,44 +68,36 @@ impl LocalVersion {
     pub fn add_sync_state(
         &mut self,
         sync_epoch: HummockEpoch,
-        uncommitted_sst_state: SyncUncommittedSstState,
+        sync_uncommitted_task_sst: SyncUncommittedTaskSst,
     ) {
         let node = self
-            .sync_uncommitted_sst_vec
+            .sync_uncommitted_tasks_ssts
             .iter_mut()
             .find(|(epoch, _)| epoch == &sync_epoch);
         match &node {
             None => {
                 assert!(matches!(
-                    uncommitted_sst_state,
-                    SyncUncommittedSstState::NoneData
+                    sync_uncommitted_task_sst,
+                    SyncUncommittedTaskSst::SyncTask(_)
                 ));
-                if let Some(last) = self.sync_uncommitted_sst_vec.last() {
-                    assert!(
-                        last.0 < sync_epoch
-                    )
+                if let Some(last) = self.sync_uncommitted_tasks_ssts.last() {
+                    assert!(last.0 < sync_epoch)
                 }
-                self.sync_uncommitted_sst_vec
-                    .push((sync_epoch, uncommitted_sst_state));
+                self.sync_uncommitted_tasks_ssts
+                    .push((sync_epoch, sync_uncommitted_task_sst));
                 return;
             }
-            Some((_, SyncUncommittedSstState::NoneData)) => {
+            Some((_, SyncUncommittedTaskSst::SyncTask(_))) => {
                 assert!(matches!(
-                    uncommitted_sst_state,
-                    SyncUncommittedSstState::SyncTask(_)
+                    sync_uncommitted_task_sst,
+                    SyncUncommittedTaskSst::SyncSst(_)
                 ));
             }
-            Some((_, SyncUncommittedSstState::SyncTask(_))) => {
-                assert!(matches!(
-                    uncommitted_sst_state,
-                    SyncUncommittedSstState::SyncSst(_)
-                ));
-            }
-            Some((_, SyncUncommittedSstState::SyncSst(_))) => {
+            Some((_, SyncUncommittedTaskSst::SyncSst(_))) => {
                 panic!("sync over, can't modify uncommitted sst state");
             }
         }
-        *node.unwrap() = (sync_epoch, uncommitted_sst_state);
+        *node.unwrap() = (sync_epoch, sync_uncommitted_task_sst);
     }
 
     pub fn iter_shared_buffer(
@@ -129,7 +122,7 @@ impl LocalVersion {
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
-            self.sync_uncommitted_sst_vec
+            self.sync_uncommitted_tasks_ssts
                 .retain(|(epoch, _)| epoch > &new_pinned_version.max_committed_epoch);
         }
 
@@ -144,7 +137,7 @@ impl LocalVersion {
 
     pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
         use parking_lot::RwLockReadGuard;
-        let (pinned_version, (shared_buffer, sync_uncommitted_state)) = {
+        let (pinned_version, (shared_buffer, sync_uncommitted_task_sst)) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
             let pinned_version = guard.pinned_version.clone();
@@ -157,10 +150,12 @@ impl LocalVersion {
                         .rev() // Important: order by epoch descendingly
                         .map(|(_, shared_buffer)| shared_buffer.clone())
                         .collect();
-                    let result_sync: Vec<SyncUncommittedSstState> = guard
-                        .sync_uncommitted_sst_vec
+                    let result_sync: Vec<SyncUncommittedTaskSst> = guard
+                        .sync_uncommitted_tasks_ssts
                         .iter()
-                        .filter(|&node| node.0 <= read_epoch && node.0 > smallest_uncommitted_epoch)
+                        .filter(|&node| {
+                            node.0 <= read_epoch && node.0 >= smallest_uncommitted_epoch
+                        })
                         .map(|(_, value)| value.clone())
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
@@ -175,7 +170,7 @@ impl LocalVersion {
         ReadVersion {
             shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
             pinned_version,
-            sync_uncommitted_state,
+            sync_uncommitted_tasks_ssts: sync_uncommitted_task_sst,
         }
     }
 
@@ -244,5 +239,5 @@ pub struct ReadVersion {
     /// The shared buffer is sorted by epoch descendingly
     pub shared_buffer: Vec<ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
     pub pinned_version: Arc<PinnedVersion>,
-    pub sync_uncommitted_state: Vec<SyncUncommittedSstState>,
+    pub sync_uncommitted_tasks_ssts: Vec<SyncUncommittedTaskSst>,
 }

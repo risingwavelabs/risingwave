@@ -42,7 +42,7 @@ pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
-mod local_version;
+pub mod local_version;
 pub mod local_version_manager;
 pub mod shared_buffer;
 pub mod sstable_store;

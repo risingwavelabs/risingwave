@@ -34,7 +34,7 @@ use crate::hummock::iterator::{
     HummockIteratorUnion,
 };
 use crate::hummock::local_version::PinnedVersion;
-use crate::hummock::local_version::SyncUncommittedSstState::{SyncSst, SyncTask,NoneData};
+use crate::hummock::local_version::SyncUncommittedTaskSst::{SyncSst, SyncTask};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
@@ -263,7 +263,7 @@ impl HummockStorage {
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version, mut sync_uncommitted_datas) =
             self.read_filter(&read_options, &(key..=key))?;
-
+        println!("sync{:?}", sync_uncommitted_datas);
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
             batch.get(key).map(|v| {
@@ -279,6 +279,7 @@ impl HummockStorage {
         for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
                 if let Some(v) = get_from_batch(&batch) {
+                    println!("a5");
                     return Ok(v);
                 }
             }
@@ -288,6 +289,7 @@ impl HummockStorage {
                     match data {
                         UncommittedData::Batch(batch) => {
                             if let Some(v) = get_from_batch(&batch) {
+                                println!("a1");
                                 return Ok(v);
                             }
                         }
@@ -301,6 +303,7 @@ impl HummockStorage {
                                 .get_from_table(table, &internal_key, key, &mut stats)
                                 .await?
                             {
+                                println!("a2");
                                 return Ok(v);
                             }
                         }
@@ -314,6 +317,7 @@ impl HummockStorage {
                     match data {
                         UncommittedData::Batch(batch) => {
                             if let Some(v) = get_from_batch(&batch) {
+                                println!("a3");
                                 return Ok(v);
                             }
                         }
@@ -327,6 +331,7 @@ impl HummockStorage {
                                 .get_from_table(table, &internal_key, key, &mut stats)
                                 .await?
                             {
+                                println!("a4");
                                 return Ok(v);
                             }
                         }
@@ -362,6 +367,7 @@ impl HummockStorage {
             .iter_merge_sstable_counts
             .with_label_values(&["sub-iter"])
             .observe(table_counts as f64);
+        println!("a6");
         Ok(None)
     }
 
@@ -391,43 +397,46 @@ impl HummockStorage {
             .map(|shared_buffer| shared_buffer.get_overlap_data(key_range))
             .collect();
         let sync_uncommitted_data: Vec<OrderSortedUncommittedData> = read_version
-            .sync_uncommitted_state
+            .sync_uncommitted_tasks_ssts
             .iter()
-            .map(|sync_uncommitted_state| match sync_uncommitted_state {
-                SyncTask(task) => {
-                    let local_data_iter = task
+            .map(
+                |sync_uncommitted_task_sst| match sync_uncommitted_task_sst {
+                    SyncTask(task) => {
+                        let local_data_iter = task
+                            .iter()
+                            .filter(|(_, data)| match data {
+                                UncommittedData::Batch(batch) => range_overlap(
+                                    key_range,
+                                    batch.start_user_key(),
+                                    batch.end_user_key(),
+                                ),
+                                UncommittedData::Sst((_, info)) => {
+                                    filter_single_sst(info, key_range)
+                                }
+                            })
+                            .map(|((_, order_index), data)| (*order_index, data.clone()));
+
+                        let mut uncommitted_data = BTreeMap::new();
+                        for (order_index, data) in local_data_iter {
+                            uncommitted_data
+                                .entry(order_index)
+                                .or_insert_with(Vec::new)
+                                .push(data);
+                        }
+                        uncommitted_data.into_values().rev().collect()
+                    }
+                    SyncSst(ssts) => vec![ssts
                         .iter()
-                        .filter(|(_, data)| match data {
-                            UncommittedData::Batch(batch) => range_overlap(
-                                key_range,
-                                batch.start_user_key(),
-                                batch.end_user_key(),
-                            ),
+                        .filter(|data| match data {
+                            UncommittedData::Batch(_) => {
+                                panic!("sync uncommitted states can't save batch")
+                            }
                             UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
                         })
-                        .map(|((_, order_index), data)| (*order_index, data.clone()));
-
-                    let mut uncommitted_data = BTreeMap::new();
-                    for (order_index, data) in local_data_iter {
-                        uncommitted_data
-                            .entry(order_index)
-                            .or_insert_with(Vec::new)
-                            .push(data);
-                    }
-                    uncommitted_data.into_values().rev().collect()
-                }
-                SyncSst(ssts) => vec![ssts
-                    .iter()
-                    .filter(|data| match data {
-                        UncommittedData::Batch(_) => {
-                            panic!("sync uncommitted states can't save batch")
-                        }
-                        UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
-                    })
-                    .cloned()
-                    .collect()],
-                NoneData => {vec![]},
-            })
+                        .cloned()
+                        .collect()],
+                },
+            )
             .collect();
         Ok((
             shared_buffer_data,
