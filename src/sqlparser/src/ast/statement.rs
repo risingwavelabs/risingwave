@@ -85,7 +85,7 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json, // Keyword::JSON
+    Json,         // Keyword::JSON
     DebeziumJson, // Keyword::DEBEZIUM_JSON
 }
 

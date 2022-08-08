@@ -115,7 +115,7 @@ pub async fn handle_create_source(
             row_id_index: 0,
             columns: bind_sql_columns(stmt.columns)?,
             pk_column_ids: vec![0],
-        }
+        },
     };
 
     let session = context.session_ctx.clone();
