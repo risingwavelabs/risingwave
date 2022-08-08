@@ -31,12 +31,14 @@ const CONFIG_KEYS: [&str; 6] = [
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
 ];
 
+// MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
+// "RW_IMPLICIT_FLUSH".
 const IMPLICIT_FLUSH: usize = 0;
 const QUERY_MODE: usize = 1;
-const EXTRA_FLOAT_DIGITS: usize = 3;
-const APPLICATION_NAME: usize = 4;
-const DATE_STYLE: usize = 5;
-const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
+const EXTRA_FLOAT_DIGITS: usize = 2;
+const APPLICATION_NAME: usize = 3;
+const DATE_STYLE: usize = 4;
+const BATCH_ENABLE_LOOKUP_JOIN: usize = 5;
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;
