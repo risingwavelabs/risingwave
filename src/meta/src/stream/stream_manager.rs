@@ -608,13 +608,9 @@ where
             let mut processing_table_guard = self.processing_table.lock().await;
             // Success Register to compaction group, we can push catalog to CN / Compactor
             for (table_id, table_catalog) in internal_table_id_map {
-                let table_catalog = match table_catalog {
-                    Some(table_catalog) => table_catalog.to_owned(),
-
-                    None => Table::default(),
-                };
-
+                let table_catalog = table_catalog.to_owned().unwrap_or_default();
                 processing_table_guard.insert(*table_id, table_catalog.clone());
+
                 self.notification_manager
                     .notify_compute(Operation::Add, Info::Table(table_catalog.clone()))
                     .await;

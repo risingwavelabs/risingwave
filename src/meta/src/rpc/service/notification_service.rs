@@ -114,11 +114,8 @@ where
             },
 
             WorkerType::Compactor => {
-                table.extend(
-                    processing_table_guard
-                        .iter()
-                        .map(|(_, table)| table.clone()),
-                );
+                table.extend(processing_table_guard.values().cloned());
+
                 MetaSnapshot {
                     table,
                     ..Default::default()
@@ -126,11 +123,8 @@ where
             }
 
             WorkerType::ComputeNode => {
-                table.extend(
-                    processing_table_guard
-                        .iter()
-                        .map(|(_, table)| table.clone()),
-                );
+                table.extend(processing_table_guard.values().cloned());
+
                 MetaSnapshot {
                     table,
                     hummock_version,

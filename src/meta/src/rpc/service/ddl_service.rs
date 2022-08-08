@@ -513,7 +513,7 @@ where
         let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
 
         // 4. Finally, update the catalog.
-        let version = match self
+        let version = self
             .catalog_manager
             .finish_create_procedure(
                 match relation {
@@ -522,23 +522,13 @@ where
                 },
                 relation,
             )
-            .await
-        {
-            Ok(version) => version,
-
-            Err(e) => {
-                self.stream_manager
-                    .remove_processing_table(internal_table_ids)
-                    .await;
-                return Err(e);
-            }
-        };
+            .await;
 
         self.stream_manager
             .remove_processing_table(internal_table_ids)
             .await;
 
-        Ok((id, version))
+        Ok((id, version?))
     }
 
     async fn create_relation_on_compute_node(
@@ -726,25 +716,15 @@ where
         let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
 
         // Finally, update the catalog.
-        let version = match self
+        let version = self
             .catalog_manager
             .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
-            .await
-        {
-            Ok(version) => version,
-
-            Err(e) => {
-                self.stream_manager
-                    .remove_processing_table(internal_table_ids)
-                    .await;
-                return Err(e);
-            }
-        };
+            .await;
 
         self.stream_manager
             .remove_processing_table(internal_table_ids)
             .await;
-        Ok((source_id, mview_id, version))
+        Ok((source_id, mview_id, version?))
     }
 
     async fn drop_materialized_source_inner(
