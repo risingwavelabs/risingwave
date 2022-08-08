@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
+use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -62,7 +65,7 @@ where
         worker_type: WorkerType,
     ) -> Result<MetaSnapshot, MetaError> {
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let (database, schema, table, source, sink, index) = catalog_guard.get_catalog().await?;
+        let (databases, schemas, tables, sources, sinks, indexes) = catalog_guard.get_catalog().await?;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
@@ -73,29 +76,43 @@ where
             .values()
             .cloned()
             .collect::<Vec<_>>();
+
         let hummock_version = Some(self.hummock_manager.get_current_version().await);
+        let hash_mapping_guard = self
+            .env
+            .hash_mapping_manager()
+            .get_hash_mapping_core_guard();
+        let table_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.id));
+        let parallel_unit_mappings = hash_mapping_guard
+            .list_table_mappings()
+            .filter(|mapping| {
+                mapping.is_some() && table_ids.contains(&mapping.as_ref().unwrap().table_id)
+            })
+            .map(|mapping| mapping.unwrap())
+            .collect_vec();
 
         // Send the snapshot on subscription. After that we will send only updates.
         let result = match worker_type {
             WorkerType::Frontend => MetaSnapshot {
                 nodes,
-                database,
-                schema,
-                source,
-                sink,
-                table,
+                databases,
+                schemas,
+                sources,
+                sinks,
+                tables,
+                indexes,
                 users,
+                parallel_unit_mappings,
                 hummock_version: None,
-                index,
             },
 
             WorkerType::Compactor => MetaSnapshot {
-                table,
+                tables,
                 ..Default::default()
             },
 
             WorkerType::ComputeNode => MetaSnapshot {
-                table,
+                tables,
                 hummock_version,
                 ..Default::default()
             },

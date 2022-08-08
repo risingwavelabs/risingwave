@@ -15,9 +15,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
-use risingwave_pb::common::ParallelUnit;
+use risingwave_common::util::compress::compress_data;
+use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 
 use super::TableId;
 use crate::model::FragmentId;
@@ -42,6 +43,12 @@ impl HashMappingManager {
         }
     }
 
+    /// Used in `NotificationService::subscribe`.
+    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
+    pub fn get_hash_mapping_core_guard(&self) -> MutexGuard<'_, HashMappingManagerCore> {
+        self.core.lock()
+    }
+
     pub fn build_fragment_hash_mapping(
         &self,
         fragment_id: FragmentId,
@@ -64,6 +71,16 @@ impl HashMappingManager {
         let mut core = self.core.lock();
         core.state_table_fragment_mapping
             .insert(state_table_id, fragment_id);
+    }
+
+    pub fn delete_fragment_hash_mapping(&self, fragment_id: FragmentId) {
+        let mut core = self.core.lock();
+        core.hash_mapping_infos.remove(&fragment_id);
+    }
+
+    pub fn delete_table_hash_mapping(&self, table_id: TableId) {
+        let mut core = self.core.lock();
+        core.state_table_fragment_mapping.remove(&table_id);
     }
 
     pub fn get_table_hash_mapping(&self, table_id: &TableId) -> Option<Vec<ParallelUnitId>> {
@@ -110,7 +127,7 @@ struct HashMappingInfo {
     load_balancer: BTreeMap<usize, Vec<ParallelUnitId>>,
 }
 
-struct HashMappingManagerCore {
+pub struct HashMappingManagerCore {
     /// Mapping from fragment to hash mapping information. One fragment will have exactly one vnode
     /// mapping, which describes the data distribution of the fragment.
     hash_mapping_infos: HashMap<FragmentId, HashMappingInfo>,
@@ -124,6 +141,21 @@ impl HashMappingManagerCore {
             hash_mapping_infos: HashMap::new(),
             state_table_fragment_mapping: HashMap::new(),
         }
+    }
+
+    pub fn list_table_mappings(&self) -> impl Iterator<Item = Option<ParallelUnitMapping>> + '_ {
+        self.state_table_fragment_mapping
+            .iter()
+            .map(|(table_id, fragment_id)| {
+                self.hash_mapping_infos.get(fragment_id).map(|info| {
+                    let (original_indices, data) = compress_data(&info.vnode_mapping);
+                    ParallelUnitMapping {
+                        table_id: *table_id,
+                        original_indices,
+                        data,
+                    }
+                })
+            })
     }
 
     /// Build a [`HashMappingInfo`] and record it for the fragment based on given `parallel_units`.

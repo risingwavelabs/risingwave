@@ -77,22 +77,22 @@ impl ObserverNodeImpl for FrontendObserverNode {
         user_guard.clear();
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
-                for db in snapshot.database {
+                for db in snapshot.databases {
                     catalog_guard.create_database(db)
                 }
-                for schema in snapshot.schema {
+                for schema in snapshot.schemas {
                     catalog_guard.create_schema(schema)
                 }
-                for table in snapshot.table {
+                for table in snapshot.tables {
                     catalog_guard.create_table(&table)
                 }
-                for source in snapshot.source {
+                for source in snapshot.sources {
                     catalog_guard.create_source(source)
                 }
                 for user in snapshot.users {
                     user_guard.create_user(user)
                 }
-                for index in snapshot.index {
+                for index in snapshot.indexes {
                     catalog_guard.create_index(&index)
                 }
                 self.worker_node_manager.refresh_worker_node(snapshot.nodes);
@@ -138,7 +138,7 @@ impl FrontendObserverNode {
             Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database.clone()),
                 Operation::Delete => catalog_guard.drop_database(database.id),
-                _ => panic!("receive an unsupported notify {:?}", resp.clone()),
+                _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema.clone()),

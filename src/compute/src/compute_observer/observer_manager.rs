@@ -61,7 +61,7 @@ impl ObserverNodeImpl for ComputeObserverNode {
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
-                self.handle_catalog_snapshot(snapshot.table);
+                self.handle_catalog_snapshot(snapshot.tables);
                 self.version = resp.version;
             }
             _ => {

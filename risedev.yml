@@ -305,7 +305,7 @@ risedev:
     - use: etcd
       unsafe-no-fsync: true
     - use: meta-node
-      unsafe-disable-recovery: true
+      unsafe-disable-recovery: false
     - use: compute-node
       port: 5687
       exporter-port: 1222

@@ -96,6 +96,10 @@ impl TableFragments {
         }
     }
 
+    pub fn fragment_ids(&self) -> impl Iterator<Item = FragmentId> + '_ {
+        self.fragments.keys().cloned()
+    }
+
     pub fn fragments(&self) -> Vec<&Fragment> {
         self.fragments.values().collect_vec()
     }

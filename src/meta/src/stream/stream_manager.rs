@@ -652,7 +652,7 @@ where
 
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
-    pub async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
+    pub async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<TableFragments> {
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(table_id)
@@ -696,7 +696,7 @@ where
             );
         }
 
-        Ok(())
+        Ok(table_fragments)
     }
 }
 #[cfg(test)]
