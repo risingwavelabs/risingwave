@@ -60,7 +60,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     buildkite-agent artifact download sqlsmith-"$profile" target/debug/
     mv target/debug/sqlsmith-"$profile" target/debug/sqlsmith
     chmod +x ./target/debug/sqlsmith
-    timeout 15m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
+    timeout 20m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
 
     echo "--- Kill cluster"
     cargo make ci-kill
