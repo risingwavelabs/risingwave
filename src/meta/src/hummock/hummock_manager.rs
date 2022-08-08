@@ -28,15 +28,19 @@ use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockVersionDeltaExt, HummockVersionExt,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
+    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
     HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
+    OverlappingLevel,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -215,22 +219,17 @@ impl Versioning {
         delta_range: impl RangeBounds<HummockVersionId>,
     ) {
         for (_, delta) in self.hummock_version_deltas.range(delta_range) {
-            let mut no_sst_to_delete = true;
             if delta.trivial_move {
                 self.deltas_to_delete.push(delta.id);
                 continue;
             }
-            for level_deltas in delta.level_deltas.values() {
-                for level_delta in &level_deltas.level_deltas {
-                    for sst_id in &level_delta.removed_table_ids {
-                        let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
-                        assert!(duplicate_insert.is_none());
-                        no_sst_to_delete = false;
-                    }
-                }
+            let removed_sst_ids = delta.get_removed_sst_ids();
+            for sst_id in &removed_sst_ids {
+                let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
+                debug_assert!(duplicate_insert.is_none());
             }
             // If no_sst_to_delete, the delta is qualified for deletion now.
-            if no_sst_to_delete {
+            if removed_sst_ids.is_empty() {
                 self.deltas_to_delete.push(delta.id);
             }
             // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
@@ -340,23 +339,26 @@ where
             };
             // Initialize independent levels via corresponding compaction group' config.
             for compaction_group in self.compaction_group_manager.compaction_groups().await {
-                let mut levels = vec![Level {
-                    level_idx: 0u32,
-                    level_type: LevelType::Overlapping as i32,
-                    table_infos: vec![],
-                    total_file_size: 0,
-                }];
+                let mut levels = vec![];
                 for l in 0..compaction_group.compaction_config().max_level {
                     levels.push(Level {
                         level_idx: (l + 1) as u32,
                         level_type: LevelType::Nonoverlapping as i32,
                         table_infos: vec![],
                         total_file_size: 0,
+                        sub_level_id: 0,
                     });
                 }
-                init_version
-                    .levels
-                    .insert(compaction_group.group_id(), Levels { levels });
+                init_version.levels.insert(
+                    compaction_group.group_id(),
+                    Levels {
+                        levels,
+                        l0: Some(OverlappingLevel {
+                            sub_levels: vec![],
+                            total_file_size: 0,
+                        }),
+                    },
+                );
             }
             init_version.insert(self.env.meta_store()).await?;
             init_version
@@ -418,12 +420,7 @@ where
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
                 // Using the preserved meta id is allowed.
-            } else if self
-                .cluster_manager
-                .get_worker_by_id(context_id)
-                .await
-                .is_none()
-            {
+            } else if !self.check_context(context_id).await {
                 // The worker is not found in cluster.
                 return Err(Error::InvalidContext(context_id));
             }
@@ -682,7 +679,6 @@ where
             compaction_group_id,
             manual_compaction_option,
         );
-
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
@@ -713,7 +709,6 @@ where
                             .collect_vec()
                     })
                     .collect::<HashSet<u32>>();
-
                 for table_id in table_ids {
                     // to found exist table_id from
                     if existing_table_ids_from_meta.contains(&table_id) {
@@ -740,18 +735,24 @@ where
 
                 commit_multi_var!(self, None, compact_status)?;
                 tracing::trace!(
-                    "For compaction group {}: pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
+                    "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
                     compaction_group_id,
                     compact_task.input_ssts[0].table_infos.len(),
                     compact_task.input_ssts[0].level_idx,
-                    current_version.get_compaction_group_levels(compaction_group_id)[compact_task.input_ssts[0].level_idx as usize]
-                        .table_infos
-                        .len(),
                     start_time.elapsed()
                 );
                 Ok(Some(compact_task))
             }
         };
+        trigger_sst_stat(
+            &self.metrics,
+            compaction
+                .compaction_statuses
+                .get(&compaction_group_id)
+                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+            &current_version,
+            compaction_group_id,
+        );
 
         #[cfg(test)]
         {
@@ -909,6 +910,7 @@ where
             let level_delta = LevelDelta {
                 level_idx: compact_task.target_level,
                 inserted_table_infos: compact_task.sorted_output_ssts.clone(),
+                l0_sub_level_id: compact_task.target_sub_level_id,
                 ..Default::default()
             };
             level_deltas.push(level_delta);
@@ -935,7 +937,6 @@ where
                     hummock_version_deltas
                 )?;
             }
-
             versioning.current_version = new_version;
         } else {
             // The compaction task is cancelled.
@@ -1020,12 +1021,7 @@ where
                     continue;
                 }
             }
-            if self
-                .cluster_manager
-                .get_worker_by_id(*context_id)
-                .await
-                .is_none()
-            {
+            if !self.check_context(*context_id).await {
                 return Err(Error::InvalidSst(*sst_id));
             }
         }
@@ -1064,25 +1060,33 @@ where
                 .entry(compaction_group_id)
                 .or_default()
                 .level_deltas;
+            let version_l0 = new_hummock_version
+                .get_compaction_group_levels_mut(compaction_group_id)
+                .l0
+                .as_mut()
+                .expect("Expect level 0 is not empty");
             let level_delta = LevelDelta {
                 level_idx: 0,
                 inserted_table_infos: group_sstables.clone(),
+                l0_sub_level_id: epoch,
                 ..Default::default()
             };
-            level_deltas.push(level_delta);
 
-            let version_first_level = new_hummock_version
-                .get_compaction_group_levels_mut(compaction_group_id)
-                .first_mut()
-                .expect("Expect at least one level");
-            assert_eq!(version_first_level.level_idx, 0);
-            assert_eq!(
-                version_first_level.level_type,
-                LevelType::Overlapping as i32
-            );
-            version_first_level.total_file_size +=
-                group_sstables.iter().map(|s| s.file_size).sum::<u64>();
-            version_first_level.table_infos.extend(group_sstables);
+            // All files will be committed in one new Overlapping sub-level and become
+            // Nonoverlapping  after at least one compaction.
+            let level = Level {
+                level_type: LevelType::Overlapping as i32,
+                level_idx: 0,
+                total_file_size: group_sstables
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum::<u64>(),
+                table_infos: group_sstables,
+                sub_level_id: level_delta.l0_sub_level_id,
+            };
+            version_l0.total_file_size += level.total_file_size;
+            version_l0.sub_levels.push(level);
+            level_deltas.push(level_delta);
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
@@ -1207,6 +1211,7 @@ where
     }
 
     /// Tries to checkpoint at min_pinned_version_id
+    ///
     /// Returns the diff between new and old checkpoint id.
     #[named]
     pub async fn proceed_version_checkpoint(&self) -> Result<u64> {
@@ -1259,21 +1264,15 @@ where
              versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
                 let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
                 let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-                let current_version_copy = versioning_guard.current_version.clone();
                 let pinned_versions_copy = versioning_guard.pinned_versions.clone();
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
-                let ssts_to_delete_copy = versioning_guard.ssts_to_delete.clone();
-                let deltas_to_delete_copy = versioning_guard.deltas_to_delete.clone();
                 let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 (
                     compact_statuses_copy,
                     compact_task_assignment_copy,
-                    current_version_copy,
                     pinned_versions_copy,
                     pinned_snapshots_copy,
-                    ssts_to_delete_copy,
-                    deltas_to_delete_copy,
                     checkpoint_version_copy,
                     hummock_version_deltas_copy,
                 )
@@ -1430,7 +1429,7 @@ where
         let send_task = async {
             tokio::time::timeout(Duration::from_secs(3), async {
                 compactor
-                    .send_task(Some(compact_task.clone()), None)
+                    .send_task(Task::CompactTask(compact_task.clone()))
                     .await
                     .is_ok()
             })
@@ -1506,7 +1505,8 @@ where
         let mut deltas_to_delete = HashSet::new();
         let mut versioning_guard = write_lock!(self, versioning).await;
         for sst_id in sst_ids {
-            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(sst_id) {
+            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(sst_id) && version_id != INVALID_VERSION_ID{
+                // Orphan SST is mapped to INVALID_VERSION_ID
                 deltas_to_delete.insert(version_id);
             }
         }
@@ -1542,5 +1542,34 @@ where
             self.check_state_consistency().await;
         }
         Ok((deleted, remain))
+    }
+
+    /// Extends `ssts_to_delete` according to object store full scan result.
+    /// Caller should ensure `sst_ids` doesn't include any SSTs belong to a on-going version write.
+    /// That's to say, these sst_ids won't appear in either `commit_epoch` or
+    /// `report_compact_task`.
+    #[named]
+    pub async fn extend_ssts_to_delete_from_scan(&self, sst_ids: &[HummockSstableId]) -> usize {
+        let tracked_sst_ids: HashSet<HummockSstableId> = {
+            let versioning_guard = read_lock!(self, versioning).await;
+            let mut tracked_sst_ids =
+                HashSet::from_iter(versioning_guard.current_version.get_sst_ids());
+            for delta in versioning_guard.hummock_version_deltas.values() {
+                tracked_sst_ids.extend(delta.get_removed_sst_ids());
+            }
+            tracked_sst_ids
+        };
+        let to_delete = sst_ids
+            .iter()
+            .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
+            .collect_vec();
+        tracing::info!("SST full scan results: {:#?}", sst_ids);
+        tracing::info!("SST to delete in full GC: {:#?}", to_delete);
+        write_lock!(self, versioning).await.ssts_to_delete.extend(
+            to_delete
+                .iter()
+                .map(|sst_id| (**sst_id, INVALID_VERSION_ID)),
+        );
+        to_delete.len()
     }
 }

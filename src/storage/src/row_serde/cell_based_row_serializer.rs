@@ -18,7 +18,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
-use super::cell_based_encoding_util::{serialize_column_id, serialize_pk_and_row};
+use super::row_serde_util::{serialize_column_id, serialize_pk_and_row};
 use crate::row_serde::{KeyBytes, RowSerialize, ValueBytes};
 
 #[derive(Clone)]

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::io::{self, Error as IoError, ErrorKind};
 use std::str::Utf8Error;
 use std::sync::Arc;
@@ -103,7 +104,10 @@ where
         match self.do_process_inner().await {
             Ok(v) => v,
             Err(e) => {
-                tracing::error!("Error: {}", e);
+                let mut error_msg = String::new();
+                // Execution error should not break current connection.
+                // For unexpected eof, just break and not print to log.
+                write!(&mut error_msg, "Error: {}", e).unwrap();
                 match e {
                     PsqlError::SslError(io_err) | PsqlError::IoError(io_err) => {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
@@ -114,6 +118,7 @@ where
                     PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
                         self.stream
                             .write_for_error(&BeMessage::ErrorResponse(Box::new(e)));
+                        tracing::error!("{}", error_msg);
                         return true;
                     }
 
@@ -145,6 +150,7 @@ where
                     PsqlError::CancelMsg(_) => todo!(),
                 }
                 self.stream.flush_for_error().await;
+                tracing::error!("{}", error_msg);
                 false
             }
         }
@@ -289,8 +295,8 @@ where
     }
 
     async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
-        let query = cstr_to_str(&msg.query_string).unwrap();
-        tracing::trace!("(extended query)parse query: {}", query);
+        let sql = cstr_to_str(&msg.sql_bytes).unwrap();
+        tracing::trace!("(extended query)parse query: {}", sql);
         // 1. Create the types description.
         let type_ids = msg.type_ids;
         let types: Vec<TypeOid> = type_ids
@@ -298,20 +304,26 @@ where
             .map(|x| TypeOid::as_type(x).unwrap())
             .collect();
 
-        // 2. Create the row description.
+        // Flag indicate whether statement is a query statement.
+        let is_query_sql = {
+            let lower_sql = sql.to_ascii_lowercase();
+            lower_sql.starts_with("select")
+                || lower_sql.starts_with("values")
+                || lower_sql.starts_with("show")
+                || lower_sql.starts_with("with")
+                || lower_sql.starts_with("describe")
+        };
 
-        let rows: Vec<PgFieldDescriptor> = if query.starts_with("SELECT")
-            || query.starts_with("select")
-        {
+        // 2. Create the row description.
+        let rows: Vec<PgFieldDescriptor> = if is_query_sql {
             if types.is_empty() {
                 let session = self.session.clone().unwrap();
                 session
-                    .infer_return_type(query)
+                    .infer_return_type(sql)
                     .await
                     .map_err(PsqlError::ParseError)?
             } else {
-                query
-                    .split(&[' ', ',', ';'])
+                sql.split(&[' ', ',', ';'])
                     .skip(1)
                     .into_iter()
                     .take_while(|x| !x.is_empty())
@@ -338,7 +350,7 @@ where
         // 3. Create the statement.
         let statement = PgStatement::new(
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
-            msg.query_string,
+            msg.sql_bytes,
             types,
             rows,
         );
@@ -435,12 +447,14 @@ where
         //  b'P' => Portal
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
-            let name = cstr_to_str(&msg.query_name).unwrap().to_string();
+            let name = cstr_to_str(&msg.name).unwrap().to_string();
             let statement = if name.is_empty() {
                 &self.unnamed_statement
             } else {
                 // NOTE Error handle need modify later.
-                self.named_statements.get(&name).unwrap()
+                self.named_statements
+                    .get(&name)
+                    .ok_or_else(|| PsqlError::DescribeError("statement isn't exist".to_string()))?
             };
 
             // 1. Send parameter description.
@@ -453,12 +467,14 @@ where
                 .write(&BeMessage::RowDescription(&statement.row_desc()))
                 .await?;
         } else if msg.kind == b'P' {
-            let name = cstr_to_str(&msg.query_name).unwrap().to_string();
+            let name = cstr_to_str(&msg.name).unwrap().to_string();
             let portal = if name.is_empty() {
                 &self.unnamed_portal
             } else {
                 // NOTE Error handle need modify later.
-                self.named_portals.get(&name).unwrap()
+                self.named_portals
+                    .get(&name)
+                    .ok_or_else(|| PsqlError::DescribeError("portal isn't exist".to_string()))?
             };
 
             // 3. Send row description.
@@ -470,7 +486,7 @@ where
     }
 
     async fn process_close_msg(&mut self, msg: FeCloseMessage) -> PsqlResult<()> {
-        let name = cstr_to_str(&msg.query_name).unwrap().to_string();
+        let name = cstr_to_str(&msg.name).unwrap().to_string();
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
             self.named_statements.remove_entry(&name);

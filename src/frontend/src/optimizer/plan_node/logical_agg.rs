@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -243,10 +244,13 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 write!(
                     f,
                     "{}",
-                    self.input_schema.fields.get(input.index).unwrap().name
+                    InputRefDisplay {
+                        input_ref: input,
+                        input_schema: self.input_schema
+                    }
                 )?;
                 if idx != (that.inputs.len() - 1) {
-                    write!(f, ",")?;
+                    write!(f, ", ")?;
                 }
             }
             if !that.order_by_fields.is_empty() {
@@ -309,6 +313,20 @@ impl LogicalAgg {
                                             column_mapping: &mut Vec<usize>|
          -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+            if !self.ctx().inner().with_properties.is_empty() {
+                let ctx = self.ctx();
+                let properties: HashMap<_, _> = ctx
+                    .inner()
+                    .with_properties
+                    .iter()
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+
+                if !properties.is_empty() {
+                    internal_table_catalog_builder.add_properties(properties);
+                }
+            }
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
@@ -346,6 +364,20 @@ impl LogicalAgg {
                                      column_mapping: &mut Vec<usize>|
          -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+            if !self.ctx().inner().with_properties.is_empty() {
+                let ctx = self.ctx();
+                let properties: HashMap<_, _> = ctx
+                    .inner()
+                    .with_properties
+                    .iter()
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect();
+
+                if !properties.is_empty() {
+                    internal_table_catalog_builder.add_properties(properties);
+                }
+            }
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
@@ -410,6 +442,7 @@ impl LogicalAgg {
                     get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
                 }
             };
+
             table_catalogs.push(state_table);
             column_mappings_vec.push(column_mapping);
         }
@@ -1113,6 +1146,7 @@ impl ToStream for LogicalAgg {
         drop(input); // to prevent accidental use of logical input
 
         let input_dist = stream_input.distribution().clone();
+        let input_append_only = stream_input.append_only();
 
         let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
             matches!(
@@ -1120,10 +1154,10 @@ impl ToStream for LogicalAgg {
                 AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
             ) && c.order_by_fields.is_empty()
         });
-        let agg_calls_are_stateless = self
-            .agg_calls
-            .iter()
-            .all(|c| matches!(c.agg_kind, AggKind::Sum | AggKind::Count));
+        let agg_calls_are_stateless = self.agg_calls.iter().all(|c| {
+            matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
+                || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
+        });
         let is_simple_agg = self.group_key().is_empty();
 
         if is_simple_agg

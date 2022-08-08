@@ -19,11 +19,9 @@ use itertools::Itertools;
 use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use risingwave_frontend::binder::Binder;
-use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::LocalFrontend;
-use risingwave_frontend::{handler, FrontendOpts};
+use risingwave_frontend::{handler, Binder, FrontendOpts, Planner};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
@@ -140,25 +138,22 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
         rng = SmallRng::seed_from_u64(seed);
     }
 
-    let sql = sql_gen(&mut rng, tables.clone());
+    let sql = sql_gen(&mut rng, tables);
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
     let statements = parse_sql(&sql);
     let stmt = statements[0].clone();
     let context: OptimizerContextRef =
-        OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
+        OptimizerContext::new(session.clone(), Arc::from(sql)).into();
 
-    match stmt.clone() {
+    match stmt {
         Statement::Query(_) => {
-            let mut binder = Binder::new(
-                session.env().catalog_reader().read_guard(),
-                session.database().to_string(),
-            );
+            let mut binder = Binder::new(&session);
             let bound = binder
-                .bind(stmt.clone())
+                .bind(stmt)
                 .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
-            let mut planner = Planner::new(context.clone());
+            let mut planner = Planner::new(context);
             let logical_plan = planner
                 .plan(bound)
                 .unwrap_or_else(|e| panic!("Failed to generate logical plan:\nReason:\n{}", e));
@@ -219,9 +214,9 @@ pub fn run() {
             tables,
             setup_sql,
         } = &*SQLSMITH_ENV;
-        test_batch_query(session.clone(), tables.clone(), test.data, &setup_sql);
+        test_batch_query(session.clone(), tables.clone(), test.data, setup_sql);
         let test_stream_query =
-            test_stream_query(session.clone(), tables.clone(), test.data, &setup_sql);
+            test_stream_query(session.clone(), tables.clone(), test.data, setup_sql);
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()

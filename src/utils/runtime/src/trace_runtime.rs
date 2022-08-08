@@ -61,7 +61,6 @@ impl Runtime for RwTokio {
 }
 
 #[async_trait::async_trait]
-#[cfg(not(madsim))]
 impl opentelemetry_jaeger::JaegerTraceRuntime for RwTokio {
     type Socket = tokio::net::UdpSocket;
 

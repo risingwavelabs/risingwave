@@ -18,11 +18,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Ident, Select, SelectItem};
+use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
-use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
+use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 
@@ -84,6 +84,9 @@ impl Binder {
         // Bind FROM clause.
         let from = self.bind_vec_table_with_joins(select.from)?;
 
+        // Bind SELECT clause.
+        let (select_items, aliases) = self.bind_select_list(select.projection)?;
+
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
         let selection = select
@@ -104,9 +107,6 @@ impl Binder {
         // Bind HAVING clause.
         let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
         Self::require_bool_clause(&having, "HAVING")?;
-
-        // Bind SELECT clause.
-        let (select_items, aliases) = self.bind_select_list(select.projection)?;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
@@ -141,18 +141,7 @@ impl Binder {
                 SelectItem::UnnamedExpr(expr) => {
                     let (select_expr, alias) = match &expr.clone() {
                         Expr::Identifier(ident) => {
-                            // We allow binding a column if the group is exactly equivalent to
-                            // the set of columns with same name in the current level of the bind
-                            // context.
-                            if let Some(group_id) = self.context.get_group_id(&ident.real_value()) {
-                                let new_expr = Expr::CompoundIdentifier(vec![
-                                    Ident::new(format!("{COLUMN_GROUP_PREFIX}{group_id}")),
-                                    ident.clone(),
-                                ]);
-                                (self.bind_expr(new_expr)?, Some(ident.real_value()))
-                            } else {
-                                (self.bind_expr(expr)?, Some(ident.real_value()))
-                            }
+                            (self.bind_expr(expr)?, Some(ident.real_value()))
                         }
                         Expr::CompoundIdentifier(idents) => (
                             self.bind_expr(expr)?,
@@ -193,6 +182,12 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
+                    if self.context.range_of.is_empty() {
+                        return Err(ErrorCode::BindError(
+                            "SELECT * with no tables specified is not valid".into(),
+                        )
+                        .into());
+                    }
                     // Bind the column groups
                     // In psql, the USING and NATURAL columns come before the rest of the columns in
                     // a SELECT * statement

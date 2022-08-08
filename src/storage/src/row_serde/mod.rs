@@ -27,13 +27,13 @@ use self::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use self::row_based_deserializer::RowBasedDeserializer;
 use self::row_based_serializer::RowBasedSerializer;
 
-pub mod cell_based_encoding_util;
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
 pub mod dedup_pk_cell_based_row_deserializer;
 pub mod dedup_pk_cell_based_row_serializer;
 pub mod row_based_deserializer;
 pub mod row_based_serializer;
+pub mod row_serde_util;
 
 #[derive(Clone)]
 pub struct CellBasedRowSerde;
@@ -63,7 +63,7 @@ impl RowSerde for RowBasedSerde {
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
-/// `Encoding` defines an interface for encoding a key row into kv storage.
+/// `RowSerialize` defines an interface for encoding a key row into kv storage.
 pub trait RowSerialize: Clone {
     /// Constructs a new serializer.
     fn create_row_serializer(
@@ -93,7 +93,8 @@ pub trait RowSerialize: Clone {
     fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>>;
 }
 
-/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
+/// `ColumnDescMapping` is the record mapping from [`ColumnDesc`], [`ColumnId`], and is used in both
+/// cell-based encoding and row-based encoding.
 #[derive(Clone)]
 pub struct ColumnDescMapping {
     /// output_columns are some of the columns that to be partialy scan.
@@ -109,10 +110,9 @@ pub struct ColumnDescMapping {
     pub output_index: Vec<usize>,
 }
 
-/// `Decoding` defines an interface for decoding a key row from kv storage.
+/// `RowDeserialize` defines an interface for decoding a key row from kv storage.
 pub trait RowDeserialize {
-    /// Constructs a new serializer.
-    // TODO: more parameters might be required for pk dedup.
+    /// Constructs a new deserializer.
     fn create_row_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self;
 
     /// When we encounter a new key, we can be sure that the previous row has been fully
