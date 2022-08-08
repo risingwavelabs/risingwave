@@ -89,33 +89,18 @@ impl LogicalHopWindow {
             input_pk.chain(window_pk).collect_vec()
         })();
         let functional_dependency = {
-            let input_fd =
+            let mut fd_set =
                 ColIndexMapping::identity_or_none(input.schema().len(), original_schema.len())
                     .composite(&ColIndexMapping::with_remaining_columns(
                         &output_indices,
                         original_schema.len(),
                     ))
                     .rewrite_functional_dependency_set(input.functional_dependency().clone());
-            let mut current_fd = FunctionalDependencySet::new(actual_schema.len());
-            for fd in input_fd.as_dependencies() {
-                if let Some(start_idx) = window_start_index {
-                    let mut fd = fd.clone();
-                    fd.set_from(start_idx, true);
-                    current_fd.add_functional_dependency(fd);
-                }
-                if let Some(end_idx) = window_end_index {
-                    let mut fd = fd.clone();
-                    fd.set_from(end_idx, true);
-                    current_fd.add_functional_dependency(fd);
-                }
+            if let Some(start_idx) = window_start_index && let Some(end_idx) = window_end_index {
+                fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
+                fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
             }
-            if let Some(start_idx) = window_start_index {
-                current_fd.add_key(&[start_idx])
-            }
-            if let Some(end_idx) = window_end_index {
-                current_fd.add_key(&[end_idx])
-            }
-            current_fd
+            fd_set
         };
         let base = PlanBase::new_logical(ctx, actual_schema, pk_indices, functional_dependency);
         LogicalHopWindow {
@@ -487,9 +472,9 @@ mod test {
         // input: [date, v1, v2]
         // FD: { date, v1 } --> { v2 }
         // output: [date, v1, v2, window_start, window_end],
-        // FD: { date, v1, window_start } --> { v2 }, { date, v1, window_end } --> v2
-        //     window_start --> { date, v1, v2, window_end }
-        //     window_end --> { date, v1, v2, window_start }
+        // FD: { date, v1 } --> { v2 }
+        //     window_start --> window_end
+        //     window_end --> window_start
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Date, "date"),
@@ -517,10 +502,9 @@ mod test {
             .cloned()
             .collect();
         let expected_fd_set: HashSet<_> = [
-            FunctionalDependency::with_indices(5, &[0, 1, 3], &[2]),
-            FunctionalDependency::with_indices(5, &[0, 1, 4], &[2]),
-            FunctionalDependency::with_indices(5, &[3], &[0, 1, 2, 4]),
-            FunctionalDependency::with_indices(5, &[4], &[0, 1, 2, 3]),
+            FunctionalDependency::with_indices(5, &[0, 1], &[2]),
+            FunctionalDependency::with_indices(5, &[3], &[4]),
+            FunctionalDependency::with_indices(5, &[4], &[3]),
         ]
         .into_iter()
         .collect();
