@@ -43,6 +43,9 @@ members = [
 [profile.dev]
 lto = 'off'
 
+[profile.release]
+debug = true
+
 [profile.bench]
 opt-level = 3
 debug = false
@@ -53,16 +56,14 @@ debug-assertions = false
 overflow-checks = false
 rpath = false
 
-[profile.release]
-debug = true
-
+# The profile used for CI in pull requests.
+# External dependencies are built with optimization enabled, while crates in this workspace are built
+# with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
 lto = 'off'
-
-# Set the default for external dependencies.
-[profile.ci-dev.package."*"]
+[profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 debug = 1
 
