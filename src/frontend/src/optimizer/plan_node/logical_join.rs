@@ -360,8 +360,8 @@ impl LogicalJoin {
                     .for_each(|fd| fd_set.add_functional_dependency(fd));
                 fd_set
             }
-            JoinType::LeftOuter => get_new_right_fd_set(right_fd_set),
-            JoinType::RightOuter => get_new_left_fd_set(left_fd_set),
+            JoinType::LeftOuter => get_new_left_fd_set(left_fd_set),
+            JoinType::RightOuter => get_new_right_fd_set(right_fd_set),
             JoinType::FullOuter => FunctionalDependencySet::new(out_col_num),
             JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
             JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
@@ -1563,6 +1563,12 @@ mod tests {
         // Full Outer Join:
         //  Schema: [l0, l1, r0, r1, r2]
         //  FD: empty
+        // Left Semi/Anti Join:
+        //  Schema: [l0, l1]
+        //  FD: l0 --> l1
+        // Right Semi/Anti Join:
+        //  Schema: [r0, r1, r2]
+        //  FD: r0 --> {r1, r2}
         let ctx = OptimizerContext::mock().await;
         let left = {
             let fields: Vec<Field> = vec![
@@ -1592,37 +1598,31 @@ mod tests {
             values
         };
         // l0 = 0 AND l1 = r1
-        let on = ExprImpl::FunctionCall(Box::new(
-            FunctionCall::new(
-                Type::And,
-                vec![
-                    ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new(
-                            Type::Equal,
-                            vec![
-                                ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
-                                ExprImpl::Literal(Box::new(Literal::new(
-                                    Some(ScalarImpl::Int32(0)),
-                                    DataType::Int32,
-                                ))),
-                            ],
-                        )
-                        .unwrap(),
-                    )),
-                    ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new(
-                            Type::Equal,
-                            vec![
-                                ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
-                                ExprImpl::InputRef(Box::new(InputRef::new(3, DataType::Int32))),
-                            ],
-                        )
-                        .unwrap(),
-                    )),
-                ],
-            )
-            .unwrap(),
-        ));
+        let on: ExprImpl = FunctionCall::new(
+            Type::And,
+            vec![
+                FunctionCall::new(
+                    Type::Equal,
+                    vec![
+                        InputRef::new(0, DataType::Int32).into(),
+                        ExprImpl::literal_int(0),
+                    ],
+                )
+                .unwrap()
+                .into(),
+                FunctionCall::new(
+                    Type::Equal,
+                    vec![
+                        InputRef::new(1, DataType::Int32).into(),
+                        InputRef::new(3, DataType::Int32).into(),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
         let expected_fd_set = [
             (
                 JoinType::Inner,
@@ -1642,7 +1642,7 @@ mod tests {
             ),
             (JoinType::FullOuter, HashSet::new()),
             (
-                JoinType::LeftOuter,
+                JoinType::RightOuter,
                 [
                     // inherit from right
                     FunctionalDependency::with_indices(5, &[2], &[3, 4]),
@@ -1651,10 +1651,46 @@ mod tests {
                 .collect::<HashSet<_>>(),
             ),
             (
-                JoinType::RightOuter,
+                JoinType::LeftOuter,
                 [
                     // inherit from left
                     FunctionalDependency::with_indices(5, &[0], &[1]),
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            ),
+            (
+                JoinType::LeftSemi,
+                [
+                    // inherit from left
+                    FunctionalDependency::with_indices(2, &[0], &[1]),
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            ),
+            (
+                JoinType::LeftAnti,
+                [
+                    // inherit from left
+                    FunctionalDependency::with_indices(2, &[0], &[1]),
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            ),
+            (
+                JoinType::RightSemi,
+                [
+                    // inherit from right
+                    FunctionalDependency::with_indices(3, &[0], &[1, 2]),
+                ]
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            ),
+            (
+                JoinType::RightAnti,
+                [
+                    // inherit from right
+                    FunctionalDependency::with_indices(3, &[0], &[1, 2]),
                 ]
                 .into_iter()
                 .collect::<HashSet<_>>(),

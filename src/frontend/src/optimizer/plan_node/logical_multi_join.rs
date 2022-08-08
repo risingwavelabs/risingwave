@@ -589,48 +589,47 @@ mod test {
             values
         };
         // On: v0 = 0 AND v1 = v3 AND v4 = v5
-        let on = ExprImpl::FunctionCall(Box::new(
-            FunctionCall::new(
-                Type::And,
-                vec![
-                    FunctionCall::new(
-                        Type::Equal,
-                        vec![
-                            InputRef::new(0, DataType::Int32).into(),
-                            ExprImpl::literal_int(0),
-                        ],
-                    )
-                    .unwrap()
-                    .into(),
-                    FunctionCall::new(
-                        Type::And,
-                        vec![
-                            FunctionCall::new(
-                                Type::Equal,
-                                vec![
-                                    InputRef::new(1, DataType::Int32).into(),
-                                    InputRef::new(3, DataType::Int32).into(),
-                                ],
-                            )
-                            .unwrap()
-                            .into(),
-                            FunctionCall::new(
-                                Type::Equal,
-                                vec![
-                                    InputRef::new(4, DataType::Int32).into(),
-                                    InputRef::new(5, DataType::Int32).into(),
-                                ],
-                            )
-                            .unwrap()
-                            .into(),
-                        ],
-                    )
-                    .unwrap()
-                    .into(),
-                ],
-            )
-            .unwrap(),
-        ));
+        let on: ExprImpl = FunctionCall::new(
+            Type::And,
+            vec![
+                FunctionCall::new(
+                    Type::Equal,
+                    vec![
+                        InputRef::new(0, DataType::Int32).into(),
+                        ExprImpl::literal_int(0),
+                    ],
+                )
+                .unwrap()
+                .into(),
+                FunctionCall::new(
+                    Type::And,
+                    vec![
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                InputRef::new(1, DataType::Int32).into(),
+                                InputRef::new(3, DataType::Int32).into(),
+                            ],
+                        )
+                        .unwrap()
+                        .into(),
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                InputRef::new(4, DataType::Int32).into(),
+                                InputRef::new(5, DataType::Int32).into(),
+                            ],
+                        )
+                        .unwrap()
+                        .into(),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
         let multi_join = LogicalMultiJoin::new(
             vec![t1.into(), t2.into(), t3.into()],
             Condition::with_expr(on),
