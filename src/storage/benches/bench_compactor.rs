@@ -235,11 +235,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(8)
-            .build()
-            .unwrap();
-        b.to_async(runtime).iter(|| {
+        b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
                 HummockIteratorUnion::First(ConcatIterator::new(
