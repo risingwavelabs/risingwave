@@ -28,12 +28,15 @@ use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockVersionDeltaExt, HummockVersionExt,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
-    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
+    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
     HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
@@ -216,22 +219,17 @@ impl Versioning {
         delta_range: impl RangeBounds<HummockVersionId>,
     ) {
         for (_, delta) in self.hummock_version_deltas.range(delta_range) {
-            let mut no_sst_to_delete = true;
             if delta.trivial_move {
                 self.deltas_to_delete.push(delta.id);
                 continue;
             }
-            for level_deltas in delta.level_deltas.values() {
-                for level_delta in &level_deltas.level_deltas {
-                    for sst_id in &level_delta.removed_table_ids {
-                        let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
-                        assert!(duplicate_insert.is_none());
-                        no_sst_to_delete = false;
-                    }
-                }
+            let removed_sst_ids = delta.get_removed_sst_ids();
+            for sst_id in &removed_sst_ids {
+                let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
+                debug_assert!(duplicate_insert.is_none());
             }
             // If no_sst_to_delete, the delta is qualified for deletion now.
-            if no_sst_to_delete {
+            if removed_sst_ids.is_empty() {
                 self.deltas_to_delete.push(delta.id);
             }
             // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
@@ -1213,6 +1211,7 @@ where
     }
 
     /// Tries to checkpoint at min_pinned_version_id
+    ///
     /// Returns the diff between new and old checkpoint id.
     #[named]
     pub async fn proceed_version_checkpoint(&self) -> Result<u64> {
@@ -1265,21 +1264,15 @@ where
              versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
                 let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
                 let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-                let current_version_copy = versioning_guard.current_version.clone();
                 let pinned_versions_copy = versioning_guard.pinned_versions.clone();
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
-                let ssts_to_delete_copy = versioning_guard.ssts_to_delete.clone();
-                let deltas_to_delete_copy = versioning_guard.deltas_to_delete.clone();
                 let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 (
                     compact_statuses_copy,
                     compact_task_assignment_copy,
-                    current_version_copy,
                     pinned_versions_copy,
                     pinned_snapshots_copy,
-                    ssts_to_delete_copy,
-                    deltas_to_delete_copy,
                     checkpoint_version_copy,
                     hummock_version_deltas_copy,
                 )
@@ -1436,7 +1429,7 @@ where
         let send_task = async {
             tokio::time::timeout(Duration::from_secs(3), async {
                 compactor
-                    .send_task(Some(compact_task.clone()), None)
+                    .send_task(Task::CompactTask(compact_task.clone()))
                     .await
                     .is_ok()
             })
@@ -1512,7 +1505,8 @@ where
         let mut deltas_to_delete = HashSet::new();
         let mut versioning_guard = write_lock!(self, versioning).await;
         for sst_id in sst_ids {
-            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(sst_id) {
+            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(sst_id) && version_id != INVALID_VERSION_ID{
+                // Orphan SST is mapped to INVALID_VERSION_ID
                 deltas_to_delete.insert(version_id);
             }
         }
@@ -1548,5 +1542,34 @@ where
             self.check_state_consistency().await;
         }
         Ok((deleted, remain))
+    }
+
+    /// Extends `ssts_to_delete` according to object store full scan result.
+    /// Caller should ensure `sst_ids` doesn't include any SSTs belong to a on-going version write.
+    /// That's to say, these sst_ids won't appear in either `commit_epoch` or
+    /// `report_compact_task`.
+    #[named]
+    pub async fn extend_ssts_to_delete_from_scan(&self, sst_ids: &[HummockSstableId]) -> usize {
+        let tracked_sst_ids: HashSet<HummockSstableId> = {
+            let versioning_guard = read_lock!(self, versioning).await;
+            let mut tracked_sst_ids =
+                HashSet::from_iter(versioning_guard.current_version.get_sst_ids());
+            for delta in versioning_guard.hummock_version_deltas.values() {
+                tracked_sst_ids.extend(delta.get_removed_sst_ids());
+            }
+            tracked_sst_ids
+        };
+        let to_delete = sst_ids
+            .iter()
+            .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
+            .collect_vec();
+        tracing::info!("SST full scan results: {:#?}", sst_ids);
+        tracing::info!("SST to delete in full GC: {:#?}", to_delete);
+        write_lock!(self, versioning).await.ssts_to_delete.extend(
+            to_delete
+                .iter()
+                .map(|sst_id| (**sst_id, INVALID_VERSION_ID)),
+        );
+        to_delete.len()
     }
 }

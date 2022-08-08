@@ -190,6 +190,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 checkpoint_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,
+                ..Default::default()
             },
         )
         .await
