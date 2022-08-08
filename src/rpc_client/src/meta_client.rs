@@ -20,7 +20,9 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
     Table as ProstTable,
@@ -338,10 +340,14 @@ impl MetaClient {
                         return;
                     }
                 }
-                let extra_info = extra_info_sources
-                    .iter()
-                    .filter_map(|s| s.get_extra_info())
-                    .collect::<Vec<_>>();
+                let mut extra_info = Vec::with_capacity(extra_info_sources.len());
+                for extra_info_source in &extra_info_sources {
+                    if let Some(info) = extra_info_source.get_extra_info().await {
+                        // None means the info is not available at the moment, and won't be sent to
+                        // meta.
+                        extra_info.push(info);
+                    }
+                }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
@@ -352,7 +358,7 @@ impl MetaClient {
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {}", err);
+                        tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
                         if err.to_string().contains("unknown worker") {
                             panic!("Already removed by the meta node. Need to restart the worker");
                         }
@@ -517,6 +523,12 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
+        let req = ReportFullScanTaskRequest { sst_ids };
+        self.inner.report_full_scan_task(req).await?;
+        Ok(())
+    }
+
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
         let req = GetCompactionGroupsRequest {};
         let resp = self.inner.get_compaction_groups(req).await?;
@@ -659,6 +671,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
+            ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
