@@ -64,8 +64,8 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     # This avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.
     # Use that to reproduce logs on local machine.
-    RUST_LOG=off timeout 20m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
+    timeout 20m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
 
     echo "--- Kill cluster"
-    cargo make ci-kill
+    cargo make kill
 fi
