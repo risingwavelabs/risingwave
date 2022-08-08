@@ -18,14 +18,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
-use bytes::{Buf, BufMut, Bytes};
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache, LruCacheEventListener};
 use risingwave_hummock_sdk::HummockSstableId;
 
-use super::{
-    Block, HummockResult, TieredCache, TieredCacheEntry, TieredCacheKey, TieredCacheValue,
-};
+use super::{Block, HummockResult, TieredCacheEntry, TieredCacheValue};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
@@ -85,54 +82,8 @@ impl Deref for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
-impl TieredCacheKey for (HummockSstableId, u64) {
-    fn encoded_len() -> usize {
-        16
-    }
-
-    fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.0);
-        buf.put_u64(self.1);
-    }
-
-    fn decode(mut buf: &[u8]) -> Self {
-        let sst_id = buf.get_u64();
-        let block_idx = buf.get_u64();
-        (sst_id, block_idx)
-    }
-}
-
-impl TieredCacheValue for Box<Block> {
-    fn len(&self) -> usize {
-        Block::len(self)
-    }
-
-    fn encoded_len(&self) -> usize {
-        self.len()
-    }
-
-    fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_slice(self.raw_data());
-    }
-
-    fn decode(buf: Vec<u8>) -> Self {
-        Box::new(Block::decode_from_raw(Bytes::from(buf)))
-    }
-}
-
-pub struct MemoryBlockCacheEventListener {
-    tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
-}
-
-impl LruCacheEventListener for MemoryBlockCacheEventListener {
-    type K = (HummockSstableId, u64);
-    type T = Box<Block>;
-
-    fn on_release(&self, key: Self::K, value: Self::T) {
-        // TODO(MrCroxx): handle error?
-        self.tiered_cache.insert(key, value).unwrap();
-    }
-}
+type BlockCacheEventListener =
+    Arc<dyn LruCacheEventListener<K = (HummockSstableId, u64), T = Box<Block>>>;
 
 #[derive(Clone)]
 pub struct BlockCache {
@@ -140,10 +91,22 @@ pub struct BlockCache {
 }
 
 impl BlockCache {
-    pub fn new(
+    pub fn new(capacity: usize, max_shard_bits: usize) -> Self {
+        Self::new_inner(capacity, max_shard_bits, None)
+    }
+
+    pub fn with_event_listener(
+        capacity: usize,
+        max_shard_bits: usize,
+        listener: BlockCacheEventListener,
+    ) -> Self {
+        Self::new_inner(capacity, max_shard_bits, Some(listener))
+    }
+
+    fn new_inner(
         capacity: usize,
         mut max_shard_bits: usize,
-        tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
+        listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
@@ -152,9 +115,10 @@ impl BlockCache {
             max_shard_bits -= 1;
         }
 
-        let listener = Arc::new(MemoryBlockCacheEventListener { tiered_cache });
-
-        let cache = LruCache::with_event_listener(max_shard_bits, capacity, listener);
+        let cache = match listener {
+            Some(listener) => LruCache::with_event_listener(max_shard_bits, capacity, listener),
+            None => LruCache::new(max_shard_bits, capacity),
+        };
 
         Self {
             inner: Arc::new(cache),
