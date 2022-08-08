@@ -384,7 +384,7 @@ do
 done
 
 echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
 echo
 
 echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
@@ -539,7 +539,7 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets --features failpoints --locked -- -D warnings
+cargo clippy --all-targets --features failpoints
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 

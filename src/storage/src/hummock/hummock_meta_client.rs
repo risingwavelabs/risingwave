@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_hummock_sdk::{LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta,
     SubscribeCompactTasksResponse, VacuumTask,
@@ -144,5 +144,9 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client
             .trigger_manual_compaction(compaction_group_id, table_id, level)
             .await
+    }
+
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
+        self.meta_client.report_full_scan_task(sst_ids).await
     }
 }

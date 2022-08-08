@@ -109,9 +109,10 @@ where
 }
 
 /// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.
+#[async_trait::async_trait]
 pub trait ExtraInfoSource: Send + Sync {
     /// None means the info is not available at the moment.
-    fn get_extra_info(&self) -> Option<extra_info::Info>;
+    async fn get_extra_info(&self) -> Option<extra_info::Info>;
 }
 
 pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
