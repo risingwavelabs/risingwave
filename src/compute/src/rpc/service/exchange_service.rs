@@ -16,8 +16,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use futures::Stream;
+use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
@@ -31,7 +32,7 @@ use tonic::{Request, Response, Status};
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 
 /// Buffer size of the receiver of the remote channel.
-const EXCHANGE_BUFFER_SIZE: usize = 1024;
+const BATCH_EXCHANGE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
@@ -40,12 +41,13 @@ pub struct ExchangeServiceImpl {
     metrics: Arc<ExchangeServiceMetrics>,
 }
 
-type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
-    type GetDataStream = ExchangeDataStream;
-    type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
+    type GetDataStream = BatchDataStream;
+    type GetStreamStream = StreamDataStream;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn get_data(
@@ -59,7 +61,7 @@ impl ExchangeService for ExchangeServiceImpl {
             .into_inner()
             .task_output_id
             .expect("Failed to get task output id.");
-        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
+        let (tx, rx) = tokio::sync::mpsc::channel(BATCH_EXCHANGE_BUFFER_SIZE);
         if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
             error!("Failed to serve exchange RPC from {}: {}", peer_addr, e);
             return Err(e.into());
@@ -79,19 +81,14 @@ impl ExchangeService for ExchangeServiceImpl {
         let up_down_actor_ids = (req.up_actor_id, req.down_actor_id);
         let up_down_fragment_ids = (req.up_fragment_id, req.down_fragment_id);
         let receiver = self.stream_mgr.take_receiver(up_down_actor_ids)?;
-        match self
-            .get_stream_impl(peer_addr, receiver, up_down_actor_ids, up_down_fragment_ids)
-            .await
-        {
-            Ok(resp) => Ok(resp),
-            Err(e) => {
-                error!(
-                    "Failed to server stream exchange RPC from {}: {}",
-                    peer_addr, e
-                );
-                Err(e.into())
-            }
-        }
+
+        Ok(Response::new(Self::get_stream_impl(
+            self.metrics.clone(),
+            peer_addr,
+            receiver,
+            up_down_actor_ids,
+            up_down_fragment_ids,
+        )))
     }
 }
 
@@ -108,80 +105,53 @@ impl ExchangeServiceImpl {
         }
     }
 
+    #[try_stream(ok = GetStreamResponse, error = Status)]
     async fn get_stream_impl(
-        &self,
+        metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
         mut receiver: Receiver<Message>,
         up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
-    ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
-        let metrics = self.metrics.clone();
+    ) {
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
-        tokio::spawn(async move {
-            let up_actor_id = up_down_actor_ids.0.to_string();
-            let down_actor_id = up_down_actor_ids.1.to_string();
-            let up_fragment_id = up_down_fragment_ids.0.to_string();
-            let down_fragment_id = up_down_fragment_ids.1.to_string();
+        let up_actor_id = up_down_actor_ids.0.to_string();
+        let down_actor_id = up_down_actor_ids.1.to_string();
+        let up_fragment_id = up_down_fragment_ids.0.to_string();
+        let down_fragment_id = up_down_fragment_ids.1.to_string();
 
-            let mut rr = 0;
-            const SAMPLING_FREQUENCY: u64 = 100;
+        let mut rr = 0;
+        const SAMPLING_FREQUENCY: u64 = 100;
 
-            loop {
-                let msg = receiver.recv().await;
-                match msg {
-                    // the sender is closed, we close the receiver and stop forwarding message
-                    None => break,
-                    Some(msg) => {
-                        // add serialization duration metric with given sampling frequency
-                        let proto = if rr % SAMPLING_FREQUENCY == 0 {
-                            let start_time = Instant::now();
-                            let proto = msg.to_protobuf();
-                            metrics
-                                .actor_sampled_serialize_duration_ns
-                                .with_label_values(&[&up_actor_id])
-                                .inc_by(start_time.elapsed().as_nanos() as u64);
-                            proto
-                        } else {
-                            msg.to_protobuf()
-                        };
-                        rr += 1;
+        while let Some(msg) = receiver.recv().await {
+            // add serialization duration metric with given sampling frequency
+            let proto = if rr % SAMPLING_FREQUENCY == 0 {
+                let start_time = Instant::now();
+                let proto = msg.to_protobuf();
+                metrics
+                    .actor_sampled_serialize_duration_ns
+                    .with_label_values(&[&up_actor_id])
+                    .inc_by(start_time.elapsed().as_nanos() as u64);
+                proto
+            } else {
+                msg.to_protobuf()
+            }?;
+            rr += 1;
 
-                        let res = match proto {
-                            Ok(stream_msg) => Ok(GetStreamResponse {
-                                message: Some(stream_msg),
-                            }),
-                            Err(e) => Err(e.into()),
-                        };
+            let message = GetStreamResponse {
+                message: Some(proto),
+            };
+            let bytes = Message::get_encoded_len(&message);
 
-                        let bytes = match res.as_ref() {
-                            Ok(msg) => Message::get_encoded_len(msg),
-                            Err(_) => 0,
-                        };
+            yield message;
 
-                        let _ = match tx.send(res).await.map_err(|e| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "failed to send stream data: {}",
-                                e
-                            )))
-                        }) {
-                            Ok(_) => {
-                                metrics
-                                    .stream_exchange_bytes
-                                    .with_label_values(&[&up_actor_id, &down_actor_id])
-                                    .inc_by(bytes as u64);
-                                metrics
-                                    .stream_fragment_exchange_bytes
-                                    .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                                    .inc_by(bytes as u64);
-                                Ok(())
-                            }
-                            Err(e) => tx.send(Err(e.into())).await,
-                        };
-                    }
-                }
-            }
-        });
-        Ok(Response::new(ReceiverStream::new(rx)))
+            metrics
+                .stream_exchange_bytes
+                .with_label_values(&[&up_actor_id, &down_actor_id])
+                .inc_by(bytes as u64);
+            metrics
+                .stream_fragment_exchange_bytes
+                .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                .inc_by(bytes as u64);
+        }
     }
 }
