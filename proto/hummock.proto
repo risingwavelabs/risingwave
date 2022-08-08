@@ -255,12 +255,21 @@ message SubscribeCompactTasksRequest {
 }
 
 message SubscribeCompactTasksResponse {
-  CompactTask compact_task = 1;
-  VacuumTask vacuum_task = 2;
+  oneof task {
+    CompactTask compact_task = 1;
+    VacuumTask vacuum_task = 2;
+    FullScanTask full_scan_task = 3;
+  }
 }
 
+// Delete SSTs in object store
 message VacuumTask {
   repeated uint64 sstable_ids = 1;
+}
+
+// Scan object store to get candidate orphan SSTs.
+message FullScanTask {
+  uint64 sst_retention_time_sec = 1;
 }
 
 message ReportVacuumTaskRequest {
@@ -290,6 +299,14 @@ message TriggerManualCompactionResponse {
   common.Status status = 1;
 }
 
+message ReportFullScanTaskRequest {
+  repeated uint64 sst_ids = 1;
+}
+
+message ReportFullScanTaskResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -304,6 +321,7 @@ service HummockManagerService {
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
+  rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
 }
 
 service CompactorService {}

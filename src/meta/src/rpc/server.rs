@@ -469,6 +469,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger,
         notification_manager,
         compaction_scheduler,
+        &env.opts,
     )
     .await;
     sub_tasks.push((lease_handle, lease_shutdown));
