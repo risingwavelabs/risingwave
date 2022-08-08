@@ -308,6 +308,57 @@ where
         }))
     }
 
+    async fn create_index(
+        &self,
+        request: Request<CreateIndexRequest>,
+    ) -> Result<Response<CreateIndexResponse>, Status> {
+        self.ddl_lock.read().await;
+        self.env.idle_manager().record_activity();
+
+        let req = request.into_inner();
+        let index = req.get_index().map_err(meta_error_to_tonic)?.clone();
+        let index_table = req.get_index_table().map_err(meta_error_to_tonic)?.clone();
+        let fragment_graph = req
+            .get_fragment_graph()
+            .map_err(meta_error_to_tonic)?
+            .clone();
+
+        let (index_id, version) = self
+            .create_relation(&mut Relation::Index(index, index_table), fragment_graph)
+            .await?;
+
+        Ok(Response::new(CreateIndexResponse {
+            status: None,
+            index_id,
+            version,
+        }))
+    }
+
+    async fn drop_index(
+        &self,
+        request: Request<DropIndexRequest>,
+    ) -> Result<Response<DropIndexResponse>, Status> {
+        self.ddl_lock.read().await;
+        use risingwave_common::catalog::TableId;
+
+        self.env.idle_manager().record_activity();
+
+        let index_id = request.into_inner().index_id;
+
+        // 1. Drop index in catalog. Ref count will be checked.
+        let (index_table_id, version) = self.catalog_manager.drop_index(index_id).await?;
+
+        // 2. drop mv(index) in stream manager
+        self.stream_manager
+            .drop_materialized_view(&TableId::new(index_table_id))
+            .await?;
+
+        Ok(Response::new(DropIndexResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_materialized_source(
         &self,
         request: Request<CreateMaterializedSourceRequest>,
@@ -426,8 +477,14 @@ where
                 return Err(e);
             }
             Ok(()) => {
-                if let Relation::Table(table) = relation {
-                    self.set_table_mapping(table)?;
+                match relation {
+                    Relation::Table(table) => {
+                        self.set_table_mapping(table)?;
+                    }
+                    Relation::Index(_, index_table) => {
+                        self.set_table_mapping(index_table)?;
+                    }
+                    Relation::Sink(_) => (),
                 }
                 self.get_internal_table(&ctx)?
             }
@@ -439,6 +496,7 @@ where
             match relation {
                 Relation::Table(_) => "materialized_view",
                 Relation::Sink(_) => "sink",
+                Relation::Index(..) => "index",
             },
             internal_tables.len(),
             ctx.internal_table_id_map.len()
@@ -449,8 +507,8 @@ where
             .catalog_manager
             .finish_create_procedure(
                 match relation {
-                    Relation::Table(_) => Some(internal_tables),
-                    _ => None,
+                    Relation::Table(_) | Relation::Index(..) => Some(internal_tables),
+                    Relation::Sink(_) => None,
                 },
                 relation,
             )
@@ -470,7 +528,7 @@ where
 
         // Get relation_id and make fragment_graph immutable.
         let (relation_id, fragment_graph) = match relation {
-            Relation::Table(_) => {
+            Relation::Table(_) | Relation::Index(..) => {
                 // Fill in the correct mview id for stream node.
                 fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
                     let mut mview_count = 0;
