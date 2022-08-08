@@ -38,7 +38,7 @@ mod utils;
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
 pub use function_call::{FunctionCall, FunctionCallDisplay};
-pub use input_ref::{as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};

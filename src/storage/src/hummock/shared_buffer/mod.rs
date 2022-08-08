@@ -691,6 +691,5 @@ mod tests {
             order_index1,
             vec![(StaticCompactionGroupId::StateDefault.into(), sst1)],
         );
-
     }
 }

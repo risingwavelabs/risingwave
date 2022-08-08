@@ -29,7 +29,6 @@ impl Rule for ApplyProjRule {
         let (left, right, on, join_type, correlated_id, correlated_indices) =
             apply.clone().decompose();
         let project = right.as_logical_project()?;
-
         assert_eq!(join_type, JoinType::Inner);
 
         // Insert all the columns of `LogicalApply`'s left at the beginning of the new

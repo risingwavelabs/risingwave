@@ -93,7 +93,7 @@ impl ColIndexMapping {
     ///
     /// Positive offset:
     ///
-    /// ```rust
+    /// ```ignore
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(3, 3);
     /// assert_eq!(mapping.map(0), 3);
@@ -103,7 +103,7 @@ impl ColIndexMapping {
     ///
     /// Negative offset:
     ///
-    ///  ```rust
+    ///  ```ignore
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(6, -3);
     /// assert_eq!(mapping.try_map(0), None);
@@ -131,7 +131,7 @@ impl ColIndexMapping {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// # use fixedbitset::FixedBitSet;
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut remaining_cols = vec![1, 3];
@@ -155,7 +155,7 @@ impl ColIndexMapping {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// # use fixedbitset::FixedBitSet;
     /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut removed_cols = vec![0, 2, 4];

@@ -52,7 +52,7 @@ use crate::hummock::shared_buffer::{
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
     INVALID_VERSION_ID,
 };
 use crate::monitor::StateStoreMetrics;
@@ -146,6 +146,7 @@ pub struct LocalVersionManager {
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     max_sync_epoch: RwLock<u64>,
+    sstable_id_manager: SstableIdManagerRef,
 }
 
 impl LocalVersionManager {
@@ -199,10 +200,11 @@ impl LocalVersionManager {
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
-                sstable_id_manager,
+                sstable_id_manager.clone(),
                 filter_key_extractor_manager.clone(),
             )),
             max_sync_epoch: RwLock::new(0),
+            sstable_id_manager,
         });
 
         // Pin and get the latest version.
@@ -297,7 +299,15 @@ impl LocalVersionManager {
         }
 
         let mut new_version = old_version.clone();
-        new_version.set_pinned_version(newly_pinned_version);
+        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
+        let sstable_id_manager_clone = self.sstable_id_manager.clone();
+        tokio::spawn(async move {
+            for cleaned_epoch in cleaned_epochs {
+                sstable_id_manager_clone
+                    .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
+                    .await;
+            }
+        });
         {
             let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
             *guard = new_version;
@@ -499,7 +509,7 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        // todo! xuxinhao: modify it after supporting uploading some shared buffers.#4442
+        // TODO(xuxinhao): modify it after supporting uploading multiple shared buffers.#4442
         loop {
             let max_sync_epoch_guard = self.max_sync_epoch.read();
             let local_version_guard = self.local_version.read();
@@ -927,10 +937,16 @@ impl LocalVersionManager {
                         assert!(pending_write_requests.is_empty());
 
                         // Clear shared buffer
-                        local_version_manager
+                        let cleaned_epochs = local_version_manager
                             .local_version
                             .write()
                             .clear_shared_buffer();
+                        for cleaned_epoch in cleaned_epochs {
+                            local_version_manager
+                                .sstable_id_manager
+                                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
+                                .await;
+                        }
 
                         // Notify completion of the Clear event.
                         notifier.send(()).unwrap();

@@ -219,7 +219,7 @@ pub trait StateStoreIter: Send + 'static {
 pub struct ReadOptions {
     pub epoch: u64,
     pub table_id: Option<TableId>,
-    pub ttl: Option<u32>, // second
+    pub retention_seconds: Option<u32>, // second
 }
 
 #[derive(Default, Clone)]
@@ -231,8 +231,10 @@ pub struct WriteOptions {
 impl ReadOptions {
     pub fn min_epoch(&self) -> u64 {
         let epoch = Epoch(self.epoch);
-        match self.ttl {
-            Some(ttl_second_u32) => epoch.subtract_ms((ttl_second_u32 * 1000) as u64).0,
+        match self.retention_seconds.as_ref() {
+            Some(retention_seconds_u32) => {
+                epoch.subtract_ms((retention_seconds_u32 * 1000) as u64).0
+            }
             None => 0,
         }
     }

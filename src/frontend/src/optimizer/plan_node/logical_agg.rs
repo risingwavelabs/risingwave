@@ -18,7 +18,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
-use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -244,10 +244,13 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 write!(
                     f,
                     "{}",
-                    self.input_schema.fields.get(input.index).unwrap().name
+                    InputRefDisplay {
+                        input_ref: input,
+                        input_schema: self.input_schema
+                    }
                 )?;
                 if idx != (that.inputs.len() - 1) {
-                    write!(f, ",")?;
+                    write!(f, ", ")?;
                 }
             }
             if !that.order_by_fields.is_empty() {
@@ -316,7 +319,7 @@ impl LogicalAgg {
                     .inner()
                     .with_properties
                     .iter()
-                    .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
 
@@ -367,7 +370,7 @@ impl LogicalAgg {
                     .inner()
                     .with_properties
                     .iter()
-                    .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
 
