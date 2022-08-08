@@ -20,6 +20,7 @@ use rand::{thread_rng, Rng};
 use serde_json::{json, Value};
 
 use super::DEFAULT_MAX_PAST;
+use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
 
 pub struct TimestampField {
     max_past: Duration,
@@ -49,5 +50,13 @@ impl TimestampField {
         let max_seconds = rng.gen_range(0..=seconds);
         let res = self.local_now - Duration::seconds(max_seconds);
         json!(res.to_string())
+    }
+
+    pub fn generate_datum(&mut self) -> Datum {
+        let seconds = self.max_past.num_seconds();
+        let mut rng = thread_rng();
+        let max_seconds = rng.gen_range(0..=seconds);
+        let res = self.local_now - Duration::seconds(max_seconds);
+        Some(NaiveDateTimeWrapper::new(res).to_scalar_value())
     }
 }

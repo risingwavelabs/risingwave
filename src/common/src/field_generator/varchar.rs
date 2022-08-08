@@ -18,6 +18,7 @@ use rand::Rng;
 use serde_json::{json, Value};
 
 use super::DEFAULT_LENGTH;
+use crate::types::{Datum, Scalar};
 
 pub struct VarcharField {
     length: usize,
@@ -40,5 +41,14 @@ impl VarcharField {
             .map(char::from)
             .collect();
         json!(s)
+    }
+
+    pub fn generate_datum(&mut self) -> Datum {
+        let s: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(self.length)
+            .map(char::from)
+            .collect();
+        Some(s.to_scalar_value())
     }
 }
