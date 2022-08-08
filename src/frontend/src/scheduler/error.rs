@@ -34,9 +34,6 @@ pub enum SchedulerError {
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
-
-    #[error("Empty worker nodes")]
-    EmptyWorkerNodes
 }
 
 impl From<SchedulerError> for RwError {

@@ -35,7 +35,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tonic::Streaming;
-use tracing::error;
+use tracing::{error, info};
 use uuid::Uuid;
 use StageEvent::Failed;
 
@@ -318,14 +318,6 @@ impl StageRunner {
                 futures.push(self.schedule_task(task_id, plan_fragment, None));
             }
         }
-        // We have not scheduled any task, return early. May relates to empty worker.
-        if futures.len() == 0 {
-            self.send_event(QueryMessage::Stage(StageEvent::Failed {
-                id: self.stage.id,
-                reason: anyhow!("futures cnt 0").into()
-            })).await?;
-            return Ok(());
-        }
 
         // Await each future and convert them into a set of streams.
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
@@ -357,30 +349,26 @@ impl StageRunner {
                 // All tasks in this stage have been scheduled. Notify query runner to schedule next
                 // stage.
                 if running_task_cnt == self.tasks.keys().len() {
-                    self.notify_schedule_next().await?;
+                    self.notify_schedule_next_stage().await?;
                     sent_signal_to_next = true;
                 }
 
                 // TODO: handle task failure.
             }
-            println!(
+            info!(
                 "task status {:?}!",
                 status.task_info.as_ref().unwrap().task_status
             );
         }
 
-        // May be because the empty workers, do not create any task so never receive any status. So we schedule failed event.
-        if !sent_signal_to_next {
-            self.send_event(QueryMessage::Stage(StageEvent::Failed {
-                id: self.stage.id,
-                reason: anyhow!("Have not receive any ").into()
-            })).await?;
-        }
+        // After processing all stream status, we must have sent signal (Either Scheduled or
+        // Failed) to Query Runner.
+        assert!(sent_signal_to_next);
         Ok(())
     }
 
     /// Write message into channel to notify query runner current stage have been scheduled.
-    async fn notify_schedule_next(&self) -> SchedulerResult<()> {
+    async fn notify_schedule_next_stage(&self) -> SchedulerResult<()> {
         // If all tasks of this stage is scheduled, tell the query manager to schedule next.
         {
             // Changing state
