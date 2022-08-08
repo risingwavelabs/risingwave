@@ -1071,7 +1071,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{DataType, Datum, ScalarImpl};
+    use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
