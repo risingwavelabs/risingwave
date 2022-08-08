@@ -21,7 +21,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
+use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
