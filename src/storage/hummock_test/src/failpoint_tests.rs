@@ -160,7 +160,8 @@ async fn test_failpoints_state_store_read_upload() {
     let result = hummock_storage.sync(3).await;
     assert!(result.is_err());
     fail::remove(mem_upload_err);
-    //TODO: We cannot discontinuously sync now, we will remove the comment after supporting uploading multiple shared buffers.#4442
+    // TODO: We cannot sync discontinuously now, we will remove the comment after supporting
+    // uploading multiple shared buffers.#4442
 
     // let (_, ssts) = hummock_storage.sync(3).await.unwrap();
     // meta_client.commit_epoch(3, ssts).await.unwrap();
