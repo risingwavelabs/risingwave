@@ -71,7 +71,7 @@ steps:
     soft_fail: true
 
   - label: "end-to-end source test"
-    command: "ci/scripts/e2e-source-test.sh"
+    command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -84,7 +84,7 @@ steps:
     retry: *auto-retry
 
   - label: "regress test"
-    command: "ci/scripts/regress-test.sh"
+    command: "ci/scripts/regress-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
