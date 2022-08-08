@@ -27,7 +27,6 @@ madsim = "=0.2.0-alpha.6"
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.3"
 num-traits = "0.2"
-num_cpus = "1.13.1"
 parking_lot = "0.12"
 paste = "1"
 postgres-types = { version = "0.2", features = ["derive","with-chrono-0_4"] }

@@ -53,7 +53,6 @@ mod model;
 pub mod rpc;
 pub mod storage;
 mod stream;
-pub mod test_utils;
 
 use std::time::Duration;
 

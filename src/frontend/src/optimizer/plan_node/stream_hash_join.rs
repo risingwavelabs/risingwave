@@ -17,7 +17,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, Field, Schema, SchemaId};
-use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
@@ -46,7 +46,7 @@ pub struct StreamHashJoin {
     eq_join_predicate: EqJoinPredicate,
 
     /// Whether to force use delta join for this join node. If this is true, then indexes will
-    /// be create automatically when building the executors on meta service. For testing purpose
+    /// be created automatically when building the executors on meta service. For testing purpose
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
 
@@ -274,7 +274,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
             .inner()
             .with_properties
             .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
 

@@ -5,13 +5,21 @@ package meta;
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
 
 option optimize_for = SPEED;
 
 message HeartbeatRequest {
+  message ExtraInfo {
+    oneof info {
+      uint64 hummock_gc_watermark = 1;
+    }
+  }
   uint32 node_id = 1;
+  // Lightweight info piggybacked by heartbeat request.
+  repeated ExtraInfo info = 2;
 }
 
 message HeartbeatResponse {
@@ -156,6 +164,7 @@ message MetaSnapshot {
   repeated catalog.Sink sink = 5;
   repeated catalog.Table table = 6;
   repeated user.UserInfo users = 7;
+  hummock.HummockVersion hummock_version = 8;
 }
 
 message SubscribeResponse {
@@ -210,6 +219,8 @@ message GetClusterInfoRequest {}
 message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
+  map<uint32, source.ConnectorSplits> actor_splits = 3;
+  map<uint32, catalog.StreamSourceInfo> stream_source_infos = 4;
 }
 
 service ScaleService {

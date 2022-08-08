@@ -1526,6 +1526,7 @@ impl Parser {
     // where option can be:
     //       SUPERUSER | NOSUPERUSER
     //     | CREATEDB | NOCREATEDB
+    //     | CREATEUSER | NOCREATEUSER
     //     | LOGIN | NOLOGIN
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {

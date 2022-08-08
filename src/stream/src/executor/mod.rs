@@ -278,6 +278,11 @@ impl Barrier {
         Self { span, ..self }
     }
 
+    /// Whether this barrier carries stop mutation.
+    pub fn is_with_stop_mutation(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Stop(_)))
+    }
+
     /// Whether this barrier is to stop the actor with `actor_id`.
     pub fn is_stop_or_update_drop_actor(&self, actor_id: ActorId) -> bool {
         match self.mutation.as_deref() {

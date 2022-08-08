@@ -61,10 +61,6 @@ impl LogicalProjectBuilder {
         self.exprs_index.get(expr).copied()
     }
 
-    pub fn exprs_num(&self) -> usize {
-        self.exprs.len()
-    }
-
     /// build the `LogicalProject` from `LogicalProjectBuilder`
     pub fn build(self, input: PlanRef) -> LogicalProject {
         LogicalProject::new(input, self.exprs)

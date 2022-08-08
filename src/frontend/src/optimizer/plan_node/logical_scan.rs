@@ -211,6 +211,11 @@ impl LogicalScan {
         &self.indexes
     }
 
+    /// Get the logical scan's filter predicate
+    pub fn predicate(&self) -> &Condition {
+        &self.predicate
+    }
+
     /// The mapped distribution key of the scan operator.
     ///
     /// The column indices in it is the position in the `required_col_idx`, instead of the position
@@ -359,7 +364,7 @@ impl fmt::Display for LogicalScan {
                 }.join(", "),
                 required_col_names.join(", "),
                 {
-                    let fields = self.table_desc.columns.iter().map(|col|  Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
+                    let fields = self.table_desc.columns.iter().map(|col| Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
                     let input_schema = Schema{fields};
                     format!("{}", ConditionDisplay {
                         condition: &self.predicate,

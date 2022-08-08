@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{UpdateUserRequest, UserInfo};
@@ -26,25 +27,53 @@ use crate::user::user_authentication::{encrypt_default, encrypted_password};
 fn alter_prost_user_info(
     mut user_info: UserInfo,
     options: &UserOptions,
+    session_user: &UserInfo,
 ) -> Result<UpdateUserRequest> {
     let mut update_fields = Vec::new();
+    let mut has_privilege = true;
     for option in &options.0 {
         match option {
             UserOption::SuperUser => {
+                if !session_user.is_supper {
+                    has_privilege = false;
+                }
                 user_info.is_supper = true;
                 update_fields.push(UpdateField::Super as i32);
             }
             UserOption::NoSuperUser => {
+                if !session_user.is_supper {
+                    has_privilege = false;
+                }
                 user_info.is_supper = false;
                 update_fields.push(UpdateField::Super as i32);
             }
             UserOption::CreateDB => {
+                if !session_user.can_create_db {
+                    has_privilege = false;
+                }
                 user_info.can_create_db = true;
                 update_fields.push(UpdateField::CreateDb as i32);
             }
             UserOption::NoCreateDB => {
+                if !session_user.can_create_db {
+                    has_privilege = false;
+                }
                 user_info.can_create_db = false;
                 update_fields.push(UpdateField::CreateDb as i32);
+            }
+            UserOption::CreateUser => {
+                if !session_user.can_create_user {
+                    has_privilege = false;
+                }
+                user_info.can_create_user = true;
+                update_fields.push(UpdateField::CreateUser as i32);
+            }
+            UserOption::NoCreateUser => {
+                if !session_user.can_create_user {
+                    has_privilege = false;
+                }
+                user_info.can_create_user = false;
+                update_fields.push(UpdateField::CreateUser as i32);
             }
             UserOption::Login => {
                 user_info.can_login = true;
@@ -67,6 +96,9 @@ fn alter_prost_user_info(
                 }
             }
         }
+        if !session_user.is_supper && !has_privilege {
+            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+        }
     }
     let request = UpdateUserRequest {
         user: Some(user_info),
@@ -81,18 +113,24 @@ pub async fn handle_alter_user(
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let user_name = Binder::resolve_user_name(stmt.user_name.clone())?;
-    let mut old_info = {
+    let (mut old_info, session_user) = {
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(origin_info) = reader.get_user_by_name(&user_name) {
-            origin_info.clone()
+            (
+                origin_info.clone(),
+                reader
+                    .get_user_by_name(session.user_name())
+                    .unwrap()
+                    .clone(),
+            )
         } else {
             return Err(CatalogError::NotFound("user", user_name).into());
         }
     };
     let request = match stmt.mode {
         risingwave_sqlparser::ast::AlterUserMode::Options(options) => {
-            alter_prost_user_info(old_info, &options)?
+            alter_prost_user_info(old_info, &options, &session_user)?
         }
         risingwave_sqlparser::ast::AlterUserMode::Rename(new_name) => {
             old_info.name = Binder::resolve_user_name(new_name)?;
