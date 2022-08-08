@@ -50,8 +50,7 @@ pub struct KafkaConfig {
     // partition number. The partition number should set by meta.
     pub partition: Option<i32>,
 
-    #[serde(rename = "sink.type")]
-    pub sink_type: String, // accept "append_only" or "debezium"
+    pub format: String, // accept "append_only" or "debezium"
 
     pub identifier: String,
 
@@ -68,10 +67,10 @@ impl KafkaConfig {
         let identifier = values
             .get("identifier")
             .expect("kafka.identifier must be set");
-        let sink_type = values.get("sink.type").expect("sink.type must be set");
-        if sink_type != "append_only" && sink_type != "debezium" {
+        let format = values.get("format").expect("format must be set");
+        if format != "append_only" && format != "debezium" {
             return Err(SinkError::Config(
-                "sink.type must be set to \"append_only\" or \"debezium\"".to_string(),
+                "format must be set to \"append_only\" or \"debezium\"".to_string(),
             ));
         }
 
@@ -85,7 +84,7 @@ impl KafkaConfig {
             timeout: Duration::from_secs(5), // default timeout is 5 seconds
             max_retry_num: 3,                // default max retry num is 3
             retry_interval: Duration::from_millis(100), // default retry interval is 100ms
-            sink_type: sink_type.to_string(),
+            format: format.to_string(),
         })
     }
 }
@@ -291,13 +290,14 @@ impl Sink for KafkaSink {
         if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
             return Ok(())
         }
-        if self.config.sink_type.as_str() == "append_only" {
-            self.append_only(chunk, schema).await
-        } else if self.config.sink_type.as_str() == "debezium" {
-            self.debezium_update(chunk, schema, Instant::now().elapsed().as_secs())
-                .await
-        } else {
-            unreachable!()
+
+        match self.config.format.as_str() {
+            "append_only" => self.append_only(chunk, schema).await,
+            "debezium" => {
+                self.debezium_update(chunk, schema, Instant::now().elapsed().as_secs())
+                    .await
+            }
+            _ => unreachable!(),
         }
     }
 

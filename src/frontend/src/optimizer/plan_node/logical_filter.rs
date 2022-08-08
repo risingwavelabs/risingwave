@@ -16,6 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::error::Result;
 
 use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
@@ -23,7 +24,6 @@ use super::{
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
-use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to

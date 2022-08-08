@@ -469,6 +469,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger,
         notification_manager,
         compaction_scheduler,
+        &env.opts,
     )
     .await;
     sub_tasks.push((lease_handle, lease_shutdown));
@@ -539,7 +540,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_leader_lease() {
         let info = AddressInfo {
             addr: "node1".to_string(),
