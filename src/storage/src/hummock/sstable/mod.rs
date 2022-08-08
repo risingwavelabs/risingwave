@@ -84,7 +84,7 @@ impl Sstable {
         let mut blocks = vec![];
         for block_meta in &meta.block_metas {
             let end_offset = (block_meta.offset + block_meta.len) as usize;
-            let block = Block::decode(&data.slice(block_meta.offset as usize..end_offset))?;
+            let block = Block::decode(&data[block_meta.offset as usize..end_offset])?;
             blocks.push(Arc::new(block));
         }
         Ok(Self { id, meta, blocks })
