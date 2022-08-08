@@ -271,7 +271,7 @@ impl Binder {
     fn resolve_table_id(&self, args: Vec<FunctionArg>) -> Result<(String, TableId)> {
         if args.is_empty() || args.len() > 2 {
             return Err(ErrorCode::BindError(
-                "usage: __rw_table(table_id[,schema_name])".to_string(),
+                "usage: rw_table(table_id[,schema_name])".to_string(),
             )
             .into());
         }
