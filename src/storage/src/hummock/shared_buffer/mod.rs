@@ -692,6 +692,5 @@ mod tests {
             vec![(StaticCompactionGroupId::StateDefault.into(), sst1)],
         );
 
-        shared_buffer.borrow_mut().fail_upload_task(order_index2);
     }
 }

@@ -263,7 +263,6 @@ impl HummockStorage {
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version, mut sync_uncommitted_datas) =
             self.read_filter(&read_options, &(key..=key))?;
-        println!("sync{:?}", sync_uncommitted_datas);
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
             batch.get(key).map(|v| {
@@ -279,7 +278,6 @@ impl HummockStorage {
         for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
                 if let Some(v) = get_from_batch(&batch) {
-                    println!("a5");
                     return Ok(v);
                 }
             }
@@ -289,7 +287,6 @@ impl HummockStorage {
                     match data {
                         UncommittedData::Batch(batch) => {
                             if let Some(v) = get_from_batch(&batch) {
-                                println!("a1");
                                 return Ok(v);
                             }
                         }
@@ -303,7 +300,6 @@ impl HummockStorage {
                                 .get_from_table(table, &internal_key, key, &mut stats)
                                 .await?
                             {
-                                println!("a2");
                                 return Ok(v);
                             }
                         }
@@ -317,7 +313,6 @@ impl HummockStorage {
                     match data {
                         UncommittedData::Batch(batch) => {
                             if let Some(v) = get_from_batch(&batch) {
-                                println!("a3");
                                 return Ok(v);
                             }
                         }
@@ -331,7 +326,6 @@ impl HummockStorage {
                                 .get_from_table(table, &internal_key, key, &mut stats)
                                 .await?
                             {
-                                println!("a4");
                                 return Ok(v);
                             }
                         }
@@ -367,7 +361,6 @@ impl HummockStorage {
             .iter_merge_sstable_counts
             .with_label_values(&["sub-iter"])
             .observe(table_counts as f64);
-        println!("a6");
         Ok(None)
     }
 
