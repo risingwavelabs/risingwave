@@ -224,14 +224,7 @@ impl LogicalProjectSet {
         select_list: &[ExprImpl],
     ) -> FunctionalDependencySet {
         let i2o = Self::i2o_col_mapping_inner(input_len, select_list);
-        let mut fd_set = FunctionalDependencySet::new(select_list.len() + 1);
-        for fd in input_fd_set.as_dependencies() {
-            if let Some(mut fd) = i2o.rewrite_functional_dependency(fd) {
-                fd.set_from(0, true);
-                fd_set.add_functional_dependency(fd);
-            }
-        }
-        fd_set
+        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
     pub fn select_list(&self) -> &[ExprImpl] {
@@ -391,7 +384,7 @@ mod test {
         // input: [v1, v2, v3]
         // FD: v2 --> v3
         // output: [projected_row_id, v3, v2, generate_series(v1, v2, v3)],
-        // FD: { projected_row_id, v2 } --> v3
+        // FD: v2 --> v3
 
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
@@ -429,7 +422,7 @@ mod test {
             .into_iter()
             .collect();
         let expected_fd_set: HashSet<FunctionalDependency> =
-            [FunctionalDependency::with_indices(4, &[0, 2], &[1])]
+            [FunctionalDependency::with_indices(4, &[2], &[1])]
                 .into_iter()
                 .collect();
         assert_eq!(fd_set, expected_fd_set);
