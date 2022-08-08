@@ -28,7 +28,7 @@ const CONFIG_KEYS: [&str; 7] = [
     "RW_FORCE_DELTA_JOIN",
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
-    "DATE_STYLE",
+    "DATESTYLE",
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
 ];
 const IMPLICIT_FLUSH: usize = 0;
