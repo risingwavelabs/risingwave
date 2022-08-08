@@ -614,7 +614,7 @@ where
             .all_stream_clients()
             .await?
             .into_iter()
-            .map(|mut client| {
+            .map(|client| {
                 let request = ComputeNodeCreateSourceRequest {
                     source: Some(source.clone()),
                 };
@@ -667,7 +667,7 @@ where
             .all_stream_clients()
             .await?
             .into_iter()
-            .map(|mut client| {
+            .map(|client| {
                 let request = ComputeNodeDropSourceRequest { source_id };
                 async move { client.drop_source(request).await }
             });
