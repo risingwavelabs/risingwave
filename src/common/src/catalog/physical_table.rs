@@ -42,6 +42,8 @@ pub struct TableDesc {
     /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
     /// table.
     pub vnode_mapping: Option<Vec<ParallelUnitId>>,
+
+    pub retention_seconds: u32,
 }
 
 impl TableDesc {
@@ -67,6 +69,7 @@ impl TableDesc {
             columns: self.columns.iter().map(Into::into).collect(),
             order_key: self.order_key.iter().map(|v| v.to_protobuf()).collect(),
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
+            retention_seconds: self.retention_seconds,
         }
     }
 }

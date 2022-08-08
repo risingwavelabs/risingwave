@@ -202,6 +202,15 @@ pub async fn compute_node_serve(
         state_store,
     );
 
+    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
+    // if this is not the case, we can use the following command to get it printed into the logs
+    // periodically.
+    //
+    // Comment out the following line to enable.
+    // TODO: may optionally enable based on the features
+    #[cfg(any())]
+    stream_mgr.clone().spawn_print_trace();
+
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =

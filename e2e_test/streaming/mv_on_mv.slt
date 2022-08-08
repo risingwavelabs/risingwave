@@ -1,8 +1,8 @@
 statement ok
-create table t1(v1 int not null, v2 int not null);
+create table t1(v1 int, v2 int);
 
 statement ok
-create table t2(v1 real not null, v2 int not null, v3 real not null);
+create table t2(v1 real, v2 int, v3 real);
 
 statement ok
 create materialized view m1 as select v1, v2 from t1 where v1 = 1;
@@ -135,7 +135,7 @@ select sum_v1, sum_v3 from m10;
 1 6
 
 statement ok
-create table t3(v1 int not null, v2 int not null, v3 int not null);
+create table t3(v1 int, v2 int, v3 int);
 
 statement ok
 insert into t3 values (1,2,3),(1,5,6),(3,2,6);
@@ -162,7 +162,7 @@ select avg_v1, sum_v2, count_v3 from m12;
 1.7 9 3
 
 statement ok
-create table t4(v1 real not null);
+create table t4(v1 real);
 
 statement ok
 insert into t4 values(1),(2),(3);

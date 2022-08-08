@@ -15,7 +15,7 @@ while getopts 'p:' opt; do
             exit 1
             ;;
         : )
-            echo "Invalid option: $OPTARG requires an arguemnt" 1>&2
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
             ;;
     esac
 done
@@ -42,13 +42,6 @@ cargo make link-all-in-one-binaries
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
 timeout 5m sqllogictest -p 4566 -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
-
-echo "--- Kill cluster"
-cargo make ci-kill
-
-echo "--- e2e, ci-3cn-1fe, delta join"
-cargo make ci-start ci-3cn-1fe
-timeout 3m sqllogictest -p 4566 -d dev  './e2e_test/streaming_delta_join/**/*.slt' --junit "parallel-streaming-delta-join-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill

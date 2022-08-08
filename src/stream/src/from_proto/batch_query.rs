@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::table::storage_table::RowBasedStorageTable;
@@ -77,6 +77,15 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             None => Distribution::fallback(),
         };
+
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+
         let table = RowBasedStorageTable::new_partial(
             state_store,
             table_id,
@@ -85,6 +94,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             order_types,
             pk_indices,
             distribution,
+            table_option,
         );
 
         let schema = table.schema().clone();

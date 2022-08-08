@@ -97,22 +97,20 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn create_task(&self, task_id: TaskId, plan: PlanFragment, epoch: u64) -> Result<()> {
-        let _ = self
-            .create_task_inner(CreateTaskRequest {
+    pub async fn create_task(
+        &self,
+        task_id: TaskId,
+        plan: PlanFragment,
+        epoch: u64,
+    ) -> Result<Streaming<TaskInfoResponse>> {
+        Ok(self
+            .task_client
+            .to_owned()
+            .create_task(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
             })
-            .await?;
-        Ok(())
-    }
-
-    async fn create_task_inner(&self, req: CreateTaskRequest) -> Result<TaskInfoResponse> {
-        Ok(self
-            .task_client
-            .to_owned()
-            .create_task(req)
             .await?
             .into_inner())
     }

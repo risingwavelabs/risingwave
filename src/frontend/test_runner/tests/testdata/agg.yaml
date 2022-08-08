@@ -182,7 +182,7 @@
                 StreamProject { exprs: [t.v1, (t.v2 + t.v3), t._row_id] }
                   StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
 - sql: |
-    create table t (v1 real not null);
+    create table t (v1 real);
     select v1, count(*) from t group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -190,7 +190,7 @@
         BatchExchange { order: [], dist: HashShard(t.v1) }
           BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
-    create table t (v1 real not null);
+    create table t (v1 real);
     select count(*) from t;
   batch_plan: |
     BatchSimpleAgg { aggs: [sum(count)] }
@@ -199,7 +199,7 @@
           BatchScan { table: t, columns: [], distribution: SomeShard }
 - sql: |
     /* having with agg call */
-    create table t (v1 real not null);
+    create table t (v1 real);
     select 1 from t having sum(v1) > 5;
   batch_plan: |
     BatchProject { exprs: [1:Int32] }
@@ -210,7 +210,7 @@
               BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     /* having with group column */
-    create table t (v1 real not null);
+    create table t (v1 real);
     select 1 from t group by v1 having v1 > 5;
   logical_plan: |
     LogicalProject { exprs: [1:Int32] }
@@ -220,7 +220,7 @@
             LogicalScan { table: t, columns: [t._row_id, t.v1] }
 - sql: |
     /* having with non-group column */
-    create table t (v1 real not null, v2 int);
+    create table t (v1 real, v2 int);
     select 1 from t group by v1 having v2 > 5;
   planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause
     or be used in an aggregate function'
