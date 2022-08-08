@@ -352,17 +352,14 @@ mod tests {
 
         let backward_iters = vec![
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(handle1),
+                handle1,
                 sstable_store.clone(),
             )),
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(handle2),
+                handle2,
                 sstable_store.clone(),
             )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(handle0),
-                sstable_store,
-            )),
+            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle0, sstable_store)),
         ];
 
         let mi =
@@ -417,17 +414,14 @@ mod tests {
         let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2));
         let backward_iters = vec![
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(handle0),
+                handle0,
                 sstable_store.clone(),
             )),
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(handle1),
+                handle1,
                 sstable_store.clone(),
             )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(handle2),
-                sstable_store,
-            )),
+            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle2, sstable_store)),
         ];
 
         let bmi =
@@ -504,11 +498,11 @@ mod tests {
         let cache = create_small_table_cache();
         let backward_iters = vec![
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(cache.insert(table0.id, table0.id, 1, Box::new(table0))),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
             )),
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                Arc::new(cache.insert(table1.id, table1.id, 1, Box::new(table1))),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store,
             )),
         ];
@@ -558,7 +552,7 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            Arc::new(handle),
+            handle,
             sstable_store,
         ))];
         let bmi =
@@ -641,7 +635,7 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            Arc::new(handle),
+            handle,
             sstable_store,
         ))];
         let bmi =
@@ -724,7 +718,7 @@ mod tests {
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            Arc::new(cache.insert(sstable.id, sstable.id, 1, Box::new(sstable))),
+            cache.insert(sstable.id, sstable.id, 1, Box::new(sstable)),
             sstable_store,
         ))];
         let bmi =
@@ -807,7 +801,7 @@ mod tests {
         let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
 
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            Arc::new(handle),
+            handle,
             sstable_store,
         ))];
         let bmi =
@@ -902,7 +896,7 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            Arc::new(handle),
+            handle,
             sstable_store,
         ))];
         let bmi =
@@ -1152,7 +1146,7 @@ mod tests {
         let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
 
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            Arc::new(handle0),
+            handle0,
             sstable_store,
         ))];
 
