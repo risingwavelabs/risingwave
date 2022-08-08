@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t (v1 int not null, v2 numeric not null, v3 double not null)
+create table t (v1 int, v2 numeric, v3 double)
 
 statement ok
 insert into t values (1,2,3), (4,5,6), (7,8,9)
