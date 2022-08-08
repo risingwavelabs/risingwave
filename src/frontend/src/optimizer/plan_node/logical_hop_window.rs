@@ -26,7 +26,6 @@ use super::{
 };
 use crate::expr::{InputRef, InputRefDisplay};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
