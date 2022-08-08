@@ -204,7 +204,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let test_key_size = 256 * 1024;
     let (data1, meta1) = build_table(1, 0..test_key_size, 1);
     let (data2, meta2) = build_table(2, 0..test_key_size, 1);
-    let level1 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone()t)]);
+    let level1 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
         sstable_store1
             .put_sst(1, meta1, data1, CachePolicy::Fill)

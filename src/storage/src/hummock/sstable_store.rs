@@ -111,22 +111,6 @@ impl SstableStore {
         Ok(())
     }
 
-    pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
-        let charge = sst.estimate_size();
-        self.put_sst_data(sst.id, data).await?;
-        fail_point!("metadata_upload_err");
-        if let Err(e) = self.put_meta(sst.id, &sst.meta).await {
-            self.delete_sst_data(sst.id).await?;
-            return Err(e);
-        }
-        if let CachePolicy::Fill = policy {
-            self.meta_cache
-                .insert(sst.id, sst.id, charge, Box::new(sst));
-        }
-
-        Ok(())
-    }
-
     pub async fn delete(&self, sst_id: HummockSstableId) -> HummockResult<()> {
         // Meta
         self.store
@@ -391,7 +375,7 @@ mod tests {
             }),
         );
         sstable_store
-            .put_sst(1, meta.clone(), data, CachePolicy::Fill)
+            .put_sst(1, meta.clone(), data, CachePolicy::NotFill)
             .await
             .unwrap();
         let mut stats = StoreLocalStatistic::default();

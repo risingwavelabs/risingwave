@@ -134,7 +134,7 @@ pub async fn gen_test_sstable(
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::Fill).await
+    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
 /// The key (with epoch 0) of an index in the test table
