@@ -24,7 +24,7 @@ use futures::future::Fuse;
 use futures::{Future, FutureExt};
 use indextree::NodeId;
 use pin_project::{pin_project, pinned_drop};
-use triomphe::{Arc, OffsetArc};
+use triomphe::Arc;
 
 use crate::context::{try_with_context, with_context};
 
@@ -37,7 +37,7 @@ pub use manager::{StackTraceManager, StackTraceReport, TraceReporter};
 #[derive(Debug, Clone)]
 pub enum SpanValue {
     Slice(&'static str),
-    Shared(OffsetArc<String>),
+    Shared(Arc<String>),
 }
 
 impl Default for SpanValue {
@@ -52,7 +52,7 @@ impl From<&'static str> for SpanValue {
 }
 impl From<String> for SpanValue {
     fn from(s: String) -> Self {
-        Self::Shared(Arc::into_raw_offset(Arc::new(s)))
+        Self::Shared(Arc::new(s))
     }
 }
 impl AsRef<str> for SpanValue {
