@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use futures::{Future, TryFutureExt};
 use itertools::Itertools;
-use madsim::time::Instant;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
@@ -209,7 +208,7 @@ impl KafkaSink {
         })
     }
 
-    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts: u64) -> Result<()> {
+    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         let mut update_cache = HashMap::new();
         for (op, row) in chunk.rows() {
             let event_object = match op {
@@ -219,7 +218,6 @@ impl KafkaSink {
                         "before": null,
                         "after": record_to_json(row.clone(), schema.fields.clone())?,
                         "op": "c",
-                        "ts_ms": ts,
                     }
                 })),
                 Op::Delete => Some(json!({
@@ -228,7 +226,6 @@ impl KafkaSink {
                         "before": record_to_json(row.clone(), schema.fields.clone())?,
                         "after": null,
                         "op": "d",
-                        "ts_ms": ts,
                     }
                 })),
                 Op::UpdateDelete => {
@@ -247,7 +244,6 @@ impl KafkaSink {
                                 "before": before,
                                 "after": record_to_json(row.clone(), schema.fields.clone())?,
                                 "op": "u",
-                                "ts_ms": ts,
                             }
                         }))
                     } else {
@@ -293,10 +289,7 @@ impl Sink for KafkaSink {
 
         match self.config.format.as_str() {
             "append_only" => self.append_only(chunk, schema).await,
-            "debezium" => {
-                self.debezium_update(chunk, schema, Instant::now().elapsed().as_millis() as u64)
-                    .await
-            }
+            "debezium" => self.debezium_update(chunk, schema).await,
             _ => unreachable!(),
         }
     }
