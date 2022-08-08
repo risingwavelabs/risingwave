@@ -1,0 +1,40 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+# description: Test less than join
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# create table ... as ... not working
+# statement ok
+# create table a AS SELECT i FROM range(1, 2001, 1) t1(i)
+
+statement ok
+create table a (i int);
+
+statement ok
+insert into a select * from generate_series(1, 2000, 1);
+
+query I
+select count(*) from a, (SELECT 2000 AS j) b where i < j
+----
+1999
+
+query I
+select count(*) from a, (SELECT 2000 AS j) b where i <= j
+----
+2000
+
+query I
+select count(*) from a, (SELECT 1 AS j) b where i > j
+----
+1999
+
+query I
+select count(*) from a, (SELECT 1 AS j) b where i >= j
+----
+2000
+
+statement ok
+drop table a;
