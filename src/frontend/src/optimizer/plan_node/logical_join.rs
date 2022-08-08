@@ -130,7 +130,12 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
         LogicalJoin {
             base,
             left,
@@ -293,7 +298,7 @@ impl LogicalJoin {
         right_pk: &[usize],
         join_type: JoinType,
         output_indices: &[usize],
-    ) -> Vec<usize> {
+    ) -> Option<Vec<usize>> {
         let l2i = Self::l2i_col_mapping_inner(left_len, right_len, join_type);
         let r2i = Self::r2i_col_mapping_inner(left_len, right_len, join_type);
         let out_col_num = Self::out_column_num(left_len, right_len, join_type);
@@ -305,7 +310,6 @@ impl LogicalJoin {
             .flatten()
             .map(|index| i2o.try_map(index))
             .collect::<Option<Vec<_>>>()
-            .unwrap_or_default()
     }
 
     pub(super) fn derive_fd(
