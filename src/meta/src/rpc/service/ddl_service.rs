@@ -467,11 +467,23 @@ where
             affiliated_source: None,
             ..Default::default()
         };
+
         let internal_tables = match self
             .create_relation_on_compute_node(relation, fragment_graph, id, &mut ctx)
             .await
         {
             Err(e) => {
+                let internal_table_ids = ctx
+                    .internal_table_id_map
+                    .iter()
+                    .filter(|(_, table)| table.is_some())
+                    .map(|(_, table)| table.clone().unwrap().id)
+                    .collect_vec();
+
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids)
+                    .await;
+
                 self.catalog_manager
                     .cancel_create_procedure(relation)
                     .await?;
@@ -503,10 +515,15 @@ where
             ctx.internal_table_id_map.len()
         );
 
-        let internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+        let internal_table_ids = ctx
+            .internal_table_id_map
+            .iter()
+            .filter(|(_, table)| table.is_some())
+            .map(|(_, table)| table.clone().unwrap().id)
+            .collect_vec();
 
         // 4. Finally, update the catalog.
-        let version = self
+        let version = match self
             .catalog_manager
             .finish_create_procedure(
                 match relation {
@@ -515,12 +532,21 @@ where
                 },
                 relation,
             )
-            .await?;
+            .await
+        {
+            Ok(version) => version,
 
-        let _defer_func = scopeguard::guard(internal_table_ids, |internal_table_ids| {
-            self.stream_manager
-                .remove_processing_table(internal_table_ids);
-        });
+            Err(e) => {
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids)
+                    .await;
+                return Err(e);
+            }
+        };
+
+        self.stream_manager
+            .remove_processing_table(internal_table_ids)
+            .await;
 
         Ok((id, version))
     }
@@ -689,6 +715,17 @@ where
             .await
         {
             Err(e) => {
+                let internal_table_ids = ctx
+                    .internal_table_id_map
+                    .iter()
+                    .filter(|(_, table)| table.is_some())
+                    .map(|(_, table)| table.clone().unwrap().id)
+                    .collect_vec();
+
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids)
+                    .await;
+
                 self.catalog_manager
                     .cancel_create_materialized_source_procedure(&source, &mview)
                     .await?;
@@ -701,19 +738,32 @@ where
             }
         };
 
-        let internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
+        let internal_table_ids = ctx
+            .internal_table_id_map
+            .iter()
+            .filter(|(_, table)| table.is_some())
+            .map(|(_, table)| table.clone().unwrap().id)
+            .collect_vec();
 
         // Finally, update the catalog.
-        let version = self
+        let version = match self
             .catalog_manager
             .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
-            .await?;
+            .await
+        {
+            Ok(version) => version,
 
-        let _defer_func = scopeguard::guard(internal_table_ids, |internal_table_ids| {
-            self.stream_manager
-                .remove_processing_table(internal_table_ids);
-        });
+            Err(e) => {
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids)
+                    .await;
+                return Err(e);
+            }
+        };
 
+        self.stream_manager
+            .remove_processing_table(internal_table_ids)
+            .await;
         Ok((source_id, mview_id, version))
     }
 

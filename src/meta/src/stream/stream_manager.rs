@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
@@ -31,6 +30,8 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use risingwave_rpc_client::StreamClientPoolRef;
+// use parking_lot::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 use super::ScheduledLocations;
@@ -602,25 +603,26 @@ where
             }
         }));
 
-        // Success Register to compaction group, we can push catalog to CN / Compactor
-        for (table_id, table_catalog) in internal_table_id_map {
-            let table_catalog = match table_catalog {
-                Some(table_catalog) => table_catalog.to_owned(),
+        {
+            // lock before notify to avoid notify when some node re-subscribe
+            let mut processing_table_guard = self.processing_table.lock().await;
+            // Success Register to compaction group, we can push catalog to CN / Compactor
+            for (table_id, table_catalog) in internal_table_id_map {
+                let table_catalog = match table_catalog {
+                    Some(table_catalog) => table_catalog.to_owned(),
 
-                None => Table::default(),
-            };
-            self.notification_manager
-                .notify_compute(Operation::Add, Info::Table(table_catalog.clone()))
-                .await;
+                    None => Table::default(),
+                };
 
-            self.notification_manager
-                .notify_compactor(Operation::Add, Info::Table(table_catalog.clone()))
-                .await;
+                processing_table_guard.insert(*table_id, table_catalog.clone());
+                self.notification_manager
+                    .notify_compute(Operation::Add, Info::Table(table_catalog.clone()))
+                    .await;
 
-            self.processing_table
-                .try_lock()
-                .unwrap()
-                .insert(*table_id, table_catalog);
+                self.notification_manager
+                    .notify_compactor(Operation::Add, Info::Table(table_catalog))
+                    .await;
+            }
         }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
@@ -728,7 +730,8 @@ where
         }
 
         // Remove internal_tables push to CN and Compactor
-        self.remove_processing_table(table_fragments.internal_table_ids());
+        self.remove_processing_table(table_fragments.internal_table_ids())
+            .await;
         for table_id in table_fragments.internal_table_ids() {
             let delete_table = Table {
                 id: table_id,
@@ -751,10 +754,15 @@ where
         self.processing_table.try_lock().unwrap().clone()
     }
 
-    pub fn remove_processing_table(&self, table_ids: Vec<u32>) {
+    pub async fn remove_processing_table(&self, table_ids: Vec<u32>) {
+        let mut processing_table_guard = self.processing_table.lock().await;
         for table_id in table_ids {
-            self.processing_table.try_lock().unwrap().remove(&table_id);
+            processing_table_guard.remove(&table_id);
         }
+    }
+
+    pub async fn get_processing_table_guard(&self) -> MutexGuard<'_, HashMap<u32, Table>> {
+        self.processing_table.lock().await
     }
 }
 #[cfg(test)]
