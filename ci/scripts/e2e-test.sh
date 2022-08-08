@@ -46,9 +46,6 @@ timeout 8m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- Kill cluster"
-cargo make ci-kill
-
 echo "--- e2e, ci-3cn-1fe, batch distributed"
 cargo make ci-start ci-3cn-1fe
 timeout 2m sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
