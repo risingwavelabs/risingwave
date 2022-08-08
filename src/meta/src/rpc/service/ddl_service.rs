@@ -473,12 +473,7 @@ where
             .await
         {
             Err(e) => {
-                let internal_table_ids = ctx
-                    .internal_table_id_map
-                    .iter()
-                    .filter(|(_, table)| table.is_some())
-                    .map(|(_, table)| table.clone().unwrap().id)
-                    .collect_vec();
+                let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
 
                 self.stream_manager
                     .remove_processing_table(internal_table_ids)
@@ -515,12 +510,7 @@ where
             ctx.internal_table_id_map.len()
         );
 
-        let internal_table_ids = ctx
-            .internal_table_id_map
-            .iter()
-            .filter(|(_, table)| table.is_some())
-            .map(|(_, table)| table.clone().unwrap().id)
-            .collect_vec();
+        let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
 
         // 4. Finally, update the catalog.
         let version = match self
@@ -715,12 +705,7 @@ where
             .await
         {
             Err(e) => {
-                let internal_table_ids = ctx
-                    .internal_table_id_map
-                    .iter()
-                    .filter(|(_, table)| table.is_some())
-                    .map(|(_, table)| table.clone().unwrap().id)
-                    .collect_vec();
+                let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
 
                 self.stream_manager
                     .remove_processing_table(internal_table_ids)
@@ -738,12 +723,7 @@ where
             }
         };
 
-        let internal_table_ids = ctx
-            .internal_table_id_map
-            .iter()
-            .filter(|(_, table)| table.is_some())
-            .map(|(_, table)| table.clone().unwrap().id)
-            .collect_vec();
+        let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
 
         // Finally, update the catalog.
         let version = match self
