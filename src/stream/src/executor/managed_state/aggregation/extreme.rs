@@ -475,7 +475,7 @@ mod tests {
     use std::collections::{BTreeSet, HashSet};
 
     use itertools::Itertools;
-    use madsim::rand::prelude::*;
+    use rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::ScalarImpl;

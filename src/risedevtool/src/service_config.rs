@@ -266,7 +266,7 @@ pub struct RedisConfig {
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
-    FrontendV2(FrontendConfig),
+    Frontend(FrontendConfig),
     Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
@@ -285,7 +285,7 @@ impl ServiceConfig {
         match self {
             Self::ComputeNode(c) => &c.id,
             Self::MetaNode(c) => &c.id,
-            Self::FrontendV2(c) => &c.id,
+            Self::Frontend(c) => &c.id,
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,

@@ -21,7 +21,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::prost_key_range::KeyRangeExt;
-use crate::CompactionGroupId;
+use crate::{CompactionGroupId, HummockSstableId};
 
 pub trait HummockVersionExt {
     /// Gets `compaction_group_id`'s levels
@@ -88,9 +88,8 @@ impl HummockVersionExt for HummockVersion {
     }
 
     fn get_sst_ids(&self) -> Vec<u64> {
-        self.levels
+        self.get_combined_levels()
             .iter()
-            .flat_map(|(_, l)| &l.levels)
             .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
             .collect_vec()
     }
@@ -299,5 +298,94 @@ impl HummockLevelsExt for Levels {
 
     fn get_level_mut(&mut self, level_idx: usize) -> &mut Level {
         &mut self.levels[level_idx - 1]
+    }
+}
+
+pub trait HummockVersionDeltaExt {
+    fn get_removed_sst_ids(&self) -> Vec<HummockSstableId>;
+    fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId>;
+}
+
+impl HummockVersionDeltaExt for HummockVersionDelta {
+    fn get_removed_sst_ids(&self) -> Vec<HummockSstableId> {
+        let mut ret = vec![];
+        for level_deltas in self.level_deltas.values() {
+            for level_delta in &level_deltas.level_deltas {
+                for sst_id in &level_delta.removed_table_ids {
+                    ret.push(*sst_id);
+                }
+            }
+        }
+        ret
+    }
+
+    fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId> {
+        let mut ret = vec![];
+        for level_deltas in self.level_deltas.values() {
+            for level_delta in &level_deltas.level_deltas {
+                for sst in &level_delta.inserted_table_infos {
+                    ret.push(sst.id);
+                }
+            }
+        }
+        ret
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use risingwave_pb::hummock::hummock_version::Levels;
+    use risingwave_pb::hummock::{HummockVersion, Level, OverlappingLevel, SstableInfo};
+
+    use crate::compaction_group::hummock_version_ext::HummockVersionExt;
+
+    #[test]
+    fn test_get_sst_ids() {
+        let mut version = HummockVersion {
+            id: 0,
+            levels: HashMap::from_iter([(
+                0,
+                Levels {
+                    levels: vec![],
+                    l0: Some(OverlappingLevel {
+                        sub_levels: vec![],
+                        total_file_size: 0,
+                    }),
+                },
+            )]),
+            max_committed_epoch: 0,
+            safe_epoch: 0,
+        };
+        assert_eq!(version.get_sst_ids().len(), 0);
+
+        // Add to sub level
+        version
+            .levels
+            .get_mut(&0)
+            .unwrap()
+            .l0
+            .as_mut()
+            .unwrap()
+            .sub_levels
+            .push(Level {
+                table_infos: vec![SstableInfo {
+                    id: 11,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            });
+        assert_eq!(version.get_sst_ids().len(), 1);
+
+        // Add to non sub level
+        version.levels.get_mut(&0).unwrap().levels.push(Level {
+            table_infos: vec![SstableInfo {
+                id: 22,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        assert_eq!(version.get_sst_ids().len(), 2);
     }
 }

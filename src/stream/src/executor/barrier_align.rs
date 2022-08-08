@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::future::{select, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use madsim::time::Instant;
 
 use super::error::StreamExecutorError;
 use super::{Barrier, BoxedMessageStream, Message, StreamChunk};
@@ -38,9 +38,8 @@ pub async fn barrier_align(
     metrics: Arc<StreamingMetrics>,
 ) {
     let actor_id = actor_id.to_string();
-    use madsim::rand::Rng;
     loop {
-        let prefer_left: bool = madsim::rand::thread_rng().gen();
+        let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
             select(left.next(), right.next()).await
         } else {

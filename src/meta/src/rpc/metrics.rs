@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
+
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_gauge_vec_with_registry,
@@ -55,6 +57,8 @@ pub struct MetaMetrics {
 
     /// Latency for hummock manager to really process a request after acquire the lock
     pub hummock_manager_real_process_time: HistogramVec,
+
+    pub time_after_last_observation: AtomicU64,
 }
 
 impl MetaMetrics {
@@ -177,6 +181,7 @@ impl MetaMetrics {
             version_size,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
+            time_after_last_observation: AtomicU64::new(0),
         }
     }
 

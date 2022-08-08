@@ -38,6 +38,18 @@ pub enum FilterKeyExtractorImpl {
     Multi(MultiFilterKeyExtractor),
 }
 
+impl FilterKeyExtractorImpl {
+    pub fn from_table(table_catalog: &Table) -> Self {
+        if table_catalog.read_pattern_prefix_column < 1 {
+            // for now frontend had not infer the table_id_to_filter_key_extractor, so we
+            // use FullKeyFilterKeyExtractor
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
+        } else {
+            FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
+        }
+    }
+}
+
 macro_rules! impl_filter_key_extractor {
     ([], $( { $variant_name:ident } ),*) => {
         impl FilterKeyExtractorImpl {
@@ -233,6 +245,13 @@ impl FilterKeyExtractorManagerInner {
         self.notify.notify_waiters();
     }
 
+    fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
+        let mut guard = self.table_id_to_filter_key_extractor.write();
+        guard.clear();
+        guard.extend(filter_key_extractor_map);
+        self.notify.notify_waiters();
+    }
+
     fn remove(&self, table_id: u32) {
         self.table_id_to_filter_key_extractor
             .write()
@@ -287,6 +306,11 @@ impl FilterKeyExtractorManager {
         self.inner.remove(table_id);
     }
 
+    /// Sync all filter key extractors by snapshot
+    pub fn sync(&self, filter_key_extractor_map: HashMap<u32, Arc<FilterKeyExtractorImpl>>) {
+        self.inner.sync(filter_key_extractor_map)
+    }
+
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// table_id does not util version update (notify), and retry to get
@@ -307,6 +331,7 @@ mod tests {
     use bytes::{BufMut, BytesMut};
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
     use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
@@ -415,7 +440,10 @@ mod tests {
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             mapping: None,
-            properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
+            properties: HashMap::from([(
+                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from("300"),
+            )]),
             read_pattern_prefix_column: column_count, // 1 column
         }
     }
@@ -590,7 +618,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_filter_key_extractor_manager() {
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let filter_key_extractor_manager_ref = filter_key_extractor_manager.clone();

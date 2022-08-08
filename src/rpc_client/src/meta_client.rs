@@ -18,12 +18,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use paste::paste;
-use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -31,6 +33,7 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::*;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
@@ -49,6 +52,7 @@ use tonic::{Status, Streaming};
 
 use crate::error::Result;
 use crate::hummock_meta_client::HummockMetaClient;
+use crate::ExtraInfoSourceRef;
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -121,8 +125,14 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
-        let request = HeartbeatRequest { node_id };
+    pub async fn send_heartbeat(&self, node_id: u32, info: Vec<extra_info::Info>) -> Result<()> {
+        let request = HeartbeatRequest {
+            node_id,
+            info: info
+                .into_iter()
+                .map(|info| ExtraInfo { info: Some(info) })
+                .collect(),
+        };
         self.inner.heartbeat(request).await?;
         Ok(())
     }
@@ -205,6 +215,22 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.source_id, resp.version))
     }
 
+    pub async fn create_index(
+        &self,
+        index: ProstIndex,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<(TableId, CatalogVersion)> {
+        let request = CreateIndexRequest {
+            index: Some(index),
+            index_table: Some(table),
+            fragment_graph: Some(graph),
+        };
+        let resp = self.inner.create_index(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.index_id.into(), resp.version))
+    }
+
     pub async fn drop_materialized_source(
         &self,
         source_id: u32,
@@ -228,6 +254,14 @@ impl MetaClient {
     pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
         let request = DropSinkRequest { sink_id };
         let resp = self.inner.drop_sink(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_index(&self, index_id: IndexId) -> Result<CatalogVersion> {
+        let request = DropIndexRequest {
+            index_id: index_id.index_id,
+        };
+        let resp = self.inner.drop_index(request).await?;
         Ok(resp.version)
     }
 
@@ -309,9 +343,13 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Starts a heartbeat worker.
+    ///
+    /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
     pub fn start_heartbeat_loop(
         meta_client: MetaClient,
         min_interval: Duration,
+        extra_info_sources: Vec<ExtraInfoSourceRef>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
@@ -326,17 +364,25 @@ impl MetaClient {
                         return;
                     }
                 }
+                let mut extra_info = Vec::with_capacity(extra_info_sources.len());
+                for extra_info_source in &extra_info_sources {
+                    if let Some(info) = extra_info_source.get_extra_info().await {
+                        // None means the info is not available at the moment, and won't be sent to
+                        // meta.
+                        extra_info.push(info);
+                    }
+                }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
-                    meta_client.send_heartbeat(meta_client.worker_id()),
+                    meta_client.send_heartbeat(meta_client.worker_id(), extra_info),
                 )
                 .await
                 {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
-                        tracing::warn!("Failed to send_heartbeat: error {}", err);
+                        tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
                         if err.to_string().contains("unknown worker") {
                             panic!("Already removed by the meta node. Need to restart the worker");
                         }
@@ -501,6 +547,12 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
+        let req = ReportFullScanTaskRequest { sst_ids };
+        self.inner.report_full_scan_task(req).await?;
+        Ok(())
+    }
+
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
         let req = GetCompactionGroupsRequest {};
         let resp = self.inner.get_compaction_groups(req).await?;
@@ -623,12 +675,14 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
+            ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
+            ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
@@ -643,6 +697,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
+            ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

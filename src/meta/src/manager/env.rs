@@ -75,6 +75,12 @@ pub struct MetaOpts {
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
     pub in_flight_barrier_nums: usize,
+
+    pub vacuum_interval_sec: u64,
+    /// Interval of performing full SST GC.
+    pub full_sst_gc_interval_sec: u64,
+    /// Threshold used by worker node to filter out new SSTs when scanning object store.
+    pub sst_retention_time_sec: u64,
 }
 
 impl Default for MetaOpts {
@@ -85,6 +91,9 @@ impl Default for MetaOpts {
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            vacuum_interval_sec: 30,
+            full_sst_gc_interval_sec: 3600 * 24,
+            sst_retention_time_sec: 3600 * 24 * 7,
         }
     }
 }
@@ -99,6 +108,7 @@ impl MetaOpts {
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            ..Default::default()
         }
     }
 }

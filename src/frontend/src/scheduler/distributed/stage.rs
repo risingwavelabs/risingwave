@@ -19,19 +19,23 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
+use futures_async_stream::for_await;
 use itertools::Itertools;
+use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::task_service::TaskInfoResponse;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::error;
+use tonic::Streaming;
+use tracing::{error, info};
 use uuid::Uuid;
 use StageEvent::Failed;
 
@@ -42,7 +46,7 @@ use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId,
 };
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::SchedulerError::Internal;
+use crate::scheduler::SchedulerError::{Internal, RpcError};
 use crate::scheduler::{SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
@@ -184,6 +188,7 @@ impl StageExecution {
                     }
                 });
 
+                // TODO: Should change state before spawn task.
                 *s = StageState::Started { sender, handle };
                 Ok(())
             }
@@ -258,25 +263,6 @@ impl StageRunner {
             .await?;
             return Ok(());
         }
-
-        {
-            // Changing state
-            let mut s = self.state.write().await;
-            match mem::replace(&mut *s, StageState::Failed) {
-                StageState::Started { sender, handle } => {
-                    *s = StageState::Running {
-                        _sender: sender,
-                        _handle: handle,
-                    };
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        // All tasks scheduled, send `StageScheduled` event to `QueryRunner`.
-        self.send_event(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
-            .await?;
-
         Ok(())
     }
 
@@ -293,6 +279,8 @@ impl StageRunner {
         })
     }
 
+    /// Schedule all tasks to CN and wait process all status messages from RPC. Note that when all
+    /// task is created, it should tell `QueryRunner` to schedule next.
     async fn schedule_tasks(&self) -> SchedulerResult<()> {
         let mut futures = vec![];
 
@@ -330,11 +318,72 @@ impl StageRunner {
                 futures.push(self.schedule_task(task_id, plan_fragment, None));
             }
         }
+
+        // Await each future and convert them into a set of streams.
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
+        let mut buffered_streams = vec![];
         while let Some(result) = buffered.next().await {
-            result?;
+            buffered_streams.push(result?);
         }
+
+        // Merge different task streams into a single stream.
+        let all_streams = select_all(buffered_streams);
+
+        // Process the stream until finished.
+        let mut running_task_cnt = 0;
+        let mut sent_signal_to_next = false;
+        #[for_await]
+        for status_res in all_streams {
+            // The status can be Running, Finished, Failed etc. This stream contains status from
+            // different tasks.
+            let status = status_res.map_err(|e| RpcError(e.into()))?;
+            use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
+            if TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status)
+                == Some(TaskStatusProst::Running)
+            {
+                running_task_cnt += 1;
+                // The task running count should always less or equal than the registered tasks
+                // number.
+                assert!(running_task_cnt <= self.tasks.keys().len());
+                // All tasks in this stage have been scheduled. Notify query runner to schedule next
+                // stage.
+                if running_task_cnt == self.tasks.keys().len() {
+                    self.notify_schedule_next_stage().await?;
+                    sent_signal_to_next = true;
+                }
+
+                // TODO: handle task failure.
+            }
+            info!(
+                "task status {:?}!",
+                status.task_info.as_ref().unwrap().task_status
+            );
+        }
+
+        // After processing all stream status, we must have sent signal (Either Scheduled or
+        // Failed) to Query Runner.
+        assert!(sent_signal_to_next);
         Ok(())
+    }
+
+    /// Write message into channel to notify query runner current stage have been scheduled.
+    async fn notify_schedule_next_stage(&self) -> SchedulerResult<()> {
+        // If all tasks of this stage is scheduled, tell the query manager to schedule next.
+        {
+            // Changing state
+            let mut s = self.state.write().await;
+            match mem::replace(&mut *s, StageState::Failed) {
+                StageState::Started { sender, handle } => {
+                    *s = StageState::Running {
+                        _sender: sender,
+                        _handle: handle,
+                    };
+                }
+                _ => unreachable!(),
+            }
+        }
+        self.send_event(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
+            .await
     }
 
     async fn schedule_task(
@@ -342,7 +391,7 @@ impl StageRunner {
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
-    ) -> SchedulerResult<()> {
+    ) -> SchedulerResult<Streaming<TaskInfoResponse>> {
         let worker_node_addr = worker
             .unwrap_or(self.worker_node_manager.next_random()?)
             .host
@@ -350,12 +399,12 @@ impl StageRunner {
 
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr((&worker_node_addr).into())
+            .get_by_addr((&worker_node_addr).into())
             .await
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
-        compute_client
+        let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch)
             .await
             .map_err(|e| anyhow!(e))?;
@@ -365,7 +414,7 @@ impl StageRunner {
             location: Some(worker_node_addr),
         }));
 
-        Ok(())
+        Ok(stream_status)
     }
 
     fn create_plan_fragment(

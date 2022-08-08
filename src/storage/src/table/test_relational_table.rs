@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId, TableOption};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
@@ -1938,6 +1938,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         order_types.clone(),
         pk_indices,
         Distribution::fallback(),
+        TableOption::default(),
     );
     let epoch: u64 = 0;
 
@@ -2012,6 +2013,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         order_types.clone(),
         pk_indices,
         Distribution::fallback(),
+        TableOption::default(),
     );
     let epoch: u64 = 0;
 
