@@ -76,7 +76,19 @@ steps:
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
-    command: "ci/scripts/deterministic-simulation-test.sh"
+    command: "ci/scripts/deterministic-unit-test.sh"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 10
+    soft_fail: true
+    retry: *auto-retry
+
+  - label: "end-to-end test (deterministic simulation)"
+    command: "ci/scripts/deterministic-e2e-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -85,6 +97,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 15
     soft_fail: true
+    retry: *auto-retry
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"

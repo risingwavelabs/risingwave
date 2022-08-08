@@ -132,7 +132,7 @@ mod tests {
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 

@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
@@ -191,6 +191,14 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             None => Distribution::all_vnodes(dist_key_indices),
         };
 
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let batch_stats = source.context().stats();
             let table = RowBasedStorageTable::new_partial(
@@ -201,6 +209,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 order_types,
                 pk_indices,
                 distribution,
+                table_option,
             );
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
