@@ -391,7 +391,7 @@ macro_rules! for_all_cmp_variants {
             { timestamp, date, timestamp, $general_f },
             { date, timestamp, timestamp, $general_f },
             { interval, time, interval, $general_f },
-            { time, interval, interval, $general_f }
+            { time, interval, interval, $general_f },
         }
     };
 }

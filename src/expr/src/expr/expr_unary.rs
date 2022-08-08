@@ -50,7 +50,7 @@ use crate::{ExprError, Result};
 /// * `$func`: The scalar function for expression, it's a generic function and specialized by the
 ///   type of `$input, $cast`
 macro_rules! gen_cast_impl {
-    ([$child:expr, $ret:expr], $( { $input:ident, $cast:ident, $func:expr } ),*) => {
+    ([$child:expr, $ret:expr], $( { $input:ident, $cast:ident, $func:expr } ),* $(,)?) => {
         match ($child.return_type(), $ret.clone()) {
             $(
                 ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
@@ -130,7 +130,7 @@ macro_rules! gen_cast {
             { decimal, float64, to_f64 },
 
             { date, timestamp, general_cast },
-            { time, interval, general_cast }
+            { time, interval, general_cast },
         }
     };
 }
