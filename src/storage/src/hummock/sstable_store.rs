@@ -51,6 +51,7 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
+    tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
 }
 
 impl SstableStore {
@@ -69,8 +70,13 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS, tiered_cache),
+            block_cache: BlockCache::new(
+                block_cache_capacity,
+                MAX_CACHE_SHARD_BITS,
+                tiered_cache.clone(),
+            ),
             meta_cache,
+            tiered_cache,
         }
     }
 
@@ -83,11 +89,13 @@ impl SstableStore {
         meta_cache_capacity: usize,
     ) -> Self {
         let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity));
+        let tiered_cache = TieredCache::none();
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 2, TieredCache::none()),
+            block_cache: BlockCache::new(block_cache_capacity, 2, tiered_cache.clone()),
             meta_cache,
+            tiered_cache,
         }
     }
 
@@ -177,7 +185,8 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         stats.cache_data_block_total += 1;
-        let mut fetch_block = || {
+        let tiered_cache = self.tiered_cache.clone();
+        let fetch_block = || {
             stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
@@ -191,8 +200,18 @@ impl SstableStore {
             };
             let data_path = self.get_sst_data_path(sst.id);
             let store = self.store.clone();
+            let sst_id = sst.id;
 
             async move {
+                if let Some(holder) = tiered_cache
+                    .get(&(sst_id, block_index))
+                    .await
+                    .map_err(HummockError::tiered_cache)?
+                {
+                    // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it later.
+                    return Ok(holder.into_owned());
+                }
+
                 let block_data = store
                     .read(&data_path, Some(block_loc))
                     .await
@@ -219,9 +238,17 @@ impl SstableStore {
                     .get_or_insert_with(sst.id, block_index, fetch_block)
                     .await
             }
-            CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index).await {
+            CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
                 Some(block) => Ok(block),
-                None => fetch_block().await.map(BlockHolder::from_owned_block),
+                None => match self
+                    .tiered_cache
+                    .get(&(sst.id, block_index))
+                    .await
+                    .map_err(HummockError::tiered_cache)?
+                {
+                    Some(holder) => Ok(BlockHolder::from_tiered_cache(holder.into_inner())),
+                    None => fetch_block().await.map(BlockHolder::from_owned_block),
+                },
             },
             CachePolicy::Disable => fetch_block().await.map(BlockHolder::from_owned_block),
         }

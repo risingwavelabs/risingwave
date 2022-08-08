@@ -136,8 +136,6 @@ impl LruCacheEventListener for MemoryBlockCacheEventListener {
 #[derive(Clone)]
 pub struct BlockCache {
     inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
-
-    tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
 }
 
 impl BlockCache {
@@ -153,34 +151,19 @@ impl BlockCache {
             max_shard_bits -= 1;
         }
 
-        let listener = Arc::new(MemoryBlockCacheEventListener {
-            tiered_cache: tiered_cache.clone(),
-        });
+        let listener = Arc::new(MemoryBlockCacheEventListener { tiered_cache });
 
         let cache = LruCache::with_event_listener(max_shard_bits, capacity, listener);
 
         Self {
             inner: Arc::new(cache),
-
-            tiered_cache,
         }
     }
 
-    pub async fn get(&self, sst_id: HummockSstableId, block_idx: u64) -> Option<BlockHolder> {
-        if let Some(block) = self
-            .inner
+    pub fn get(&self, sst_id: HummockSstableId, block_idx: u64) -> Option<BlockHolder> {
+        self.inner
             .lookup(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
             .map(BlockHolder::from_cached_block)
-        {
-            return Some(block);
-        }
-
-        // TODO(MrCroxx): handle error
-        if let Some(holder) = self.tiered_cache.get(&(sst_id, block_idx)).await.unwrap() {
-            return Some(BlockHolder::from_tiered_cache(holder.into_inner()));
-        }
-
-        None
     }
 
     pub fn insert(
@@ -212,21 +195,8 @@ impl BlockCache {
         let entry = self
             .inner
             .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
-                let tiered_cache = self.tiered_cache.clone();
                 let f = f();
                 async move {
-                    if let Some(holder) = tiered_cache
-                        .get(&key)
-                        .await
-                        .map_err(HummockError::tiered_cache)?
-                    {
-                        // TODO(MrCroxx): `TieredCacheEntryHolder::into_owned()` may perform copy,
-                        // eliminate it later.
-                        let block = holder.into_owned();
-                        let len = block.len();
-                        return Ok((block, len));
-                    }
-
                     let block = f.await?;
                     let len = block.len();
                     Ok((block, len))

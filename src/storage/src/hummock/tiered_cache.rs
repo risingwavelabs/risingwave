@@ -103,6 +103,9 @@ where
     }
 }
 
+unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Send for TieredCacheEntryHolder<K, V> {}
+unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Sync for TieredCacheEntryHolder<K, V> {}
+
 #[cfg(target_os = "linux")]
 pub use super::file_cache;
 
