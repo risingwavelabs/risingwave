@@ -16,6 +16,7 @@ dyn-clone = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
