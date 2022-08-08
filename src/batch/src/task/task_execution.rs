@@ -373,7 +373,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
-        info!("Task finished with status: {:?}", state);
         *self.state.lock() = state;
         if let Err(e) = sender.send(None).await {
             match e {

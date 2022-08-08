@@ -323,8 +323,7 @@ impl StageRunner {
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
         let mut buffered_streams = vec![];
         while let Some(result) = buffered.next().await {
-            let a = result?;
-            buffered_streams.push(a);
+            buffered_streams.push(result?);
         }
 
         // Merge different task streams into a single stream.
