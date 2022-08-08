@@ -174,46 +174,12 @@ impl KafkaSink {
         )
     }
 
-    fn fields_to_json(&self, fields: &[Field]) -> Value {
-        let mut res = Vec::new();
-        fields.iter().for_each(|field| {
-            res.push(json!({
-             "field": field.name,
-             "optional": true,
-             "type": field.type_name,
-            }))
-        });
-
-        json!(res)
-    }
-
-    fn schema_to_json(&self, schema: &Schema) -> Value {
-        let mut schema_fields = Vec::new();
-        schema_fields.push(json!({
-            "type": "struct",
-            "fields": self.fields_to_json(&schema.fields),
-            "optional": true,
-            "field": "before",
-        }));
-        schema_fields.push(json!({
-            "type": "struct",
-            "fields": self.fields_to_json(&schema.fields),
-            "optional": true,
-            "field": "after",
-        }));
-        json!({
-            "type": "struct",
-            "fields": schema_fields,
-            "optional": false,
-        })
-    }
-
     async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         let mut update_cache = HashMap::new();
         for (op, row) in chunk.rows() {
             let event_object = match op {
                 Op::Insert => Some(json!({
-                    "schema": self.schema_to_json(schema),
+                    "schema": schema_to_json(schema),
                     "payload": {
                         "before": null,
                         "after": record_to_json(row.clone(), schema.fields.clone())?,
@@ -221,7 +187,7 @@ impl KafkaSink {
                     }
                 })),
                 Op::Delete => Some(json!({
-                    "schema": self.schema_to_json(schema),
+                    "schema": schema_to_json(schema),
                     "payload": {
                         "before": record_to_json(row.clone(), schema.fields.clone())?,
                         "after": null,
@@ -239,7 +205,7 @@ impl KafkaSink {
                     let before = update_cache.get(&row.index());
                     if let Some(before) = before {
                         Some(json!({
-                            "schema": self.schema_to_json(schema),
+                            "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
                                 "after": record_to_json(row.clone(), schema.fields.clone())?,
@@ -435,6 +401,40 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
     }
 
     Ok(records)
+}
+
+fn fields_to_json(fields: &[Field]) -> Value {
+    let mut res = Vec::new();
+    fields.iter().for_each(|field| {
+        res.push(json!({
+         "field": field.name,
+         "optional": true,
+         "type": field.type_name,
+        }))
+    });
+
+    json!(res)
+}
+
+fn schema_to_json(schema: &Schema) -> Value {
+    let mut schema_fields = Vec::new();
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "before",
+    }));
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "after",
+    }));
+    json!({
+        "type": "struct",
+        "fields": schema_fields,
+        "optional": false,
+    })
 }
 
 /// the struct conducts all transactions with Kafka
@@ -649,6 +649,8 @@ mod test {
         ]);
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
+        let schema_json = schema_to_json(&schema);
+        assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
         assert_eq!(
             json_chunk[0].as_str(),
             "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}"
