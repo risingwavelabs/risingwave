@@ -41,7 +41,7 @@ use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::cell_based_encoding_util::serialize_pk_and_column_id;
+use crate::row_serde::row_serde_util::serialize_pk_and_column_id;
 use crate::row_serde::{
     serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde,
     RowSerialize,
@@ -144,6 +144,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
     /// This is parameterized on cell based row serializer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,
         table_id: TableId,
@@ -152,6 +153,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         distribution: Distribution,
+        table_options: TableOption,
     ) -> Self {
         Self::new_inner(
             store,
@@ -161,7 +163,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
             order_types,
             pk_indices,
             distribution,
-            Default::default(),
+            table_options,
             0,
         )
     }
@@ -373,7 +375,10 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
         tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
-        self.check_vnode_is_set(vnode);
+        // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
+        if !indices.is_empty() {
+            self.check_vnode_is_set(vnode);
+        }
         vnode
     }
 
@@ -483,7 +488,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         ReadOptions {
             epoch,
             table_id: Some(self.keyspace.table_id()),
-            ttl: self.table_option.ttl,
+            retention_seconds: self.table_option.retention_seconds,
         }
     }
 }
@@ -690,13 +695,14 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
                 .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
 
             async move {
+                let read_options = self.get_read_option(epoch);
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     prefix_hint,
                     raw_key_range,
                     wait_epoch,
-                    self.get_read_option(epoch),
+                    read_options,
                 )
                 .await?
                 .into_stream();

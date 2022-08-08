@@ -67,9 +67,8 @@ async fn test_hummock_pin_unpin() {
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
         assert_eq!(version_id, hummock_version.id);
-        assert_eq!(7, levels.len());
-        assert_eq!(0, levels[0].table_infos.len());
-        assert_eq!(0, levels[1].table_infos.len());
+        assert_eq!(6, levels.levels.len());
+        assert_eq!(0, levels.levels[0].table_infos.len());
 
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
@@ -265,11 +264,17 @@ async fn test_hummock_table() {
         .unwrap()
         .2
         .unwrap();
+    let levels =
+        pinned_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
     assert_eq!(
         Ordering::Equal,
-        pinned_version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+        levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
             .iter()
+            .chain(levels.levels.iter())
             .flat_map(|level| level.table_infos.iter())
             .map(|info| info.id)
             .sorted()
@@ -809,7 +814,8 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    assert!(s.contains("Compaction task id: 1, target level: 6"));
+    println!("{:?}", s);
+    assert!(s.contains("Compaction task id: 1, target level: 0"));
 }
 
 #[tokio::test]
@@ -882,23 +888,7 @@ async fn test_trigger_manual_compaction() {
         assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
     }
 
-    // Add some sstables and commit.
-    let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
-        &original_tables,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    commit_from_meta_node(
-        hummock_manager.borrow(),
-        epoch,
-        to_local_sstable_info(&original_tables),
-    )
-    .await
-    .unwrap();
-
+    let _ = add_test_tables(&hummock_manager, context_id).await;
     {
         // to check compactor send task fail
         drop(receiver);
@@ -916,7 +906,7 @@ async fn test_trigger_manual_compaction() {
 
     {
         let option = ManualCompactionOption {
-            level: 0,
+            level: 6,
             key_range: KeyRange {
                 inf: true,
                 ..Default::default()
@@ -930,7 +920,7 @@ async fn test_trigger_manual_compaction() {
         assert!(result.is_ok());
     }
 
-    let task_id: u64 = 3;
+    let task_id: u64 = 4;
     let compact_task = hummock_manager
         .compaction_task_from_assignment_for_test(task_id)
         .await
@@ -947,4 +937,51 @@ async fn test_trigger_manual_compaction() {
             .await;
         assert!(result.is_err());
     }
+}
+
+#[tokio::test]
+async fn test_extend_ssts_to_delete() {
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
+    let max_committed_sst_id = sst_infos
+        .iter()
+        .map(|ssts| ssts.iter().max_by_key(|s| s.id).map(|s| s.id).unwrap())
+        .max()
+        .unwrap();
+    let orphan_sst_num = 10;
+    let orphan_sst_ids = sst_infos
+        .iter()
+        .flatten()
+        .map(|s| s.id)
+        .chain(max_committed_sst_id + 1..=max_committed_sst_id + orphan_sst_num)
+        .collect_vec();
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .extend_ssts_to_delete_from_scan(&orphan_sst_ids)
+            .await,
+        orphan_sst_num as usize
+    );
+    assert_eq!(
+        hummock_manager.get_ssts_to_delete().await.len(),
+        orphan_sst_num as usize
+    );
+
+    // Checkpoint
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        3
+    );
+    assert_eq!(
+        hummock_manager
+            .extend_ssts_to_delete_from_scan(&orphan_sst_ids)
+            .await,
+        orphan_sst_num as usize
+    );
+    // Another 3 SSTs from useless delta logs after checkpoint
+    assert_eq!(
+        hummock_manager.get_ssts_to_delete().await.len(),
+        orphan_sst_num as usize + 3
+    );
 }

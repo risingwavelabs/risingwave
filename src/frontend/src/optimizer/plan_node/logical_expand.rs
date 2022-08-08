@@ -16,6 +16,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
@@ -23,7 +24,6 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalExpand`] expand one row multiple times according to `column_subsets`.
@@ -120,7 +120,6 @@ impl PlanTreeNodeUnary for LogicalExpand {
             })
             .collect_vec();
         let (mut map, new_input_col_num) = input_col_change.into_parts();
-        assert_eq!(new_input_col_num, input.schema().len());
         map.push(Some(new_input_col_num));
 
         (Self::new(input, column_subsets), ColIndexMapping::new(map))

@@ -25,7 +25,7 @@ use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
     ToBatch, ToStream,
 };
-use crate::catalog::ColumnId;
+use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::session::OptimizerContextRef;
@@ -43,7 +43,7 @@ pub struct LogicalScan {
     // Descriptor of the table
     table_desc: Rc<TableDesc>,
     // Descriptors of all indexes on this table
-    indexes: Vec<(String, Rc<TableDesc>)>,
+    indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     predicate: Condition,
 }
@@ -55,7 +55,7 @@ impl LogicalScan {
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        indexes: Vec<(String, Rc<TableDesc>)>,
+        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
     ) -> Self {
@@ -117,7 +117,7 @@ impl LogicalScan {
         table_name: String, // explain-only
         is_sys_table: bool,
         table_desc: Rc<TableDesc>,
-        indexes: Vec<(String, Rc<TableDesc>)>,
+        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
     ) -> Self {
         Self::new(
@@ -207,13 +207,18 @@ impl LogicalScan {
     }
 
     /// Get all indexes on this table
-    pub fn indexes(&self) -> &[(String, Rc<TableDesc>)] {
+    pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
         &self.indexes
+    }
+
+    /// Get the logical scan's filter predicate
+    pub fn predicate(&self) -> &Condition {
+        &self.predicate
     }
 
     /// The mapped distribution key of the scan operator.
     ///
-    /// The column indices in it is the position in the `required_col_idx`,instead of the position
+    /// The column indices in it is the position in the `required_col_idx`, instead of the position
     /// in all the columns of the table (which is the table's distribution key).
     ///
     /// Return `None` if the table's distribution key are not all in the `required_col_idx`.
@@ -231,26 +236,28 @@ impl LogicalScan {
             .collect()
     }
 
-    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> LogicalScan {
+    pub fn to_index_scan(
+        &self,
+        index_name: &str,
+        index_table_desc: Rc<TableDesc>,
+        primary_to_secondary_mapping: &[usize],
+    ) -> LogicalScan {
+        assert_eq!(
+            primary_to_secondary_mapping.len(),
+            self.table_desc.columns.len()
+        );
         let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
-        let all_columns = index
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(idx, desc)| (desc.column_id, idx))
-            .collect::<HashMap<_, _>>();
 
         // create index scan plan to match the output order of the current table scan
         for &col_idx in &self.required_col_idx {
-            let column_idx_in_index = all_columns[&self.table_desc.columns[col_idx].column_id];
-            new_required_col_idx.push(column_idx_in_index);
+            new_required_col_idx.push(primary_to_secondary_mapping[col_idx]);
         }
 
         Self::new(
             index_name.to_string(),
             false,
             new_required_col_idx,
-            index.clone(),
+            index_table_desc,
             vec![],
             self.ctx(),
             self.predicate.clone(),
@@ -361,6 +368,10 @@ impl LogicalScan {
             false => Ok((self.clone(), ColIndexMapping::identity(self.schema().len()))),
         }
     }
+
+    pub fn output_col_idx(&self) -> &Vec<usize> {
+        &self.output_col_idx
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
@@ -398,7 +409,7 @@ impl fmt::Display for LogicalScan {
                 }.join(", "),
                 required_col_names.join(", "),
                 {
-                    let fields = self.table_desc.columns.iter().map(|col|  Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
+                    let fields = self.table_desc.columns.iter().map(|col| Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
                     let input_schema = Schema{fields};
                     format!("{}", ConditionDisplay {
                         condition: &self.predicate,

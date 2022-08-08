@@ -25,18 +25,19 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::Stream;
-use risingwave_common::error::{tonic_err, RwError};
 use tokio::sync::mpsc::Receiver;
 
-/// `RwReceiverStream` is a wrapper around `tokio::sync::mpsc::Receiver` that implements Stream.
-/// `RwReceiverStream` is similar to `tokio_stream::wrappers::ReceiverStream`, but it maps Result<S,
-/// `RwError`> to Result<S, `tonic::Status`>.
+use crate::MetaError;
+
+/// `RwReceiverStream` is a wrapper around `tokio::sync::mpsc::Receiver` that implements
+/// Stream. `RwReceiverStream` is similar to `tokio_stream::wrappers::ReceiverStream`, but it
+/// maps Result<S, `MetaError`> to Result<S, `tonic::Status`>.
 pub struct RwReceiverStream<S> {
-    inner: Receiver<Result<S, RwError>>,
+    inner: Receiver<Result<S, MetaError>>,
 }
 
 impl<S> RwReceiverStream<S> {
-    pub fn new(inner: Receiver<Result<S, RwError>>) -> Self {
+    pub fn new(inner: Receiver<Result<S, MetaError>>) -> Self {
         Self { inner }
     }
 }
@@ -47,6 +48,6 @@ impl<S> Stream for RwReceiverStream<S> {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner
             .poll_recv(cx)
-            .map(|opt| opt.map(|res| res.map_err(tonic_err)))
+            .map(|opt| opt.map(|res| res.map_err(Into::into)))
     }
 }

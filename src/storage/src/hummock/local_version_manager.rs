@@ -24,8 +24,10 @@ use itertools::Itertools;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+#[cfg(any(test, feature = "test"))]
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
@@ -47,7 +49,7 @@ use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
 use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
     INVALID_VERSION_ID,
 };
 use crate::monitor::StateStoreMetrics;
@@ -140,6 +142,7 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
+    sstable_id_manager: SstableIdManagerRef,
 }
 
 impl LocalVersionManager {
@@ -149,8 +152,8 @@ impl LocalVersionManager {
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
         sstable_id_manager: SstableIdManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -193,9 +196,10 @@ impl LocalVersionManager {
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
-                table_id_to_slice_transform.clone(),
-                sstable_id_manager,
+                sstable_id_manager.clone(),
+                filter_key_extractor_manager.clone(),
             )),
+            sstable_id_manager,
         });
 
         // Pin and get the latest version.
@@ -233,11 +237,11 @@ impl LocalVersionManager {
             Arc::new(StateStoreMetrics::unused()),
             hummock_meta_client.clone(),
             write_conflict_detector,
-            Arc::new(RwLock::new(HashMap::new())),
             Arc::new(crate::hummock::SstableIdManager::new(
                 hummock_meta_client,
                 options.sstable_id_remote_fetch_number,
             )),
+            Arc::new(FilterKeyExtractorManager::default()),
         )
         .await
     }
@@ -290,7 +294,15 @@ impl LocalVersionManager {
         }
 
         let mut new_version = old_version.clone();
-        new_version.set_pinned_version(newly_pinned_version);
+        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
+        let sstable_id_manager_clone = self.sstable_id_manager.clone();
+        tokio::spawn(async move {
+            for cleaned_epoch in cleaned_epochs {
+                sstable_id_manager_clone
+                    .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
+                    .await;
+            }
+        });
         {
             let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
             *guard = new_version;
@@ -883,10 +895,16 @@ impl LocalVersionManager {
                         assert!(pending_write_requests.is_empty());
 
                         // Clear shared buffer
-                        local_version_manager
+                        let cleaned_epochs = local_version_manager
                             .local_version
                             .write()
                             .clear_shared_buffer();
+                        for cleaned_epoch in cleaned_epochs {
+                            local_version_manager
+                                .sstable_id_manager
+                                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
+                                .await;
+                        }
 
                         // Notify completion of the Clear event.
                         notifier.send(()).unwrap();
