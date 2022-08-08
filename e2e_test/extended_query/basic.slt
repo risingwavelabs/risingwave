@@ -1,0 +1,52 @@
+# SET
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# explain
+# create table
+# create index
+# drop
+# insert 
+# select 
+statement ok
+create table t(v int);
+
+statement ok
+explain create index i on t(v);
+
+statement ok
+insert into t (v) values (1);
+
+query I
+select * from t;
+----
+1
+
+statement ok
+drop table t;
+
+# values
+query II
+values(round(42.4382));
+----
+42
+
+# show
+# describe
+# create mv
+include ../ddl/*.slt
+
+# int2 int4 int8
+query III
+select 42::smallint, 42::int, 42::bigint;
+----
+42 42 42
+
+# float4 float8 decimal
+query IV
+select 42::real,42::double precision,42::decimal;
+----
+42 42 42
+
+
+
