@@ -20,7 +20,7 @@ use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
+use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
