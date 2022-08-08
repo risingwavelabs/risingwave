@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
+pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
+
 /// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
 /// separately.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
