@@ -26,18 +26,18 @@ pub const PULSAR_CONNECTOR: &str = "pulsar";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct PulsarProperties {
-    #[serde(rename = "pulsar.topic")]
+    #[serde(rename = "topic", alias = "pulsar.topic")]
     pub topic: String,
 
-    #[serde(rename = "pulsar.admin.url")]
+    #[serde(rename = "admin.url", alias = "pulsar.admin.url")]
     pub admin_url: String,
 
-    #[serde(rename = "pulsar.service.url")]
+    #[serde(rename = "service.url", alias = "pulsar.service.url")]
     pub service_url: String,
 
-    #[serde(rename = "pulsar.scan.startup.mode")]
+    #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "pulsar.time.offset")]
+    #[serde(rename = "scan.startup.timestamp_millis", alias = "pulsar.time.offset")]
     pub time_offset: Option<String>,
 }
