@@ -200,6 +200,8 @@ impl ToStream for LogicalFilter {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::expr::expr_node::Type;
@@ -452,20 +454,20 @@ mod tests {
             .unwrap(),
         ));
         let filter = LogicalFilter::create_with_expr(values.into(), predicate);
-        let fd_set = filter.functional_dependency();
-        let expected_fd_set = vec![
+        let fd_set: HashSet<_> = filter
+            .functional_dependency()
+            .as_dependencies()
+            .iter()
+            .cloned()
+            .collect();
+        let expected_fd_set: HashSet<_> = [
             FunctionalDependency::with_indices(4, &[3], &[1, 2]),
             FunctionalDependency::with_indices(4, &[], &[0]),
             FunctionalDependency::with_indices(4, &[1], &[2]),
             FunctionalDependency::with_indices(4, &[2], &[1]),
-        ];
-        assert_eq!(fd_set.as_dependencies().len(), expected_fd_set.len());
-        for i in fd_set.as_dependencies() {
-            assert!(
-                expected_fd_set.contains(i),
-                "{} should be in expected_fd_set",
-                i
-            );
-        }
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(fd_set, expected_fd_set);
     }
 }

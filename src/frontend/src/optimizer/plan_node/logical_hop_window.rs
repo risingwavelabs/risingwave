@@ -419,6 +419,8 @@ impl ToStream for LogicalHopWindow {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -508,20 +510,20 @@ mod test {
             None,
         )
         .into();
-        let fd_set = hop_window.functional_dependency();
-        let expected_fd_set = vec![
+        let fd_set: HashSet<_> = hop_window
+            .functional_dependency()
+            .as_dependencies()
+            .iter()
+            .cloned()
+            .collect();
+        let expected_fd_set: HashSet<_> = [
             FunctionalDependency::with_indices(5, &[0, 1, 3], &[2]),
             FunctionalDependency::with_indices(5, &[0, 1, 4], &[2]),
             FunctionalDependency::with_indices(5, &[3], &[0, 1, 2, 4]),
             FunctionalDependency::with_indices(5, &[4], &[0, 1, 2, 3]),
-        ];
-        assert_eq!(fd_set.as_dependencies().len(), expected_fd_set.len());
-        for i in fd_set.as_dependencies() {
-            assert!(
-                expected_fd_set.contains(i),
-                "{} should be in expected_fd_set",
-                i
-            );
-        }
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(fd_set, expected_fd_set);
     }
 }
