@@ -56,7 +56,6 @@ use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
-use crate::test_utils::MockUserInfoWriter;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -212,7 +211,7 @@ impl FrontendEnv {
     }
 
     pub fn mock() -> Self {
-        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient};
+        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
@@ -469,8 +468,8 @@ impl SessionImpl {
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,
-    observer_join_handle: JoinHandle<()>,
-    heartbeat_join_handle: JoinHandle<()>,
+    _observer_join_handle: JoinHandle<()>,
+    _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: Sender<()>,
 }
 
@@ -549,16 +548,10 @@ impl SessionManagerImpl {
             FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
-            observer_join_handle: join_handle,
-            heartbeat_join_handle,
+            _observer_join_handle: join_handle,
+            _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
         })
-    }
-
-    /// Used in unit test. Called before `LocalMeta::stop`.
-    pub fn terminate(&self) {
-        self.observer_join_handle.abort();
-        self.heartbeat_join_handle.abort();
     }
 }
 

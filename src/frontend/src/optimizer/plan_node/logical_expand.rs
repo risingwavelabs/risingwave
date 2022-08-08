@@ -16,6 +16,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
@@ -24,7 +25,6 @@ use super::{
 };
 use crate::expr::InputRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalExpand`] expand one row multiple times according to `column_subsets`.

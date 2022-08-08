@@ -29,8 +29,6 @@ pub enum Error {
     MetaStoreError(anyhow::Error),
     #[error("compactor {0} is disconnected")]
     CompactorUnreachable(HummockContextId),
-    #[error("compactor {0} is busy")]
-    CompactorBusy(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
     CompactionTaskAlreadyAssigned(u64, HummockContextId),
     #[error("compaction group {0} not found")]

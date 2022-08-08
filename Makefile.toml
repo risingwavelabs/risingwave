@@ -261,9 +261,9 @@ cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
-[tasks.pre-start-playground]
+[tasks.pre-start-dev]
 category = "RiseDev - Prepare"
-description = "Prepare playground by downloading necessary tools and build required components"
+description = "Prepare dev cluster by downloading necessary tools and build required components"
 dependencies = [
   "download-minio",
   "download-mcli",
@@ -336,10 +336,10 @@ alias = "dev"
 
 [tasks.dev]
 category = "RiseDev - Start"
-dependencies = ["pre-start-playground"]
-command = "target/${BUILD_MODE_DIR}/risedev-playground"
+dependencies = ["pre-start-dev"]
+command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
-description = "Start a full RisingWave dev cluster using risedev-playground"
+description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]
 category = "RiseDev - Start"
@@ -384,7 +384,7 @@ do
 done
 
 echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
 echo
 
 echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
@@ -443,7 +443,19 @@ script = """
 #!/bin/bash
 set -e
 
-cargo build "$@"
+cargo build \
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  "$@"
 """
 
 [tasks.stest]
@@ -455,7 +467,31 @@ script = """
 #!/bin/bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run \
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  "$@"
+"""
+
+[tasks.sslt]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run e2e tests in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo run -p risingwave_simulation "$@"
 """
 
 [tasks.check-hakari]
@@ -503,7 +539,7 @@ script = """
 #!@shell
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets --features failpoints --locked -- -D warnings
+cargo clippy --all-targets --features failpoints
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 
@@ -559,10 +595,10 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 
 [tasks.ci-start]
 category = "RiseDev - CI"
-dependencies = ["clean-data", "pre-start-playground"]
-command = "target/${BUILD_MODE_DIR}/risedev-playground"
+dependencies = ["clean-data", "pre-start-dev"]
+command = "target/${BUILD_MODE_DIR}/risedev-dev"
 args = ["${@}"]
-description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
+description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.ci-kill]
 category = "RiseDev - CI"

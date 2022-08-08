@@ -938,3 +938,50 @@ async fn test_trigger_manual_compaction() {
         assert!(result.is_err());
     }
 }
+
+#[tokio::test]
+async fn test_extend_ssts_to_delete() {
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
+    let max_committed_sst_id = sst_infos
+        .iter()
+        .map(|ssts| ssts.iter().max_by_key(|s| s.id).map(|s| s.id).unwrap())
+        .max()
+        .unwrap();
+    let orphan_sst_num = 10;
+    let orphan_sst_ids = sst_infos
+        .iter()
+        .flatten()
+        .map(|s| s.id)
+        .chain(max_committed_sst_id + 1..=max_committed_sst_id + orphan_sst_num)
+        .collect_vec();
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .extend_ssts_to_delete_from_scan(&orphan_sst_ids)
+            .await,
+        orphan_sst_num as usize
+    );
+    assert_eq!(
+        hummock_manager.get_ssts_to_delete().await.len(),
+        orphan_sst_num as usize
+    );
+
+    // Checkpoint
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        3
+    );
+    assert_eq!(
+        hummock_manager
+            .extend_ssts_to_delete_from_scan(&orphan_sst_ids)
+            .await,
+        orphan_sst_num as usize
+    );
+    // Another 3 SSTs from useless delta logs after checkpoint
+    assert_eq!(
+        hummock_manager.get_ssts_to_delete().await.len(),
+        orphan_sst_num as usize + 3
+    );
+}

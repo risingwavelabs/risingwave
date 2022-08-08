@@ -35,7 +35,7 @@ statement ok
 select * from s6;
 
 statement ok
-create sink si from s5 with ( kafka.brokers = '127.0.0.1:29092', kafka.topic = 'sink_target', sink.type = 'append_only', sink_type = 'kafka' )
+create sink si from s5 with ( kafka.brokers = '127.0.0.1:29092', kafka.topic = 'sink_target', format = 'append_only', connector = 'kafka' )
 
 statement ok
 create materialized source s7 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'sink_target', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
