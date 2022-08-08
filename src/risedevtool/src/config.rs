@@ -113,7 +113,7 @@ impl ConfigExpander {
                 let result = match use_type.as_str() {
                     "minio" => ServiceConfig::Minio(serde_yaml::from_str(&out_str)?),
                     "etcd" => ServiceConfig::Etcd(serde_yaml::from_str(&out_str)?),
-                    "frontend" => ServiceConfig::FrontendV2(serde_yaml::from_str(&out_str)?),
+                    "frontend" => ServiceConfig::Frontend(serde_yaml::from_str(&out_str)?),
                     "compactor" => ServiceConfig::Compactor(serde_yaml::from_str(&out_str)?),
                     "compute-node" => ServiceConfig::ComputeNode(serde_yaml::from_str(&out_str)?),
                     "meta-node" => ServiceConfig::MetaNode(serde_yaml::from_str(&out_str)?),

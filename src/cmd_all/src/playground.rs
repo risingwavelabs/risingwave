@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -59,6 +60,14 @@ pub async fn playground() -> Result<()> {
         "playground".to_string()
     };
 
+    // TODO: may allow specifying the config file for the playground.
+    let apply_config_file = |cmd: &mut Command| {
+        let path = Path::new("src/config/risingwave.toml");
+        if path.exists() {
+            cmd.arg("--config-path").arg(path);
+        }
+    };
+
     let services = match load_risedev_config(&profile).await {
         Ok((steps, services)) => {
             tracing::info!(
@@ -91,6 +100,7 @@ pub async fn playground() -> Result<()> {
                                 HummockInMemoryStrategy::Isolated
                             },
                         )?;
+                        apply_config_file(&mut command);
                         rw_services.push(RisingWaveService::Compute(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
@@ -98,11 +108,12 @@ pub async fn playground() -> Result<()> {
                     ServiceConfig::MetaNode(c) => {
                         let mut command = Command::new("meta-node");
                         MetaNodeService::apply_command_args(&mut command, c)?;
+                        apply_config_file(&mut command);
                         rw_services.push(RisingWaveService::Meta(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
                     }
-                    ServiceConfig::FrontendV2(c) => {
+                    ServiceConfig::Frontend(c) => {
                         let mut command = Command::new("frontend-node");
                         FrontendService::apply_command_args(&mut command, c)?;
                         rw_services.push(RisingWaveService::Frontend(
@@ -112,6 +123,7 @@ pub async fn playground() -> Result<()> {
                     ServiceConfig::Compactor(c) => {
                         let mut command = Command::new("compactor");
                         CompactorService::apply_command_args(&mut command, c)?;
+                        apply_config_file(&mut command);
                         rw_services.push(RisingWaveService::Compactor(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));

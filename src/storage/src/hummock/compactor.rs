@@ -23,7 +23,9 @@ use dyn_clone::DynClone;
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
+use risingwave_common::config::constant::hummock::{
+    CompactionFilterFlag, TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -67,15 +69,15 @@ pub struct RemoteBuilderFactory {
 #[async_trait::async_trait]
 impl TableBuilderFactory for RemoteBuilderFactory {
     async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
-        let timer = Instant::now();
-        let table_id = self.sstable_id_manager.get_next_sst_id().await?;
-        let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-        self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let tracker = self
             .limiter
             .require_memory(self.options.capacity as u64 + self.options.block_capacity as u64)
             .await
             .unwrap();
+        let timer = Instant::now();
+        let table_id = self.sstable_id_manager.get_new_sst_id().await?;
+        let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
+        self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let builder = SstableBuilder::new(table_id, self.options.clone());
         Ok((tracker, builder))
     }
@@ -176,7 +178,7 @@ impl CompactionFilter for TTLCompactionFilter {
                 }
                 match self.table_id_to_ttl.get(&table_id) {
                     Some(ttl_second_u32) => {
-                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
+                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETAINTION_SECOND);
                         // default to zero.
                         let ttl_mill = (*ttl_second_u32 * 1000) as u64;
                         let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
@@ -449,10 +451,30 @@ impl Compactor {
         }
     }
 
-    /// Handle a compaction task and report its status to hummock manager.
+    /// Handles a compaction task and reports its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
         use risingwave_common::catalog::TableOption;
+
+        // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
+        // write op. The watermark is invalidated when this method exits.
+        let tracker_id = match context.sstable_id_manager.add_watermark_sst_id(None).await {
+            Ok(tracker_id) => tracker_id,
+            Err(err) => {
+                tracing::warn!("Failed to track pending SST id. {:#?}", err);
+                return false;
+            }
+        };
+        let sstable_id_manager_clone = context.sstable_id_manager.clone();
+        let _guard = scopeguard::guard(
+            (tracker_id, sstable_id_manager_clone),
+            |(tracker_id, sstable_id_manager)| {
+                tokio::spawn(async move {
+                    sstable_id_manager.remove_watermark_sst_id(tracker_id).await;
+                });
+            },
+        );
+
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
         let compaction_read_bytes = compact_task
@@ -538,9 +560,9 @@ impl Compactor {
                 .iter()
                 .filter(|id_to_option| {
                     let table_option: TableOption = id_to_option.1.into();
-                    table_option.ttl.is_some()
+                    table_option.retention_seconds.is_some()
                 })
-                .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
                 .collect();
             let ttl_filter = Box::new(TTLCompactionFilter::new(
                 id_to_ttl,

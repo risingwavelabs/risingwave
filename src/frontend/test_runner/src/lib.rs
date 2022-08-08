@@ -17,22 +17,20 @@
 
 mod resolve_id;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
-use risingwave_frontend::binder::Binder;
+use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table,
 };
-use risingwave_frontend::optimizer::PlanRef;
-use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
-use risingwave_frontend::FrontendOpts;
-use risingwave_sqlparser::ast::{ObjectName, Statement, WithProperties};
+use risingwave_frontend::{Binder, FrontendOpts, PlanRef, Planner};
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -262,7 +260,7 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(session.clone(), Arc::from(sql));
+            let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
             context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
             match stmt.clone() {
                 Statement::Query(_)
@@ -284,7 +282,9 @@ impl TestCase {
                     with_options,
                     ..
                 } => {
-                    create_table::handle_create_table(context, name, columns, with_options).await?;
+                    context.with_properties =
+                        handle_with_properties("handle_create_table", with_options.clone())?;
+                    create_table::handle_create_table(context, name, columns).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
@@ -309,8 +309,9 @@ impl TestCase {
                     with_options,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, query, WithProperties(with_options))
-                        .await?;
+                    context.with_properties =
+                        handle_with_properties("handle_create_mv", with_options.clone())?;
+                    create_mv::handle_create_mv(context, name, query).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -345,7 +346,7 @@ impl TestCase {
         let logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
                 }
                 logical_plan
             }
@@ -413,7 +414,6 @@ impl TestCase {
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
-                HashMap::new(),
             )?;
 
             // Only generate stream_plan if it is specified in test case

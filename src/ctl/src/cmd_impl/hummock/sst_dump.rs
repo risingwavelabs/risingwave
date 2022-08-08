@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use bytes::{Buf, Bytes};
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_frontend::catalog::TableCatalog;
+use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSstableId;
@@ -28,7 +28,7 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
-use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
+use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
 
 use crate::common::HummockServiceOpts;
 

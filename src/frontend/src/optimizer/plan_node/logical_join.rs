@@ -474,7 +474,7 @@ impl LogicalJoin {
     fn convert_to_lookup_join(
         &self,
         logical_join: LogicalJoin,
-        predicate: EqJoinPredicate,
+        mut predicate: EqJoinPredicate,
     ) -> Option<PlanRef> {
         if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
             log::warn!(
@@ -509,7 +509,23 @@ impl LogicalJoin {
             }
         }
 
+        let new_other = predicate
+            .other_cond()
+            .clone()
+            .and(logical_scan.predicate().clone());
+        *predicate.other_cond_mut() = new_other;
+
         Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
+    }
+
+    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
+        (
+            self.left,
+            self.right,
+            self.on,
+            self.join_type,
+            self.output_indices,
+        )
     }
 }
 
@@ -593,6 +609,11 @@ impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        // make `required_cols` point to internal table instead of output schema.
+        let required_cols = required_cols
+            .iter()
+            .map(|i| self.output_indices[*i])
+            .collect_vec();
         let left_len = self.left.schema().fields.len();
 
         let total_len = self.left().schema().len() + self.right().schema().len();
@@ -638,10 +659,7 @@ impl ColPrunable for LogicalJoin {
 
             let mapping =
                 ColIndexMapping::with_remaining_columns(required_inputs_in_output, total_len);
-            required_cols
-                .iter()
-                .map(|&i| mapping.map(self.output_indices[i]))
-                .collect_vec()
+            required_cols.iter().map(|&i| mapping.map(i)).collect_vec()
         };
 
         LogicalJoin::new_with_output_indices(
@@ -888,12 +906,7 @@ impl ToStream for LogicalJoin {
                 return Err(nested_loop_join_error);
             };
 
-            let left = self
-                .left()
-                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.left().schema().len(),
-                    &[left_ref_index],
-                ))?;
+            let left = self.left().to_stream()?;
 
             let right = self
                 .right()
