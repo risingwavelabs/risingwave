@@ -44,7 +44,10 @@ impl StreamIndexScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::HashShard(logical.distribution_key().unwrap()),
+            // The upstream MV can be scaled independently, and has different vnode mapping with
+            // the current MV. So we just specify its distribution as
+            // `SomeShard` to force an exchange is inserted.
+            Distribution::SomeShard,
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {

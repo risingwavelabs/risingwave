@@ -53,6 +53,9 @@ impl StreamDeltaJoin {
             &logical
                 .l2i_col_mapping()
                 .composite(&logical.i2o_col_mapping()),
+            &logical
+                .r2i_col_mapping()
+                .composite(&logical.i2o_col_mapping()),
         );
 
         // TODO: derive from input

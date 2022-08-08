@@ -65,6 +65,9 @@ impl StreamHashJoin {
             &logical
                 .l2i_col_mapping()
                 .composite(&logical.i2o_col_mapping()),
+            &logical
+                .r2i_col_mapping()
+                .composite(&logical.i2o_col_mapping()),
         );
 
         // TODO: derive from input
@@ -97,14 +100,22 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        side2o_mapping: &ColIndexMapping,
+        l2o_mapping: &ColIndexMapping,
+        r2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                side2o_mapping.rewrite_provided_distribution(left)
+            (Distribution::HashShard(_), Distribution::HashShard(_) | Distribution::SomeShard) => {
+                l2o_mapping.rewrite_provided_distribution(left)
             }
-            (_, _) => panic!(),
+            (Distribution::SomeShard, Distribution::HashShard(_)) => {
+                r2o_mapping.rewrite_provided_distribution(right)
+            }
+            (Distribution::SomeShard, Distribution::SomeShard) => Distribution::SomeShard,
+            (_, _) => unreachable!(
+                "suspicious distribution: left: {:?}, right: {:?}",
+                left, right
+            ),
         }
     }
 

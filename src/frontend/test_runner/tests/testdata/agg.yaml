@@ -31,12 +31,10 @@
           BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
-      StreamProject { exprs: [t.v1, (min(min(t.v2)) + (max(max(t.v3)) * sum(count(t.v1))))] }
-        StreamHashAgg { group_key: [t.v1], aggs: [sum(count), min(min(t.v2)), max(max(t.v3)), sum(count(t.v1))] }
+      StreamProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1)))] }
+        StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v2), max(t.v3), count(t.v1)] }
           StreamExchange { dist: HashShard(t.v1) }
-            StreamHashAgg { group_key: [t.v1, Vnode(t._row_id)], aggs: [count, min(t.v2), max(t.v3), count(t.v1)] }
-              StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id)] }
-                StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) as agg from t;
@@ -53,12 +51,10 @@
           BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [agg], pk_columns: [] }
-      StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum(count(t.v3))))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v2)), sum(count(t.v3))] }
+      StreamProject { exprs: [(min(t.v1) + (max(t.v2) * count(t.v3)))] }
+        StreamGlobalSimpleAgg { aggs: [count, min(t.v1), max(t.v2), count(t.v3)] }
           StreamExchange { dist: Single }
-            StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v2), count(t.v3)] }
-              StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id)] }
-                StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -87,13 +83,11 @@
             BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v3, agg], pk_columns: [v3] }
-      StreamProject { exprs: [t.v3, (min(min(t.v1)) * (sum(sum((t.v1 + t.v2)))::Decimal / sum(count((t.v1 + t.v2)))))] }
-        StreamHashAgg { group_key: [t.v3], aggs: [sum(count), min(min(t.v1)), sum(sum((t.v1 + t.v2))), sum(count((t.v1 + t.v2)))] }
+      StreamProject { exprs: [t.v3, (min(t.v1) * (sum((t.v1 + t.v2))::Decimal / count((t.v1 + t.v2))))] }
+        StreamHashAgg { group_key: [t.v3], aggs: [count, min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
           StreamExchange { dist: HashShard(t.v3) }
-            StreamHashAgg { group_key: [t.v3, Vnode(t._row_id)], aggs: [count, min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
-              StreamProject { exprs: [t.v3, t.v1, (t.v1 + t.v2), t._row_id, Vnode(t._row_id)] }
-                StreamProject { exprs: [t.v3, t.v1, (t.v1 + t.v2), t._row_id] }
-                  StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamProject { exprs: [t.v3, t.v1, (t.v1 + t.v2), t._row_id] }
+              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int);
@@ -161,7 +155,7 @@
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
             StreamProject { exprs: [(t.v1 + t.v2), t._row_id] }
-              StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+              StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) as agg from t group by v1;
@@ -174,13 +168,11 @@
               BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
-      StreamProject { exprs: [t.v1, ((sum(sum((t.v2 + t.v3))) / sum(count((t.v2 + t.v3)))) + max(max(t.v1)))] }
-        StreamHashAgg { group_key: [t.v1], aggs: [sum(count), sum(sum((t.v2 + t.v3))), sum(count((t.v2 + t.v3))), max(max(t.v1))] }
+      StreamProject { exprs: [t.v1, ((sum((t.v2 + t.v3)) / count((t.v2 + t.v3))) + max(t.v1))] }
+        StreamHashAgg { group_key: [t.v1], aggs: [count, sum((t.v2 + t.v3)), count((t.v2 + t.v3)), max(t.v1)] }
           StreamExchange { dist: HashShard(t.v1) }
-            StreamHashAgg { group_key: [t.v1, Vnode(t._row_id)], aggs: [count, sum((t.v2 + t.v3)), count((t.v2 + t.v3)), max(t.v1)] }
-              StreamProject { exprs: [t.v1, (t.v2 + t.v3), t._row_id, Vnode(t._row_id)] }
-                StreamProject { exprs: [t.v1, (t.v2 + t.v3), t._row_id] }
-                  StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamProject { exprs: [t.v1, (t.v2 + t.v3), t._row_id] }
+              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     create table t (v1 real);
     select v1, count(*) from t group by v1;
@@ -265,13 +257,11 @@
               BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [agg], pk_columns: [] }
-      StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum(count(t.v2))))] }
-        StreamGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v3)), sum(count(t.v2))] }
+      StreamProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2)))] }
+        StreamGlobalSimpleAgg { aggs: [count, min(t.v1), max(t.v3), count(t.v2)] }
           StreamExchange { dist: Single }
-            StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v3), count(t.v2)] }
-              StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id, Vnode(t._row_id)] }
-                StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id] }
-                  StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamProject { exprs: [t.v1, t.v3, t.v2, t._row_id] }
+              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* simple-agg with single distribution */
     create table t(v1 int);
@@ -288,7 +278,7 @@
         StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
           StreamExchange { dist: Single }
             StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+              StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* simple-agg with some shard distribution */
     create table t(v1 int);
@@ -303,7 +293,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* simple-agg with hash shard distribution */
     create table t(v1 int, v2 int);
@@ -318,15 +308,13 @@
                 BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [sum(count)(hidden), s1], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(sum(sum(t.v2))))] }
+      StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(sum(t.v2)))] }
         StreamExchange { dist: Single }
-          StreamStatelessLocalSimpleAgg { aggs: [count, sum(sum(sum(t.v2)))] }
-            StreamProject { exprs: [sum(sum(t.v2)), t.v1] }
-              StreamHashAgg { group_key: [t.v1], aggs: [sum(count), sum(sum(t.v2))] }
+          StreamStatelessLocalSimpleAgg { aggs: [count, sum(sum(t.v2))] }
+            StreamProject { exprs: [sum(t.v2), t.v1] }
+              StreamHashAgg { group_key: [t.v1], aggs: [count, sum(t.v2)] }
                 StreamExchange { dist: HashShard(t.v1) }
-                  StreamHashAgg { group_key: [t.v1, Vnode(t._row_id)], aggs: [count, sum(t.v2)] }
-                    StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id)] }
-                      StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+                  StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* simple-stream-agg with append-only min-max should use 2-phase-agg */
     create table t(v1 int, v2 int) with (appendonly = true);
@@ -336,18 +324,16 @@
       StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), min(min(t.v1)), max(max(t.v2))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, min(t.v1), max(t.v2)] }
-            StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* simple-stream-agg with non-append-only min-max should use 1-phase agg */
     create table t(v1 int, v2 int) with (appendonly = false);
     select sum(v1) as s1, min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
-    StreamMaterialize { columns: [sum(count)(hidden), s1, a1, a2], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1)), min(min(t.v1)), max(max(t.v2))] }
+    StreamMaterialize { columns: [count(hidden), s1, a1, a2], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, sum(t.v1), min(t.v1), max(t.v2)] }
         StreamExchange { dist: Single }
-          StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, sum(t.v1), min(t.v1), max(t.v2)] }
-            StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id)] }
-              StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+          StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* dup group key */
     create table t(v1 int) with (appendonly = false);
@@ -364,11 +350,9 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, t.v1(hidden)], pk_columns: [v1, t.v1] }
       StreamProject { exprs: [t.v1, t.v1] }
-        StreamHashAgg { group_key: [t.v1, t.v1], aggs: [sum(count)] }
+        StreamHashAgg { group_key: [t.v1, t.v1], aggs: [count] }
           StreamExchange { dist: HashShard(t.v1) }
-            StreamHashAgg { group_key: [t.v1, t.v1, Vnode(t._row_id)], aggs: [count] }
-              StreamProject { exprs: [t.v1, t._row_id, Vnode(t._row_id)] }
-                StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* dup group key */
     create table t(v1 int, v2 int, v3 int) with (appendonly = false);
@@ -385,13 +369,11 @@
           LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   stream_plan: |
     StreamMaterialize { columns: [v2, min_v1, v3, max_v1, t.v2(hidden)], pk_columns: [v3, v2, t.v2] }
-      StreamProject { exprs: [t.v2, min(min(t.v1)), t.v3, max(max(t.v1)), t.v2] }
-        StreamHashAgg { group_key: [t.v3, t.v2, t.v2], aggs: [sum(count), min(min(t.v1)), max(max(t.v1))] }
+      StreamProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1), t.v2] }
+        StreamHashAgg { group_key: [t.v3, t.v2, t.v2], aggs: [count, min(t.v1), max(t.v1)] }
           StreamExchange { dist: HashShard(t.v3, t.v2) }
-            StreamHashAgg { group_key: [t.v3, t.v2, t.v2, Vnode(t._row_id)], aggs: [count, min(t.v1), max(t.v1)] }
-              StreamProject { exprs: [t.v3, t.v2, t.v1, t._row_id, Vnode(t._row_id)] }
-                StreamProject { exprs: [t.v3, t.v2, t.v1, t._row_id] }
-                  StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamProject { exprs: [t.v3, t.v2, t.v1, t._row_id] }
+              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* order by agg input */
     create table t(v1 int);
@@ -409,7 +391,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* order by other columns */
     create table t(v1 int, v2 varchar);
@@ -427,7 +409,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* order by ASC/DESC and default */
     create table t(v1 int, v2 varchar, v3 int);
@@ -445,7 +427,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* order by NULLS FIRST/LAST and default */
     create table t(v1 int, v2 varchar, v3 int);
@@ -463,7 +445,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* order by complex expressions */
     create table t(v1 int, v2 varchar, v3 int);
@@ -481,7 +463,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1)] }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* filter clause */
     create table t(v1 int);
@@ -499,7 +481,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v1) filter((t.v1 > 0:Int32))] }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* filter clause */
     /* extra calculation, should reuse result from project */
@@ -528,13 +510,11 @@
       LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
         LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
-    StreamMaterialize { columns: [sum(count)(hidden), sab], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum(count), max(max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))))] }
+    StreamMaterialize { columns: [count(hidden), sab], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
         StreamExchange { dist: Single }
-          StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
-            StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id, Vnode(t._row_id)] }
-              StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id] }
-                StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+          StreamProject { exprs: [t.a, t.b, (t.a * t.b), t._row_id] }
+            StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* avg filter clause + group by */
     create table t(a int, b int);
@@ -551,13 +531,11 @@
           LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
     StreamMaterialize { columns: [avga, t.b(hidden)], pk_columns: [t.b] }
-      StreamProject { exprs: [(sum(sum(t.a) filter((t.a > t.b)))::Decimal / sum(count(t.a) filter((t.a > t.b)))), t.b] }
-        StreamHashAgg { group_key: [t.b], aggs: [sum(count), sum(sum(t.a) filter((t.a > t.b))), sum(count(t.a) filter((t.a > t.b)))] }
+      StreamProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))), t.b] }
+        StreamHashAgg { group_key: [t.b], aggs: [count, sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
           StreamExchange { dist: HashShard(t.b) }
-            StreamHashAgg { group_key: [t.b, Vnode(t._row_id)], aggs: [count, sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
-              StreamProject { exprs: [t.b, t.a, t._row_id, Vnode(t._row_id)] }
-                StreamProject { exprs: [t.b, t.a, t._row_id] }
-                  StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamProject { exprs: [t.b, t.a, t._row_id] }
+              StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* count filter clause */
     create table t(a int, b int);
@@ -575,7 +553,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(count filter((t.a > t.b)))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, count filter((t.a > t.b))] }
-            StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* filter clause + non-boolean function */
     create table t(a int, b int);
@@ -613,7 +591,7 @@
       StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v2) filter((t.v2 < 5:Int32))] }
-            StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* only distinct agg */
     create table t(a int, b int, c int);
@@ -641,7 +619,7 @@
               StreamHashAgg { group_key: [t.a, t.b, flag], aggs: [count, sum(t.c)] }
                 StreamExchange { dist: HashShard(t.a, t.b, flag) }
                   StreamExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-                    StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+                    StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     /* distinct agg with filter */
     create table t(a int, b int, c int);
@@ -679,7 +657,7 @@
         StreamExchange { dist: Single }
           StreamStatelessLocalSimpleAgg { aggs: [count, sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
             StreamProject { exprs: [t.b, (Length(t.a) * t.b), t._row_id] }
-              StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: HashShard(t._row_id) }
+              StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], distribution: SomeShard }
 - sql: |
     create table t(x int, y varchar);
     select string_agg(y, ',' order by y), count(distinct x) from t;

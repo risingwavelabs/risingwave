@@ -48,8 +48,10 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
-                // Follows upstream distribution from TableCatalog
-                Distribution::HashShard(distribution_key)
+                // The upstream MV can be scaled independently, and has different vnode mapping with
+                // the current MV. So we just specify its distribution as
+                // `SomeShard` to force an exchange is inserted.
+                Distribution::SomeShard
             }
         };
         let base = PlanBase::new_stream(
