@@ -35,9 +35,8 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
-use risingwave_pb::hummock::{
-    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
-};
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -843,30 +842,6 @@ impl Compactor {
         ))
     }
 
-    pub async fn try_vacuum(
-        vacuum_task: Option<VacuumTask>,
-        sstable_store: SstableStoreRef,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) {
-        if let Some(vacuum_task) = vacuum_task {
-            tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
-            match Vacuum::vacuum(
-                sstable_store.clone(),
-                vacuum_task,
-                hummock_meta_client.clone(),
-            )
-            .await
-            {
-                Ok(_) => {
-                    tracing::info!("Finish vacuuming SSTs");
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to vacuum SSTs. {:#?}", e);
-                }
-            }
-        }
-    }
-
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.
     #[allow(clippy::too_many_arguments)]
@@ -894,16 +869,18 @@ impl Compactor {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
         let join_handle = tokio::spawn(async move {
-            let process_task = |compact_task,
-                                vacuum_task,
-                                compactor_context,
-                                sstable_store,
-                                hummock_meta_client| async {
-                if let Some(compact_task) = compact_task {
-                    Compactor::compact(compactor_context, compact_task).await;
+            let process_task = |task, compactor_context, sstable_store, hummock_meta_client| async {
+                match task {
+                    Task::CompactTask(compact_task) => {
+                        Compactor::compact(compactor_context, compact_task).await;
+                    }
+                    Task::VacuumTask(vacuum_task) => {
+                        Vacuum::vacuum(vacuum_task, sstable_store, hummock_meta_client).await;
+                    }
+                    Task::FullScanTask(full_scan_task) => {
+                        Vacuum::full_scan(full_scan_task, sstable_store, hummock_meta_client).await;
+                    }
                 }
-
-                Compactor::try_vacuum(vacuum_task, sstable_store, hummock_meta_client).await;
             };
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             // This outer loop is to recreate stream.
@@ -937,7 +914,7 @@ impl Compactor {
                 };
 
                 // This inner loop is to consume stream.
-                loop {
+                'consume_stream: loop {
                     let message = tokio::select! {
                         message = stream.message() => {
                             message
@@ -950,13 +927,13 @@ impl Compactor {
                     };
                     match message {
                         // The inner Some is the side effect of generated code.
-                        Ok(Some(SubscribeCompactTasksResponse {
-                            compact_task,
-                            vacuum_task,
-                        })) => {
+                        Ok(Some(SubscribeCompactTasksResponse { task })) => {
+                            let task = match task {
+                                Some(task) => task,
+                                None => continue 'consume_stream,
+                            };
                             tokio::spawn(process_task(
-                                compact_task,
-                                vacuum_task,
+                                task,
                                 compactor_context.clone(),
                                 sstable_store.clone(),
                                 hummock_meta_client.clone(),
