@@ -205,7 +205,7 @@ def section_compaction(panels):
 
         panels.timeseries_count("Compactor Task Splits Count", [
             panels.target(
-                "sum(rate(storage_compact_parallelism[$__rate_interval])) by(job,instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
+                "avg(storage_compact_task_pending_num) by(job, instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
             ),
         ]),
 

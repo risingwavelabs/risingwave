@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
@@ -298,7 +298,7 @@ impl FilterKeyExtractorManagerInner {
             .fetch_add(bloom_filter_size, Ordering::SeqCst);
     }
 
-    pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> size {
+    pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> usize {
         let sst_size_mb = sst_size >> 20;
         let total_bloom_filter = self.total_bloom_filter.load(Ordering::Acquire);
         let total_file_size_mb = self.total_file_size_kb.load(Ordering::Acquire) / 1024;
@@ -345,7 +345,7 @@ impl FilterKeyExtractorManager {
     }
 
     pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> usize {
-        self.inner.estimate_bloom_filter_size(sst_size_mb)
+        self.inner.estimate_bloom_filter_size(sst_size)
     }
 }
 

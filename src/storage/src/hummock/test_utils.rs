@@ -93,6 +93,7 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
         restart_interval: DEFAULT_RESTART_INTERVAL,
         bloom_false_positive: 0.1,
         compression_algorithm: CompressionAlgorithm::None,
+        ..Default::default()
     }
 }
 
@@ -120,7 +121,7 @@ pub async fn gen_test_sstable_inner(
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
     let sst = Sstable::new(sst_id, meta.clone());
     sstable_store
-        .put(Sstable::new(sst_id, meta.clone()), data, policy)
+        .put_sst(sst_id, meta, data, policy)
         .await
         .unwrap();
     sst

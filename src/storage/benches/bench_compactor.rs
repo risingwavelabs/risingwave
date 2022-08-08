@@ -108,7 +108,7 @@ fn bench_table_scan(c: &mut Criterion) {
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
         sstable_store1
-            .put(Sstable::new(1, meta.clone()), data, CachePolicy::NotFill)
+            .put_sst(1, meta, data, CachePolicy::NotFill)
             .await
             .unwrap();
     });
@@ -202,15 +202,13 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let test_key_size = 256 * 1024;
     let (data1, meta1) = build_table(1, 0..test_key_size, 1);
     let (data2, meta2) = build_table(2, 0..test_key_size, 1);
-    let sst1 = Sstable::new_with_data(1, meta1.clone(), data1.clone()).unwrap();
-    let sst2 = Sstable::new_with_data(2, meta2.clone(), data2.clone()).unwrap();
     runtime.block_on(async move {
         sstable_store1
-            .put(sst1, data1, CachePolicy::Fill)
+            .put_sst(1, meta1.clone(), data1, CachePolicy::Fill)
             .await
             .unwrap();
         sstable_store1
-            .put(sst2, data2, CachePolicy::Fill)
+            .put_sst1(2, meta2.clone(), data2, CachePolicy::Fill)
             .await
             .unwrap();
     });
@@ -218,16 +216,14 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
 
     let (data1, meta1) = build_table(1, 0..test_key_size, 2);
     let (data2, meta2) = build_table(2, 0..test_key_size, 2);
-    let sst3 = Sstable::new_with_data(3, meta1.clone(), data1.clone()).unwrap();
-    let sst4 = Sstable::new_with_data(4, meta2.clone(), data2.clone()).unwrap();
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
         sstable_store1
-            .put(sst3, data1, CachePolicy::Fill)
+            .put_sst(3, meta1.clone(), data1, CachePolicy::Fill)
             .await
             .unwrap();
         sstable_store1
-            .put(sst4, data2, CachePolicy::Fill)
+            .put_sst(4, meta2.clone(), data2, CachePolicy::Fill)
             .await
             .unwrap();
     });

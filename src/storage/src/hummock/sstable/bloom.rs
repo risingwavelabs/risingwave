@@ -16,7 +16,7 @@
 
 use std::f64;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::BufMut;
 
 pub trait BitSlice {
     fn get_bit(&self, idx: usize) -> bool;
@@ -85,7 +85,7 @@ impl<'a> Bloom<'a> {
         let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
         let nbits = nbytes * 8;
-        let mut filter = BytesMut::with_capacity(nbytes + 1);
+        let mut filter = Vec::with_capacity(nbytes + 1);
         filter.resize(nbytes, 0);
         for h in keys {
             let mut h = *h;
@@ -97,7 +97,7 @@ impl<'a> Bloom<'a> {
             }
         }
         filter.put_u8(k as u8);
-        filter.into_vec()
+        filter
     }
 
     /// Judges whether the hash value is in the table with the given false positive rate.
