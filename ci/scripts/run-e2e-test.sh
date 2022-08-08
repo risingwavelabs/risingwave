@@ -57,7 +57,8 @@ cargo make ci-kill
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     echo "--- e2e, ci-3cn-1fe, fuzzing"
     cargo make ci-start ci-3cn-1fe
-    buildkite-agent artifact download sqlsmith target/debug/
+    buildkite-agent artifact download sqlsmith-"$profile" target/debug/
+    mv target/debug/sqlsmith-"$profile" target/debug/sqlsmith
     chmod +x ./target/debug/sqlsmith
     timeout 15m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
 
