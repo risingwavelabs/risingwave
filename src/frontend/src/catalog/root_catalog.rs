@@ -226,6 +226,8 @@ impl Catalog {
             .unwrap()
             .get_table_name_by_id(table_id)
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()).into())
+    }
+
     pub fn get_schema_by_id(
         &self,
         db_id: &DatabaseId,
