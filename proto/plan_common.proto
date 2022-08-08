@@ -36,6 +36,7 @@ message StorageTableDesc {
   // TODO: may refactor primary key representations
   repeated ColumnOrder order_key = 3;
   repeated uint32 dist_key_indices = 4;
+  uint32 retention_seconds = 5;
 }
 
 enum JoinType {
