@@ -37,7 +37,7 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
                     ReadOptions {
                         epoch: u64::MAX,
                         table_id: None,
-                        ttl: None,
+                        retention_seconds: None,
                     },
                 )
                 .await?
@@ -55,7 +55,7 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
                     ReadOptions {
                         epoch: u64::MAX,
                         table_id: Some(TableId { table_id }),
-                        ttl: None,
+                        retention_seconds: None,
                     },
                 )
                 .await?

@@ -14,13 +14,14 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::catalog::{Sink, Table};
+use risingwave_pb::catalog::{Index, Sink, Table};
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 pub enum Relation {
     Table(Table),
     Sink(Sink),
+    Index(Index, Table),
 }
 
 impl Relation {
@@ -28,6 +29,11 @@ impl Relation {
         match self {
             Self::Table(table) => table.id = id,
             Self::Sink(sink) => sink.id = id,
+            Self::Index(index, index_table) => {
+                index.id = id;
+                index.index_table_id = id;
+                index_table.id = id;
+            }
         }
     }
 
@@ -35,6 +41,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.dependent_relations = dependent_relations,
             Self::Sink(sink) => sink.dependent_relations = dependent_relations,
+            Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
         }
     }
 
@@ -42,6 +49,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.schema_id,
             Self::Sink(sink) => sink.schema_id,
+            Self::Index(index, _) => index.schema_id,
         }
     }
 
@@ -49,6 +57,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.database_id,
             Self::Sink(sink) => sink.database_id,
+            Self::Index(index, _) => index.database_id,
         }
     }
 
@@ -56,6 +65,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.name.clone(),
             Self::Sink(sink) => sink.name.clone(),
+            Self::Index(index, _) => index.name.clone(),
         }
     }
 
@@ -63,6 +73,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.properties.clone(),
             Self::Sink(sink) => sink.properties.clone(),
+            Self::Index(_, index_table) => index_table.properties.clone(),
         }
     }
 }

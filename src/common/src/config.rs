@@ -295,7 +295,7 @@ mod default {
     }
 
     pub fn worker_node_parallelism() -> usize {
-        num_cpus::get()
+        std::thread::available_parallelism().unwrap().get()
     }
 
     pub fn compactor_memory_limit_mb() -> usize {
@@ -326,7 +326,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_TTL: u32 = 0;
-        pub const PROPERTIES_TTL_KEY: &str = "ttl";
+        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

@@ -23,13 +23,11 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
 use crate::monitor::SourceMetrics;
-use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
@@ -95,18 +93,6 @@ pub struct SourceDesc {
     // The column index of row ID. By default it's 0, which means the first column is row ID.
     // TODO: change to Option<usize> when pk supported in the future.
     pub row_id_index: usize,
-    pub row_id_generator: Arc<Mutex<RowIdGenerator>>,
-}
-
-impl SourceDesc {
-    pub fn next_row_id(&self) -> RowId {
-        self.row_id_generator.as_ref().lock().next()
-    }
-
-    pub fn next_row_id_batch(&self, length: usize) -> Vec<RowId> {
-        let mut guard = self.row_id_generator.as_ref().lock();
-        guard.next_batch(length)
-    }
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
@@ -114,8 +100,6 @@ pub type SourceManagerRef = Arc<dyn SourceManager>;
 #[derive(Debug, Default)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
-    /// Located worker id.
-    worker_id: u32,
     /// local source metrics
     metrics: Arc<SourceMetrics>,
 }
@@ -179,10 +163,6 @@ impl SourceManager for MemSourceManager {
             format,
             columns,
             row_id_index,
-            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
-                self.worker_id,
-                *UNIX_SINGULARITY_DATE_EPOCH,
-            ))),
             metrics: self.metrics.clone(),
         };
 
@@ -215,10 +195,6 @@ impl SourceManager for MemSourceManager {
             columns: source_columns,
             format: SourceFormat::Invalid,
             row_id_index: 0, // always use the first column as row_id
-            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
-                self.worker_id,
-                *UNIX_SINGULARITY_DATE_EPOCH,
-            ))),
             metrics: self.metrics.clone(),
         };
 
@@ -252,10 +228,9 @@ impl SourceManager for MemSourceManager {
 }
 
 impl MemSourceManager {
-    pub fn new(worker_id: u32, metrics: Arc<SourceMetrics>) -> Self {
+    pub fn new(metrics: Arc<SourceMetrics>) -> Self {
         MemSourceManager {
             sources: Mutex::new(HashMap::new()),
-            worker_id,
             metrics,
         }
     }

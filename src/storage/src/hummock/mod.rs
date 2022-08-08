@@ -25,6 +25,13 @@ use risingwave_rpc_client::HummockMetaClient;
 
 mod block_cache;
 pub use block_cache::*;
+
+#[cfg(target_os = "linux")]
+pub mod file_cache;
+
+mod tiered_cache;
+pub use tiered_cache::*;
+
 pub mod sstable;
 pub use sstable::*;
 
@@ -47,8 +54,6 @@ pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
 
-#[cfg(target_os = "linux")]
-pub mod file_cache;
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
@@ -68,7 +73,6 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
-use crate::store::ReadOptions;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -154,7 +158,6 @@ impl HummockStorage {
         sstable: TableHolder,
         internal_key: &[u8],
         key: &[u8],
-        _read_options: &ReadOptions,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
         // TODO: via read_options to determine whether to check bloom_filter next PR

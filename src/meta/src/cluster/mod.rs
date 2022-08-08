@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::ops::Add;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::error::{internal_error, ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -33,6 +31,7 @@ use tokio::task::JoinHandle;
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
+use crate::MetaResult;
 
 pub type WorkerId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
@@ -71,7 +70,7 @@ impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
 
@@ -97,7 +96,7 @@ where
         r#type: WorkerType,
         host_address: HostAddress,
         worker_node_parallelism: usize,
-    ) -> Result<WorkerNode> {
+    ) -> MetaResult<WorkerNode> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
             // TODO(zehua): update parallelism when the worker exists.
@@ -137,7 +136,7 @@ where
         }
     }
 
-    pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
+    pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
         if worker.worker_node.state == State::Running as i32 {
@@ -159,7 +158,7 @@ where
         Ok(())
     }
 
-    pub async fn delete_worker_node(&self, host_address: HostAddress) -> Result<()> {
+    pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;
         let worker_type = worker.worker_type();
@@ -189,16 +188,21 @@ where
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(&self, worker_id: WorkerId) -> Result<()> {
+    pub async fn heartbeat(
+        &self,
+        worker_id: WorkerId,
+        info: Vec<heartbeat_request::extra_info::Info>,
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
-
-        if let Some(worker) = core.get_worker_by_id(worker_id) {
-            core.update_worker_ttl(worker.key().unwrap(), self.max_heartbeat_interval);
-            Ok(())
-        } else {
-            Err(ErrorCode::UnknownWorker.into())
+        for worker in core.workers.values_mut() {
+            if worker.worker_id() == worker_id {
+                worker.update_ttl(self.max_heartbeat_interval);
+                worker.update_info(info);
+                return Ok(());
+            }
         }
+        bail!("unknown worker id: {}", worker_id);
     }
 
     pub async fn start_heartbeat_checker(
@@ -208,6 +212,7 @@ where
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(check_interval);
+            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
                     // Wait for interval
@@ -218,30 +223,32 @@ where
                         return;
                     }
                 }
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("Clock may have gone backwards")
-                    .as_secs();
-                let mut workers_to_init_or_delete = cluster_manager
-                    .core
-                    .read()
-                    .await
-                    .workers
-                    .values()
-                    .filter(|worker| worker.expire_at() < now)
-                    .cloned()
-                    .collect_vec();
-                // 1. Initialize new workers' expire_at.
-                for worker in
-                    workers_to_init_or_delete.drain_filter(|w| w.expire_at() == INVALID_EXPIRE_AT)
-                {
-                    cluster_manager.core.write().await.update_worker_ttl(
-                        worker.key().expect("illegal key"),
-                        cluster_manager.max_heartbeat_interval,
-                    );
-                }
-                // 2. Delete expired workers.
-                for worker in workers_to_init_or_delete {
+                let (workers_to_delete, now) = {
+                    let mut core = cluster_manager.core.write().await;
+                    let workers = &mut core.workers;
+                    // 1. Initialize new workers' TTL.
+                    for worker in workers
+                        .values_mut()
+                        .filter(|worker| worker.expire_at() == INVALID_EXPIRE_AT)
+                    {
+                        worker.update_ttl(cluster_manager.max_heartbeat_interval);
+                    }
+                    // 2. Collect expired workers.
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Clock may have gone backwards")
+                        .as_secs();
+                    (
+                        workers
+                            .values()
+                            .filter(|worker| worker.expire_at() < now)
+                            .cloned()
+                            .collect_vec(),
+                        now,
+                    )
+                };
+                // 3. Delete expired workers.
+                for worker in workers_to_delete {
                     let key = worker.key().expect("illegal key");
                     match cluster_manager.delete_worker_node(key.clone()).await {
                         Ok(_) => {
@@ -251,21 +258,15 @@ where
                                 .delete_sender(WorkerKey(key.clone()))
                                 .await;
                             tracing::warn!(
-                                "Deleted expired worker {} {}:{}; expired at {}, now {}",
-                                worker.worker_id(),
-                                key.host,
-                                key.port,
-                                worker.expire_at(),
+                                "Deleted expired worker {:#?}, current timestamp {}",
+                                worker,
                                 now,
                             );
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {:?}",
-                                worker.worker_id(),
-                                key.host,
-                                key.port,
-                                worker.expire_at(),
+                                "Failed to delete expired worker {:#?}, current timestamp {}. {:?}",
+                                worker,
                                 now,
                                 err,
                             );
@@ -305,7 +306,7 @@ where
         &self,
         parallel_degree: usize,
         worker_id: WorkerId,
-    ) -> Result<Vec<ParallelUnit>> {
+    ) -> MetaResult<Vec<ParallelUnit>> {
         let start_id = self
             .env
             .id_gen_manager()
@@ -334,7 +335,7 @@ pub struct ClusterManagerCore {
 }
 
 impl ClusterManagerCore {
-    async fn new<S>(meta_store: Arc<S>) -> Result<Self>
+    async fn new<S>(meta_store: Arc<S>) -> MetaResult<Self>
     where
         S: MetaStore,
     {
@@ -354,9 +355,9 @@ impl ClusterManagerCore {
     }
 
     /// If no worker exists, return an error.
-    fn get_worker_by_host_checked(&self, host_address: HostAddress) -> Result<Worker> {
+    fn get_worker_by_host_checked(&self, host_address: HostAddress) -> MetaResult<Worker> {
         self.get_worker_by_host(host_address)
-            .ok_or_else(|| internal_error("Worker node does not exist!"))
+            .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!").into())
     }
 
     fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
@@ -416,23 +417,6 @@ impl ClusterManagerCore {
     fn get_parallel_unit_count(&self) -> usize {
         self.parallel_units.len()
     }
-
-    fn update_worker_ttl(&mut self, host_address: HostAddress, ttl: Duration) {
-        match self.workers.entry(WorkerKey(host_address)) {
-            Entry::Occupied(mut worker) => {
-                let expire_at = cmp::max(
-                    worker.get().expire_at(),
-                    SystemTime::now()
-                        .add(ttl)
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .expect("Clock may have gone backwards")
-                        .as_secs(),
-                );
-                worker.get_mut().set_expire_at(expire_at);
-            }
-            Entry::Vacant(_) => {}
-        }
-    }
 }
 
 #[cfg(test)]
@@ -442,7 +426,7 @@ mod tests {
     use crate::storage::MemStore;
 
     #[tokio::test]
-    async fn test_cluster_manager() -> Result<()> {
+    async fn test_cluster_manager() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(
@@ -529,7 +513,10 @@ mod tests {
         let keep_alive_join_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(cluster_manager_ref.max_heartbeat_interval / 3).await;
-                cluster_manager_ref.heartbeat(context_id_1).await.unwrap();
+                cluster_manager_ref
+                    .heartbeat(context_id_1, vec![])
+                    .await
+                    .unwrap();
             }
         });
 

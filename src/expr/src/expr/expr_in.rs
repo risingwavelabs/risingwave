@@ -19,9 +19,12 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
+use risingwave_common::{bail, ensure};
+use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{BoxedExpression, Expression};
-use crate::Result;
+use crate::expr::{build_from_prost, BoxedExpression, Expression};
+use crate::{ExprError, Result};
 
 #[derive(Debug)]
 pub(crate) struct InExpression {
@@ -88,14 +91,94 @@ impl Expression for InExpression {
     }
 }
 
+impl<'a> TryFrom<&'a ExprNode> for InExpression {
+    type Error = ExprError;
+
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        ensure!(prost.get_expr_type().unwrap() == Type::In);
+
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
+        let children = &func_call_node.children;
+
+        let left_expr = build_from_prost(&children[0])?;
+        let mut data = Vec::new();
+        // Used for const expression below to generate datum.
+        // Frontend has made sure these can all be folded to constants.
+        let data_chunk = DataChunk::new_dummy(1);
+        for child in &children[1..] {
+            let const_expr = build_from_prost(child)?;
+            let array = const_expr.eval(&data_chunk)?;
+            let datum = array.value_at(0).to_owned_datum();
+            data.push(datum);
+        }
+        Ok(InExpression::new(left_expr, data.into_iter(), ret_type))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, Row};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{DataType, Scalar, ScalarImpl};
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::expr::expr_node::{RexNode, Type};
+    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 
     use crate::expr::expr_in::InExpression;
     use crate::expr::{Expression, InputRefExpression};
+
+    #[test]
+    fn test_in_expr() {
+        let input_ref = InputRefExpr { column_idx: 0 };
+        let input_ref_expr_node = ExprNode {
+            expr_type: Type::InputRef as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Varchar as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::InputRef(input_ref)),
+        };
+        let constant_values = vec![
+            ExprNode {
+                expr_type: Type::ConstantValue as i32,
+                return_type: Some(ProstDataType {
+                    type_name: TypeName::Varchar as i32,
+                    ..Default::default()
+                }),
+                rex_node: Some(RexNode::Constant(ConstantValue {
+                    body: "ABC".as_bytes().to_vec(),
+                })),
+            },
+            ExprNode {
+                expr_type: Type::ConstantValue as i32,
+                return_type: Some(ProstDataType {
+                    type_name: TypeName::Varchar as i32,
+                    ..Default::default()
+                }),
+                rex_node: Some(RexNode::Constant(ConstantValue {
+                    body: "def".as_bytes().to_vec(),
+                })),
+            },
+        ];
+        let mut in_children = vec![input_ref_expr_node];
+        in_children.extend(constant_values.into_iter());
+        let call = FunctionCall {
+            children: in_children,
+        };
+        let p = ExprNode {
+            expr_type: Type::In as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Boolean as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(call)),
+        };
+        assert!(InExpression::try_from(&p).is_ok());
+    }
 
     #[test]
     fn test_eval_search_expr() {

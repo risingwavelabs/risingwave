@@ -11,15 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::clone::Clone;
 use std::mem::size_of;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use fail::fail_point;
+use itertools::Itertools;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
-use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStore, ObjectStoreRef};
+use risingwave_object_store::object::{
+    get_local_path, BlockLocation, ObjectMetadata, ObjectStore, ObjectStoreRef,
+};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
@@ -89,7 +93,6 @@ impl SstableStore {
     pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
         let data_len = data.len();
         self.put_sst_data(sst.id, data).await?;
-
         fail_point!("metadata_upload_err");
         self.put_meta_or_delete_data(sst, policy, data_len).await
     }
@@ -252,6 +255,15 @@ impl SstableStore {
         ret
     }
 
+    pub fn get_sst_id_from_path(&self, path: &str) -> HummockSstableId {
+        let split = path.split(&['/', '.']).collect_vec();
+        debug_assert!(split.len() > 2);
+        debug_assert!(split[split.len() - 1] == "meta" || split[split.len() - 1] == "data");
+        split[split.len() - 2]
+            .parse::<HummockSstableId>()
+            .expect("valid sst id")
+    }
+
     pub fn store(&self) -> ObjectStoreRef {
         self.store.clone()
     }
@@ -290,8 +302,9 @@ impl SstableStore {
                     let meta_path = self.get_sst_meta_path(sst_id);
                     let data_path = self.get_sst_data_path(sst_id);
                     stats.cache_meta_block_miss += 1;
-
+                    let stats_ptr = stats.remote_io_time.clone();
                     async move {
+                        let now = Instant::now();
                         let meta = match meta_data {
                             Some(data) => data,
                             None => {
@@ -320,6 +333,8 @@ impl SstableStore {
                         } else {
                             Sstable::new(sst_id, meta)
                         };
+                        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                         Ok((Box::new(sst), size))
                     }
                 })
@@ -346,6 +361,13 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
         self.load_table(sst_id, false, stats).await
+    }
+
+    pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
+        self.store
+            .list(&self.path)
+            .await
+            .map_err(HummockError::object_io_error)
     }
 }
 
@@ -403,5 +425,17 @@ mod tests {
             assert_eq!(key, iterator_test_key_of(i).as_slice());
             iter.next().await.unwrap();
         }
+    }
+
+    #[test]
+    fn test_basic() {
+        let sstable_store = mock_sstable_store();
+        let sst_id = 123;
+        let meta_path = sstable_store.get_sst_meta_path(sst_id);
+        let data_path = sstable_store.get_sst_data_path(sst_id);
+        assert_eq!(meta_path, "test/123.meta");
+        assert_eq!(data_path, "test/123.data");
+        assert_eq!(sstable_store.get_sst_id_from_path(&meta_path), sst_id);
+        assert_eq!(sstable_store.get_sst_id_from_path(&data_path), sst_id);
     }
 }

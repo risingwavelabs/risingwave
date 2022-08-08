@@ -72,6 +72,11 @@ impl DatabaseCatalog {
         self.schema_by_name.get(name)
     }
 
+    pub fn get_schema_by_id(&self, schema_id: &SchemaId) -> Option<&SchemaCatalog> {
+        self.schema_by_name
+            .get(self.schema_name_by_id.get(schema_id)?)
+    }
+
     pub fn get_schema_mut(&mut self, schema_id: SchemaId) -> Option<&mut SchemaCatalog> {
         let name = self.schema_name_by_id.get(&schema_id).unwrap();
         self.schema_by_name.get_mut(name)
