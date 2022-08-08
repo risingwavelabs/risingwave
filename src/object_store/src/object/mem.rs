@@ -30,9 +30,10 @@ use crate::object::{
 };
 
 /// Store multiple parts in a map, and concatenate them on finish.
+#[derive(Clone)]
 pub struct InMemMultipartUploadHandle {
     path: String,
-    parts: Mutex<BTreeMap<PartId, Bytes>>,
+    parts: Arc<Mutex<BTreeMap<PartId, Bytes>>>,
     objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
 }
 
@@ -50,7 +51,7 @@ impl MultipartUploadHandle for InMemMultipartUploadHandle {
         fail_point!("mem_finish_multipart_upload_err", |_| Err(
             ObjectError::internal("mem finish multipart upload error")
         ));
-        let parts = self.parts.into_inner();
+        let parts = self.parts.lock().await;
         let object_size = parts.values().map(|p| p.len()).sum();
         let mut buf = BytesMut::with_capacity(object_size);
         parts.values().for_each(|p| buf.put_slice(p));

@@ -40,8 +40,13 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::multi_builder::CapacitySplitTableBuilder;
-use super::{CompressionAlgorithm, HummockResult, Sstable, SstableBuilderOptions};
+use super::multi_builder::{
+    CapacitySplitTableBuilder, SstableBatchUploader, SstableBuilderConsumer,
+};
+use super::{
+    CompressionAlgorithm, HummockResult, InMemWriterBuilder, Sstable, SstableBuilderOptions,
+    SstableWriterBuilder,
+};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::{
     ConcatSstableIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
@@ -57,26 +62,39 @@ use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
-pub struct RemoteBuilderFactory {
+pub struct RemoteBuilderFactory<B>
+where
+    B: SstableWriterBuilder,
+{
     sstable_id_manager: SstableIdManagerRef,
     limiter: Arc<MemoryLimiter>,
     options: SstableBuilderOptions,
     remote_rpc_cost: Arc<AtomicU64>,
+    writer_builder: B,
 }
 
 #[async_trait::async_trait]
-impl TableBuilderFactory for RemoteBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
+impl<B> TableBuilderFactory<B> for RemoteBuilderFactory<B>
+where
+    B: SstableWriterBuilder,
+{
+    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
         let timer = Instant::now();
         let table_id = self.sstable_id_manager.get_next_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
+        // TODO: streaming upload may take up less memory than the SST capacity, and it also
+        // depends on cache policy.
         let tracker = self
             .limiter
             .require_memory(self.options.capacity as u64 + self.options.block_capacity as u64)
             .await
             .unwrap();
-        let builder = SstableBuilder::new(table_id, self.options.clone());
+        let builder = SstableBuilder::new(
+            table_id,
+            self.writer_builder.build().await?,
+            self.options.clone(),
+        );
         Ok((tracker, builder))
     }
 }
@@ -684,19 +702,19 @@ impl Compactor {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
+        // TODO: change after support of streaming upload
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.memory_limiter.clone(),
+            writer_builder: InMemWriterBuilder::from(&options),
             options,
             remote_rpc_cost: get_id_time.clone(),
         };
 
+        let builder_consumer =
+            SstableBatchUploader::new(self.context.sstable_store.clone(), cache_policy);
         // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let mut builder = CapacitySplitTableBuilder::new(
-            builder_factory,
-            cache_policy,
-            self.context.sstable_store.clone(),
-        );
+        let mut builder = CapacitySplitTableBuilder::new(builder_factory, builder_consumer);
 
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -715,7 +733,7 @@ impl Compactor {
         )
         .await?;
         let builder_len = builder.len();
-        let sealed_builders = builder.finish();
+        let sealed_builders = builder.finish().await?;
         compact_timer.observe_duration();
 
         let mut ssts = Vec::with_capacity(builder_len);
@@ -952,14 +970,19 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn compact_and_build_sst<T: TableBuilderFactory>(
-        sst_builder: &mut CapacitySplitTableBuilder<T>,
+    pub async fn compact_and_build_sst<F, B, C>(
+        sst_builder: &mut CapacitySplitTableBuilder<F, B, C>,
         kr: KeyRange,
         mut iter: impl HummockIterator<Direction = Forward>,
         gc_delete_keys: bool,
         watermark: Epoch,
         mut compaction_filter: impl CompactionFilter,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<()>
+    where
+        F: TableBuilderFactory<B>,
+        B: SstableWriterBuilder,
+        C: SstableBuilderConsumer<B::Writer>,
+    {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
         } else {

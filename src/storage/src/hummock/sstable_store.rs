@@ -87,17 +87,20 @@ impl SstableStore {
     }
 
     pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
-        let charge = sst
-            .blocks
-            .iter()
-            .map(|block| block.restart_point_len())
-            .sum::<usize>()
-            * size_of::<usize>()
-            + sst.meta.encoded_size()
-            + data.len();
+        let data_len = data.len();
         self.put_sst_data(sst.id, data).await?;
 
         fail_point!("metadata_upload_err");
+        self.put_meta_or_delete_data(sst, policy, data_len).await
+    }
+
+    pub async fn put_meta_or_delete_data(
+        &self,
+        sst: Sstable,
+        policy: CachePolicy,
+        data_len: usize,
+    ) -> HummockResult<()> {
+        let charge = self.get_sst_cache_charge(&sst, data_len);
         if let Err(e) = self.put_meta(&sst).await {
             self.delete_sst_data(sst.id).await?;
             return Err(e);
@@ -127,6 +130,16 @@ impl SstableStore {
 
     pub fn delete_cache(&self, sst_id: HummockSstableId) {
         self.meta_cache.erase(sst_id, &sst_id);
+    }
+
+    fn get_sst_cache_charge(&self, sst: &Sstable, data_len: usize) -> usize {
+        sst.blocks
+            .iter()
+            .map(|block| block.restart_point_len())
+            .sum::<usize>()
+            * size_of::<usize>()
+            + sst.meta.encoded_size()
+            + data_len
     }
 
     async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
@@ -361,7 +374,8 @@ mod tests {
                     HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
                 )
             }),
-        );
+        )
+        .await;
         let table = Sstable::new(1, meta.clone());
         sstable_store
             .put(table, data, CachePolicy::Fill)

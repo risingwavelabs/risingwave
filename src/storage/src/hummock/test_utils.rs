@@ -21,7 +21,11 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
-use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
+use super::multi_builder::SstableBatchUploader;
+use super::{
+    CompressionAlgorithm, InMemSstableWriter, InMemWriterBuilder, SstableMeta,
+    DEFAULT_RESTART_INTERVAL,
+};
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
@@ -96,17 +100,34 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
     }
 }
 
+pub fn default_sst_writer_from_opt(opt: &SstableBuilderOptions) -> InMemSstableWriter {
+    InMemSstableWriter::from(opt)
+}
+
+/// The writer will generate an entire SST in memory and the consumer will upload it to object
+/// store.
+pub fn default_sst_writer_builder_and_consumer_from_opt(
+    opt: &SstableBuilderOptions,
+    sstable_store: SstableStoreRef,
+    policy: CachePolicy,
+) -> (InMemWriterBuilder, SstableBatchUploader) {
+    (
+        InMemWriterBuilder::from(opt),
+        SstableBatchUploader::new(sstable_store, policy),
+    )
+}
+
 /// Generates sstable data and metadata from given `kv_iter`
-pub fn gen_test_sstable_data(
+pub async fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta, Vec<u32>) {
-    let mut b = SstableBuilder::new(0, opts);
+    let mut b = SstableBuilder::new(0, default_sst_writer_from_opt(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice())
+        b.add(&key, value.as_slice()).await.unwrap();
     }
-    let (_, data, meta, table_ids) = b.finish();
-    (data, meta, table_ids)
+    let output = b.finish().await.unwrap();
+    (output.writer_output, output.meta, output.table_ids)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -117,7 +138,7 @@ pub async fn gen_test_sstable_inner(
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
 ) -> Sstable {
-    let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
+    let (data, meta, _) = gen_test_sstable_data(opts, kv_iter).await;
     let sst = Sstable::new(sst_id, meta.clone());
     sstable_store
         .put(Sstable::new(sst_id, meta.clone()), data, policy)

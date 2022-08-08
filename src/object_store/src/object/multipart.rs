@@ -78,7 +78,7 @@ impl PartIdGenerator for LocalPartIdGenerator {
 /// The parts can be uploaded out of order. Upon finish, the parts will be logically
 /// assembled in ascending order of `part_id`.
 #[async_trait::async_trait]
-pub trait MultipartUploadHandle: Send + Sync {
+pub trait MultipartUploadHandle: Send + Sync + Clone {
     /// Upload a part of the object.
     async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()>;
 
@@ -100,6 +100,7 @@ impl PartIdGenerator for PartIdGeneratorImpl {
     }
 }
 
+#[derive(Clone)]
 pub enum MultipartUploadHandleImpl {
     S3(S3MultipartUploadHandle),
     InMem(InMemMultipartUploadHandle),
@@ -135,6 +136,7 @@ impl MultipartUpload for ObjectStoreImpl {
     }
 }
 
+#[derive(Clone)]
 pub struct MonitoredMultipartUploadHandle<Handle: MultipartUploadHandle> {
     inner: Handle,
     object_store_metrics: Arc<ObjectStoreMetrics>,

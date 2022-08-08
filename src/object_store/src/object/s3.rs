@@ -63,6 +63,7 @@ impl PartIdGenerator for S3PartIdGenerator {
 
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
+#[derive(Clone)]
 pub struct S3MultipartUploadHandle {
     client: Arc<Client>,
     bucket: String,
@@ -72,7 +73,7 @@ pub struct S3MultipartUploadHandle {
     upload_id: String,
     /// Parts that are already uploaded to S3.
     /// The bool member indicates whether the upload is finished.
-    uploaded_parts: Mutex<(bool, BTreeMap<i32, UploadPartOutput>)>,
+    uploaded_parts: Arc<Mutex<BTreeMap<i32, UploadPartOutput>>>,
 }
 
 #[async_trait::async_trait]
@@ -82,22 +83,18 @@ impl MultipartUploadHandle for S3MultipartUploadHandle {
             "s3 upload part error"
         )));
         let mut upload_guard = self.uploaded_parts.lock().await;
-        if !upload_guard.0 {
-            let part_id = part_id as i32;
-            let upload_output = self
-                .client
-                .upload_part()
-                .bucket(&self.bucket)
-                .key(&self.key)
-                .upload_id(&self.upload_id)
-                .part_number(part_id)
-                .body(aws_sdk_s3::types::ByteStream::from(part))
-                .send()
-                .await?;
-            upload_guard.1.insert(part_id, upload_output);
-        } else {
-            panic!("an upload task must be created first before the parts are uploaded");
-        }
+        let part_id = part_id as i32;
+        let upload_output = self
+            .client
+            .upload_part()
+            .bucket(&self.bucket)
+            .key(&self.key)
+            .upload_id(&self.upload_id)
+            .part_number(part_id)
+            .body(aws_sdk_s3::types::ByteStream::from(part))
+            .send()
+            .await?;
+        upload_guard.insert(part_id, upload_output);
         Ok(())
     }
 
@@ -105,35 +102,29 @@ impl MultipartUploadHandle for S3MultipartUploadHandle {
         fail_point!("s3_finish_multipart_upload_err", |_| Err(
             ObjectError::internal("s3 finish multipart upload error")
         ));
-        let mut upload_guard = self.uploaded_parts.lock().await;
-        if !upload_guard.0 {
-            self.client
-                .complete_multipart_upload()
-                .bucket(&self.bucket)
-                .key(&self.key)
-                .upload_id(&self.upload_id)
-                .multipart_upload(
-                    CompletedMultipartUpload::builder()
-                        .set_parts(Some(
-                            upload_guard
-                                .1
-                                .iter()
-                                .map(|(part_id, output)| {
-                                    CompletedPart::builder()
-                                        .set_e_tag(output.e_tag.clone())
-                                        .set_part_number(Some(*part_id))
-                                        .build()
-                                })
-                                .collect_vec(),
-                        ))
-                        .build(),
-                )
-                .send()
-                .await?;
-            upload_guard.0 = true;
-        } else {
-            panic!("an upload task must be created first before finishing it");
-        }
+        let upload_guard = self.uploaded_parts.lock().await;
+        self.client
+            .complete_multipart_upload()
+            .bucket(&self.bucket)
+            .key(&self.key)
+            .upload_id(&self.upload_id)
+            .multipart_upload(
+                CompletedMultipartUpload::builder()
+                    .set_parts(Some(
+                        upload_guard
+                            .iter()
+                            .map(|(part_id, output)| {
+                                CompletedPart::builder()
+                                    .set_e_tag(output.e_tag.clone())
+                                    .set_part_number(Some(*part_id))
+                                    .build()
+                            })
+                            .collect_vec(),
+                    ))
+                    .build(),
+            )
+            .send()
+            .await?;
         Ok(())
     }
 }
