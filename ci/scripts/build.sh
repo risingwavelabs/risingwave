@@ -18,7 +18,7 @@ while getopts 't:p:' opt; do
             exit 1
             ;;
         : )
-            echo "Invalid option: $OPTARG requires an arguemnt" 1>&2
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
             ;;
     esac
 done
