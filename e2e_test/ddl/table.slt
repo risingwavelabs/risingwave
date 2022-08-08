@@ -111,4 +111,10 @@ statement ok
 insert into "T2" ("V1") values (1);
 
 statement error
-create tabke C1 (c1 varchar(5));
+create table C1 (c1 varchar(5));
+
+statement error
+create table t (v1 int not null);
+
+statement error
+create table t (v1 varchar collate "en_US");
