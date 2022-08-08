@@ -770,13 +770,8 @@ impl ToBatch for LogicalJoin {
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
                 let plan = BatchFilter::new(logical_filter).into();
                 if self.output_indices != default_indices {
-                    let logical_project = LogicalProject::with_mapping(
-                        plan,
-                        ColIndexMapping::with_remaining_columns(
-                            &new_output_indices,
-                            new_internal_column_num,
-                        ),
-                    );
+                    let logical_project =
+                        LogicalProject::with_out_col_idx(plan, new_output_indices.into_iter());
                     Ok(BatchProject::new(logical_project).into())
                 } else {
                     Ok(plan)
