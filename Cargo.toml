@@ -40,6 +40,9 @@ members = [
   "src/workspace-hack",
 ]
 
+[profile.dev]
+lto = 'off'
+
 [profile.bench]
 opt-level = 3
 debug = false
@@ -52,6 +55,15 @@ rpath = false
 
 [profile.release]
 debug = true
+
+[profile.ci-dev]
+inherits = "dev"
+incremental = false
+lto = 'off'
+
+# Set the default for external dependencies.
+[profile.ci-dev.package."*"]
+opt-level = 1
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]

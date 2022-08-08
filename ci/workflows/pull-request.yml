@@ -32,7 +32,7 @@ steps:
   - wait
 
   - label: "build"
-    command: "ci/scripts/build.sh -t debug -p dev"
+    command: "ci/scripts/build.sh -t debug -p ci-dev"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -44,7 +44,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test"
-    command: "ci/scripts/e2e-test.sh -p dev"
+    command: "ci/scripts/e2e-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -57,7 +57,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (parallel)"
-    command: "ci/scripts/e2e-test-parallel.sh -p dev"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
