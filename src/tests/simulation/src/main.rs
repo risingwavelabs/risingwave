@@ -12,16 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(madsim)]
+#![cfg_attr(not(madsim), allow(dead_code))]
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
 
-#[madsim::test]
-async fn basic() {
+#[cfg(not(madsim))]
+fn main() {
+    println!("This binary is only available in simulation.");
+}
+
+/// Determinisitic simulation end-to-end test runner.
+///
+/// ENVS:
+///
+///     RUST_LOG            Set the log level.
+///
+///     MADSIM_TEST_SEED    Random seed for this run.
+///
+///     MADSIM_TEST_NUM     The number of runs.
+#[derive(Debug, Parser)]
+pub struct Args {
+    /// Glob of sqllogictest scripts.
+    #[clap()]
+    files: String,
+
+    /// The number of frontend nodes.
+    #[clap(long, default_value = "1")]
+    frontend_nodes: usize,
+
+    /// The number of compute nodes.
+    #[clap(long, default_value = "3")]
+    compute_nodes: usize,
+
+    /// The number of CPU cores for each compute node.
+    ///
+    /// This determines worker_node_parallelism.
+    #[clap(long, default_value = "2")]
+    compute_node_cores: usize,
+}
+
+#[cfg(madsim)]
+#[madsim::main]
+async fn main() {
+    let args = Args::parse();
+
     let handle = madsim::runtime::Handle::current();
+    println!("seed = {}", handle.seed());
+    println!("{:?}", args);
 
     // meta node
     handle
@@ -41,31 +80,33 @@ async fn basic() {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // frontend node
-    handle
-        .create_node()
-        .name("frontend")
-        .ip("192.168.2.1".parse().unwrap())
-        .init(|| async {
-            let opts = risingwave_frontend::FrontendOpts::parse_from([
-                "frontend-node",
-                "--host",
-                "0.0.0.0:4566",
-                "--client-address",
-                "192.168.2.1:4566",
-                "--meta-addr",
-                "192.168.1.1:5690",
-            ]);
-            risingwave_frontend::start(opts).await
-        })
-        .build();
+    for i in 1..=args.frontend_nodes {
+        handle
+            .create_node()
+            .name(format!("frontend-{i}"))
+            .ip([192, 168, 2, i as u8].into())
+            .init(move || async move {
+                let opts = risingwave_frontend::FrontendOpts::parse_from([
+                    "frontend-node",
+                    "--host",
+                    "0.0.0.0:4566",
+                    "--client-address",
+                    &format!("192.168.2.{i}:4566"),
+                    "--meta-addr",
+                    "192.168.1.1:5690",
+                ]);
+                risingwave_frontend::start(opts).await
+            })
+            .build();
+    }
 
     // compute node
-    // TODO: support multiple nodes
-    for i in 1..=1 {
+    for i in 1..=args.compute_nodes {
         handle
             .create_node()
             .name(format!("compute-{i}"))
-            .ip([192, 168, 3, i].into())
+            .ip([192, 168, 3, i as u8].into())
+            .cores(args.compute_node_cores)
             .init(move || async move {
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                     "compute-node",
@@ -75,6 +116,8 @@ async fn basic() {
                     &format!("192.168.3.{i}:5688"),
                     "--meta-address",
                     "192.168.1.1:5690",
+                    "--state-store",
+                    "hummock+memory-shared",
                 ]);
                 risingwave_compute::start(opts).await
             })
@@ -84,46 +127,53 @@ async fn basic() {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // client
-    handle
+    let client_node = handle
         .create_node()
         .name("client")
-        .ip("192.168.100.1".parse().unwrap())
-        .build()
-        .spawn(async {
-            let (client, connection) = tokio_postgres::Config::new()
-                .host("192.168.2.1")
-                .port(4566)
-                .dbname("dev")
-                .user("root")
-                .connect_timeout(Duration::from_secs(5))
-                .connect(tokio_postgres::NoTls)
-                .await
-                .expect("Failed to connect to database");
-            tokio::spawn(async move {
-                connection.await.expect("Postgres connection error");
-            });
-            let mut tester = sqllogictest::Runner::new(Postgres {
-                client: Arc::new(client),
-            });
-            // run the following e2e tests
-            for dir in ["ddl", "batch", "streaming", "streaming_delta_join"] {
-                let files = glob::glob(&format!("../../../e2e_test/{dir}/**/*.slt"))
-                    .expect("failed to read glob pattern");
-                for file in files {
-                    tester
-                        .run_file_async(file.unwrap().as_path())
-                        .await
-                        .unwrap();
-                }
+        .ip([192, 168, 100, 1].into())
+        .build();
+    client_node
+        .spawn(async move {
+            let mut tester = sqllogictest::Runner::new(Postgres::connect("192.168.2.1").await);
+            let files = glob::glob(&args.files).expect("failed to read glob pattern");
+            for file in files {
+                let file = file.unwrap();
+                let path = file.as_path();
+                println!("{}", path.display());
+                tester.run_file_async(path).await.unwrap();
             }
         })
         .await
         .unwrap();
 }
 
-#[derive(Clone)]
 struct Postgres {
-    client: Arc<tokio_postgres::Client>,
+    client: tokio_postgres::Client,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Postgres {
+    async fn connect(host: &str) -> Self {
+        let (client, connection) = tokio_postgres::Config::new()
+            .host(host)
+            .port(4566)
+            .dbname("dev")
+            .user("root")
+            .connect_timeout(Duration::from_secs(5))
+            .connect(tokio_postgres::NoTls)
+            .await
+            .expect("Failed to connect to database");
+        let task = tokio::spawn(async move {
+            connection.await.expect("Postgres connection error");
+        });
+        Postgres { client, task }
+    }
+}
+
+impl Drop for Postgres {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 #[async_trait::async_trait]
