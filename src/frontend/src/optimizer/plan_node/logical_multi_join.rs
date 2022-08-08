@@ -531,24 +531,24 @@ mod test {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{FunctionCall, InputRef, Literal};
+    use crate::expr::{FunctionCall, InputRef};
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
     use crate::session::OptimizerContext;
     #[tokio::test]
     async fn fd_derivation_multi_join() {
-        // left: [v0, v1], right: [v2, v3, v4]
-        // FD: v0 --> v1, v2 --> { v3, v4 }
-        // On: v0 = 0 AND v1 = v3
+        // t1: [v0, v1], t2: [v2, v3, v4], t3: [v5, v6]
+        // FD: v0 --> v1, v2 --> { v3, v4 }, {} --> v5
+        // On: v0 = 0 AND v1 = v3 AND v4 = v5
         //
-        // Output: [v0, v1, v2,v 3, v4]
-        // FD: v0 --> v1, v2 --> { v3, v4 }, {} --> v0, v1 --> v3, v3 --> v1
+        // Output: [v0, v1, v4, v5]
+        // FD: v0 --> v1, {} --> v0, {} --> v5, v4 --> v5, v5 --> v4
         let ctx = OptimizerContext::mock().await;
-        let left = {
+        let t1 = {
             let fields: Vec<Field> = vec![
                 Field::with_name(DataType::Int32, "v0"),
                 Field::with_name(DataType::Int32, "v1"),
@@ -561,13 +561,13 @@ mod test {
                 .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
-        let right = {
+        let t2 = {
             let fields: Vec<Field> = vec![
                 Field::with_name(DataType::Int32, "v2"),
                 Field::with_name(DataType::Int32, "v3"),
                 Field::with_name(DataType::Int32, "v4"),
             ];
-            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx.clone());
             // 0 --> 1, 2
             values
                 .base
@@ -575,91 +575,81 @@ mod test {
                 .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
-        // l0 = 0 AND l1 = r1
+        let t3 = {
+            let fields: Vec<Field> = vec![
+                Field::with_name(DataType::Int32, "v5"),
+                Field::with_name(DataType::Int32, "v6"),
+            ];
+            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+            // {} --> 0
+            values
+                .base
+                .functional_dependency
+                .add_functional_dependency_by_column_indices(&[], &[0]);
+            values
+        };
+        // On: v0 = 0 AND v1 = v3 AND v4 = v5
         let on = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::And,
                 vec![
-                    ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new(
-                            Type::Equal,
-                            vec![
-                                ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
-                                ExprImpl::Literal(Box::new(Literal::new(
-                                    Some(ScalarImpl::Int32(0)),
-                                    DataType::Int32,
-                                ))),
-                            ],
-                        )
-                        .unwrap(),
-                    )),
-                    ExprImpl::FunctionCall(Box::new(
-                        FunctionCall::new(
-                            Type::Equal,
-                            vec![
-                                ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
-                                ExprImpl::InputRef(Box::new(InputRef::new(3, DataType::Int32))),
-                            ],
-                        )
-                        .unwrap(),
-                    )),
+                    FunctionCall::new(
+                        Type::Equal,
+                        vec![
+                            InputRef::new(0, DataType::Int32).into(),
+                            ExprImpl::literal_int(0),
+                        ],
+                    )
+                    .unwrap()
+                    .into(),
+                    FunctionCall::new(
+                        Type::And,
+                        vec![
+                            FunctionCall::new(
+                                Type::Equal,
+                                vec![
+                                    InputRef::new(1, DataType::Int32).into(),
+                                    InputRef::new(3, DataType::Int32).into(),
+                                ],
+                            )
+                            .unwrap()
+                            .into(),
+                            FunctionCall::new(
+                                Type::Equal,
+                                vec![
+                                    InputRef::new(4, DataType::Int32).into(),
+                                    InputRef::new(5, DataType::Int32).into(),
+                                ],
+                            )
+                            .unwrap()
+                            .into(),
+                        ],
+                    )
+                    .unwrap()
+                    .into(),
                 ],
             )
             .unwrap(),
         ));
-        let expected_fd_set = [
-            (
-                JoinType::LeftSemi,
-                [
-                    // inherit from left
-                    FunctionalDependency::with_indices(2, &[0], &[1]),
-                ]
-                .into_iter()
-                .collect::<HashSet<_>>(),
-            ),
-            (
-                JoinType::LeftAnti,
-                [
-                    // inherit from left
-                    FunctionalDependency::with_indices(2, &[0], &[1]),
-                ]
-                .into_iter()
-                .collect::<HashSet<_>>(),
-            ),
-            (
-                JoinType::RightSemi,
-                [
-                    // inherit from right
-                    FunctionalDependency::with_indices(3, &[0], &[1, 2]),
-                ]
-                .into_iter()
-                .collect::<HashSet<_>>(),
-            ),
-            (
-                JoinType::RightAnti,
-                [
-                    // inherit from right
-                    FunctionalDependency::with_indices(3, &[0], &[1, 2]),
-                ]
-                .into_iter()
-                .collect::<HashSet<_>>(),
-            ),
-        ];
-
-        for (join_type, expected_res) in expected_fd_set {
-            let join = LogicalJoin::new(
-                left.clone().into(),
-                right.clone().into(),
-                join_type,
-                Condition::with_expr(on.clone()),
-            );
-            let fd_set = join
-                .functional_dependency()
-                .as_dependencies()
-                .iter()
-                .cloned()
-                .collect::<HashSet<_>>();
-            assert_eq!(fd_set, expected_res);
-        }
+        let multi_join = LogicalMultiJoin::new(
+            vec![t1.into(), t2.into(), t3.into()],
+            Condition::with_expr(on),
+            vec![0, 1, 4, 5],
+        );
+        let expected_fd_set: HashSet<_> = [
+            FunctionalDependency::with_indices(4, &[0], &[1]),
+            FunctionalDependency::with_indices(4, &[], &[0, 3]),
+            FunctionalDependency::with_indices(4, &[2], &[3]),
+            FunctionalDependency::with_indices(4, &[3], &[2]),
+        ]
+        .into_iter()
+        .collect();
+        let fd_set: HashSet<_> = multi_join
+            .functional_dependency()
+            .as_dependencies()
+            .iter()
+            .cloned()
+            .collect();
+        assert_eq!(expected_fd_set, fd_set);
     }
 }
