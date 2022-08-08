@@ -82,3 +82,7 @@ harness = false
 name = "hash_join"
 harness = false
 
+[[bench]]
+name = "order_by"
+harness = false
+
