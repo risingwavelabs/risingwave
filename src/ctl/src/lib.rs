@@ -44,6 +44,9 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
+    /// Commands for Stream
+    #[clap(subcommand)]
+    Stream(StreamCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -101,13 +104,22 @@ enum MetaCommands {
     ClusterInfo,
 }
 
+#[derive(Subcommand)]
+enum StreamCommands {
+    /// get traces of all actors or some specific actor
+    Trace {
+        #[clap(short, long = "actor-id")]
+        actor_id: Option<u32>,
+    },
+}
+
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
         Commands::Hummock(HummockCommands::ListVersion) => {
-            tokio::spawn(cmd_impl::hummock::list_version()).await??;
+            cmd_impl::hummock::list_version().await?;
         }
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
-            tokio::spawn(cmd_impl::hummock::list_kv(epoch, table_id)).await??;
+            cmd_impl::hummock::list_kv(epoch, table_id).await?;
         }
         Commands::Hummock(HummockCommands::SstDump) => cmd_impl::hummock::sst_dump().await.unwrap(),
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
@@ -115,25 +127,20 @@ pub async fn start(opts: CliOpts) -> Result<()> {
             table_id,
             level,
         }) => {
-            tokio::spawn(cmd_impl::hummock::trigger_manual_compaction(
-                compaction_group_id,
-                table_id,
-                level,
-            ))
-            .await??
+            cmd_impl::hummock::trigger_manual_compaction(compaction_group_id, table_id, level)
+                .await?
         }
-        Commands::Table(TableCommands::Scan { mv_name }) => {
-            tokio::spawn(cmd_impl::table::scan(mv_name)).await??
-        }
+        Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {
-            tokio::spawn(cmd_impl::table::scan_id(table_id)).await??
+            cmd_impl::table::scan_id(table_id).await?
         }
-        Commands::Table(TableCommands::List) => tokio::spawn(cmd_impl::table::list()).await??,
-        Commands::Bench(cmd) => tokio::spawn(cmd_impl::bench::do_bench(cmd)).await??,
-        Commands::Meta(MetaCommands::Pause) => tokio::spawn(cmd_impl::meta::pause()).await??,
-        Commands::Meta(MetaCommands::Resume) => tokio::spawn(cmd_impl::meta::resume()).await??,
-        Commands::Meta(MetaCommands::ClusterInfo) => {
-            tokio::spawn(cmd_impl::meta::cluster_info()).await??
+        Commands::Table(TableCommands::List) => cmd_impl::table::list().await?,
+        Commands::Bench(cmd) => cmd_impl::bench::do_bench(cmd).await?,
+        Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
+        Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
+        Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
+        Commands::Stream(StreamCommands::Trace { actor_id }) => {
+            cmd_impl::stream::trace(actor_id).await?
         }
     }
     Ok(())
