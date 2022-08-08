@@ -148,7 +148,7 @@ impl HopWindowExecutor {
             .ok_or_else(|| ExprError::InvalidParam {
                 name: "window",
                 reason: format!(
-                    "window_size {} cannot be divided by window_slide {}",
+                    "window_size {} cannot be divided by window_slide {}, or wasn't non-zero",
                     window_size, window_slide
                 ),
             })?
