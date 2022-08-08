@@ -153,14 +153,6 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
-    /// Iterate all indexs, excluding the materialized views.
-    // pub fn iter_index(&self) -> impl Iterator<Item = &TableCatalog> {
-    //     self.table_by_name
-    //         .iter()
-    //         .filter(|(_, v)| v.associated_source_id.is_none() && v.is_index_on.is_some())
-    //         .map(|(_, v)| v)
-    // }
-
     /// Iterate all indexs
     pub fn iter_index(&self) -> impl Iterator<Item = &IndexCatalog> {
         self.index_by_name.iter().map(|(_, v)| v)

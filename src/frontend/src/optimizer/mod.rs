@@ -279,6 +279,13 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         );
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Index Selection".to_string(),
+            vec![IndexSelectionRule::create()],
+            ApplyOrder::BottomUp,
+        );
+
         plan
     }
 
