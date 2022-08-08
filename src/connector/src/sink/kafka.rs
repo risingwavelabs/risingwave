@@ -294,7 +294,7 @@ impl Sink for KafkaSink {
         match self.config.format.as_str() {
             "append_only" => self.append_only(chunk, schema).await,
             "debezium" => {
-                self.debezium_update(chunk, schema, Instant::now().elapsed().as_secs())
+                self.debezium_update(chunk, schema, Instant::now().elapsed().as_millis() as u64)
                     .await
             }
             _ => unreachable!(),
