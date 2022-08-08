@@ -331,6 +331,7 @@ mod tests {
     use bytes::{BufMut, BytesMut};
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
     use risingwave_common::util::ordered::{OrderedRowDeserializer, OrderedRowSerializer};
@@ -439,7 +440,10 @@ mod tests {
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             mapping: None,
-            properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
+            properties: HashMap::from([(
+                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from("300"),
+            )]),
             read_pattern_prefix_column: column_count, // 1 column
         }
     }
@@ -614,7 +618,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_filter_key_extractor_manager() {
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let filter_key_extractor_manager_ref = filter_key_extractor_manager.clone();

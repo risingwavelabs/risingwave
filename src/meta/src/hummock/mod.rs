@@ -47,6 +47,7 @@ use crate::hummock::compaction_scheduler::CompactionSchedulerRef;
 use crate::hummock::utils::RetryableError;
 use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::storage::MetaStore;
+use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
 pub async fn start_hummock_workers<S>(
@@ -55,13 +56,23 @@ pub async fn start_hummock_workers<S>(
     vacuum_trigger: Arc<VacuumTrigger<S>>,
     notification_manager: NotificationManagerRef,
     compaction_scheduler: CompactionSchedulerRef<S>,
+    meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)>
 where
     S: MetaStore,
 {
     vec![
         start_compaction_scheduler(compaction_scheduler),
-        start_vacuum_scheduler(vacuum_trigger),
+        start_vacuum_scheduler(
+            vacuum_trigger.clone(),
+            Duration::from_secs(meta_opts.vacuum_interval_sec),
+        ),
+        // TODO #4037: enable full GC after watermark id introduced by #4369 is actually used.
+        // start_full_gc_scheduler(
+        //     vacuum_trigger,
+        //     Duration::from_secs(meta_opts.full_sst_gc_interval_sec),
+        //     Duration::from_secs(meta_opts.sst_retention_time_sec),
+        // ),
         subscribe_cluster_membership_change(
             hummock_manager,
             compactor_manager,
@@ -139,16 +150,18 @@ where
     (join_handle, shutdown_tx)
 }
 
-/// Vacuum is triggered at this rate.
-const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(30);
 /// Starts a task to periodically vacuum hummock.
-pub fn start_vacuum_scheduler<S>(vacuum: Arc<VacuumTrigger<S>>) -> (JoinHandle<()>, Sender<()>)
+pub fn start_vacuum_scheduler<S>(
+    vacuum: Arc<VacuumTrigger<S>>,
+    interval: Duration,
+) -> (JoinHandle<()>, Sender<()>)
 where
     S: MetaStore,
 {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
-        let mut min_trigger_interval = tokio::time::interval(VACUUM_TRIGGER_INTERVAL);
+        let mut min_trigger_interval = tokio::time::interval(interval);
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
                 // Wait for interval
@@ -159,12 +172,41 @@ where
                     return;
                 }
             }
-            if let Err(err) = vacuum.vacuum_version_metadata().await {
-                tracing::warn!("Vacuum tracked data error {}", err);
+            // May metadata vacuum and SST vacuum split into two tasks.
+            if let Err(err) = vacuum.vacuum_metadata().await {
+                tracing::warn!("Vacuum metadata error {:#?}", err);
             }
-            // vacuum_orphan_data can be invoked less frequently.
             if let Err(err) = vacuum.vacuum_sst_data().await {
-                tracing::warn!("Vacuum SST data error {}", err);
+                tracing::warn!("Vacuum SST error {:#?}", err);
+            }
+        }
+    });
+    (join_handle, shutdown_tx)
+}
+
+pub fn start_full_gc_scheduler<S>(
+    vacuum: Arc<VacuumTrigger<S>>,
+    interval: Duration,
+    sst_retention_time: Duration,
+) -> (JoinHandle<()>, Sender<()>)
+where
+    S: MetaStore,
+{
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut min_trigger_interval = tokio::time::interval(interval);
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        min_trigger_interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = min_trigger_interval.tick() => {},
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Full GC scheduler is stopped");
+                    return;
+                }
+            }
+            if let Err(err) = vacuum.run_full_gc(sst_retention_time).await {
+                tracing::warn!("Full GC error {:#?}", err);
             }
         }
     });

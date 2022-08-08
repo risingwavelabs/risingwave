@@ -24,31 +24,24 @@ shift $((OPTIND -1))
 echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-playground-"$profile" target/debug/
+buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-playground-"$profile" target/debug/risedev-playground
+mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-playground
+chmod +x ./target/debug/risedev-dev
 
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
-echo "--- Prepare RiseDev playground"
-cargo make pre-start-playground
+echo "--- Prepare RiseDev dev cluster"
+cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
 timeout 5m sqllogictest -p 4566 -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
-
-echo "--- Kill cluster"
-cargo make ci-kill
-
-echo "--- e2e, ci-3cn-1fe, delta join"
-cargo make ci-start ci-3cn-1fe
-timeout 3m sqllogictest -p 4566 -d dev  './e2e_test/streaming_delta_join/**/*.slt' --junit "parallel-streaming-delta-join-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill

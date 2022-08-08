@@ -23,16 +23,13 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
-use risingwave_frontend::binder::Binder;
 use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table,
 };
-use risingwave_frontend::optimizer::PlanRef;
-use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
-use risingwave_frontend::FrontendOpts;
+use risingwave_frontend::{Binder, FrontendOpts, PlanRef, Planner};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
@@ -299,10 +296,12 @@ impl TestCase {
                     name,
                     table_name,
                     columns,
+                    include,
                     // TODO: support unique and if_not_exist in planner test
                     ..
                 } => {
-                    create_index::handle_create_index(context, name, table_name, columns).await?;
+                    create_index::handle_create_index(context, name, table_name, columns, include)
+                        .await?;
                 }
                 Statement::CreateView {
                     materialized: true,
@@ -349,7 +348,7 @@ impl TestCase {
         let logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
                 }
                 logical_plan
             }

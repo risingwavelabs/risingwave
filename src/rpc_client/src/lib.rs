@@ -33,6 +33,7 @@
 
 mod meta_client;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -48,6 +49,7 @@ pub mod error;
 mod stream_client;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::meta::heartbeat_request::extra_info;
 pub use stream_client::*;
 
 use crate::error::{Result, RpcError};
@@ -107,3 +109,12 @@ where
             .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
     }
 }
+
+/// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.
+#[async_trait::async_trait]
+pub trait ExtraInfoSource: Send + Sync {
+    /// None means the info is not available at the moment.
+    async fn get_extra_info(&self) -> Option<extra_info::Info>;
+}
+
+pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
