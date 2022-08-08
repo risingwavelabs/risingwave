@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use futures::{Future, TryFutureExt};
 use itertools::Itertools;
+use madsim::time::Instant;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
@@ -175,6 +176,98 @@ impl KafkaSink {
         )
     }
 
+    fn fields_to_json(&self, fields: &[Field]) -> Value {
+        let mut res = Vec::new();
+        fields.iter().for_each(|field| {
+            res.push(json!({
+             "field": field.name,
+             "optional": true,
+             "type": field.type_name,
+            }))
+        });
+
+        json!(res)
+    }
+
+    fn schema_to_json(&self, schema: &Schema) -> Value {
+        let mut schema_fields = Vec::new();
+        schema_fields.push(json!({
+            "type": "struct",
+            "fields": self.fields_to_json(&schema.fields),
+            "optional": true,
+            "field": "before",
+        }));
+        schema_fields.push(json!({
+            "type": "struct",
+            "fields": self.fields_to_json(&schema.fields),
+            "optional": true,
+            "field": "after",
+        }));
+        json!({
+            "type": "struct",
+            "fields": schema_fields,
+            "optional": false,
+        })
+    }
+
+    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts: u64) -> Result<()> {
+        let mut update_cache = HashMap::new();
+        for (op, row) in chunk.rows() {
+            let event_object = match op {
+                Op::Insert => Some(json!({
+                    "schema": self.schema_to_json(schema),
+                    "payload": {
+                        "before": null,
+                        "after": record_to_json(row.clone(), schema.fields.clone())?,
+                        "op": "c",
+                        "ts_ms": ts,
+                    }
+                })),
+                Op::Delete => Some(json!({
+                    "schema": self.schema_to_json(schema),
+                    "payload": {
+                        "before": record_to_json(row.clone(), schema.fields.clone())?,
+                        "after": null,
+                        "op": "d",
+                        "ts_ms": ts,
+                    }
+                })),
+                Op::UpdateDelete => {
+                    update_cache.insert(
+                        row.index(),
+                        record_to_json(row.clone(), schema.fields.clone())?,
+                    );
+                    None
+                }
+                Op::UpdateInsert => {
+                    let before = update_cache.get(&row.index());
+                    if let Some(before) = before {
+                        Some(json!({
+                            "schema": self.schema_to_json(schema),
+                            "payload": {
+                                "before": before,
+                                "after": record_to_json(row.clone(), schema.fields.clone())?,
+                                "op": "u",
+                                "ts_ms": ts,
+                            }
+                        }))
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(obj) = event_object {
+                self.send(
+                    BaseRecord::to(self.config.topic.as_str())
+                        .key(self.gen_message_key().as_bytes())
+                        .payload(obj.to_string().as_bytes()),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn append_only(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
@@ -201,7 +294,8 @@ impl Sink for KafkaSink {
         if self.config.sink_type.as_str() == "append_only" {
             self.append_only(chunk, schema).await
         } else if self.config.sink_type.as_str() == "debezium" {
-            todo!()
+            self.debezium_update(chunk, schema, Instant::now().elapsed().as_secs())
+                .await
         } else {
             unreachable!()
         }
