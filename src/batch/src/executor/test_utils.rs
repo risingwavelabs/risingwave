@@ -44,7 +44,9 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
     for i in 0..batch_num {
         let mut columns = Vec::new();
         for data_type in data_types {
-            let mut data_gen = FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None , SEED).unwrap();
+            let mut data_gen =
+                FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED)
+                    .unwrap();
             let mut array_builder = data_type.create_array_builder(batch_size);
             for j in 0..batch_size {
                 array_builder
