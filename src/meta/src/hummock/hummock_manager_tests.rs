@@ -938,3 +938,100 @@ async fn test_trigger_manual_compaction() {
         assert!(result.is_err());
     }
 }
+
+
+#[tokio::test]
+async fn test_hummock_compaction_task_heartbeat() {
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_num = 2;
+
+    // Construct vnode mappings for generating compaction tasks.
+    let parallel_units = cluster_manager.list_parallel_units().await;
+    env.hash_mapping_manager()
+        .build_fragment_hash_mapping(1, &parallel_units);
+    for table_id in 1..sst_num + 2 {
+        env.hash_mapping_manager()
+            .set_fragment_state_table(1, table_id as u32);
+    }
+
+    // No compaction task available.
+    let task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap();
+    assert_eq!(task, None);
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
+
+    // Get a compaction task.
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id, async { true })
+        .await
+        .unwrap();
+    assert_eq!(
+        compact_task
+            .get_input_ssts()
+            .first()
+            .unwrap()
+            .get_level_idx(),
+        0
+    );
+    assert_eq!(compact_task.get_task_id(), 2);
+
+    // Cancel the task and succeed.
+    compact_task.task_status = false;
+    assert!(hummock_manager
+        .report_compact_task(context_id, &compact_task)
+        .await
+        .unwrap());
+    // Cancel the task and told the task is not found, which may have been processed previously.
+    assert!(!hummock_manager
+        .report_compact_task(context_id, &compact_task)
+        .await
+        .unwrap());
+
+    // Get a compaction task.
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compact_task, context_id, async { true })
+        .await
+        .unwrap();
+    assert_eq!(compact_task.get_task_id(), 3);
+    // Finish the task and succeed.
+    compact_task.task_status = true;
+
+    assert!(hummock_manager
+        .report_compact_task(context_id, &compact_task)
+        .await
+        .unwrap());
+    // Finish the task and told the task is not found, which may have been processed previously.
+    assert!(!hummock_manager
+        .report_compact_task(context_id, &compact_task)
+        .await
+        .unwrap());
+}

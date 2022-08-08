@@ -43,7 +43,7 @@ use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
-use crate::hummock::CompactionScheduler;
+use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{CatalogManager, IdleManager, MetaOpts, MetaSrvEnv, UserManager};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -461,13 +461,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let mut sub_tasks = hummock::start_hummock_workers(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_manager,
         vacuum_trigger,
         notification_manager,
         compaction_scheduler,
     )
     .await;
+    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager));
     sub_tasks.push((lease_handle, lease_shutdown));
     #[cfg(not(test))]
     {

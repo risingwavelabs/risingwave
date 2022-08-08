@@ -201,6 +201,18 @@ where
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
+    async fn report_compaction_task_progress(
+        &self,
+        request: Request<ReportCompactionTaskProgressRequest>,
+    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        let req = request.into_inner();
+        self.compactor_manager
+            .update_compaction_task_progress(req.context_id, req.progress);
+        Ok(Response::new(ReportCompactionTaskProgressResponse {
+            status: None,
+        }))
+    }
+
     async fn report_vacuum_task(
         &self,
         request: Request<ReportVacuumTaskRequest>,

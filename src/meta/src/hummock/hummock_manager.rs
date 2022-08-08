@@ -41,7 +41,9 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLockWriteGuard;
+use tokio::task::JoinHandle;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
@@ -275,6 +277,33 @@ where
         // Release snapshots pinned by meta on restarting.
         instance.release_contexts([META_NODE_ID]).await?;
         Ok(instance)
+    }
+
+    pub fn start_compaction_heartbeat(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let compactor_manager = hummock_manager.compactor_manager.clone();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(std::time::Duration::from_millis(1000));
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {},
+                    // Shutdown
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Compaction heartbeat checker is stopped");
+                        return;
+                    }
+                }
+                for (context_id, mut task) in compactor_manager.get_cancellable_tasks() {
+                    task.task_status = false; // Change task status to failed
+                    if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await {
+                        tracing::info!("Compaction task cancellation due to missing heartbeat failed: hummock context: {context_id}, task_id: {}, {:?}", task.task_id, e);
+                    }
+                    // compactor_manager.cancel_task(context_id, &task);
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 
     /// Load state from meta store.

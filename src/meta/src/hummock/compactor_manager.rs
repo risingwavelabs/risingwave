@@ -12,22 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
-use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
+use risingwave_pb::hummock::{
+    CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse,
+    VacuumTask,
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
+const TASK_HEARTBEAT_TTL_SECONDS: u64 = 60;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
-
+type TaskId = u64;
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
+    // Tasks only register a heartbeat if they make progress since the last block.
+    // Else, they may have stalled even if they are still running within the compactor.
+    task_heartbeats: Mutex<HashMap<TaskId, TaskHeartbeat>>,
+}
+
+struct TaskHeartbeat {
+    task: CompactTask,
+    num_blocks_sealed: u32,
+    num_blocks_uploaded: u32,
+    expire_at: u64,
 }
 
 impl Compactor {
@@ -39,11 +55,45 @@ impl Compactor {
         // TODO: compactor node backpressure
         self.sender
             .send(Ok(SubscribeCompactTasksResponse {
-                compact_task,
+                compact_task: compact_task.clone(),
                 vacuum_task,
             }))
             .await
-            .map_err(|e| anyhow::anyhow!(e).into())
+            .map_err(|e| anyhow::anyhow!(e))?;
+        if let Some(task) = compact_task {
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("Clock may have gone backwards")
+                .as_secs();
+            self.task_heartbeats.lock().unwrap().insert(
+                task.task_id,
+                TaskHeartbeat {
+                    task,
+                    num_blocks_sealed: 0,
+                    num_blocks_uploaded: 0,
+                    expire_at: now + TASK_HEARTBEAT_TTL_SECONDS,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    pub fn update_task_heartbeats(&self, progress_list: &Vec<CompactTaskProgress>) {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        let mut guard = self.task_heartbeats.lock().unwrap();
+        for progress in progress_list {
+            if let Some(task_ref) = guard.get_mut(&progress.task_id) {
+                if task_ref.num_blocks_sealed < progress.num_blocks_sealed
+                    || task_ref.num_blocks_uploaded < progress.num_blocks_uploaded
+                {
+                    // Refresh the expiry of the task as it is showing progress.
+                    task_ref.expire_at = now + TASK_HEARTBEAT_TTL_SECONDS;
+                }
+            }
+        }
     }
 
     pub fn context_id(&self) -> HummockContextId {
@@ -53,7 +103,11 @@ impl Compactor {
 
 struct CompactorManagerInner {
     /// Senders of stream to available compactors
-    compactors: Vec<Arc<Compactor>>,
+    compactors: Vec<HummockContextId>,
+
+    /// TODO: Let each compactor have its own Mutex, we should not need to lock whole thing.
+    /// The outer lock is a RwLock, so we should still be able to modify each compactor
+    compactor_map: HashMap<HummockContextId, Arc<Compactor>>,
 
     /// We use round-robin approach to assign tasks to compactors.
     /// This field indexes the compactor which the next task should be assigned to.
@@ -64,6 +118,7 @@ impl CompactorManagerInner {
     pub fn new() -> Self {
         Self {
             compactors: vec![],
+            compactor_map: HashMap::new(),
             next_compactor: 0,
         }
     }
@@ -95,6 +150,32 @@ impl CompactorManager {
         }
     }
 
+    pub fn get_cancellable_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        let guard = self.inner.write();
+        let mut cancellable_tasks = vec![];
+        for compactor in guard.compactor_map.values() {
+            let mut cancellable_task_ids = vec![];
+            for (id, TaskHeartbeat { expire_at, .. }) in compactor.task_heartbeats.lock().unwrap().iter() {
+                if *expire_at < now {
+                    cancellable_task_ids.push(*id);
+                }
+            }
+            let mut hb_guard = compactor.task_heartbeats.lock().unwrap();
+            for id in cancellable_task_ids {
+                if let Some(TaskHeartbeat { task, .. }) = hb_guard.remove(&id) {
+                    cancellable_tasks.push((compactor.context_id(), task));
+                }
+            }
+        }
+        cancellable_tasks
+    }
+
+    // pub fn cancel_task(context_id: HummockContextId, )
+
     /// Gets next compactor to assign task.
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         let mut guard = self.inner.write();
@@ -102,9 +183,9 @@ impl CompactorManager {
             return None;
         }
         let compactor_index = guard.next_compactor % guard.compactors.len();
-        let compactor = guard.compactors[compactor_index].clone();
+        let compactor = guard.compactors[compactor_index];
         guard.next_compactor += 1;
-        Some(compactor)
+        Some(guard.compactor_map.get(&compactor).unwrap().clone())
     }
 
     pub fn random_compactor(&self) -> Option<Arc<Compactor>> {
@@ -114,8 +195,8 @@ impl CompactorManager {
         }
 
         let compactor_index = rand::thread_rng().gen::<usize>() % guard.compactors.len();
-        let compactor = guard.compactors[compactor_index].clone();
-        Some(compactor)
+        let compactor = guard.compactors[compactor_index];
+        Some(guard.compactor_map.get(&compactor).unwrap().clone())
     }
 
     pub fn add_compactor(
@@ -123,22 +204,43 @@ impl CompactorManager {
         context_id: HummockContextId,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
+        self.remove_compactor(context_id);
         let mut guard = self.inner.write();
-        guard.compactors.retain(|c| c.context_id != context_id);
-        guard.compactors.push(Arc::new(Compactor {
+        guard.compactors.push(context_id);
+        guard.compactor_map.insert(
             context_id,
-            sender: tx,
-        }));
+            Arc::new(Compactor {
+                context_id,
+                sender: tx,
+                task_heartbeats: Mutex::new(HashMap::new()),
+            }),
+        );
         tracing::info!("Added compactor {}", context_id);
         rx
     }
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
+        let mut guard = self.inner.write();
+        guard.compactors.retain(|c| *c != context_id);
+        guard.compactor_map.remove(&context_id);
         tracing::info!("Removed compactor {}", context_id);
-        self.inner
-            .write()
-            .compactors
-            .retain(|c| c.context_id != context_id);
+    }
+
+    pub fn update_compaction_task_progress(
+        &self,
+        context_id: HummockContextId,
+        task: Vec<CompactTaskProgress>,
+    ) {
+        let mut guard = self.inner.write();
+        if let Some(compactor) = guard.compactor_map.get_mut(&context_id) {
+            compactor.update_task_heartbeats(&task);
+            tracing::info!("Updated compactor task progress {}", context_id);
+        } else {
+            tracing::info!(
+                "Update compactor task progress failed. Compactor does not exist: {}",
+                context_id
+            );
+        }
     }
 }
 
@@ -220,13 +322,11 @@ mod tests {
         ));
 
         let task = dummy_compact_task(123);
-        let compactor = compactor_manager
-            .inner
-            .write()
-            .compactors
-            .first()
-            .unwrap()
-            .clone();
+        let compactor = {
+            let guard = compactor_manager.inner.write();
+            let compactor_id = guard.compactors.first().unwrap();
+            guard.compactor_map.get(compactor_id).unwrap().clone()
+        };
         compactor.send_task(Some(task.clone()), None).await.unwrap();
         // Receive a compact task.
         assert_eq!(

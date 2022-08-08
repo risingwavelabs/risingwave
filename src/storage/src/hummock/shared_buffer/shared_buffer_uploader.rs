@@ -21,7 +21,7 @@ use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compaction_executor::CompactionExecutor;
-use crate::hummock::compactor::{Compactor, CompactorContext};
+use crate::hummock::compactor::{Compactor, CompactorContext, TaskProgressTracker};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
 use crate::hummock::{HummockResult, MemoryLimiter, SstableIdManagerRef, SstableStoreRef};
@@ -71,6 +71,7 @@ impl SharedBufferUploader {
             filter_key_extractor_manager: filter_key_extractor_manager.clone(),
             memory_limiter: memory_limiter.clone(),
             sstable_id_manager: sstable_id_manager.clone(),
+            task_progress: TaskProgressTracker::default(),
         });
         let remote_object_store_compactor_context = Arc::new(CompactorContext {
             options: options.clone(),
@@ -82,6 +83,7 @@ impl SharedBufferUploader {
             filter_key_extractor_manager,
             memory_limiter,
             sstable_id_manager,
+            task_progress: TaskProgressTracker::default(),
         });
         Self {
             options,

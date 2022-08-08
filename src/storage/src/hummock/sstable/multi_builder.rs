@@ -17,6 +17,7 @@ use risingwave_hummock_sdk::HummockSstableId;
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
+use crate::hummock::compactor::{TaskId, TaskProgressTracker};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
@@ -51,11 +52,17 @@ pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
     policy: CachePolicy,
     sstable_store: SstableStoreRef,
     tracker: Option<MemoryTracker>,
+    task_progress: (TaskId, TaskProgressTracker),
 }
 
 impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        builder_factory: F,
+        policy: CachePolicy,
+        sstable_store: SstableStoreRef,
+        task_progress: (TaskId, TaskProgressTracker),
+    ) -> Self {
         Self {
             builder_factory,
             sealed_builders: Vec::new(),
@@ -63,6 +70,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             policy,
             sstable_store,
             tracker: None,
+            task_progress,
         }
     }
 
@@ -131,6 +139,8 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             let (table_id, data, meta, table_ids) = builder.finish();
             let len = data.len();
             let sstable_store = self.sstable_store.clone();
+            let task_id = self.task_progress.0;
+            let task_progress = self.task_progress.clone();
             let meta_clone = meta.clone();
             let policy = self.policy;
             let tracker = self.tracker.take();
@@ -147,6 +157,11 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                         )
                         .await
                 };
+                // TODO: maybe error handle rather than unwrap...?
+                let mut guard = task_progress.1 .0.lock().unwrap();
+                let progress = guard.entry(task_id).or_insert_with(Default::default);
+                progress.num_blocks_uploaded += 1;
+                drop(guard);
                 drop(tracker);
                 ret
             });
@@ -156,7 +171,13 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                 table_ids,
                 upload_join_handle,
                 data_len: len,
-            })
+            });
+            let task_id = self.task_progress.0;
+            // TODO: maybe error handle rather than unwrap...?
+            let mut guard = self.task_progress.1 .0.lock().unwrap();
+            let progress = guard.entry(task_id).or_insert_with(Default::default);
+            progress.num_blocks_sealed += 1;
+            drop(guard);
         }
     }
 
@@ -224,6 +245,7 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
+            (0, TaskProgressTracker::default()),
         );
         let results = builder.finish();
         assert!(results.is_empty());
@@ -247,6 +269,7 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
+            (0, TaskProgressTracker::default()),
         );
 
         for i in 0..table_capacity {
@@ -271,6 +294,7 @@ mod tests {
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
+            (0, TaskProgressTracker::default()),
         );
         let mut epoch = 100;
 
@@ -310,6 +334,7 @@ mod tests {
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
+            (0, TaskProgressTracker::default()),
         );
 
         builder

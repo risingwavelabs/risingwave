@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
@@ -34,7 +34,8 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
 use risingwave_pb::hummock::{
-    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactTaskProgress, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
@@ -57,6 +58,7 @@ use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
+pub type TaskId = u64;
 pub struct RemoteBuilderFactory {
     sstable_id_manager: SstableIdManagerRef,
     limiter: Arc<MemoryLimiter>,
@@ -106,7 +108,18 @@ pub struct CompactorContext {
     pub memory_limiter: Arc<MemoryLimiter>,
 
     pub sstable_id_manager: SstableIdManagerRef,
+
+    pub task_progress: TaskProgressTracker,
 }
+
+#[derive(Default, Clone)]
+pub struct TaskProgress {
+    pub num_blocks_sealed: u32,
+    pub num_blocks_uploaded: u32,
+}
+
+#[derive(Clone, Default)]
+pub struct TaskProgressTracker(pub Arc<Mutex<HashMap<TaskId, TaskProgress>>>);
 
 pub trait CompactionFilter: Send + DynClone {
     fn should_delete(&mut self, _: &[u8]) -> bool {
@@ -700,6 +713,10 @@ impl Compactor {
             builder_factory,
             cache_policy,
             self.context.sstable_store.clone(),
+            (
+                self.compact_task.task_id,
+                self.context.task_progress.clone(),
+            ),
         );
 
         // Monitor time cost building shared buffer to SSTs.
@@ -858,6 +875,7 @@ impl Compactor {
         memory_limiter: Arc<MemoryLimiter>,
         sstable_id_manager: SstableIdManagerRef,
     ) -> (JoinHandle<()>, Sender<()>) {
+        let task_progress = TaskProgressTracker::default();
         let compactor_context = Arc::new(CompactorContext {
             options,
             hummock_meta_client: hummock_meta_client.clone(),
@@ -868,9 +886,11 @@ impl Compactor {
             filter_key_extractor_manager,
             memory_limiter,
             sstable_id_manager,
+            task_progress: task_progress.clone(),
         });
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
+        let task_progress_update_interval = Duration::from_millis(1000);
         let join_handle = tokio::spawn(async move {
             let process_task = |compact_task,
                                 vacuum_task,
@@ -884,6 +904,7 @@ impl Compactor {
                 Compactor::try_vacuum(vacuum_task, sstable_store, hummock_meta_client).await;
             };
             let mut min_interval = tokio::time::interval(stream_retry_interval);
+            let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 tokio::select! {
@@ -915,8 +936,24 @@ impl Compactor {
                 };
 
                 // This inner loop is to consume stream.
-                loop {
+                'inner: loop {
                     let message = tokio::select! {
+                        _ = task_progress_interval.tick() => {
+                            let mut progress_list = Vec::new();
+                            #[allow(clippy::significant_drop_in_scrutinee)]
+                            for (&task_id, progress) in task_progress.0.lock().unwrap().iter() {
+                                progress_list.push(CompactTaskProgress {
+                                    task_id,
+                                    num_blocks_sealed: progress.num_blocks_sealed,
+                                    num_blocks_uploaded: progress.num_blocks_uploaded,
+                                });
+                            }
+                            // ignore any errors while trying to report task progress
+                            if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
+                                tracing::warn!("Failed to report task progress. {e:?}");
+                            }
+                            continue 'inner;
+                        }
                         message = stream.message() => {
                             message
                         },
@@ -932,6 +969,8 @@ impl Compactor {
                             compact_task,
                             vacuum_task,
                         })) => {
+                            // TODO: do something with join handle to figure out when the task is
+                            // complete.
                             tokio::spawn(process_task(
                                 compact_task,
                                 vacuum_task,

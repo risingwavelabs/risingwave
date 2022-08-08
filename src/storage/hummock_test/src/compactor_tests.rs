@@ -38,7 +38,7 @@ mod tests {
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
-    use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
+    use risingwave_storage::hummock::compactor::{Compactor, CompactorContext, TaskProgressTracker};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::{HummockStorage, MemoryLimiter, SstableIdManager};
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -126,6 +126,7 @@ mod tests {
                 hummock_meta_client.clone(),
                 storage.options().sstable_id_remote_fetch_number,
             )),
+            task_progress: TaskProgressTracker::default(), 
         }
     }
 
