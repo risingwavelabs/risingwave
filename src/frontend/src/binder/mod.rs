@@ -71,6 +71,7 @@ pub struct Binder {
     lateral_contexts: Vec<LateralBindContext>,
 
     next_subquery_id: usize,
+    next_values_id: usize,
     /// Map the cte's name to its Relation::Subquery.
     cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
 }
@@ -85,6 +86,7 @@ impl Binder {
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
+            next_values_id: 0,
             cte_to_relation: HashMap::new(),
         }
     }
@@ -147,6 +149,12 @@ impl Binder {
     fn next_subquery_id(&mut self) -> usize {
         let id = self.next_subquery_id;
         self.next_subquery_id += 1;
+        id
+    }
+
+    fn next_values_id(&mut self) -> usize {
+        let id = self.next_values_id;
+        self.next_values_id += 1;
         id
     }
 }
