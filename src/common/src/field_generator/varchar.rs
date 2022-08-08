@@ -14,7 +14,8 @@
 
 use anyhow::Result;
 use rand::distributions::Alphanumeric;
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use serde_json::{json, Value};
 
 use super::DEFAULT_LENGTH;
@@ -22,20 +23,21 @@ use crate::types::{Datum, Scalar};
 
 pub struct VarcharField {
     length: usize,
+    seed: u64,
 }
 
 impl VarcharField {
-    pub fn new(length_option: Option<String>) -> Result<Self> {
+    pub fn new(length_option: Option<String>, seed: u64) -> Result<Self> {
         let length = if let Some(length_option) = length_option {
             length_option.parse::<usize>()?
         } else {
             DEFAULT_LENGTH
         };
-        Ok(Self { length })
+        Ok(Self { length, seed })
     }
 
-    pub fn generate(&mut self) -> Value {
-        let s: String = rand::thread_rng()
+    pub fn generate(&mut self, offset: u64) -> Value {
+        let s: String = StdRng::seed_from_u64(offset ^ self.seed)
             .sample_iter(&Alphanumeric)
             .take(self.length)
             .map(char::from)
@@ -43,8 +45,8 @@ impl VarcharField {
         json!(s)
     }
 
-    pub fn generate_datum(&mut self) -> Datum {
-        let s: String = rand::thread_rng()
+    pub fn generate_datum(&mut self, offset: u64) -> Datum {
+        let s: String = StdRng::seed_from_u64(offset ^ self.seed)
             .sample_iter(&Alphanumeric)
             .take(self.length)
             .map(char::from)
