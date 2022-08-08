@@ -182,7 +182,7 @@ impl Planner {
         let correlated_indices =
             subquery.collect_correlated_indices_by_depth_and_assign_id(correlated_id);
         let output_column_type = subquery.query.data_types()[0].clone();
-        let right_plan = self.plan_query(subquery.query)?.as_subplan();
+        let right_plan = self.plan_query(subquery.query)?.into_subplan();
         let on = match subquery.kind {
             SubqueryKind::Existential => ExprImpl::literal_bool(true),
             SubqueryKind::In(left_expr) => {
@@ -258,7 +258,7 @@ impl Planner {
             .into_iter()
             .zip_eq(rewriter.correlated_indices_collection)
         {
-            let mut right = self.plan_query(subquery.query)?.as_subplan();
+            let mut right = self.plan_query(subquery.query)?.into_subplan();
 
             match subquery.kind {
                 SubqueryKind::Scalar => {}

@@ -83,7 +83,7 @@
     /* alias more columns than available */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a, b, c) join t on a=v1;
-  binder_error: 'Bind error: table "tt" has less columns available but more aliases
+  binder_error: 'Bind error: table "tt" has 2 columns available but 3 column aliases
     specified'
 - sql: |
     create table t(x int);
