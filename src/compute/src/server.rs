@@ -211,6 +211,7 @@ pub async fn compute_node_serve(
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
+            .initial_connection_window_size(1 << 31 - 1)
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))

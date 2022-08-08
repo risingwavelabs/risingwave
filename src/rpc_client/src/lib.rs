@@ -93,7 +93,8 @@ where
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
         self.clients
             .try_get_with(addr.clone(), async {
-                let endpoint = Endpoint::from_shared(format!("http://{}", addr.clone()))?;
+                let endpoint = Endpoint::from_shared(format!("http://{}", addr.clone()))?
+                    .initial_connection_window_size(1 << 31 - 1);
                 let client = S::new_client(
                     addr,
                     endpoint

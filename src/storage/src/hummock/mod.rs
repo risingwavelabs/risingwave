@@ -208,7 +208,7 @@ impl HummockStorage {
 
     async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
         match tokio::time::timeout(
-            Duration::from_secs(10),
+            Duration::from_secs(200),
             self.compaction_group_client
                 .get_compaction_group_id(table_id.table_id),
         )

@@ -568,7 +568,8 @@ impl GrpcMetaClient {
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
-        let endpoint = Endpoint::from_shared(addr.to_string())?;
+        let endpoint =
+            Endpoint::from_shared(addr.to_string())?.initial_connection_window_size(1 << 31 - 1);
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);
