@@ -198,7 +198,7 @@ impl KafkaSink {
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache = Some( record_to_json(row.clone(), schema.fields.clone())? );
+                    update_cache = Some(record_to_json(row.clone(), schema.fields.clone())?);
                     continue;
                 }
                 Op::UpdateInsert => {
@@ -213,7 +213,10 @@ impl KafkaSink {
                             }
                         }))
                     } else {
-                        warn!("not found UpdateDelete in prev row, skipping, row_id {:?}", row.index());
+                        warn!(
+                            "not found UpdateDelete in prev row, skipping, row_id {:?}",
+                            row.index()
+                        );
                         continue;
                     }
                 }
@@ -250,8 +253,8 @@ impl KafkaSink {
 impl Sink for KafkaSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
-        //     return Ok(())
+        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
+        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
         // }
 
         println!("sink chunk {:?}", chunk);
