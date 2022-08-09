@@ -20,22 +20,6 @@ statement ok
 create materialized view mv_hop as
 select * from hop(t1, created_at, interval '15' minute, interval '30' minute);
 
-statement error
-create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '0', interval '1');
-
-statement error
-create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '1', interval '-1');
-
-statement error
-create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '-1', interval '1');
-
-statement error
-create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '-1', interval '-1');
-
 statement ok
 create materialized view mv_tumble_agg_1 as
 select sum(v) as sum_v, window_start
@@ -161,6 +145,22 @@ drop materialized view mv_hop_agg_1;
 
 statement ok
 drop materialized view mv_hop_agg_2;
+
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '0', interval '1');
+
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '1', interval '-1');
+
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '-1', interval '1');
+
+statement error
+create materialized view invalid_hop as
+select * from hop(t1, created_at, interval '-1', interval '-1');
 
 statement ok
 drop table t1;
