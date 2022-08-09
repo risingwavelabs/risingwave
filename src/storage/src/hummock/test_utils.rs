@@ -50,6 +50,7 @@ pub fn default_config_for_test() -> StorageConfig {
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,
+        ..Default::default()
     }
 }
 
