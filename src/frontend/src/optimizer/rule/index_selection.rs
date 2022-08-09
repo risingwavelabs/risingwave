@@ -41,7 +41,7 @@ use crate::utils::Condition;
 ///             * ... cost(match type of the last idx)
 ///
 /// For Example:
-/// index(a, b, c)
+/// index order_key (a, b, c)
 /// for a = 1 and b = 1 and c = 1, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
 /// for a in (xxx) and b = 1 and c = 1, its cost is In0 * Equal1 * Equal2 = 10
 /// for a = 1 and b in (xxx), its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
@@ -52,7 +52,7 @@ use crate::utils::Condition;
 ///
 /// With the assumption that the most effective part of a index is its prefix,
 /// cost decreases as `column_idx` increasing.
-/// for index length > 5, we just ignore the rest.
+/// for index order key length > 5, we just ignore the rest.
 
 const INDEX_MAX_LEN: usize = 5;
 const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
@@ -190,7 +190,7 @@ impl<'a> TableScanIoEstimator<'a> {
             .reduce(|x, y| x * y)
             .unwrap();
 
-        IndexCost::new(index_cost * self.row_size)
+        IndexCost::new(index_cost).mul(&IndexCost::new(self.row_size))
     }
 
     fn match_index_column(
@@ -251,11 +251,15 @@ impl IndexCost {
     }
 
     fn maximum() -> usize {
-        100000
+        10000000
     }
 
     fn add(&self, other: &IndexCost) -> IndexCost {
-        IndexCost::new(self.0 + other.0)
+        IndexCost::new(self.0.checked_add(other.0).unwrap_or(IndexCost::maximum()))
+    }
+
+    fn mul(&self, other: &IndexCost) -> IndexCost {
+        IndexCost::new(self.0.checked_mul(other.0).unwrap_or(IndexCost::maximum()))
     }
 
     fn le(&self, other: &IndexCost) -> bool {
