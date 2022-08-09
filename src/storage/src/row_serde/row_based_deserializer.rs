@@ -131,17 +131,16 @@ mod tests {
             .collect_vec();
 
         let mut se = RowBasedSerializer::create_row_serializer(&[], &column_descs, &column_ids);
-        let value_bytes = se.serialize(DEFAULT_VNODE, &[], row.clone()).unwrap();
+        let (pk, value) = se.serialize(DEFAULT_VNODE, &[], row.clone()).unwrap();
         // each cell will add a is_none flag (u8)
 
         let mut de =
             RowBasedDeserializer::create_row_deserializer(ColumnDescMapping::new(column_descs));
-        for (pk, value) in value_bytes {
-            assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
-            let row1 = de.deserialize(pk, value).unwrap();
-            assert_eq!(DEFAULT_VNODE, row1.clone().unwrap().0);
-            assert_eq!(row, row1.unwrap().2);
-        }
+
+        assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
+        let row1 = de.deserialize(pk, value).unwrap();
+        assert_eq!(DEFAULT_VNODE, row1.clone().unwrap().0);
+        assert_eq!(row, row1.unwrap().2);
     }
 
     #[test]
@@ -184,7 +183,7 @@ mod tests {
             .collect_vec();
 
         let mut se = RowBasedSerializer::create_row_serializer(&[], &column_descs, &column_ids);
-        let value_bytes = se.serialize(DEFAULT_VNODE, &[], row).unwrap();
+        let (pk, value) = se.serialize(DEFAULT_VNODE, &[], row).unwrap();
         // each cell will add a is_none flag (u8)
 
         let mut de = RowBasedDeserializer::create_row_deserializer(ColumnDescMapping::new_partial(
@@ -201,11 +200,10 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        for (pk, value) in value_bytes {
-            assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
-            let deser_row = de.deserialize(pk, value).unwrap();
-            assert_eq!(DEFAULT_VNODE, deser_row.clone().unwrap().0);
-            assert_eq!(partial_row, deser_row.unwrap().2);
-        }
+
+        assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
+        let deser_row = de.deserialize(pk, value).unwrap();
+        assert_eq!(DEFAULT_VNODE, deser_row.clone().unwrap().0);
+        assert_eq!(partial_row, deser_row.unwrap().2);
     }
 }

@@ -54,19 +54,7 @@ pub trait RowSerialize: Clone {
         vnode: VirtualNode,
         pk: &[u8],
         row: Row,
-    ) -> Result<Vec<(KeyBytes, ValueBytes)>>;
-
-    /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
-    /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
-    /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    fn serialize_for_update(
-        &mut self,
-        vnode: VirtualNode,
-        pk: &[u8],
-        row: Row,
-    ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
-
-    fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>>;
+    ) -> Result<(KeyBytes, ValueBytes)>;
 }
 
 /// `ColumnDescMapping` is the record mapping from [`ColumnDesc`], [`ColumnId`], and is used in both
