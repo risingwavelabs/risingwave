@@ -239,6 +239,8 @@ struct FilterKeyExtractorManagerInner {
     total_bloom_filter: AtomicUsize,
 }
 
+const MAX_REFRESH_DATA_SIZE: usize = 64 * 1024 * 1024; // 64GB
+
 impl FilterKeyExtractorManagerInner {
     fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
         self.table_id_to_filter_key_extractor
@@ -292,10 +294,17 @@ impl FilterKeyExtractorManagerInner {
 
     fn update_bloom_filter_avg_size(&self, sst_size: usize, bloom_filter_size: usize) {
         // store KB to avoid small result of div
-        self.total_file_size_kb
+        let old_size = self
+            .total_file_size_kb
             .fetch_add(sst_size / 1024, Ordering::SeqCst);
         self.total_bloom_filter
             .fetch_add(bloom_filter_size, Ordering::SeqCst);
+        if old_size > MAX_REFRESH_DATA_SIZE {
+            self.total_file_size_kb
+                .store(sst_size / 1024, Ordering::SeqCst);
+            self.total_bloom_filter
+                .store(bloom_filter_size, Ordering::SeqCst);
+        }
     }
 
     pub fn estimate_bloom_filter_size(&self, sst_size: usize) -> usize {
