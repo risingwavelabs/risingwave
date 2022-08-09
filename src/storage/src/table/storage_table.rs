@@ -17,6 +17,7 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
 use bytes::BufMut;
 use futures::future::try_join_all;
@@ -43,8 +44,7 @@ use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::serialize_pk_and_column_id;
 use crate::row_serde::{
-    serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde,
-    RowSerialize,
+    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -60,11 +60,6 @@ pub const READ_WRITE: AccessType = true;
 
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
-
-/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with cell-based
-/// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
-/// if the key of the column id does not exist, it will be Null in the relation
-pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
 
 /// [`RowBasedStorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format.
@@ -917,7 +912,12 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(mut self) {
-        while let Some((key, value)) = self.iter.next().await? {
+        while let Some((key, value)) = self
+            .iter
+            .next()
+            .stack_trace("storage_table_iter_next")
+            .await?
+        {
             if let Some((_vnode, pk, row)) = self
                 .row_deserializer
                 .deserialize(&key, &value)

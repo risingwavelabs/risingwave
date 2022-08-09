@@ -19,8 +19,8 @@
     LogicalScan { table: t, output_columns: [t.v1], required_columns: [v1, v2], predicate: (t.v2 > 2:Int32) }
 - sql: |
     /* join */
-    create table t1 (v1 int not null, v2 int not null, v3 int);
-    create table t2 (v1 int not null, v2 int not null, v3 int);
+    create table t1 (v1 int, v2 int, v3 int);
+    create table t2 (v1 int, v2 int, v3 int);
     select t1.v1, t2.v1 from t1 join t2 on t1.v2 = t2.v2;
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t2.v1] }
@@ -107,8 +107,8 @@
         LogicalScan { table: t, output_columns: [], required_columns: [v2], predicate: (t.v2 > 1:Int32) }
 - sql: |
     /* join + filter */
-    create table t1 (v1 int not null, v2 int not null, v3 int);
-    create table t2 (v1 int not null, v2 int not null, v3 int);
+    create table t1 (v1 int, v2 int, v3 int);
+    create table t2 (v1 int, v2 int, v3 int);
     select t1.v1, t2.v1 from t1 join t2 on t1.v2 = t2.v2 where t1.v3 < 1;
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t2.v1] }

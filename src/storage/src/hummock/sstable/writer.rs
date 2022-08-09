@@ -78,7 +78,7 @@ pub struct InMemWriterBuilder {
 impl From<&SstableBuilderOptions> for InMemWriterBuilder {
     fn from(opt: &SstableBuilderOptions) -> InMemWriterBuilder {
         InMemWriterBuilder {
-            capacity: get_in_mem_writer_capacity_from_opt(opt),
+            capacity: opt.capacity + opt.block_capacity,
         }
     }
 }
@@ -90,8 +90,4 @@ impl SstableWriterBuilder for InMemWriterBuilder {
     async fn build(&self) -> HummockResult<Self::Writer> {
         Ok(InMemSstableWriter::new(self.capacity))
     }
-}
-
-fn get_in_mem_writer_capacity_from_opt(opt: &SstableBuilderOptions) -> usize {
-    opt.capacity + opt.block_capacity
 }

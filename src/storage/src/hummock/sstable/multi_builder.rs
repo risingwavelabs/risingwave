@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use super::{InMemSstableWriter, SstableMeta, SstableWriterBuilder};
+use super::{InMemSstableWriter, SstableWriter, SstableWriterBuilder};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, HummockResult, Sstable, SstableBuilder, SstableWriter};
+use crate::hummock::{CachePolicy, HummockResult, SstableBuilder};
 
 /// Factory for new [`SstableBuilder`] inside the `CapacitySplitTableBuilder`.
 #[async_trait::async_trait]
@@ -32,11 +32,9 @@ where
 }
 
 pub struct SealedSstableBuilder {
-    pub id: HummockSstableId,
-    pub meta: SstableMeta,
-    pub table_ids: Vec<u32>,
+    pub sst_info: SstableInfo,
     pub upload_join_handle: JoinHandle<HummockResult<()>>,
-    pub data_len: usize,
+    pub bloom_filter_size: usize,
 }
 
 /// Consumer for FINISHED [`SstableBuilder`].
@@ -76,34 +74,33 @@ impl SstableBuilderConsumer<InMemSstableWriter> for SstableBatchUploader {
     ) -> HummockResult<SealedSstableBuilder> {
         let output = builder.finish().await?;
 
-        let table_id = output.sstable_id;
+        let sst_id = output.sstable_id;
         let data = output.writer_output;
-        let len = data.len();
+        let meta = output.meta;
+        let table_ids = output.table_ids;
+
         let sstable_store = self.sstable_store.clone();
-        let meta_clone = output.meta.clone();
+        let bloom_filter_size = meta.bloom_filter.len();
+        let sst_info = SstableInfo {
+            id: sst_id,
+            key_range: Some(risingwave_pb::hummock::KeyRange {
+                left: meta.smallest_key.clone(),
+                right: meta.largest_key.clone(),
+                inf: false,
+            }),
+            file_size: meta.estimated_size as u64,
+            table_ids,
+        };
         let policy = self.policy;
         let upload_join_handle = tokio::spawn(async move {
-            let ret = if policy == CachePolicy::Fill {
-                let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
-                sstable_store.put(sst, data, CachePolicy::Fill).await
-            } else {
-                sstable_store
-                    .put(
-                        Sstable::new(table_id, meta_clone),
-                        data,
-                        CachePolicy::NotFill,
-                    )
-                    .await
-            };
+            let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
             drop(tracker);
             ret
         });
         Ok(SealedSstableBuilder {
-            id: table_id,
-            meta: output.meta,
-            table_ids: output.table_ids,
+            sst_info,
             upload_join_handle,
-            data_len: len,
+            bloom_filter_size,
         })
     }
 }
@@ -232,8 +229,6 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering::SeqCst;
 
-    use itertools::Itertools;
-
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
@@ -310,6 +305,7 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
+            estimate_bloom_filter_capacity: 0,
         };
         let builder = get_capacity_split_builder(opt);
         let results = builder.finish().await.unwrap();
@@ -326,6 +322,7 @@ mod tests {
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
         };
         let mut builder = get_capacity_split_builder(opt);
 
@@ -342,7 +339,6 @@ mod tests {
 
         let results = builder.finish().await.unwrap();
         assert!(results.len() > 1);
-        assert_eq!(results.iter().map(|p| p.id).duplicates().count(), 0);
     }
 
     #[tokio::test]

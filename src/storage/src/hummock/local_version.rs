@@ -17,8 +17,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::lock_api::ArcRwLockReadGuard;
-use parking_lot::{RawRwLock, RwLock};
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
@@ -28,7 +27,7 @@ use super::shared_buffer::SharedBuffer;
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
-    shared_buffer: BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>>,
+    shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: Arc<PinnedVersion>,
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
 }
@@ -51,25 +50,32 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn get_shared_buffer(&self, epoch: HummockEpoch) -> Option<&Arc<RwLock<SharedBuffer>>> {
+    pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
+        self.shared_buffer.get_mut(&epoch)
+    }
+
+    pub fn get_shared_buffer(&self, epoch: HummockEpoch) -> Option<&SharedBuffer> {
         self.shared_buffer.get(&epoch)
     }
 
-    pub fn iter_shared_buffer(
-        &self,
-    ) -> impl Iterator<Item = (&HummockEpoch, &Arc<RwLock<SharedBuffer>>)> {
+    pub fn iter_shared_buffer(&self) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)> {
         self.shared_buffer.iter()
+    }
+
+    pub fn iter_mut_shared_buffer(
+        &mut self,
+    ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)> {
+        self.shared_buffer.iter_mut()
     }
 
     pub fn new_shared_buffer(
         &mut self,
         epoch: HummockEpoch,
         global_upload_task_size: Arc<AtomicUsize>,
-    ) -> Arc<RwLock<SharedBuffer>> {
+    ) -> &mut SharedBuffer {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::new(global_upload_task_size))))
-            .clone()
+            .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
     /// Returns epochs cleaned from shared buffer.
@@ -124,7 +130,7 @@ impl LocalVersion {
         };
 
         ReadVersion {
-            shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
+            shared_buffer: shared_buffer.into_iter().collect(),
             pinned_version,
         }
     }
@@ -194,6 +200,6 @@ impl PinnedVersion {
 
 pub struct ReadVersion {
     /// The shared buffer is sorted by epoch descendingly
-    pub shared_buffer: Vec<ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
+    pub shared_buffer: Vec<SharedBuffer>,
     pub pinned_version: Arc<PinnedVersion>,
 }

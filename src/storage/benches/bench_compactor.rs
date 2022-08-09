@@ -37,9 +37,9 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, InMemWriterBuilder, MemoryLimiter, Sstable,
+    CachePolicy, CompressionAlgorithm, HummockResult, InMemWriterBuilder, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
-    SstableWriterBuilder,
+    SstableWriterBuilder, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -47,7 +47,13 @@ pub fn mock_sstable_store() -> SstableStoreRef {
     let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
-    Arc::new(SstableStore::new(store, path, 64 << 20, 128 << 20))
+    Arc::new(SstableStore::new(
+        store,
+        path,
+        64 << 20,
+        128 << 20,
+        TieredCache::none(),
+    ))
 }
 
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
@@ -79,6 +85,7 @@ async fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, 
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
+        estimate_bloom_filter_capacity: 1024 * 1024,
     };
     let sstable_writer = sst_writer_builder_for_batch_upload(&opt)
         .build()
@@ -130,7 +137,7 @@ fn bench_table_scan(c: &mut Criterion) {
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
         sstable_store1
-            .put(Sstable::new(1, meta.clone()), data, CachePolicy::NotFill)
+            .put_sst(1, meta, data, CachePolicy::NotFill)
             .await
             .unwrap();
     });
@@ -188,6 +195,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
+        estimate_bloom_filter_capacity: 1024 * 1024,
     };
     let (writer_builder, builder_consumer) =
         sst_writer_builder_and_consumer_for_batch_upload(&opt, sstable_store, CachePolicy::NotFill);
@@ -242,19 +250,17 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             build_table(2, 0..test_key_size, 1).await,
         )
     });
-    let sst1 = Sstable::new_with_data(1, meta1.clone(), data1.clone()).unwrap();
-    let sst2 = Sstable::new_with_data(2, meta2.clone(), data2.clone()).unwrap();
+    let level1 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
         sstable_store1
-            .put(sst1, data1, CachePolicy::Fill)
+            .put_sst(1, meta1, data1, CachePolicy::Fill)
             .await
             .unwrap();
         sstable_store1
-            .put(sst2, data2, CachePolicy::Fill)
+            .put_sst(2, meta2, data2, CachePolicy::Fill)
             .await
             .unwrap();
     });
-    let level1 = generate_tables(vec![(1, meta1), (2, meta2)]);
 
     let ((data1, meta1), (data2, meta2)) = runtime.block_on(async move {
         (
@@ -262,20 +268,18 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             build_table(2, 0..test_key_size, 2).await,
         )
     });
-    let sst3 = Sstable::new_with_data(3, meta1.clone(), data1.clone()).unwrap();
-    let sst4 = Sstable::new_with_data(4, meta2.clone(), data2.clone()).unwrap();
     let sstable_store1 = sstable_store.clone();
+    let level2 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
         sstable_store1
-            .put(sst3, data1, CachePolicy::Fill)
+            .put_sst(3, meta1, data1, CachePolicy::Fill)
             .await
             .unwrap();
         sstable_store1
-            .put(sst4, data2, CachePolicy::Fill)
+            .put_sst(4, meta2, data2, CachePolicy::Fill)
             .await
             .unwrap();
     });
-    let level2 = generate_tables(vec![(1, meta1), (2, meta2)]);
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());

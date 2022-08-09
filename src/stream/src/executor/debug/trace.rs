@@ -14,9 +14,10 @@
 
 use std::sync::Arc;
 
+use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
+use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
 use tracing::event;
 use tracing_futures::Instrument;
 
@@ -106,6 +107,29 @@ pub async fn metrics(
             }
         }
 
+        yield message;
+    }
+}
+
+/// Streams wrapped by `stack_trace` will print the async stack trace of the executors.
+#[try_stream(ok = Message, error = StreamExecutorError)]
+pub async fn stack_trace(
+    info: Arc<ExecutorInfo>,
+    actor_id: ActorId,
+    executor_id: u64,
+    input: impl MessageStream,
+) {
+    pin_mut!(input);
+
+    let span: SpanValue = format!(
+        "{} (actor {}, executor {})",
+        info.identity,
+        actor_id,
+        executor_id as u32 // Use the lower 32 bit to match the dashboard.
+    )
+    .into();
+
+    while let Some(message) = input.next().stack_trace(span.clone()).await.transpose()? {
         yield message;
     }
 }
