@@ -1,0 +1,84 @@
+# The basic.slt is to cover the path of pgwire.
+#
+# There are two kinds of statement, they run different path of pgwire:
+#   1. un-query statement: SET,CREATE,INSERT,FLUSH,EXPLAIN,DROP..
+#   2. query statement: SELECT,WITH,VALUES,SHOW,DESCRIBE..
+# 
+# We also need to test different type in extended query mode:
+#   smallint,int,bigint
+#   real,double precision,numeric
+#   time,date,timestamp
+
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v int);
+
+statement ok
+explain create index i on t(v);
+
+statement ok
+create materialized view mv1 as select sum(v) as sum_v1 from t;
+
+statement ok
+insert into t (v) values (1);
+
+query I
+select * from t;
+----
+1
+
+statement ok
+drop materialized view mv1
+
+statement ok
+drop table t;
+
+query II
+values(round(42.4382));
+----
+42
+
+statement ok
+create table t3 (v1 int, v2 int, v3 int);
+
+query III
+describe t3;
+----
+v1 Int32
+v2 Int32
+v3 Int32
+
+query III
+show columns from t3;
+----
+v1 Int32
+v2 Int32
+v3 Int32
+
+statement ok
+drop table t3;
+
+query IV
+with t as (select generate_series(1,3,1)) select * from t;
+----
+1
+2
+3
+
+query V
+select 42::smallint, 42::int, 42::bigint;
+----
+42 42 42
+
+query VI
+select 42::real,42::double precision,42::decimal;
+----
+42 42 42
+
+query VII
+select '20:55:12'::time,'2022-07-12'::date,'2022-07-12 20:55:12'::timestamp;
+----
+20:55:12 2022-07-12 2022-07-12 20:55:12
