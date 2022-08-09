@@ -20,9 +20,9 @@ use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
-use tokio::sync::mpsc::error::SendError;
 
 use crate::cluster::META_NODE_ID;
 use crate::hummock::compaction::CompactStatus;
