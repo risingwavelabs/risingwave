@@ -74,8 +74,17 @@ impl StreamTableScan {
         &self.logical
     }
 
-    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> StreamIndexScan {
-        StreamIndexScan::new(self.logical.to_index_scan(index_name, index))
+    pub fn to_index_scan(
+        &self,
+        index_name: &str,
+        index_table_desc: Rc<TableDesc>,
+        primary_to_secondary_mapping: &[usize],
+    ) -> StreamIndexScan {
+        StreamIndexScan::new(self.logical.to_index_scan(
+            index_name,
+            index_table_desc,
+            primary_to_secondary_mapping,
+        ))
     }
 }
 

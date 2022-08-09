@@ -309,4 +309,14 @@ where
             snapshot: Some(hummock_snapshot),
         }))
     }
+
+    async fn report_full_scan_task(
+        &self,
+        request: Request<ReportFullScanTaskRequest>,
+    ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
+        self.hummock_manager
+            .extend_ssts_to_delete_from_scan(&request.into_inner().sst_ids)
+            .await;
+        Ok(Response::new(ReportFullScanTaskResponse { status: None }))
+    }
 }

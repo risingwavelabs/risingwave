@@ -20,6 +20,7 @@ pub(crate) mod catalog_service;
 
 pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
+pub(crate) mod index_catalog;
 pub(crate) mod pg_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
@@ -28,6 +29,7 @@ pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
 
+pub use index_catalog::IndexCatalog;
 pub use table_catalog::TableCatalog;
 
 pub(crate) type SourceId = u32;
@@ -74,6 +76,7 @@ pub fn is_row_id_column_name(name: &str) -> bool {
 }
 
 pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
+#[expect(dead_code)]
 pub const TABLE_SINK_PK_COLID: ColumnId = ColumnId::new(0);
 
 /// Creates a row ID column (for implicit primary key).

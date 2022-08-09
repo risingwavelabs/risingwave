@@ -30,13 +30,16 @@
 #![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
+#![feature(generators)]
 
 mod meta_client;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
+use async_stack_trace::StackTrace;
+pub use meta_client::{GrpcMetaClient, MetaClient};
 use moka::future::Cache;
 use tonic::transport::{Channel, Endpoint};
 mod compute_client;
@@ -47,6 +50,7 @@ pub mod error;
 mod stream_client;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::meta::heartbeat_request::extra_info;
 pub use stream_client::*;
 
 use crate::error::{Result, RpcError};
@@ -101,7 +105,33 @@ where
                 );
                 Ok::<_, RpcError>(client)
             })
+            .stack_trace("rpc_client_init")
             .await
             .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
+    }
+}
+
+/// `ExtraInfoSource` is used by heartbeat worker to pull extra info that needs to be piggybacked.
+#[async_trait::async_trait]
+pub trait ExtraInfoSource: Send + Sync {
+    /// None means the info is not available at the moment.
+    async fn get_extra_info(&self) -> Option<extra_info::Info>;
+}
+
+pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
+
+#[macro_export]
+macro_rules! rpc_client_method_impl {
+    ([], $( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(
+            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                Ok(self
+                    .$client
+                    .to_owned()
+                    .$fn_name(request)
+                    .await?
+                    .into_inner())
+            }
+        )*
     }
 }

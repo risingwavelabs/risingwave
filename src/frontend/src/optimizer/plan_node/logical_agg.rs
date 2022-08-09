@@ -18,7 +18,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
-use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -38,7 +38,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::{Direction, Order, RequiredDist};
+use crate::optimizer::property::{Direction, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
 /// See also [`crate::expr::AggOrderByExpr`]
@@ -244,10 +244,13 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 write!(
                     f,
                     "{}",
-                    self.input_schema.fields.get(input.index).unwrap().name
+                    InputRefDisplay {
+                        input_ref: input,
+                        input_schema: self.input_schema
+                    }
                 )?;
                 if idx != (that.inputs.len() - 1) {
-                    write!(f, ",")?;
+                    write!(f, ", ")?;
                 }
             }
             if !that.order_by_fields.is_empty() {
@@ -316,7 +319,7 @@ impl LogicalAgg {
                     .inner()
                     .with_properties
                     .iter()
-                    .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
 
@@ -367,7 +370,7 @@ impl LogicalAgg {
                     .inner()
                     .with_properties
                     .iter()
-                    .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+                    .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
 
@@ -818,11 +821,15 @@ impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-
         // there is only one row in simple agg's output, so its pk_indices is empty
-        let pk_indices = (0..group_key.len()).collect_vec();
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let pk_indices = (0..group_key.len()).into_iter().collect_vec();
+        let functional_dependency = Self::derive_fd(
+            schema.len(),
+            input.schema().len(),
+            input.functional_dependency(),
+            &group_key,
+        );
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         Self {
             base,
             agg_calls,
@@ -864,6 +871,28 @@ impl LogicalAgg {
             }))
             .collect();
         Schema { fields }
+    }
+
+    fn derive_fd(
+        column_cnt: usize,
+        input_len: usize,
+        input_fd_set: &FunctionalDependencySet,
+        group_key: &[usize],
+    ) -> FunctionalDependencySet {
+        let mut fd_set = FunctionalDependencySet::with_key(
+            column_cnt,
+            &(0..group_key.len()).into_iter().collect_vec(),
+        );
+        // take group keys from input_columns, then grow the target size to column_cnt
+        let i2o = ColIndexMapping::with_remaining_columns(group_key, input_len).composite(
+            &ColIndexMapping::identity_or_none(group_key.len(), column_cnt),
+        );
+        for fd in input_fd_set.as_dependencies() {
+            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+                fd_set.add_functional_dependency(fd);
+            }
+        }
+        fd_set
     }
 
     /// `create` will analyze select exprs, group exprs and having, and construct a plan like
@@ -1143,6 +1172,7 @@ impl ToStream for LogicalAgg {
         drop(input); // to prevent accidental use of logical input
 
         let input_dist = stream_input.distribution().clone();
+        let input_append_only = stream_input.append_only();
 
         let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
             matches!(
@@ -1150,10 +1180,10 @@ impl ToStream for LogicalAgg {
                 AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
             ) && c.order_by_fields.is_empty()
         });
-        let agg_calls_are_stateless = self
-            .agg_calls
-            .iter()
-            .all(|c| matches!(c.agg_kind, AggKind::Sum | AggKind::Count));
+        let agg_calls_are_stateless = self.agg_calls.iter().all(|c| {
+            matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
+                || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
+        });
         let is_simple_agg = self.group_key().is_empty();
 
         if is_simple_agg

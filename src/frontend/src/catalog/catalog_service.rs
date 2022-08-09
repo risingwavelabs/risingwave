@@ -16,12 +16,12 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
@@ -73,6 +73,13 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
+    async fn create_index(
+        &self,
+        index: ProstIndex,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>;
+
     async fn create_source(&self, source: ProstSource) -> Result<()>;
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
@@ -88,6 +95,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()>;
+
+    async fn drop_index(&self, index_id: IndexId) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -141,6 +150,16 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_index(
+        &self,
+        index: ProstIndex,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        let (_, version) = self.meta_client.create_index(index, table, graph).await?;
+        self.wait_version(version).await
+    }
+
     async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -184,6 +203,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_sink(&self, sink_id: u32) -> Result<()> {
         let version = self.meta_client.drop_sink(sink_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+        let version = self.meta_client.drop_index(index_id).await?;
         self.wait_version(version).await
     }
 

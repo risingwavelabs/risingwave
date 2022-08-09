@@ -18,7 +18,7 @@ while getopts 't:p:' opt; do
             exit 1
             ;;
         : )
-            echo "Invalid option: $OPTARG requires an arguemnt" 1>&2
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
             ;;
     esac
 done
@@ -44,8 +44,8 @@ ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
 cp target/"$target"/risingwave ./risingwave-"$profile"
-cp target/"$target"/risedev-playground ./risedev-playground-"$profile"
+cp target/"$target"/risedev-dev ./risedev-dev-"$profile"
 cp target/"$target"/risingwave_regress_test ./risingwave_regress_test-"$profile"
 buildkite-agent artifact upload risingwave-"$profile"
-buildkite-agent artifact upload risedev-playground-"$profile"
+buildkite-agent artifact upload risedev-dev-"$profile"
 buildkite-agent artifact upload risingwave_regress_test-"$profile"

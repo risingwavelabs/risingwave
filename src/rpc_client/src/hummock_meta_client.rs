@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, HummockVersion, HummockVersionDelta,
     SubscribeCompactTasksResponse, VacuumTask,
@@ -55,4 +57,5 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
     ) -> Result<()>;
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()>;
 }

@@ -540,7 +540,7 @@ where
         // allocation, but not actually builds it. We initialize all channels in this stage.
         for (worker_id, actors) in &worker_actors {
             let worker_node = locations.worker_locations.get(worker_id).unwrap();
-            let mut client = self.client_pool.get(worker_node).await?;
+            let client = self.client_pool.get(worker_node).await?;
 
             client
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -567,7 +567,7 @@ where
         // Build remaining hanging channels on compute nodes.
         for (worker_id, hanging_channels) in hanging_channels {
             let worker_node = locations.worker_locations.get(&worker_id).unwrap();
-            let mut client = self.client_pool.get(worker_node).await?;
+            let client = self.client_pool.get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
 
@@ -596,7 +596,7 @@ where
         // channels.
         for (worker_id, actors) in worker_actors {
             let worker_node = locations.worker_locations.get(&worker_id).unwrap();
-            let mut client = self.client_pool.get(worker_node).await?;
+            let client = self.client_pool.get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
@@ -845,6 +845,13 @@ mod tests {
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse::default()))
         }
+
+        async fn actor_trace(
+            &self,
+            _request: Request<ActorTraceRequest>,
+        ) -> std::result::Result<Response<ActorTraceResponse>, Status> {
+            Ok(Response::new(ActorTraceResponse::default()))
+        }
     }
 
     struct MockServices {
@@ -985,7 +992,7 @@ mod tests {
             .collect_vec()
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_create_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12333).await?;
 

@@ -18,9 +18,8 @@ use std::time::SystemTime;
 
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
-use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse, VacuumTask,
-};
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::{SubscribeCompactTasksResponse, CompactTask, CompactTaskProgress};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::MetaResult;
@@ -29,6 +28,9 @@ const STREAM_BUFFER_SIZE: usize = 4;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
 type TaskId = u64;
+
+/// Wraps the stream between meta node and compactor node.
+/// Compactor node will re-establish the stream when the previous one fails.
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
@@ -46,20 +48,13 @@ struct TaskHeartbeat {
 }
 
 impl Compactor {
-    pub async fn send_task(
-        &self,
-        compact_task: Option<CompactTask>,
-        vacuum_task: Option<VacuumTask>,
-    ) -> MetaResult<()> {
+    pub async fn send_task(&self, task: Task) -> MetaResult<()> {
         // TODO: compactor node backpressure
         self.sender
-            .send(Ok(SubscribeCompactTasksResponse {
-                compact_task: compact_task.clone(),
-                vacuum_task,
-            }))
+            .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        if let Some(task) = compact_task {
+        if let Task::CompactTask(task) = compact_task {
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .expect("Clock may have gone backwards")
@@ -218,7 +213,7 @@ impl CompactorManager {
                 task_heartbeat_interval_seconds: self.task_heartbeat_interval_seconds,
             }),
         );
-        tracing::info!("Added compactor {}", context_id);
+        tracing::info!("Added compactor session {}", context_id);
         rx
     }
 
@@ -226,7 +221,7 @@ impl CompactorManager {
         let mut guard = self.inner.write();
         guard.compactors.retain(|c| *c != context_id);
         guard.compactor_map.remove(&context_id);
-        tracing::info!("Removed compactor {}", context_id);
+        tracing::info!("Removed compactor session {}", context_id);
     }
 
     pub fn update_compaction_task_progress(
@@ -251,7 +246,9 @@ impl CompactorManager {
 mod tests {
     use std::collections::HashMap;
 
+    use risingwave_common::try_match_expand;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
@@ -330,12 +327,11 @@ mod tests {
             let compactor_id = guard.compactors.first().unwrap();
             guard.compactor_map.get(compactor_id).unwrap().clone()
         };
-        compactor.send_task(Some(task.clone()), None).await.unwrap();
+        compactor.send_task(Task::CompactTask(task.clone()), None).await.unwrap();
         // Receive a compact task.
-        assert_eq!(
-            receiver.try_recv().unwrap().unwrap().compact_task.unwrap(),
-            task
-        );
+        let received_task = receiver.try_recv().unwrap().unwrap().task.unwrap();
+        let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();
+        assert_eq!(received_compact_task, task);
 
         compactor_manager.remove_compactor(compactor.context_id);
         assert_eq!(compactor_manager.inner.read().compactors.len(), 0);
@@ -375,13 +371,15 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        compactor
+            .send_task(Task::CompactTask(task.clone()))
+            .await
+            .unwrap();
 
-        compactor.send_task(Some(task.clone()), None).await.unwrap();
         // Get a compact task.
-        assert_eq!(
-            receiver.try_recv().unwrap().unwrap().compact_task.unwrap(),
-            task
-        );
+        let received_task = receiver.try_recv().unwrap().unwrap().task.unwrap();
+        let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();
+        assert_eq!(received_compact_task, task);
 
         compactor_manager.remove_compactor(compactor.context_id());
         assert_eq!(compactor_manager.inner.read().compactors.len(), 0);

@@ -78,8 +78,8 @@
           StreamExchange { dist: HashShard(t3.v2) }
             StreamTableScan { table: t3, columns: [t3.v1, t3.v2, t3._row_id], pk: [t3._row_id], distribution: HashShard(t3._row_id) }
 - sql: |
-    create table t1 (v1 int not null, v2 int not null);
-    create table t2 (v1 int not null, v2 int not null);
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
     select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -103,8 +103,8 @@
           StreamExchange { dist: HashShard(t2.v1) }
             StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], distribution: HashShard(t2._row_id) }
 - sql: |
-    create table t1 (v1 int not null, v2 int not null);
-    create table t2 (v1 int not null, v2 int not null);
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
     select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 > t2.v1 and t1.v2 < 10;
   batch_plan: |
     BatchNestedLoopJoin { type: Inner, predicate: (t1.v1 > t2.v1), output: [t1.v2, t2.v2] }
@@ -120,20 +120,6 @@
           BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t2, columns: [t2.v1, t2.v2], distribution: SomeShard }
-- sql: |
-    create table t1 (v1 int, v2 float);
-    create table t2 (v3 int, v4 numeric, v5 bigint);
-    select * from t1, t2 where t1.v1 = t2.v3;
-  stream_plan: |
-    StreamMaterialize { columns: [v1, v2, v3, v4, v5, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id] }
-      StreamExchange { dist: HashShard(t1._row_id, t2._row_id) }
-        StreamDeltaHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t2.v5, t1._row_id, t2._row_id] }
-          StreamExchange { dist: HashShard(t1.v1) }
-            StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
-          StreamExchange { dist: HashShard(t2.v3) }
-            StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2.v5, t2._row_id], pk: [t2._row_id], distribution: HashShard(t2._row_id) }
-  with_config_map:
-    RW_FORCE_DELTA_JOIN: 'true'
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v3 int);
@@ -440,11 +426,13 @@
         LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
   optimized_logical_plan: |
     LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
-      LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: all }
-        LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
-          LogicalScan { table: a, columns: [a.x] }
-          LogicalScan { table: b, columns: [b.x] }
-        LogicalScan { table: c, columns: [c.x] }
+      LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: [a.x, b.x, c.x] }
+        LogicalProject { exprs: [a.x, b.x, Coalesce(a.x, b.x)] }
+          LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
+            LogicalScan { table: a, columns: [a.x] }
+            LogicalScan { table: b, columns: [b.x] }
+        LogicalProject { exprs: [c.x, c.x] }
+          LogicalScan { table: c, columns: [c.x] }
 - sql: |
     /* Ensure that nested natural joins bind and disambiguate columns */
     create table a(a int, y int);
@@ -505,3 +493,68 @@
                 StreamTableScan { table: a, columns: [a.x, a._row_id], pk: [a._row_id], distribution: HashShard(a._row_id) }
               StreamExchange { dist: HashShard(b.x) }
                 StreamTableScan { table: b, columns: [b.x, b._row_id], pk: [b._row_id], distribution: HashShard(b._row_id) }
+- sql: |
+    CREATE TABLE test (a INTEGER, b INTEGER);
+    CREATE TABLE test2 (a INTEGER, c INTEGER);
+    SELECT test.a, b, c FROM test, test2 WHERE test.a = test2.a AND test.b <> test2.c ORDER BY test.a;
+  logical_plan: |
+    LogicalProject { exprs: [test.a, test.b, test2.c] }
+      LogicalProject { exprs: [test.a, test.b, test2.c, test.a] }
+        LogicalFilter { predicate: (test.a = test2.a) AND (test.b <> test2.c) }
+          LogicalJoin { type: Inner, on: true, output: all }
+            LogicalScan { table: test, columns: [test._row_id, test.a, test.b] }
+            LogicalScan { table: test2, columns: [test2._row_id, test2.a, test2.c] }
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (test.a = test2.a) AND (test.b <> test2.c), output: [test.a, test.b, test2.c, test.a] }
+      LogicalScan { table: test, columns: [test.a, test.b] }
+      LogicalScan { table: test2, columns: [test2.a, test2.c] }
+  batch_plan: |
+    BatchProject { exprs: [test.a, test.b, test2.c] }
+      BatchExchange { order: [test.a ASC], dist: Single }
+        BatchSort { order: [test.a ASC] }
+          BatchProject { exprs: [test.a, test.b, test2.c, test.a] }
+            BatchFilter { predicate: (test.b <> test2.c) }
+              BatchHashJoin { type: Inner, predicate: test.a = test2.a, output: all }
+                BatchExchange { order: [], dist: HashShard(test.a) }
+                  BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
+                BatchExchange { order: [], dist: HashShard(test2.a) }
+                  BatchScan { table: test2, columns: [test2.a, test2.c], distribution: SomeShard }
+- sql: |
+    /* Use lookup join with predicate */
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
+    create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
+    select * from t1 join t3 where t1.v2 = t3.v1 and t3.v1 > 1;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (t1.v2 = t3.v1), output: all }
+      LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
+      LogicalScan { table: t3, output_columns: [t3.v1, t3.v2], required_columns: [v1, v2], predicate: (t3.v1 > 1:Int32) }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1 AND (t1.v1 > 1:Int32), output: all }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+  with_config_map:
+    QUERY_MODE: local
+    RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
+- sql: |
+    /* Use project to do the calculation */
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1, t2 where t1.x + t1.y = t2.x + t2.y;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: ((t1.x + t1.y) = (t2.x + t2.y)), output: [t1.x, t1.y, t2.x, t2.y] }
+      LogicalProject { exprs: [t1.x, t1.y, (t1.x + t1.y)] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y] }
+      LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y)] }
+        LogicalScan { table: t2, columns: [t2.x, t2.y] }
+- sql: |
+    /* Use project to align return types */
+    create table t1(x int, y int);
+    create table t2(x int, y decimal);
+    select * from t1, t2 where t1.x = t2.y;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (t1.x::Decimal = t2.y), output: [t1.x, t1.y, t2.x, t2.y] }
+      LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y] }
+      LogicalProject { exprs: [t2.x, t2.y, t2.y] }
+        LogicalScan { table: t2, columns: [t2.x, t2.y] }

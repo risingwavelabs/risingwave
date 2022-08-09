@@ -236,7 +236,11 @@ impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
-        let barrier = barrier_receiver.recv().await.unwrap();
+        let barrier = barrier_receiver
+            .recv()
+            .stack_trace("source_recv_first_barrier")
+            .await
+            .unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
@@ -262,7 +266,10 @@ impl<S: StateStore> SourceExecutor<S> {
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
 
         // todo: use epoch from msg to restore state from state store
-        let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
+        let source_chunk_reader = self
+            .build_stream_source_reader(recover_state)
+            .stack_trace("source_build_reader")
+            .await?;
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
@@ -496,34 +503,28 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let source = source.clone();
-            tokio::spawn(async move {
-                let table_source = source.as_table_v2().unwrap();
-                table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            let table_source = source.as_table_v2().unwrap();
+            table_source.write_chunk(chunk).unwrap();
         };
 
         barrier_sender.send(Barrier::new_test_barrier(1)).unwrap();
 
+        let msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(msg.into_barrier().unwrap().epoch, Epoch::new_test_epoch(1));
+
         // Write 1st chunk
         write_chunk(chunk1);
 
-        for _ in 0..2 {
-            match executor.next().await.unwrap().unwrap() {
-                Message::Chunk(chunk) => assert_eq!(
-                    chunk,
-                    StreamChunk::from_pretty(
-                        " I i T
-                        U+ 1 1 foo
-                        U+ 2 2 bar
-                        U+ 3 3 baz",
-                    )
-                ),
-                Message::Barrier(barrier) => {
-                    assert_eq!(barrier.epoch, Epoch::new_test_epoch(1))
-                }
-            }
-        }
+        let msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I i T
+                U+ 1 1 foo
+                U+ 2 2 bar
+                U+ 3 3 baz",
+            )
+        );
 
         // Write 2nd chunk
         write_chunk(chunk2);
@@ -620,20 +621,16 @@ mod tests {
         let mut executor = Box::new(executor).execute();
 
         let write_chunk = |chunk: StreamChunk| {
-            let source = source.clone();
-            tokio::spawn(async move {
-                let table_source = source.as_table_v2().unwrap();
-                table_source.blocking_write_chunk(chunk).await.unwrap();
-            });
+            let table_source = source.as_table_v2().unwrap();
+            table_source.write_chunk(chunk).unwrap();
         };
-
-        write_chunk(chunk.clone());
 
         barrier_sender
             .send(Barrier::new_test_barrier(1).with_stop())
             .unwrap();
-
         executor.next().await.unwrap().unwrap();
+
+        write_chunk(chunk.clone());
         executor.next().await.unwrap().unwrap();
         write_chunk(chunk);
 
@@ -684,10 +681,15 @@ mod tests {
         }
     }
 
-    fn drop_row_id(chunk: StreamChunk) -> StreamChunk {
-        let (ops, mut columns, bitmap) = chunk.into_inner();
-        columns.remove(0);
-        StreamChunk::new(ops, columns, bitmap)
+    trait StreamChunkExt {
+        fn drop_row_id(self) -> Self;
+    }
+    impl StreamChunkExt for StreamChunk {
+        fn drop_row_id(self) -> StreamChunk {
+            let (ops, mut columns, bitmap) = self.into_inner();
+            columns.remove(0);
+            StreamChunk::new(ops, columns, bitmap)
+        }
     }
 
     #[tokio::test]
@@ -769,7 +771,10 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let chunk_1 = materialize.next().await.unwrap().unwrap().into_chunk();
+        let chunk_1 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
 
         let chunk_1_truth = StreamChunk::from_pretty(
             " I i
@@ -777,9 +782,10 @@ mod tests {
             + 0 833
             + 0 738
             + 0 344",
-        );
+        )
+        .drop_row_id();
 
-        assert_eq!(drop_row_id(chunk_1.unwrap()), drop_row_id(chunk_1_truth));
+        assert_eq!(chunk_1, chunk_1_truth);
 
         let change_split_mutation = Barrier::new_test_barrier(curr_epoch + 1).with_mutation(
             Mutation::SourceChangeSplit(hashmap! {
@@ -804,7 +810,14 @@ mod tests {
 
         let _ = materialize.next().await.unwrap(); // barrier
 
-        let chunk_2 = materialize.next().await.unwrap().unwrap().into_chunk();
+        let chunk_2 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
+        let chunk_3 = (materialize.next().await.unwrap().unwrap())
+            .into_chunk()
+            .unwrap()
+            .drop_row_id();
 
         let chunk_2_truth = StreamChunk::from_pretty(
             " I i
@@ -812,18 +825,19 @@ mod tests {
             + 0 425
             + 0 29
             + 0 201",
-        );
-        assert_eq!(drop_row_id(chunk_2.unwrap()), drop_row_id(chunk_2_truth));
-
-        let chunk_3 = materialize.next().await.unwrap().unwrap().into_chunk();
-
+        )
+        .drop_row_id();
         let chunk_3_truth = StreamChunk::from_pretty(
             " I i
             + 0 833
             + 0 533
             + 0 344",
+        )
+        .drop_row_id();
+        assert!(
+            chunk_2 == chunk_2_truth && chunk_3 == chunk_3_truth
+                || chunk_3 == chunk_2_truth && chunk_2 == chunk_3_truth
         );
-        assert_eq!(drop_row_id(chunk_3.unwrap()), drop_row_id(chunk_3_truth));
 
         let pause_barrier =
             Barrier::new_test_barrier(curr_epoch + 2).with_mutation(Mutation::Pause);

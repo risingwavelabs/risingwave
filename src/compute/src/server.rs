@@ -29,7 +29,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
@@ -90,10 +90,7 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-    )];
+    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
@@ -137,7 +134,10 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        extra_info_sources.push(storage.sstable_id_manager());
         let memory_limiter = Arc::new(MemoryLimiter::new(
             storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
         ));
@@ -163,6 +163,12 @@ pub async fn compute_node_serve(
         }
         monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
     }
+
+    sub_tasks.push(MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+        extra_info_sources,
+    ));
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
@@ -195,6 +201,15 @@ pub async fn compute_node_serve(
         worker_id,
         state_store,
     );
+
+    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
+    // if this is not the case, we can use the following command to get it printed into the logs
+    // periodically.
+    //
+    // Comment out the following line to enable.
+    // TODO: may optionally enable based on the features
+    #[cfg(any())]
+    stream_mgr.clone().spawn_print_trace();
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);

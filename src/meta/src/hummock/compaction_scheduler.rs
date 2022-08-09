@@ -19,9 +19,10 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
-use tokio::sync::mpsc::error::SendError;
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
+use tokio::sync::mpsc::error::SendError;
 
 use crate::cluster::META_NODE_ID;
 use crate::hummock::compaction::CompactStatus;
@@ -178,7 +179,7 @@ where
             let send_task = async {
                 tokio::time::timeout(Duration::from_secs(5), async {
                     compactor
-                        .send_task(Some(compact_task.clone()), None)
+                        .send_task(Task::CompactTask(compact_task.clone()))
                         .await
                         .is_ok()
                 })
