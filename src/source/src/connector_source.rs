@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::{try_join_all, Either};
+use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
@@ -75,10 +75,10 @@ pub struct ConnectorSourceReader {
     pub columns: Vec<SourceColumnDesc>,
 
     handles: Option<HashMap<String, InnerConnectorSourceReaderHandle>>,
-    message_rx: Receiver<Either<Vec<SourceMessage>, RwError>>,
+    message_rx: Receiver<Result<Vec<SourceMessage>>>,
     // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
     // need to clone this tx when adding new inner readers in the future.
-    message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
+    message_tx: Sender<Result<Vec<SourceMessage>>>,
 
     metrics: Arc<SourceMetrics>,
     context: SourceContext,
@@ -127,7 +127,7 @@ impl InnerConnectorSourceReader {
     async fn run(
         &mut self,
         mut stop: oneshot::Receiver<()>,
-        output: mpsc::Sender<Either<Vec<SourceMessage>, RwError>>,
+        output: mpsc::Sender<Result<Vec<SourceMessage>>>,
     ) {
         let actor_id = self.context.actor_id.to_string();
         let source_id = self.context.source_id.to_string();
@@ -153,7 +153,7 @@ impl InnerConnectorSourceReader {
             match chunk.map_err(|e| internal_error(e.to_string())) {
                 Err(e) => {
                     tracing::error!("connector reader {} error happened {}", id, e.to_string());
-                    output.send(Either::Right(e)).await.ok();
+                    output.send(Err(e)).await.ok();
                     break;
                 }
                 Ok(None) => {
@@ -161,11 +161,14 @@ impl InnerConnectorSourceReader {
                     break;
                 }
                 Ok(Some(msg)) => {
+                    if msg.is_empty() {
+                        continue;
+                    }
                     self.metrics
                         .partition_input_count
                         .with_label_values(&[actor_id.as_str(), source_id.as_str(), id.as_str()])
                         .inc_by(msg.len() as u64);
-                    output.send(Either::Left(msg)).await.ok();
+                    output.send(Ok(msg)).await.ok();
                 }
             }
         }
@@ -177,12 +180,7 @@ impl SourceChunkBuilder for ConnectorSourceReader {}
 #[async_trait]
 impl StreamSourceReader for ConnectorSourceReader {
     async fn next(&mut self) -> Result<StreamChunkWithState> {
-        let batch = self.message_rx.recv().await.unwrap();
-
-        let batch = match batch {
-            Either::Left(batch) => batch,
-            Either::Right(e) => return Err(e),
-        };
+        let batch = self.message_rx.recv().await.unwrap()?;
 
         let mut events = Vec::with_capacity(batch.len());
         let mut split_offset_mapping: HashMap<String, String> = HashMap::new();
