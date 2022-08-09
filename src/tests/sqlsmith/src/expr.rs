@@ -182,6 +182,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
+        // TODO: workaround for <https://github.com/singularity-data/risingwave/issues/4508>
+        if ret == DataTypeName::Interval {
+            return self.gen_simple_scalar(ret);
+        }
         let funcs = match AGG_FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,

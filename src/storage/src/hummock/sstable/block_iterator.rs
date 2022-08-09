@@ -226,7 +226,7 @@ mod tests {
         builder.add(&full_key(b"k05", 5), b"v05");
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(
-            Block::decode(Bytes::from(buf)).unwrap(),
+            Block::decode(&buf).unwrap(),
         )))
     }
 
