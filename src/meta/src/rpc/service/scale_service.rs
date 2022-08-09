@@ -116,12 +116,7 @@ where
             })
             .collect();
 
-        let sources = self
-            .catalog_manager
-            .get_catalog_core_guard()
-            .await
-            .list_sources()
-            .await?;
+        let sources = self.catalog_manager.list_sources().await?;
 
         let mut stream_source_infos = HashMap::new();
         for source in sources {

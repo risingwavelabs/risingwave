@@ -244,8 +244,7 @@ where
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
     /// already.
     async fn sync_sources(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let sources = catalog_guard.list_sources().await?;
+        let sources = self.catalog_manager.list_sources().await?;
 
         let futures = info.node_map.iter().map(|(_, node)| {
             let request = SyncSourcesRequest {
