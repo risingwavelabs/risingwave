@@ -18,7 +18,6 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
@@ -327,7 +326,11 @@ where
         }
     }
 
-    pub async fn drop_table(&self, table_id: TableId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_table(
+        &self,
+        table_id: TableId,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
@@ -337,7 +340,23 @@ where
                     table.name, ref_count
                 ))),
                 None => {
-                    Table::delete(self.env.meta_store(), &table_id).await?;
+                    let mut transaction = Transaction::default();
+                    table.delete_in_transaction(&mut transaction)?;
+                    let mut tables_to_drop = vec![];
+                    for internal_table_id in internal_table_ids {
+                        let internal_table =
+                            Table::select(self.env.meta_store(), &internal_table_id).await?;
+                        if let Some(internal_table) = internal_table {
+                            internal_table.delete_in_transaction(&mut transaction)?;
+                            tables_to_drop.push(internal_table);
+                        }
+                    }
+                    core.env.meta_store().txn(transaction).await?;
+                    for table in tables_to_drop {
+                        core.drop_table(&table);
+                        self.broadcast_info_op(Operation::Delete, Info::Table(table))
+                            .await;
+                    }
                     core.drop_table(&table);
                     for &dependent_relation_id in &table.dependent_relations {
                         core.decrease_ref_count(dependent_relation_id);
@@ -355,18 +374,30 @@ where
         }
     }
 
+    pub async fn get_index_table(&self, index_id: IndexId) -> MetaResult<TableId> {
+        let index = Index::select(self.env.meta_store(), &index_id).await?;
+        if let Some(index) = index {
+            Ok(index.index_table_id)
+        } else {
+            bail!("index doesn't exist");
+        }
+    }
+
     pub async fn drop_index(
         &self,
         index_id: IndexId,
-    ) -> MetaResult<(TableId, NotificationVersion)> {
+        index_table_id: TableId,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let index = Index::select(self.env.meta_store(), &index_id).await?;
         if let Some(index) = index {
             let mut transaction = Transaction::default();
-            transaction.delete(Index::cf_name(), index.key()?.encode_to_vec());
+            index.delete_in_transaction(&mut transaction)?;
+            let mut tables_to_drop = vec![];
+            assert_eq!(index_table_id, index.index_table_id);
 
             // drop index table
-            let index_table_id = index.index_table_id;
             let table = Table::select(self.env.meta_store(), &index_table_id).await?;
             if let Some(table) = table {
                 match core.get_ref_count(index_table_id) {
@@ -375,10 +406,24 @@ where
                         table.name, ref_count
                     ))),
                     None => {
-                        transaction.delete(Table::cf_name(), table.key()?.encode_to_vec());
+                        table.delete_in_transaction(&mut transaction)?;
+                        for internal_table_id in internal_table_ids {
+                            let internal_table =
+                                Table::select(self.env.meta_store(), &internal_table_id).await?;
+                            if let Some(internal_table) = internal_table {
+                                internal_table.delete_in_transaction(&mut transaction)?;
+                                tables_to_drop.push(internal_table);
+                            }
+                        }
+
                         core.env.meta_store().txn(transaction).await?;
-                        core.drop_table(&table);
                         core.drop_index(&index);
+                        core.drop_table(&table);
+                        for table in tables_to_drop {
+                            core.drop_table(&table);
+                            self.broadcast_info_op(Operation::Delete, Info::Table(table))
+                                .await;
+                        }
                         for &dependent_relation_id in &table.dependent_relations {
                             core.decrease_ref_count(dependent_relation_id);
                         }
@@ -392,7 +437,7 @@ where
                             .broadcast_info_op(Operation::Delete, Info::Table(table.to_owned()))
                             .await;
 
-                        Ok((index.index_table_id, version))
+                        Ok(version)
                     }
                 }
             } else {
