@@ -39,7 +39,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{Distribution, Order};
+use super::property::{Distribution, FunctionalDependencySet, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
@@ -123,6 +123,10 @@ impl dyn PlanNode {
         self.plan_base().append_only
     }
 
+    pub fn functional_dependency(&self) -> &FunctionalDependencySet {
+        &self.plan_base().functional_dependency
+    }
+
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         self.to_batch_prost_identity(true)
@@ -153,35 +157,25 @@ impl dyn PlanNode {
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
-        self.to_stream_prost_auto_fields(true)
-    }
-
-    /// Serialize the plan node and its children to a stream plan proto without identity and without
-    /// operator id (for testing).
-    pub fn to_stream_prost_auto_fields(&self, auto_fields: bool) -> StreamPlanProst {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost(auto_fields);
+            return stream_table_scan.adhoc_to_stream_prost();
         }
         if let Some(stream_index_scan) = self.as_stream_index_scan() {
-            return stream_index_scan.adhoc_to_stream_prost(auto_fields);
+            return stream_index_scan.adhoc_to_stream_prost();
         }
 
         let node = Some(self.to_stream_prost_body());
         let input = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_stream_prost_auto_fields(auto_fields))
+            .map(|plan| plan.to_stream_prost())
             .collect();
         // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
+            identity: format!("{}", self),
             node_body: node,
-            operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
+            operator_id: self.id().0 as u64,
             pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),

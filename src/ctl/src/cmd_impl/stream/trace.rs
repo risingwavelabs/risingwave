@@ -37,11 +37,10 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
-        let mut client = clients.get(&cn).await?;
+        let client = clients.get(&cn).await?;
         let traces = client
             .actor_trace(ActorTraceRequest::default())
             .await?
-            .into_inner()
             .actor_traces;
         all_traces.extend(traces);
     }
