@@ -18,16 +18,6 @@ pub mod source;
 pub mod split;
 
 pub use config::build_client;
-
-const KINESIS_STREAM_NAME: &str = "kinesis.stream.name";
-const KINESIS_STREAM_REGION: &str = "kinesis.stream.region";
-const KINESIS_ENDPOINT: &str = "kinesis.endpoint";
-const KINESIS_CREDENTIALS_ACCESS_KEY: &str = "kinesis.credentials.access";
-const KINESIS_CREDENTIALS_SECRET_ACCESS_KEY: &str = "kinesis.credentials.secret";
-const KINESIS_CREDENTIALS_SESSION_TOKEN: &str = "kinesis.credentials.session_token";
-const KINESIS_ASSUMEROLE_ARN: &str = "kinesis.assumerole.arn";
-const KINESIS_ASSUMEROLE_EXTERNAL_ID: &str = "kinesis.assumerole.external_id";
-
 use serde::Deserialize;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
