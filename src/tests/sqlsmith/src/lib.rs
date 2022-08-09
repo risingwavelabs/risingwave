@@ -216,7 +216,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates a query with correlated context to ensure proper recursion.
     /// Used by `Subquery`
-    fn gen_corellated_query(&mut self) -> (Query, Vec<Column>){
+    fn gen_corellated_query(&mut self) -> (Query, Vec<Column>) {
         let old_ctxt = self.clone_local_context();
         let t = self.gen_query();
         self.restore_context(old_ctxt);
@@ -395,20 +395,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_group_by(&mut self) -> Vec<Expr> {
-        // let mut available = self.bound_columns.clone();
-        // if !available.is_empty() {
-        //     available.shuffle(self.rng);
-        //     let n_group_by_cols = self.rng.gen_range(1..=available.len());
-        //     let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
-        //     self.bound_columns = group_by_cols.clone();
-        //     group_by_cols
-        //         .into_iter()
-        //         .map(|c| Expr::Identifier(Ident::new(c.name)))
-        //         .collect_vec()
-        // } else {
-        //     vec![]
-        // }
-        vec![]
+        let mut available = self.bound_columns.clone();
+        if !available.is_empty() {
+            available.shuffle(self.rng);
+            let n_group_by_cols = self.rng.gen_range(1..=available.len());
+            let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
+            self.bound_columns = group_by_cols.clone();
+            group_by_cols
+                .into_iter()
+                .map(|c| Expr::Identifier(Ident::new(c.name)))
+                .collect_vec()
+        } else {
+            vec![]
+        }
     }
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
