@@ -55,6 +55,9 @@ impl BatchManager {
         let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
+        // Here the task id insert into self.tasks is put in front of `.async_execute`, cuz when
+        // send `TaskStatus::Running` in `.async_execute`, the query runner may schedule next stage,
+        // it's possible do not found parent task id in theory.
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
             Ok(())
@@ -63,7 +66,7 @@ impl BatchManager {
                 "can not create duplicate task with the same id: {:?}",
                 task_id,
             ))
-                .into())
+            .into())
         };
         task.clone().async_execute().await?;
         ret
