@@ -297,17 +297,7 @@ impl ColIndexMapping {
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
         match dist {
-            Distribution::HashShard(col_idxes) => {
-                let mapped_dist = col_idxes
-                    .iter()
-                    .map(|col_idx| self.try_map(*col_idx))
-                    .collect::<Option<Vec<_>>>();
-                match mapped_dist {
-                    Some(col_idx) => Distribution::HashShard(col_idx),
-                    None => Distribution::SomeShard,
-                }
-            }
-            Distribution::SomeHashShard(col_idxes) => {
+            Distribution::HashShard(col_idxes) | Distribution::UpstreamHashShard(col_idxes) => {
                 let mapped_dist = col_idxes
                     .iter()
                     .map(|col_idx| self.try_map(*col_idx))

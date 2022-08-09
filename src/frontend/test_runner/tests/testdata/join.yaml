@@ -18,11 +18,11 @@
         StreamHashJoin { type: Inner, predicate: t1.v1 = t3.v5, output: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t1._row_id, t2._row_id, t3._row_id] }
           StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: [t1.v1, t1.v2, t2.v3, t2.v4, t1._row_id, t2._row_id] }
             StreamExchange { dist: HashShard(t1.v1) }
-              StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: SomeHashShard(t1._row_id) }
+              StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
             StreamExchange { dist: HashShard(t2.v3) }
-              StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], distribution: SomeHashShard(t2._row_id) }
+              StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
           StreamExchange { dist: HashShard(t3.v5) }
-            StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], distribution: SomeHashShard(t3._row_id) }
+            StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], distribution: UpstreamHashShard(t3._row_id) }
 - sql: |
     /* self join */
     create table t (v1 int, v2 int);
@@ -37,9 +37,9 @@
       StreamExchange { dist: HashShard(t._row_id, t._row_id) }
         StreamHashJoin { type: Inner, predicate: t.v1 = t.v1, output: [t.v1, t.v1, t._row_id, t._row_id] }
           StreamExchange { dist: HashShard(t.v1) }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
           StreamExchange { dist: HashShard(t.v1) }
-            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
@@ -72,11 +72,11 @@
           StreamExchange { dist: HashShard(t2.v2) }
             StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v1, output: [t1.v1, t1.v2, t2.v1, t2.v2, t1._row_id, t2._row_id] }
               StreamExchange { dist: HashShard(t1.v1) }
-                StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: SomeHashShard(t1._row_id) }
+                StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
               StreamExchange { dist: HashShard(t2.v1) }
-                StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], distribution: SomeHashShard(t2._row_id) }
+                StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
           StreamExchange { dist: HashShard(t3.v2) }
-            StreamTableScan { table: t3, columns: [t3.v1, t3.v2, t3._row_id], pk: [t3._row_id], distribution: SomeHashShard(t3._row_id) }
+            StreamTableScan { table: t3, columns: [t3.v1, t3.v2, t3._row_id], pk: [t3._row_id], distribution: UpstreamHashShard(t3._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
@@ -99,9 +99,9 @@
       StreamExchange { dist: HashShard(t1._row_id, t2._row_id) }
         StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v1, output: [t1.v2, t2.v2, t1._row_id, t2._row_id] }
           StreamExchange { dist: HashShard(t1.v1) }
-            StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: SomeHashShard(t1._row_id) }
+            StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
           StreamExchange { dist: HashShard(t2.v1) }
-            StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], distribution: SomeHashShard(t2._row_id) }
+            StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
@@ -191,9 +191,9 @@
       StreamExchange { dist: HashShard(i.t._row_id, i.t._row_id) }
         StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id] }
           StreamExchange { dist: HashShard(i.x) }
-            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
           StreamExchange { dist: HashShard(i.x) }
-            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
 - sql: |
     /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
     create table t(x int);
@@ -211,9 +211,9 @@
       StreamExchange { dist: HashShard(i.t._row_id, t._row_id) }
         StreamHashJoin { type: Inner, predicate: i.x = t.x, output: [i.x, t.x, i.t._row_id, t._row_id] }
           StreamExchange { dist: HashShard(i.x) }
-            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
           StreamExchange { dist: HashShard(t.x) }
-            StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
+            StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* Left & right has same HashShard distribution. There should be no exchange below hash join */
     create table t(x int);
@@ -244,14 +244,14 @@
           StreamHashJoin { type: FullOuter, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id, i.t._row_id, i.t._row_id] }
             StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id] }
               StreamExchange { dist: HashShard(i.x) }
-                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
               StreamExchange { dist: HashShard(i.x) }
-                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
             StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id] }
               StreamExchange { dist: HashShard(i.x) }
-                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
               StreamExchange { dist: HashShard(i.x) }
-                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
 - sql: |
     /* Use lookup join */
     create table t1 (v1 int, v2 int);
@@ -521,9 +521,9 @@
           StreamFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
             StreamHashJoin { type: FullOuter, predicate: a.x = b.x, output: [a.x, b.x, a._row_id, b._row_id] }
               StreamExchange { dist: HashShard(a.x) }
-                StreamTableScan { table: a, columns: [a.x, a._row_id], pk: [a._row_id], distribution: SomeHashShard(a._row_id) }
+                StreamTableScan { table: a, columns: [a.x, a._row_id], pk: [a._row_id], distribution: UpstreamHashShard(a._row_id) }
               StreamExchange { dist: HashShard(b.x) }
-                StreamTableScan { table: b, columns: [b.x, b._row_id], pk: [b._row_id], distribution: SomeHashShard(b._row_id) }
+                StreamTableScan { table: b, columns: [b.x, b._row_id], pk: [b._row_id], distribution: UpstreamHashShard(b._row_id) }
 - sql: |
     CREATE TABLE test (a INTEGER, b INTEGER);
     CREATE TABLE test2 (a INTEGER, c INTEGER);

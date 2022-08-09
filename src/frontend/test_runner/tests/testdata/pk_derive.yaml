@@ -27,13 +27,13 @@
             StreamExchange { dist: HashShard(t1.id) }
               StreamHashAgg { group_key: [t1.id, Vnode(t1._row_id)], aggs: [count, max(t1.v1)] }
                 StreamProject { exprs: [t1.id, t1.v1, t1._row_id, Vnode(t1._row_id)] }
-                  StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1._row_id], pk: [t1._row_id], distribution: SomeHashShard(t1._row_id) }
+                  StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
         StreamProject { exprs: [max(max(t2.v2)), t2.id] }
           StreamHashAgg { group_key: [t2.id], aggs: [sum(count), max(max(t2.v2))] }
             StreamExchange { dist: HashShard(t2.id) }
               StreamHashAgg { group_key: [t2.id, Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
                 StreamProject { exprs: [t2.id, t2.v2, t2._row_id, Vnode(t2._row_id)] }
-                  StreamTableScan { table: t2, columns: [t2.id, t2.v2, t2._row_id], pk: [t2._row_id], distribution: SomeHashShard(t2._row_id) }
+                  StreamTableScan { table: t2, columns: [t2.id, t2.v2, t2._row_id], pk: [t2._row_id], distribution: UpstreamHashShard(t2._row_id) }
 - sql: |
     create table t (id int, v int);
     SELECT Tone.max_v, Ttwo.min_v
@@ -61,13 +61,13 @@
             StreamExchange { dist: HashShard(t.id) }
               StreamHashAgg { group_key: [t.id, Vnode(t._row_id)], aggs: [count, max(t.v)] }
                 StreamProject { exprs: [t.id, t.v, t._row_id, Vnode(t._row_id)] }
-                  StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
+                  StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
         StreamProject { exprs: [min(min(t.v)), t.id] }
           StreamHashAgg { group_key: [t.id], aggs: [sum(count), min(min(t.v))] }
             StreamExchange { dist: HashShard(t.id) }
               StreamHashAgg { group_key: [t.id, Vnode(t._row_id)], aggs: [count, min(t.v)] }
                 StreamProject { exprs: [t.id, t.v, t._row_id, Vnode(t._row_id)] }
-                  StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
+                  StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     select
@@ -87,7 +87,7 @@
         StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
           StreamHashAgg { group_key: [t.v1, t.v2, t.v3, Vnode(t._row_id)], aggs: [count] }
             StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id)] }
-              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
+              StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     create materialized view mv as
@@ -111,4 +111,4 @@
     StreamMaterialize { columns: [v1, mv.v2(hidden), mv.v3(hidden)], pk_columns: [v1, mv.v2, mv.v3] }
       StreamExchange { dist: HashShard(mv.v1, mv.v2, mv.v3) }
         StreamFilter { predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
-          StreamTableScan { table: mv, columns: [mv.v1, mv.v2, mv.v3], pk: [mv.v1, mv.v2, mv.v3], distribution: SomeHashShard(mv.v1, mv.v2, mv.v3) }
+          StreamTableScan { table: mv, columns: [mv.v1, mv.v2, mv.v3], pk: [mv.v1, mv.v2, mv.v3], distribution: UpstreamHashShard(mv.v1, mv.v2, mv.v3) }

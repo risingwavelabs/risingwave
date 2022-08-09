@@ -70,8 +70,18 @@ pub enum Distribution {
     /// the records with the same hash values must be on the same partition.
     /// `usize` is the index of column used as the distribution key.
     HashShard(Vec<usize>),
-    SomeHashShard(Vec<usize>),
-    /// Records are available on all downstream shards
+    /// A special kind of provided distribution which is almost the same as
+    /// [`Distribution::HashShard`], but doesn't satisfies [`RequiredDist::ShardByKey`].
+    ///
+    /// It exists because the upstream MV can be scaled independently, and has different vnode
+    /// mapping with the current MV. So we use `UpstreamHashShard` to force an exchange is
+    /// inserted.
+    ///
+    /// Alternatively, [`Distribution::SomeShard`] can also be used to insert an exchange, but
+    /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,
+    /// two-phase Agg.
+    UpstreamHashShard(Vec<usize>),
+    /// Records are available on all downstream shards.
     Broadcast,
 }
 
@@ -99,7 +109,7 @@ impl Distribution {
                 // TODO: add round robin DistributionMode
                 Distribution::SomeShard => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
-                Distribution::SomeHashShard(_) => unreachable!(),
+                Distribution::UpstreamHashShard(_) => unreachable!(),
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
@@ -116,7 +126,7 @@ impl Distribution {
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,
                 Distribution::Broadcast => None,
-                Distribution::SomeHashShard(_) => unreachable!(),
+                Distribution::UpstreamHashShard(_) => unreachable!(),
             },
         }
     }
@@ -130,7 +140,7 @@ impl Distribution {
                     self,
                     Distribution::SomeShard
                         | Distribution::HashShard(_)
-                        | Distribution::SomeHashShard(_)
+                        | Distribution::UpstreamHashShard(_)
                         | Distribution::Broadcast
                 )
             }
@@ -151,8 +161,7 @@ impl Distribution {
             Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
                 Default::default()
             }
-            Distribution::HashShard(dists) => dists,
-            Distribution::SomeHashShard(dists) => dists,
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => dists,
         }
     }
 }
@@ -164,12 +173,7 @@ impl fmt::Display for Distribution {
             Self::Single => f.write_str("Single")?,
             Self::SomeShard => f.write_str("SomeShard")?,
             Self::Broadcast => f.write_str("Broadcast")?,
-            Self::HashShard(vec) => {
-                for key in vec {
-                    std::fmt::Debug::fmt(&key, f)?;
-                }
-            }
-            Self::SomeHashShard(vec) => {
+            Self::HashShard(vec) | Self::UpstreamHashShard(vec) => {
                 for key in vec {
                     std::fmt::Debug::fmt(&key, f)?;
                 }
@@ -191,24 +195,12 @@ impl DistributionDisplay<'_> {
             Distribution::Single => f.write_str("Single"),
             Distribution::SomeShard => f.write_str("SomeShard"),
             Distribution::Broadcast => f.write_str("Broadcast"),
-            Distribution::HashShard(vec) => {
-                f.write_str("HashShard(")?;
-                for key in vec.iter().copied().with_position() {
-                    std::fmt::Debug::fmt(
-                        &FieldDisplay(self.input_schema.fields.get(key.into_inner()).unwrap()),
-                        f,
-                    )?;
-                    match key {
-                        itertools::Position::First(_) | itertools::Position::Middle(_) => {
-                            f.write_str(", ")?;
-                        }
-                        _ => {}
-                    }
+            Distribution::HashShard(vec) | Distribution::UpstreamHashShard(vec) => {
+                if let Distribution::HashShard(_) = that {
+                    f.write_str("HashShard(")?;
+                } else {
+                    f.write_str("UpstreamHashShard(")?;
                 }
-                f.write_str(")")
-            }
-            Distribution::SomeHashShard(vec) => {
-                f.write_str("SomeHashShard(")?;
                 for key in vec.iter().copied().with_position() {
                     std::fmt::Debug::fmt(
                         &FieldDisplay(self.input_schema.fields.get(key.into_inner()).unwrap()),

@@ -107,12 +107,12 @@ impl StreamHashJoin {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (
                 Distribution::HashShard(_),
-                Distribution::HashShard(_) | Distribution::SomeHashShard(_),
+                Distribution::HashShard(_) | Distribution::UpstreamHashShard(_),
             ) => l2o_mapping.rewrite_provided_distribution(left),
-            (Distribution::SomeHashShard(_), Distribution::HashShard(_)) => {
+            (Distribution::UpstreamHashShard(_), Distribution::HashShard(_)) => {
                 r2o_mapping.rewrite_provided_distribution(right)
             }
-            (Distribution::SomeHashShard(_), Distribution::SomeHashShard(_)) => {
+            (Distribution::UpstreamHashShard(_), Distribution::UpstreamHashShard(_)) => {
                 Distribution::SomeShard
             }
             (_, _) => unreachable!(
