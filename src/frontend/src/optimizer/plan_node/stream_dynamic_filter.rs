@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use risingwave_common::catalog::{DatabaseId, Schema, SchemaId};
-use risingwave_common::config::constant::hummock::PROPERTIES_TTL_KEY;
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -134,7 +134,7 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
             .inner()
             .with_properties
             .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
 
@@ -157,7 +157,7 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
             .inner()
             .with_properties
             .iter()
-            .filter(|(key, _)| key.as_str() == PROPERTIES_TTL_KEY)
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect();
 

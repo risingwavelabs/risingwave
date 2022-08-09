@@ -1,0 +1,28 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+# description: Test inequality join with > STANDARD_VECTOR_SIZE duplicates
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Disable this test due to the unsupported feature 'repeat'
+# statement ok
+# CREATE TABLE test (b INTEGER);
+
+# statement ok
+# INSERT INTO test VALUES (1), (2);
+
+# statement ok
+# CREATE TABLE test2 AS SELECT * FROM repeat(1, 10*1024) t1(b);
+
+# query I
+# SELECT COUNT(*) FROM test2;
+# ----
+# 10240
+
+# query I
+# SELECT COUNT(*) FROM test INNER JOIN test2 ON test.b<>test2.b
+# ----
+# 10240
+

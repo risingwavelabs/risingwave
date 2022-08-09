@@ -15,10 +15,11 @@
 use std::pin::Pin;
 use std::task::Poll;
 
+use async_stack_trace::StackTrace;
 use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures_async_stream::{stream, try_stream};
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_source::*;
@@ -46,7 +47,7 @@ impl SourceReaderStream {
     /// Receive barriers from barrier manager with the channel, error on channel close.
     #[try_stream(ok = Barrier, error = StreamExecutorError)]
     async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
-        while let Some(barrier) = rx.recv().await {
+        while let Some(barrier) = rx.recv().stack_trace("source_recv_barrier").await {
             yield barrier;
         }
         bail!("barrier reader closed unexpectedly");
@@ -56,14 +57,21 @@ impl SourceReaderStream {
     #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
     async fn source_chunk_reader(mut reader: Box<SourceStreamReaderImpl>) {
         loop {
-            match reader.next().await {
+            match reader.next().stack_trace("source_recv_chunk").await {
                 Ok(chunk) => yield chunk,
                 Err(err) => {
                     error!("hang up stream reader due to polling error: {}", err);
-                    futures::future::pending().await
+                    futures::future::pending().stack_trace("source_error").await
                 }
             }
         }
+    }
+
+    #[stream(item = T)]
+    async fn paused_source<T>() {
+        yield futures::future::pending()
+            .stack_trace("source_paused")
+            .await
     }
 
     /// Convert this reader to a stream.
@@ -101,7 +109,7 @@ impl SourceReaderStream {
             panic!("already paused");
         }
         let source_chunk_reader =
-            std::mem::replace(self.inner.get_mut().1, futures::stream::pending().boxed());
+            std::mem::replace(self.inner.get_mut().1, Self::paused_source().boxed());
         let _ = self.paused.insert(source_chunk_reader);
     }
 
@@ -132,7 +140,7 @@ mod tests {
 
     use super::*;
 
-    #[madsim::test]
+    #[tokio::test]
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 

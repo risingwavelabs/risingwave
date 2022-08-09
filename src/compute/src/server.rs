@@ -19,7 +19,7 @@ use std::time::Duration;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::config::{ComputeNodeConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -29,7 +29,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
@@ -90,10 +90,7 @@ pub async fn compute_node_serve(
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-    )];
+    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
@@ -129,6 +126,7 @@ pub async fn compute_node_serve(
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
+        &opts.file_cache_dir,
         storage_config.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -137,7 +135,10 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        extra_info_sources.push(storage.sstable_id_manager());
         let memory_limiter = Arc::new(MemoryLimiter::new(
             storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
         ));
@@ -163,6 +164,12 @@ pub async fn compute_node_serve(
         }
         monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
     }
+
+    sub_tasks.push(MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+        extra_info_sources,
+    ));
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
@@ -196,6 +203,15 @@ pub async fn compute_node_serve(
         state_store,
     );
 
+    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
+    // if this is not the case, we can use the following command to get it printed into the logs
+    // periodically.
+    //
+    // Comment out the following line to enable.
+    // TODO: may optionally enable based on the features
+    #[cfg(any())]
+    stream_mgr.clone().spawn_print_trace();
+
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
@@ -205,6 +221,7 @@ pub async fn compute_node_serve(
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))

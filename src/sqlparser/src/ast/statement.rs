@@ -85,7 +85,8 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json, // Keyword::JSON
+    Json,         // Keyword::JSON
+    DebeziumJson, // Keyword::DEBEZIUM_JSON
 }
 
 impl ParseTo for SourceSchema {
@@ -95,6 +96,8 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::PROTOBUF]) {
             impl_parse_to!(protobuf_schema: ProtobufSchema, p);
             SourceSchema::Protobuf(protobuf_schema)
+        } else if p.parse_keywords(&[Keyword::DEBEZIUM_JSON]) {
+            SourceSchema::DebeziumJson
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF after ROW FORMAT".to_string(),
@@ -109,6 +112,7 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
         }
     }
 }
@@ -367,6 +371,8 @@ pub enum UserOption {
     NoSuperUser,
     CreateDB,
     NoCreateDB,
+    CreateUser,
+    NoCreateUser,
     Login,
     NoLogin,
     EncryptedPassword(AstString),
@@ -380,6 +386,8 @@ impl fmt::Display for UserOption {
             UserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
             UserOption::CreateDB => write!(f, "CREATEDB"),
             UserOption::NoCreateDB => write!(f, "NOCREATEDB"),
+            UserOption::CreateUser => write!(f, "CREATEUSER"),
+            UserOption::NoCreateUser => write!(f, "NOCREATEUSER"),
             UserOption::Login => write!(f, "LOGIN"),
             UserOption::NoLogin => write!(f, "NOLOGIN"),
             UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
@@ -410,6 +418,8 @@ impl ParseTo for UserOptions {
                     Keyword::NOSUPERUSER => UserOption::NoSuperUser,
                     Keyword::CREATEDB => UserOption::CreateDB,
                     Keyword::NOCREATEDB => UserOption::NoCreateDB,
+                    Keyword::CREATEUSER => UserOption::CreateUser,
+                    Keyword::NOCREATEUSER => UserOption::NoCreateUser,
                     Keyword::LOGIN => UserOption::Login,
                     Keyword::NOLOGIN => UserOption::NoLogin,
                     Keyword::PASSWORD => {
@@ -425,7 +435,7 @@ impl ParseTo for UserOptions {
                     }
                     _ => parser.expected(
                         "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | ENCRYPTED | PASSWORD | NULL",
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | ENCRYPTED | PASSWORD | NULL",
                         token,
                     )?,
                 };
@@ -433,7 +443,7 @@ impl ParseTo for UserOptions {
             } else {
                 parser.expected(
                     "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | ENCRYPTED | PASSWORD | NULL",
+                        | CREATEUSER | NOCREATEUSER | ENCRYPTED| PASSWORD | NULL",
                     token,
                 )?
             }

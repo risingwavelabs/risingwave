@@ -1526,6 +1526,7 @@ impl Parser {
     // where option can be:
     //       SUPERUSER | NOSUPERUSER
     //     | CREATEDB | NOCREATEDB
+    //     | CREATEUSER | NOCREATEUSER
     //     | LOGIN | NOLOGIN
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
@@ -1548,10 +1549,17 @@ impl Parser {
         self.expect_token(&Token::LParen)?;
         let columns = self.parse_comma_separated(Parser::parse_order_by_expr)?;
         self.expect_token(&Token::RParen)?;
+        let mut include = vec![];
+        if self.parse_keyword(Keyword::INCLUDE) {
+            self.expect_token(&Token::LParen)?;
+            include = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_token(&Token::RParen)?;
+        }
         Ok(Statement::CreateIndex {
             name: index_name,
             table_name,
             columns,
+            include,
             unique,
             if_not_exists,
         })
@@ -2669,6 +2677,11 @@ impl Parser {
                     return Ok(Statement::ShowObjects(ShowObject::Source {
                         schema: self.parse_from_and_identifier()?,
                     }));
+                }
+                Keyword::SINKS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Sink {
+                        schema: self.parse_from_and_identifier()?,
+                    }))
                 }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowObjects(ShowObject::Database));

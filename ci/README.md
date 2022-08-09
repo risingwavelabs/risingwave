@@ -4,7 +4,7 @@
 
 Sqlsmith has two `cron` workflows.
 1. Frontend tests
-2. E2e tests (TODO)
+2. E2e tests
 
 It is separate from PR workflow because:
 1. Fuzzing tests might fail as new features and generators are added.

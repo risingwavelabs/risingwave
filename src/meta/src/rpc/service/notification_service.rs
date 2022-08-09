@@ -23,9 +23,10 @@ use tonic::{Request, Response, Status};
 
 use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::error::meta_error_to_tonic;
+use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
-use crate::MetaError;
+use crate::stream::GlobalStreamManagerRef;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -33,6 +34,8 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     user_manager: UserInfoManagerRef<S>,
+    hummock_manager: HummockManagerRef<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -44,58 +47,17 @@ where
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         user_manager: UserInfoManagerRef<S>,
+        hummock_manager: HummockManagerRef<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
     ) -> Self {
         Self {
             env,
             catalog_manager,
             cluster_manager,
             user_manager,
+            hummock_manager,
+            stream_manager,
         }
-    }
-
-    async fn build_snapshot_by_type(
-        &self,
-        worker_type: WorkerType,
-    ) -> Result<MetaSnapshot, MetaError> {
-        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let (database, schema, table, source, sink) = catalog_guard.get_catalog().await?;
-
-        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
-
-        let user_guard = self.user_manager.get_user_core_guard().await;
-        let users = user_guard
-            .get_user_info()
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-
-        // Send the snapshot on subscription. After that we will send only updates.
-        let result = match worker_type {
-            WorkerType::Frontend => MetaSnapshot {
-                nodes,
-                database,
-                schema,
-                source,
-                sink,
-                table,
-                users,
-            },
-
-            WorkerType::Compactor => MetaSnapshot {
-                table,
-                ..Default::default()
-            },
-
-            WorkerType::ComputeNode => MetaSnapshot {
-                table,
-                ..Default::default()
-            },
-
-            _ => unreachable!(),
-        };
-
-        Ok(result)
     }
 }
 
@@ -117,7 +79,61 @@ where
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
+        // let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
+
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+
+        let (database, schema, mut table, source, sink, index) =
+            catalog_guard.get_catalog().await?;
+
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+
+        let user_guard = self.user_manager.get_user_core_guard().await;
+        let users = user_guard
+            .get_user_info()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let hummock_version = Some(self.hummock_manager.get_current_version().await);
+
+        let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
+
+        // Send the snapshot on subscription. After that we will send only updates.
+        let meta_snapshot = match worker_type {
+            WorkerType::Frontend => MetaSnapshot {
+                nodes,
+                database,
+                schema,
+                source,
+                sink,
+                table,
+                users,
+                hummock_version: None,
+                index,
+            },
+
+            WorkerType::Compactor => {
+                table.extend(processing_table_guard.values().cloned());
+
+                MetaSnapshot {
+                    table,
+                    ..Default::default()
+                }
+            }
+
+            WorkerType::ComputeNode => {
+                table.extend(processing_table_guard.values().cloned());
+
+                MetaSnapshot {
+                    table,
+                    hummock_version,
+                    ..Default::default()
+                }
+            }
+
+            _ => unreachable!(),
+        };
 
         tx.send(Ok(SubscribeResponse {
             status: None,

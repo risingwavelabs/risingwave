@@ -417,8 +417,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
-        stream_manager,
-        source_manager,
+        stream_manager.clone(),
+        source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
         ddl_lock.clone(),
@@ -430,6 +430,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         barrier_manager.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
+        source_manager,
+        catalog_manager.clone(),
         ddl_lock,
     );
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
@@ -451,6 +453,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         catalog_manager,
         cluster_manager.clone(),
         user_manager,
+        hummock_manager.clone(),
+        stream_manager.clone(),
     );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -466,6 +470,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger,
         notification_manager,
         compaction_scheduler,
+        &env.opts,
     )
     .await;
     sub_tasks.push((lease_handle, lease_shutdown));
@@ -536,7 +541,7 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_leader_lease() {
         let info = AddressInfo {
             addr: "node1".to_string(),

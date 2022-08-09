@@ -49,7 +49,7 @@ use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
 use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef, TrackerId,
     INVALID_VERSION_ID,
 };
 use crate::monitor::StateStoreMetrics;
@@ -142,6 +142,7 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
+    sstable_id_manager: SstableIdManagerRef,
 }
 
 impl LocalVersionManager {
@@ -195,9 +196,10 @@ impl LocalVersionManager {
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
-                sstable_id_manager,
+                sstable_id_manager.clone(),
                 filter_key_extractor_manager.clone(),
             )),
+            sstable_id_manager,
         });
 
         // Pin and get the latest version.
@@ -292,7 +294,15 @@ impl LocalVersionManager {
         }
 
         let mut new_version = old_version.clone();
-        new_version.set_pinned_version(newly_pinned_version);
+        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
+        let sstable_id_manager_clone = self.sstable_id_manager.clone();
+        tokio::spawn(async move {
+            for cleaned_epoch in cleaned_epochs {
+                sstable_id_manager_clone
+                    .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
+                    .await;
+            }
+        });
         {
             let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
             *guard = new_version;
@@ -402,24 +412,21 @@ impl LocalVersionManager {
         batch: SharedBufferBatch,
         is_remote_batch: bool,
     ) {
-        // Try get shared buffer with version read lock
-        let shared_buffer = self.local_version.read().get_shared_buffer(epoch).cloned();
-
-        // New a shared buffer with version write lock if shared buffer of the corresponding epoch
-        // does not exist before
-        let shared_buffer = shared_buffer.unwrap_or_else(|| {
-            self.local_version
-                .write()
-                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone())
-        });
+        let mut local_version_guard = self.local_version.write();
+        // Try get shared buffer
+        let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
+            Some(shared_buffer) => shared_buffer,
+            None => local_version_guard
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone()),
+        };
 
         // Write into shared buffer
         if is_remote_batch {
             // The batch won't be synced to S3 asynchronously if it is a remote batch
-            shared_buffer.write().replicate_batch(batch);
+            shared_buffer.replicate_batch(batch);
         } else {
             // The batch will be synced to S3 asynchronously if it is a local batch
-            shared_buffer.write().write_batch(batch);
+            shared_buffer.write_batch(batch);
         }
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
@@ -440,12 +447,12 @@ impl LocalVersionManager {
         // The current implementation is a trivial one, which issue only one flush task and wait for
         // the task to finish.
         let mut task = None;
-        for (epoch, shared_buffer) in self.local_version.read().iter_shared_buffer() {
+        for (epoch, shared_buffer) in self.local_version.write().iter_mut_shared_buffer() {
             // skip the epoch that is being synced
             if syncing_epoch.get(epoch).is_some() {
                 continue;
             }
-            if let Some(upload_task) = shared_buffer.write().new_upload_task(FlushWriteBatch) {
+            if let Some(upload_task) = shared_buffer.new_upload_task(FlushWriteBatch) {
                 task = Some((*epoch, upload_task));
                 break;
             }
@@ -506,9 +513,9 @@ impl LocalVersionManager {
         }
         let (order_index, task_payload, task_write_batch_size) = match self
             .local_version
-            .read()
-            .get_shared_buffer(epoch)
-            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(SyncEpoch))
+            .write()
+            .get_mut_shared_buffer(epoch)
+            .and_then(|shared_buffer| shared_buffer.new_upload_task(SyncEpoch))
         {
             Some(task) => task,
             None => {
@@ -544,11 +551,10 @@ impl LocalVersionManager {
             .flush(epoch, is_local, task_payload)
             .await;
 
-        let local_version_guard = self.local_version.read();
-        let mut shared_buffer_guard = local_version_guard
-            .get_shared_buffer(epoch)
-            .expect("shared buffer should exist since some uncommitted data is not committed yet")
-            .write();
+        let mut local_version_guard = self.local_version.write();
+        let shared_buffer_guard = local_version_guard
+            .get_mut_shared_buffer(epoch)
+            .expect("shared buffer should exist since some uncommitted data is not committed yet");
 
         let ret = match task_result {
             Ok(ssts) => {
@@ -576,7 +582,7 @@ impl LocalVersionManager {
         self.local_version
             .read()
             .get_shared_buffer(epoch)
-            .map(|shared_buffer| shared_buffer.read().get_ssts_to_commit())
+            .map(|shared_buffer| shared_buffer.get_ssts_to_commit())
             .unwrap_or_default()
     }
 
@@ -885,10 +891,16 @@ impl LocalVersionManager {
                         assert!(pending_write_requests.is_empty());
 
                         // Clear shared buffer
-                        local_version_manager
+                        let cleaned_epochs = local_version_manager
                             .local_version
                             .write()
                             .clear_shared_buffer();
+                        for cleaned_epoch in cleaned_epochs {
+                            local_version_manager
+                                .sstable_id_manager
+                                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
+                                .await;
+                        }
 
                         // Notify completion of the Clear event.
                         notifier.send(()).unwrap();
