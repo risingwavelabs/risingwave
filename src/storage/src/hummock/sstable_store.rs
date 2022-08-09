@@ -261,9 +261,10 @@ impl SstableStore {
             let data_path = self.get_sst_data_path(sst.id);
             let store = self.store.clone();
             let sst_id = sst.id;
+            let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
-                if let Some(holder) = tiered_cache
+                if use_tiered_cache && let Some(holder) = tiered_cache
                     .get(&(sst_id, block_index))
                     .await
                     .map_err(HummockError::tiered_cache)?
