@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
@@ -25,15 +26,26 @@ use risingwave_stream::executor::{Barrier, Epoch};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
+use super::stack_trace_layer::GrpcStackTraceManager;
+
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     mgr: Arc<LocalStreamManager>,
     env: StreamEnvironment,
+    grpc_stack_trace_manager: GrpcStackTraceManager,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<LocalStreamManager>, env: StreamEnvironment) -> Self {
-        StreamServiceImpl { mgr, env }
+    pub fn new(
+        mgr: Arc<LocalStreamManager>,
+        env: StreamEnvironment,
+        grpc_stack_trace_manager: GrpcStackTraceManager,
+    ) -> Self {
+        StreamServiceImpl {
+            mgr,
+            env,
+            grpc_stack_trace_manager,
+        }
     }
 }
 
@@ -152,10 +164,18 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self.mgr.collect_barrier(req.prev_epoch).await;
+        let collect_result = self
+            .mgr
+            .collect_barrier(req.prev_epoch)
+            .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
+            .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let synced_sstables = self.mgr.sync_epoch(req.prev_epoch).await;
+        let synced_sstables = self
+            .mgr
+            .sync_epoch(req.prev_epoch)
+            .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+            .await;
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -231,6 +251,14 @@ impl StreamService for StreamServiceImpl {
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect();
+
+        {
+            let mut manager = self.grpc_stack_trace_manager.lock().await;
+            println!("RPC traces:");
+            for (k, v) in manager.get_all() {
+                println!("RPC {k} => \n{}", &*v);
+            }
+        }
 
         Ok(Response::new(ActorTraceResponse { actor_traces }))
     }

@@ -20,14 +20,20 @@ use std::time::Duration;
 use async_stack_trace::{SpanValue, StackTraceManager};
 use futures::Future;
 use hyper::Body;
-use tokio::sync::RwLock;
+use tokio::sync::Mutex;
 use tower::{Layer, Service};
 
-pub type GrpcStackTraceManager = Arc<RwLock<StackTraceManager<u64>>>;
+pub type GrpcStackTraceManager = Arc<Mutex<StackTraceManager<u64>>>;
 
 #[derive(Clone)]
 pub struct StackTraceLayer {
     manager: GrpcStackTraceManager,
+}
+
+impl StackTraceLayer {
+    pub fn new(manager: GrpcStackTraceManager) -> Self {
+        Self { manager }
+    }
 }
 
 impl<S> Layer<S> for StackTraceLayer {
@@ -37,17 +43,18 @@ impl<S> Layer<S> for StackTraceLayer {
         StackTrace {
             inner: service,
             manager: self.manager.clone(),
-            next_id: AtomicU64::new(0),
+            next_id: Default::default(),
         }
     }
 }
 
+#[derive(Clone)]
 pub struct StackTrace<S> {
     inner: S,
 
     manager: GrpcStackTraceManager,
 
-    next_id: AtomicU64,
+    next_id: Arc<AtomicU64>,
 }
 
 impl<S> Service<hyper::Request<Body>> for StackTrace<S>
@@ -75,7 +82,7 @@ where
         let manager = self.manager.clone();
 
         async move {
-            let sender = manager.write().await.register(id);
+            let sender = manager.lock().await.register(id);
             let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
 
             sender

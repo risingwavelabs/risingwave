@@ -48,6 +48,7 @@ use tokio::task::JoinHandle;
 use crate::compute_observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
+use crate::rpc::service::stack_trace_layer::{GrpcStackTraceManager, StackTraceLayer};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
 
@@ -212,16 +213,23 @@ pub async fn compute_node_serve(
     #[cfg(any())]
     stream_mgr.clone().spawn_print_trace();
 
+    let grpc_stack_trace_manager = GrpcStackTraceManager::default();
+
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone(), exchange_srv_metrics);
-    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
+    let stream_srv = StreamServiceImpl::new(
+        stream_mgr,
+        stream_env.clone(),
+        grpc_stack_trace_manager.clone(),
+    );
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .layer(StackTraceLayer::new(grpc_stack_trace_manager))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
