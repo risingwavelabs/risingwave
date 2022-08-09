@@ -19,7 +19,7 @@ use risingwave_common::types::{
 };
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprImpl, ExprVisitor, FunctionCall};
+use crate::expr::{ExprImpl, ExprType, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -75,7 +75,7 @@ impl Rule for IndexSelectionRule {
         let primary_cost = primary_table_scan_io_estimator.estimate(logical_scan.predicate());
 
         let mut final_plan = logical_scan.clone();
-        let mut min_cost = primary_cost;
+        let mut min_cost = primary_cost.clone();
 
         let required_col_idx = logical_scan.required_col_idx();
         for index in indexes {
@@ -90,7 +90,7 @@ impl Rule for IndexSelectionRule {
 
                 let mut index_table_scan_io_estimator = TableScanIoEstimator::new(&index_scan);
                 let index_cost = index_table_scan_io_estimator.estimate(index_scan.predicate());
-                if index_cost < primary_cost {
+                if index_cost.le(&min_cost) {
                     min_cost = index_cost;
                     final_plan = index_scan;
                 }
@@ -148,11 +148,16 @@ impl<'a> TableScanIoEstimator<'a> {
         }
     }
 
-    pub fn estimate(&mut self, predicate: &Condition) -> usize {
-        self.estimate_conjunctions(&predicate.conjunctions)
+    pub fn estimate(&mut self, predicate: &Condition) -> IndexCost {
+        // try to deal with OR condition
+        if predicate.conjunctions.len() == 1 {
+            self.visit_expr(&predicate.conjunctions[0])
+        } else {
+            self.estimate_conjunctions(&predicate.conjunctions)
+        }
     }
 
-    fn estimate_conjunctions(&mut self, conjunctions: &[ExprImpl]) -> usize {
+    fn estimate_conjunctions(&mut self, conjunctions: &[ExprImpl]) -> IndexCost {
         let order_column_indices = self.table_scan.table_desc().order_column_indices();
 
         let mut new_conjunctions = conjunctions.to_owned();
@@ -185,7 +190,7 @@ impl<'a> TableScanIoEstimator<'a> {
             .reduce(|x, y| x * y)
             .unwrap();
 
-        index_cost * self.row_size
+        IndexCost::new(index_cost * self.row_size)
     }
 
     fn match_index_column(
@@ -231,14 +236,48 @@ enum MatchItem {
     All,
 }
 
-impl ExprVisitor<usize> for TableScanIoEstimator<'_> {
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> usize {
-        let mut r = 0;
-        func_call
-            .inputs()
-            .iter()
-            .for_each(|expr| r = self.visit_expr(expr));
-        r
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+struct IndexCost(usize);
+
+impl Default for IndexCost {
+    fn default() -> Self {
+        Self(IndexCost::maximum())
+    }
+}
+
+impl IndexCost {
+    fn new(cost: usize) -> IndexCost {
+        Self(min(cost, IndexCost::maximum()))
+    }
+
+    fn maximum() -> usize {
+        100000
+    }
+
+    fn add(&self, other: &IndexCost) -> IndexCost {
+        IndexCost::new(self.0 + other.0)
+    }
+
+    fn le(&self, other: &IndexCost) -> bool {
+        self.0 < other.0
+    }
+}
+
+impl ExprVisitor<IndexCost> for TableScanIoEstimator<'_> {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) -> IndexCost {
+        match func_call.get_expr_type() {
+            ExprType::Or => func_call
+                .inputs()
+                .iter()
+                .map(|x| self.visit_expr(x))
+                .reduce(|x, y| x.add(&y))
+                .unwrap(),
+            ExprType::And => self.estimate_conjunctions(func_call.inputs()),
+            _ => {
+                let single = vec![ExprImpl::FunctionCall(func_call.clone().into())];
+                self.estimate_conjunctions(&single)
+            }
+        }
     }
 }
 
