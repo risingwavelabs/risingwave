@@ -172,7 +172,7 @@ impl<'a> RowRef<'a> {
 
     /// Get the index of this row in the data chunk.
     #[must_use]
-    pub(super) fn index(&self) -> usize {
+    pub fn index(&self) -> usize {
         self.idx
     }
 }
