@@ -610,16 +610,12 @@ where
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeCreateSourceRequest {
-                    source: Some(source.clone()),
-                };
-                async move { client.create_source(request).await }
-            });
+        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
+            let request = ComputeNodeCreateSourceRequest {
+                source: Some(source.clone()),
+            };
+            async move { client.create_source(request).await }
+        });
 
         // ignore response body, always none
         let _ = try_join_all(futures).await?;
@@ -663,14 +659,10 @@ where
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<()> {
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeDropSourceRequest { source_id };
-                async move { client.drop_source(request).await }
-            });
+        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
+            let request = ComputeNodeDropSourceRequest { source_id };
+            async move { client.drop_source(request).await }
+        });
         let _responses: Vec<_> = try_join_all(futures).await?;
 
         let mut core = self.core.lock().await;

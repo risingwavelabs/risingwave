@@ -15,7 +15,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
+use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
 
 use crate::hummock::compactor::CompactOutput;
 use crate::hummock::{HummockError, HummockResult};

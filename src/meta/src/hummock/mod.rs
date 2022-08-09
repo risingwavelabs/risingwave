@@ -17,9 +17,9 @@ pub mod compaction_group;
 mod compaction_scheduler;
 mod compactor_manager;
 pub mod error;
-mod hummock_manager;
-#[cfg(test)]
-mod hummock_manager_tests;
+mod manager;
+pub use manager::*;
+
 mod level_handler;
 mod metrics_utils;
 #[cfg(any(test, feature = "test"))]
@@ -35,7 +35,6 @@ use std::time::Duration;
 
 pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
-pub use hummock_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
