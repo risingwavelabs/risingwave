@@ -441,8 +441,7 @@ where
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
+            .await? as u32;
         relation.set_id(id);
 
         // 1. Resolve the dependent relations.
