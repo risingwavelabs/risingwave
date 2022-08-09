@@ -87,18 +87,6 @@ impl HopWindowExecutor {
             output_indices,
             ..
         } = *self;
-
-        if !window_size.is_positive() || !window_slide.is_positive() {
-            return Err(ExprError::InvalidParam {
-                name: "window",
-                reason: format!(
-                    "window_size {} and window_slide {} must be positive",
-                    window_size, window_slide
-                ),
-            }
-            .into());
-        }
-
         let units = window_size
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
