@@ -18,7 +18,8 @@ use std::str::FromStr;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use num_traits::ToPrimitive;
 use risingwave_common::types::{
-    Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64,
+    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
+    OrderedF64,
 };
 
 use crate::{ExprError, Result};
@@ -139,6 +140,29 @@ pub fn dec_to_i32(elem: Decimal) -> Result<i32> {
 #[inline(always)]
 pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
     to_i64(elem.round_dp(0))
+}
+
+/// In `PostgreSQL`, casting from timestamp to date discards the time part.
+#[inline(always)]
+pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> Result<NaiveDateWrapper> {
+    Ok(NaiveDateWrapper(elem.0.date()))
+}
+
+/// In `PostgreSQL`, casting from timestamp to time discards the date part.
+#[inline(always)]
+pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> Result<NaiveTimeWrapper> {
+    Ok(NaiveTimeWrapper(elem.0.time()))
+}
+
+/// In `PostgreSQL`, casting from interval to time discards the days part.
+#[inline(always)]
+pub fn interval_to_time(elem: IntervalUnit) -> Result<NaiveTimeWrapper> {
+    let ms = elem.get_ms_of_day();
+    let secs = (ms / 1000) as u32;
+    let nano = (ms % 1000 * 1_000_000) as u32;
+    Ok(NaiveTimeWrapper(NaiveTime::from_num_seconds_from_midnight(
+        secs, nano,
+    )))
 }
 
 #[inline(always)]
