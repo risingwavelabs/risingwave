@@ -296,10 +296,12 @@ impl TestCase {
                     name,
                     table_name,
                     columns,
+                    include,
                     // TODO: support unique and if_not_exist in planner test
                     ..
                 } => {
-                    create_index::handle_create_index(context, name, table_name, columns).await?;
+                    create_index::handle_create_index(context, name, table_name, columns, include)
+                        .await?;
                 }
                 Statement::CreateView {
                     materialized: true,

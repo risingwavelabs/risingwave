@@ -2,13 +2,13 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1 (v1 int not null, v2 int not null);
+create table t1 (v1 int, v2 int);
 
 statement ok
-create table t2 (v1 int not null, v3 int not null);
+create table t2 (v1 int, v3 int);
 
 statement ok
-create table t3 (v2 int not null, v3 int not null);
+create table t3 (v2 int, v3 int);
 
 statement ok
 insert into t1 values(1, 2);
@@ -33,10 +33,10 @@ select * from t1 join t2 using(v1) join t3 using(v2);
 2 1 3 3
 
 statement ok
-create index i1 on t1(v1);
+create index i1 on t1(v1) include(v2);
 
 statement ok
-create index i2 on t2(v1);
+create index i2 on t2(v1) include(v3);
 
 query II
 select * from i1 join i2 using(v1);

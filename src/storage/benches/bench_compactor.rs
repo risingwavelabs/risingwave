@@ -35,8 +35,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
+    CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter, Sstable, SstableBuilder,
+    SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -44,7 +44,13 @@ pub fn mock_sstable_store() -> SstableStoreRef {
     let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
-    Arc::new(SstableStore::new(store, path, 64 << 20, 128 << 20))
+    Arc::new(SstableStore::new(
+        store,
+        path,
+        64 << 20,
+        128 << 20,
+        TieredCache::none(),
+    ))
 }
 
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {

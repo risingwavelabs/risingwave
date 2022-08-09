@@ -224,7 +224,7 @@ impl NotificationManagerCore {
 
         let senders = match worker_type {
             WorkerType::Frontend => &self.frontend_senders,
-            WorkerType::ComputeNode => &self.compactor_senders,
+            WorkerType::ComputeNode => &self.compute_senders,
             WorkerType::Compactor => &self.compactor_senders,
 
             _ => unreachable!(),

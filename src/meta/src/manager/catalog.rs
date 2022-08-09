@@ -24,7 +24,7 @@ use risingwave_common::catalog::{
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
+use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
@@ -41,6 +41,7 @@ pub type TableId = u32;
 pub type SourceId = u32;
 pub type SinkId = u32;
 pub type RelationId = u32;
+pub type IndexId = u32;
 
 pub type Catalog = (
     Vec<Database>,
@@ -48,6 +49,7 @@ pub type Catalog = (
     Vec<Table>,
     Vec<Source>,
     Vec<Sink>,
+    Vec<Index>,
 );
 
 pub struct CatalogManager<S: MetaStore> {
@@ -146,8 +148,6 @@ where
 
             core.add_database(database);
             let mut version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
             for schema in schemas {
@@ -185,8 +185,6 @@ where
             core.drop_database(&database);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
@@ -203,8 +201,6 @@ where
             core.add_schema(schema);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
                 .await;
 
@@ -222,8 +218,6 @@ where
             core.drop_schema(&schema);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Schema(schema))
                 .await;
 
@@ -237,6 +231,9 @@ where
         match relation {
             Relation::Table(table) => self.start_create_table_procedure(table).await,
             Relation::Sink(sink) => self.start_create_sink_procedure(sink).await,
+            Relation::Index(index, index_table) => {
+                self.start_create_index_procedure(index, index_table).await
+            }
         }
     }
 
@@ -244,6 +241,9 @@ where
         match relation {
             Relation::Table(table) => self.cancel_create_table_procedure(table).await,
             Relation::Sink(sink) => self.cancel_create_sink_procedure(sink).await,
+            Relation::Index(index, index_table) => {
+                self.cancel_create_index_procedure(index, index_table).await
+            }
         }
     }
 
@@ -258,6 +258,10 @@ where
                     .await
             }
             Relation::Sink(sink) => self.finish_create_sink_procedure(sink).await,
+            Relation::Index(index, index_table) => {
+                self.finish_create_index_procedure(index, internal_tables.unwrap(), index_table)
+                    .await
+            }
         }
     }
 
@@ -294,7 +298,7 @@ where
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
 
-                self.broadcast_info_op(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
@@ -322,7 +326,11 @@ where
         }
     }
 
-    pub async fn drop_table(&self, table_id: TableId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_table(
+        &self,
+        table_id: TableId,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
@@ -332,7 +340,23 @@ where
                     table.name, ref_count
                 ))),
                 None => {
-                    Table::delete(self.env.meta_store(), &table_id).await?;
+                    let mut transaction = Transaction::default();
+                    table.delete_in_transaction(&mut transaction)?;
+                    let mut tables_to_drop = vec![];
+                    for internal_table_id in internal_table_ids {
+                        let internal_table =
+                            Table::select(self.env.meta_store(), &internal_table_id).await?;
+                        if let Some(internal_table) = internal_table {
+                            internal_table.delete_in_transaction(&mut transaction)?;
+                            tables_to_drop.push(internal_table);
+                        }
+                    }
+                    core.env.meta_store().txn(transaction).await?;
+                    for table in tables_to_drop {
+                        core.drop_table(&table);
+                        self.broadcast_info_op(Operation::Delete, Info::Table(table))
+                            .await;
+                    }
                     core.drop_table(&table);
                     for &dependent_relation_id in &table.dependent_relations {
                         core.decrease_ref_count(dependent_relation_id);
@@ -347,6 +371,80 @@ where
             }
         } else {
             bail!("table doesn't exist");
+        }
+    }
+
+    pub async fn get_index_table(&self, index_id: IndexId) -> MetaResult<TableId> {
+        let index = Index::select(self.env.meta_store(), &index_id).await?;
+        if let Some(index) = index {
+            Ok(index.index_table_id)
+        } else {
+            bail!("index doesn't exist");
+        }
+    }
+
+    pub async fn drop_index(
+        &self,
+        index_id: IndexId,
+        index_table_id: TableId,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        let index = Index::select(self.env.meta_store(), &index_id).await?;
+        if let Some(index) = index {
+            let mut transaction = Transaction::default();
+            index.delete_in_transaction(&mut transaction)?;
+            let mut tables_to_drop = vec![];
+            assert_eq!(index_table_id, index.index_table_id);
+
+            // drop index table
+            let table = Table::select(self.env.meta_store(), &index_table_id).await?;
+            if let Some(table) = table {
+                match core.get_ref_count(index_table_id) {
+                    Some(ref_count) => Err(MetaError::permission_denied(format!(
+                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                        table.name, ref_count
+                    ))),
+                    None => {
+                        table.delete_in_transaction(&mut transaction)?;
+                        for internal_table_id in internal_table_ids {
+                            let internal_table =
+                                Table::select(self.env.meta_store(), &internal_table_id).await?;
+                            if let Some(internal_table) = internal_table {
+                                internal_table.delete_in_transaction(&mut transaction)?;
+                                tables_to_drop.push(internal_table);
+                            }
+                        }
+
+                        core.env.meta_store().txn(transaction).await?;
+                        core.drop_index(&index);
+                        core.drop_table(&table);
+                        for table in tables_to_drop {
+                            core.drop_table(&table);
+                            self.broadcast_info_op(Operation::Delete, Info::Table(table))
+                                .await;
+                        }
+                        for &dependent_relation_id in &table.dependent_relations {
+                            core.decrease_ref_count(dependent_relation_id);
+                        }
+
+                        self.env
+                            .notification_manager()
+                            .notify_frontend(Operation::Delete, Info::Index(index.to_owned()))
+                            .await;
+
+                        let version = self
+                            .broadcast_info_op(Operation::Delete, Info::Table(table.to_owned()))
+                            .await;
+
+                        Ok(version)
+                    }
+                }
+            } else {
+                bail!("index table doesn't exist",)
+            }
+        } else {
+            bail!("index doesn't exist",)
         }
     }
 
@@ -511,7 +609,7 @@ where
 
             for table in tables {
                 core.add_table(&table);
-                self.broadcast_info_op(Operation::Add, Info::Table(table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
             self.broadcast_info_op(Operation::Add, Info::Table(mview.to_owned()))
@@ -606,6 +704,86 @@ where
         }
     }
 
+    pub async fn start_create_index_procedure(
+        &self,
+        index: &Index,
+        index_table: &Table,
+    ) -> MetaResult<()> {
+        let mut core = self.core.lock().await;
+        let key = (index.database_id, index.schema_id, index.name.clone());
+        if !core.has_index(index) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            for &dependent_relation_id in &index_table.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            bail!("index already exists or in creating procedure".to_string(),)
+        }
+    }
+
+    pub async fn cancel_create_index_procedure(
+        &self,
+        index: &Index,
+        index_table: &Table,
+    ) -> MetaResult<()> {
+        let mut core = self.core.lock().await;
+        let key = (index.database_id, index.schema_id, index.name.clone());
+        if !core.has_index(index) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            for &dependent_relation_id in &index_table.dependent_relations {
+                core.decrease_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            bail!("index already exist or not in creating procedure",)
+        }
+    }
+
+    pub async fn finish_create_index_procedure(
+        &self,
+        index: &Index,
+        internal_tables: Vec<Table>,
+        table: &Table,
+    ) -> MetaResult<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if !core.has_index(index) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            let mut transaction = Transaction::default();
+
+            index.upsert_in_transaction(&mut transaction)?;
+
+            for table in &internal_tables {
+                table.upsert_in_transaction(&mut transaction)?;
+            }
+            table.upsert_in_transaction(&mut transaction)?;
+            core.env.meta_store().txn(transaction).await?;
+
+            for internal_table in internal_tables {
+                core.add_table(&internal_table);
+
+                self.broadcast_info_op(Operation::Add, Info::Table(internal_table.to_owned()))
+                    .await;
+            }
+            core.add_table(table);
+            core.add_index(index);
+
+            self.broadcast_info_op(Operation::Add, Info::Table(table.to_owned()))
+                .await;
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Index(index.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            bail!("table already exist or not in creating procedure",)
+        }
+    }
+
     pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
@@ -632,8 +810,6 @@ where
             core.add_sink(sink);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
                 .await;
 
@@ -661,8 +837,6 @@ where
             core.add_sink(sink);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
                 .await;
 
@@ -683,8 +857,6 @@ where
             }
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Sink(sink))
                 .await;
 
@@ -714,6 +886,13 @@ where
             .collect())
     }
 
+    async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend(operation, info)
+            .await
+    }
+
     async fn broadcast_info_op(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.env
             .notification_manager()
@@ -727,6 +906,7 @@ type SchemaKey = (DatabaseId, String);
 type TableKey = (DatabaseId, SchemaId, String);
 type SourceKey = (DatabaseId, SchemaId, String);
 type SinkKey = (DatabaseId, SchemaId, String);
+type IndexKey = (DatabaseId, SchemaId, String);
 type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`CatalogManagerCore`] caches meta catalog information and maintains dependent relationship
@@ -743,6 +923,8 @@ pub struct CatalogManagerCore<S: MetaStore> {
     sinks: HashSet<SinkKey>,
     /// Cached table key information.
     tables: HashSet<TableKey>,
+    /// Cached index key information.
+    indexes: HashSet<IndexKey>,
     /// Relation refer count mapping.
     relation_ref_count: HashMap<RelationId, usize>,
 
@@ -760,6 +942,7 @@ where
         let sources = Source::list(env.meta_store()).await?;
         let sinks = Sink::list(env.meta_store()).await?;
         let tables = Table::list(env.meta_store()).await?;
+        let indexes = Index::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -779,6 +962,11 @@ where
                 .into_iter()
                 .map(|sink| (sink.database_id, sink.schema_id, sink.name)),
         );
+        let indexes = HashSet::from_iter(
+            indexes
+                .into_iter()
+                .map(|index| (index.database_id, index.schema_id, index.name)),
+        );
         let tables = HashSet::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
                 relation_ref_count.entry(*depend_relation_id).or_insert(0);
@@ -795,6 +983,7 @@ where
             sources,
             sinks,
             tables,
+            indexes,
             relation_ref_count,
             in_progress_creation_tracker,
         })
@@ -807,6 +996,7 @@ where
             Table::list(self.env.meta_store()).await?,
             Source::list(self.env.meta_store()).await?,
             Sink::list(self.env.meta_store()).await?,
+            Index::list(self.env.meta_store()).await?,
         ))
     }
 
@@ -898,6 +1088,21 @@ where
         Sink::select(self.env.meta_store(), &id)
             .await
             .map_err(Into::into)
+    }
+
+    fn has_index(&self, index: &Index) -> bool {
+        self.indexes
+            .contains(&(index.database_id, index.schema_id, index.name.clone()))
+    }
+
+    fn add_index(&mut self, index: &Index) {
+        self.indexes
+            .insert((index.database_id, index.schema_id, index.name.clone()));
+    }
+
+    fn drop_index(&mut self, index: &Index) -> bool {
+        self.indexes
+            .remove(&(index.database_id, index.schema_id, index.name.clone()))
     }
 
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {

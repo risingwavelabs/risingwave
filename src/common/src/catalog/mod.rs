@@ -175,3 +175,42 @@ impl TableOption {
         result
     }
 }
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+pub struct IndexId {
+    pub index_id: u32,
+}
+
+impl IndexId {
+    pub const fn new(index_id: u32) -> Self {
+        IndexId { index_id }
+    }
+
+    /// Sometimes the id field is filled later, we use this value for better debugging.
+    pub const fn placeholder() -> Self {
+        IndexId {
+            index_id: u32::MAX - 1,
+        }
+    }
+
+    pub fn index_id(&self) -> u32 {
+        self.index_id
+    }
+}
+
+impl From<u32> for IndexId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+impl From<IndexId> for u32 {
+    fn from(id: IndexId) -> Self {
+        id.index_id
+    }
+}
+
+impl fmt::Display for IndexId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.index_id,)
+    }
+}

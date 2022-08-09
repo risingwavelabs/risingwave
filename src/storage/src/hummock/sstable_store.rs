@@ -16,15 +16,18 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
-use bytes::Bytes;
+use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
+use risingwave_common::cache::LruCacheEventListener;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{
     get_local_path, BlockLocation, ObjectMetadata, ObjectStore, ObjectStoreRef,
 };
 
-use super::{Block, BlockCache, Sstable, SstableMeta};
+use super::{
+    Block, BlockCache, Sstable, SstableMeta, TieredCache, TieredCacheKey, TieredCacheValue,
+};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StoreLocalStatistic;
 
@@ -33,6 +36,59 @@ const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
 pub type TableHolder = CachableEntry<HummockSstableId, Box<Sstable>>;
+
+// BEGIN section for tiered cache
+
+impl TieredCacheKey for (HummockSstableId, u64) {
+    fn encoded_len() -> usize {
+        16
+    }
+
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_u64(self.0);
+        buf.put_u64(self.1);
+    }
+
+    fn decode(mut buf: &[u8]) -> Self {
+        let sst_id = buf.get_u64();
+        let block_idx = buf.get_u64();
+        (sst_id, block_idx)
+    }
+}
+
+impl TieredCacheValue for Box<Block> {
+    fn len(&self) -> usize {
+        Block::len(self)
+    }
+
+    fn encoded_len(&self) -> usize {
+        self.len()
+    }
+
+    fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_slice(self.raw_data());
+    }
+
+    fn decode(buf: Vec<u8>) -> Self {
+        Box::new(Block::decode_from_raw(Bytes::from(buf)))
+    }
+}
+
+pub struct BlockCacheEventListener {
+    tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
+}
+
+impl LruCacheEventListener for BlockCacheEventListener {
+    type K = (HummockSstableId, u64);
+    type T = Box<Block>;
+
+    fn on_release(&self, key: Self::K, value: Self::T) {
+        // TODO(MrCroxx): handle error?
+        self.tiered_cache.insert(key, value).unwrap();
+    }
+}
+
+// END section for tiered cache
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -50,6 +106,7 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
+    tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
 }
 
 impl SstableStore {
@@ -58,17 +115,27 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
+        tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
     ) -> Self {
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
         }
         let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity));
+        let listener = Arc::new(BlockCacheEventListener {
+            tiered_cache: tiered_cache.clone(),
+        });
+
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS),
+            block_cache: BlockCache::with_event_listener(
+                block_cache_capacity,
+                MAX_CACHE_SHARD_BITS,
+                listener,
+            ),
             meta_cache,
+            tiered_cache,
         }
     }
 
@@ -81,11 +148,13 @@ impl SstableStore {
         meta_cache_capacity: usize,
     ) -> Self {
         let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity));
+        let tiered_cache = TieredCache::none();
         Self {
             path,
             store,
             block_cache: BlockCache::new(block_cache_capacity, 2),
             meta_cache,
+            tiered_cache,
         }
     }
 
@@ -174,7 +243,8 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         stats.cache_data_block_total += 1;
-        let mut fetch_block = || {
+        let tiered_cache = self.tiered_cache.clone();
+        let fetch_block = || {
             stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
@@ -188,8 +258,19 @@ impl SstableStore {
             };
             let data_path = self.get_sst_data_path(sst.id);
             let store = self.store.clone();
+            let sst_id = sst.id;
+            let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
+                if use_tiered_cache && let Some(holder) = tiered_cache
+                    .get(&(sst_id, block_index))
+                    .await
+                    .map_err(HummockError::tiered_cache)?
+                {
+                    // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it later.
+                    return Ok(holder.into_owned());
+                }
+
                 let block_data = store
                     .read(&data_path, Some(block_loc))
                     .await
@@ -218,7 +299,15 @@ impl SstableStore {
             }
             CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
                 Some(block) => Ok(block),
-                None => fetch_block().await.map(BlockHolder::from_owned_block),
+                None => match self
+                    .tiered_cache
+                    .get(&(sst.id, block_index))
+                    .await
+                    .map_err(HummockError::tiered_cache)?
+                {
+                    Some(holder) => Ok(BlockHolder::from_tiered_cache(holder.into_inner())),
+                    None => fetch_block().await.map(BlockHolder::from_owned_block),
+                },
             },
             CachePolicy::Disable => fetch_block().await.map(BlockHolder::from_owned_block),
         }

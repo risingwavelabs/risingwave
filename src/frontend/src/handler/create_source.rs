@@ -108,6 +108,14 @@ pub async fn handle_create_source(
             columns: bind_sql_columns(stmt.columns)?,
             pk_column_ids: vec![0],
         },
+        SourceSchema::DebeziumJson => StreamSourceInfo {
+            properties: with_properties.clone(),
+            row_format: RowFormatType::DebeziumJson as i32,
+            row_schema_location: "".to_string(),
+            row_id_index: 0,
+            columns: bind_sql_columns(stmt.columns)?,
+            pk_column_ids: vec![0],
+        },
     };
 
     let session = context.session_ctx.clone();
