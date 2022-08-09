@@ -23,7 +23,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::agg_call::{self, OrderByField as ProstAggOrderByField};
+use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
@@ -1226,7 +1226,7 @@ impl ToStream for LogicalAgg {
             .iter_mut()
             .skip(self.group_key.len())
             .for_each(|index| {
-                *index = *index + 1;
+                *index += 1;
             });
         let agg_calls = iter::once(PlanAggCall::count_star())
             .chain(self.agg_calls().iter().cloned())
