@@ -121,6 +121,8 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     /// if `pk_prefix` is None, it will can rows from the relational table from the very beginning,
     /// else it will scan rows from the relational table begin with specific `pk_prefix`.
     /// if `num_limit` is None, it will scan with no limit.
+    /// this function only used in tests
+    #[cfg(test)]
     pub async fn find_range(
         &self,
         pk_prefix: Option<&Row>,
@@ -155,12 +157,17 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
 
     pub async fn fill_cache(
         &self,
+        pk_prefix: Option<&Row>,
         cache: &mut BTreeMap<OrderedRow, Row>,
         start_key: &OrderedRow,
         cache_size_limit: usize,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
-        let state_table_iter = self.state_table.iter(epoch).await?;
+        let state_table_iter = if let Some(prefix) = pk_prefix {
+            self.state_table.iter_with_pk_prefix(prefix, epoch).await?
+        } else {
+            self.state_table.iter(epoch).await?
+        };
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(item?);
@@ -324,7 +331,7 @@ mod tests {
             .unwrap();
 
         managed_state
-            .fill_cache(&mut cache, &ordered_rows[3], 2, epoch)
+            .fill_cache(None, &mut cache, &ordered_rows[3], 2, epoch)
             .await
             .unwrap();
         assert_eq!(cache.len(), 2);
