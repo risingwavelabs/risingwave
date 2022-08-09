@@ -19,12 +19,15 @@ use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
-use tonic::transport::Endpoint;
+use tonic::transport::{Endpoint, Channel};
 
 use crate::error::Result;
-use crate::{Channel, RpcClient, RpcClientPool};
+use crate::{RpcClient, RpcClientPool,rpc_client_method_impl};
+use risingwave_pb::stream_service::*;
 
-pub type StreamClient = StreamServiceClient<Channel>;
+
+#[derive(Clone)]
+pub struct StreamClient(StreamServiceClient<Channel>);
 
 #[async_trait]
 impl RpcClient for StreamClient {
@@ -34,9 +37,32 @@ impl RpcClient for StreamClient {
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
-        Ok(Self::new(channel))
+            Ok(Self(StreamServiceClient::new(channel)))
     }
 }
 
 pub type StreamClientPool = RpcClientPool<StreamClient>;
 pub type StreamClientPoolRef = Arc<StreamClientPool>;
+
+macro_rules! for_all_stream_rpc {
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*]
+            ,{ 0, update_actors, UpdateActorsRequest, UpdateActorsResponse }
+            ,{ 0, build_actors, BuildActorsRequest, BuildActorsResponse }
+            ,{ 0, broadcast_actor_info_table, BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse }
+            ,{ 0, drop_actors, DropActorsRequest, DropActorsResponse }
+            ,{ 0, force_stop_actors, ForceStopActorsRequest, ForceStopActorsResponse}
+            ,{ 0, inject_barrier, InjectBarrierRequest, InjectBarrierResponse }
+            ,{ 0, create_source, CreateSourceRequest, CreateSourceResponse }
+            ,{ 0, sync_sources, SyncSourcesRequest, SyncSourcesResponse }
+            ,{ 0, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ 0, barrier_complete, BarrierCompleteRequest, BarrierCompleteResponse }
+            ,{ 0, actor_trace, ActorTraceRequest, ActorTraceResponse }
+        }
+    };
+}
+
+impl StreamClient {
+    for_all_stream_rpc! { rpc_client_method_impl }
+}
