@@ -71,15 +71,14 @@ pub enum Distribution {
     /// `usize` is the index of column used as the distribution key.
     HashShard(Vec<usize>),
     /// A special kind of provided distribution which is almost the same as
-    /// [`Distribution::HashShard`], but doesn't satisfies [`RequiredDist::ShardByKey`].
+    /// [`Distribution::HashShard`], but may have different vnode mapping.
     ///
-    /// It exists because the upstream MV can be scaled independently, and has different vnode
-    /// mapping with the current MV. So we use `UpstreamHashShard` to force an exchange is
-    /// inserted.
+    /// It exists because the upstream MV can be scaled independently. So we use
+    /// `UpstreamHashShard` to force an exchange is inserted.
     ///
     /// Alternatively, [`Distribution::SomeShard`] can also be used to insert an exchange, but
     /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,
-    /// two-phase Agg.
+    /// two-phase Agg. It also satisfies [`RequiredDist::ShardByKey`].
     UpstreamHashShard(Vec<usize>),
     /// Records are available on all downstream shards.
     Broadcast,
@@ -145,7 +144,7 @@ impl Distribution {
                 )
             }
             RequiredDist::ShardByKey(required_key) => match self {
-                Distribution::HashShard(hash_key) => {
+                Distribution::HashShard(hash_key) | Distribution::UpstreamHashShard(hash_key) => {
                     hash_key.iter().all(|idx| required_key.contains(*idx))
                 }
                 _ => false,
@@ -246,6 +245,13 @@ impl RequiredDist {
         } else {
             Self::ShardByKey(cols)
         }
+    }
+
+    /// Used by HashJoin to ensure both sides have not only the same distribution key, but also the
+    /// same vnode mapping. [`Distribution::UpstreamHashShard`] is rejected.
+    pub fn hash_shard(key: &[usize]) -> Self {
+        assert!(!key.is_empty());
+        Self::PhysicalDist(Distribution::HashShard(key.to_vec()))
     }
 
     pub fn enforce_if_not_satisfies(

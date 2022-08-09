@@ -887,19 +887,15 @@ impl ToStream for LogicalJoin {
         if predicate.has_eq() {
             let right = self
                 .right()
-                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.right().schema().len(),
+                .to_stream_with_dist_required(&RequiredDist::hash_shard(
                     &predicate.right_eq_indexes(),
                 ))?;
 
-            let r2l =
-                predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
-
-            let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
-                right.distribution().clone(),
-            ));
-
-            let left = self.left().to_stream_with_dist_required(&left_dist)?;
+            let left = self
+                .left()
+                .to_stream_with_dist_required(&RequiredDist::hash_shard(
+                    &predicate.left_eq_indexes(),
+                ))?;
             let logical_join = self.clone_with_left_right(left, right);
 
             // Convert to Hash Join for equal joins

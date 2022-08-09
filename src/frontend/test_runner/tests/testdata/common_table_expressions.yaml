@@ -8,8 +8,7 @@
         LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
-      StreamExchange { dist: HashShard(t1._row_id) }
-        StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
+      StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v3 int, v4 int);
@@ -39,8 +38,7 @@
           LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
-      StreamExchange { dist: HashShard(t1._row_id) }
-        StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
+      StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t1 (x int);
     with with_0 as (select * from t1 group by x having EXISTS(select 0.1)) select * from with_0;

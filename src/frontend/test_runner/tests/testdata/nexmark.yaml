@@ -49,8 +49,7 @@
       BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, date_time, bid._row_id(hidden)], pk_columns: [bid._row_id] }
-      StreamExchange { dist: HashShard(bid._row_id) }
-        StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+      StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
 - id: nexmark_q1
   before:
   - create_tables
@@ -80,9 +79,8 @@
         BatchScan { table: bid, columns: [bid.auction, bid.price], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, price, bid._row_id(hidden)], pk_columns: [bid._row_id] }
-      StreamExchange { dist: HashShard(bid._row_id) }
-        StreamFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
-          StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+      StreamFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
+        StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
 - id: nexmark_q3
   before:
   - create_tables
