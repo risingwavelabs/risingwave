@@ -702,18 +702,17 @@
     /* input is sharded by group key */
     create table t(x int);
     create index i on t(x);
-    select count(*) as cnt from t group by x;
+    select count(*) as cnt from i group by x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [count] }
-        BatchHashAgg { group_key: [t.x], aggs: [count] }
-          BatchExchange { order: [], dist: HashShard(t.x) }
-            BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+        BatchHashAgg { group_key: [i.x], aggs: [count] }
+          BatchExchange { order: [], dist: HashShard(i.x) }
+            BatchScan { table: i, columns: [i.x], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [cnt, t.x(hidden)], pk_columns: [t.x] }
-      StreamProject { exprs: [sum(count), t.x] }
-        StreamHashAgg { group_key: [t.x], aggs: [sum(count), sum(count)] }
-          StreamExchange { dist: HashShard(t.x) }
-            StreamHashAgg { group_key: [t.x, Vnode(t._row_id)], aggs: [count, count] }
-              StreamProject { exprs: [t.x, t._row_id, Vnode(t._row_id)] }
-                StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [cnt, i.x(hidden)], pk_columns: [i.x] }
+      StreamProject { exprs: [sum(count), i.x] }
+        StreamHashAgg { group_key: [i.x], aggs: [sum(count), sum(count)] }
+          StreamHashAgg { group_key: [i.x, Vnode(i.x)], aggs: [count, count] }
+            StreamProject { exprs: [i.x, i.t._row_id, Vnode(i.x)] }
+              StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
