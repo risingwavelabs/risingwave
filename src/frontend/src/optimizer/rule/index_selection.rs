@@ -41,7 +41,7 @@ use crate::utils::Condition;
 ///             * ... cost(match type of the last idx)
 ///
 /// For Example:
-/// index order_key (a, b, c)
+/// index order key (a, b, c)
 /// for a = 1 and b = 1 and c = 1, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
 /// for a in (xxx) and b = 1 and c = 1, its cost is In0 * Equal1 * Equal2 = 10
 /// for a = 1 and b in (xxx), its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
@@ -255,11 +255,19 @@ impl IndexCost {
     }
 
     fn add(&self, other: &IndexCost) -> IndexCost {
-        IndexCost::new(self.0.checked_add(other.0).unwrap_or(IndexCost::maximum()))
+        IndexCost::new(
+            self.0
+                .checked_add(other.0)
+                .unwrap_or_else(IndexCost::maximum),
+        )
     }
 
     fn mul(&self, other: &IndexCost) -> IndexCost {
-        IndexCost::new(self.0.checked_mul(other.0).unwrap_or(IndexCost::maximum()))
+        IndexCost::new(
+            self.0
+                .checked_mul(other.0)
+                .unwrap_or_else(IndexCost::maximum),
+        )
     }
 
     fn le(&self, other: &IndexCost) -> bool {

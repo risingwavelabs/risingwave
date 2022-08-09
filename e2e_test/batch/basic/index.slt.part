@@ -1,0 +1,19 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int not null, v2 int not null);
+
+statement ok
+create index idx1 on t1(v1) include(v2);
+
+statement ok
+insert into t1 values(1, 2),(3,4),(5,6);
+
+statement ok
+explain select v1,v2 from t1 where v1 = 1;
+
+query III
+select v1,v2 from t1 where v1 = 1;
+----
+1 2
