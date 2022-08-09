@@ -12,44 +12,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
+use async_stack_trace::{SpanValue, StackTraceManager};
 use futures::Future;
 use hyper::Body;
+use tokio::sync::RwLock;
 use tower::{Layer, Service};
 
-use super::metrics::MetaMetrics;
+pub type GrpcStackTraceManager = Arc<RwLock<StackTraceManager<u64>>>;
 
 #[derive(Clone)]
-pub struct MetricsMiddlewareLayer {
-    metrics: Arc<MetaMetrics>,
+pub struct StackTraceLayer {
+    manager: GrpcStackTraceManager,
 }
 
-impl MetricsMiddlewareLayer {
-    pub fn new(metrics: Arc<MetaMetrics>) -> Self {
-        Self { metrics }
-    }
-}
-
-impl<S> Layer<S> for MetricsMiddlewareLayer {
-    type Service = MetricsMiddleware<S>;
+impl<S> Layer<S> for StackTraceLayer {
+    type Service = StackTrace<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        MetricsMiddleware {
+        StackTrace {
             inner: service,
-            metrics: self.metrics.clone(),
+            manager: self.manager.clone(),
+            next_id: AtomicU64::new(0),
         }
     }
 }
 
-#[derive(Clone)]
-pub struct MetricsMiddleware<S> {
+pub struct StackTrace<S> {
     inner: S,
-    metrics: Arc<MetaMetrics>,
+
+    manager: GrpcStackTraceManager,
+
+    next_id: AtomicU64,
 }
 
-impl<S> Service<hyper::Request<Body>> for MetricsMiddleware<S>
+impl<S> Service<hyper::Request<Body>> for StackTrace<S>
 where
     S: Service<hyper::Request<Body>> + Clone + Send + 'static,
     S::Future: Send + 'static,
@@ -70,20 +71,21 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
-        let metrics = self.metrics.clone();
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let manager = self.manager.clone();
 
         async move {
-            let path = req.uri().path();
-            let timer = metrics
-                .grpc_latency
-                .with_label_values(&[path])
-                .start_timer();
+            let sender = manager.write().await.register(id);
+            let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
 
-            let response = inner.call(req).await?;
-
-            timer.observe_duration();
-
-            Ok(response)
+            sender
+                .trace(
+                    inner.call(req),
+                    root_span,
+                    false,
+                    Duration::from_millis(100),
+                )
+                .await
         }
     }
 }

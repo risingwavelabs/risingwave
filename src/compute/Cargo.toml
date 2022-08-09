@@ -7,6 +7,7 @@ version = "0.1.11"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

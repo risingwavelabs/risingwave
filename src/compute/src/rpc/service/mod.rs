@@ -15,3 +15,4 @@
 pub mod exchange_metrics;
 pub mod exchange_service;
 pub mod stream_service;
+pub mod stack_trace_layer;
