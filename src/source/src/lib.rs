@@ -40,6 +40,7 @@ pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
+use risingwave_connector::source::SplitId;
 pub use table_v2::*;
 
 use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
@@ -94,7 +95,7 @@ impl StreamSourceReader for SourceStreamReaderImpl {
 #[derive(Clone, Debug)]
 pub struct StreamChunkWithState {
     pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<String, String>>,
+    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
 }
 
 #[async_trait]

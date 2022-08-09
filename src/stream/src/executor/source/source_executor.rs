@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
@@ -68,7 +68,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     split_state_store: SourceStateHandler<S>,
 
-    state_cache: HashMap<String, SplitImpl>,
+    state_cache: HashMap<SplitId, SplitImpl>,
 
     #[expect(dead_code)]
     /// Expected barrier latency
@@ -322,13 +322,13 @@ impl<S: StateStore> SourceExecutor<S> {
                     } = chunk_with_state?;
 
                     if let Some(mapping) = split_offset_mapping {
-                        let state: HashMap<String, SplitImpl> = mapping
+                        let state: HashMap<_, _> = mapping
                             .iter()
                             .map(|(split, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_splits
                                     .iter()
-                                    .filter(|origin_split| origin_split.id().as_str() == split)
+                                    .filter(|origin_split| &origin_split.id() == split)
                                     .collect_vec();
 
                                 if origin_split_impl.is_empty() {

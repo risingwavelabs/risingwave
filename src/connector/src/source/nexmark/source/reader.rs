@@ -21,7 +21,9 @@ use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::EventType;
 use crate::source::nexmark::source::generator::NexmarkEventGenerator;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
-use crate::source::{Column, ConnectorState, SourceMessage, SplitImpl, SplitMetaData, SplitReader};
+use crate::source::{
+    Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitMetaData, SplitReader,
+};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkSplitReader {
@@ -71,7 +73,7 @@ impl SplitReader for NexmarkSplitReader {
             event_num,
             split_index: 0,
             split_num: 0,
-            split_id: String::new(),
+            split_id: SplitId::default(),
             last_event: None,
             event_type,
             use_real_time,
@@ -84,7 +86,7 @@ impl SplitReader for NexmarkSplitReader {
         if let Some(splits) = state {
             log::debug!("Splits for nexmark found! {:?}", splits);
             for split in splits {
-                // TODO: currently, assume there's only on split in one reader
+                // TODO: currently, assume there's only one split in one reader
                 let split_id = split.id();
                 if let SplitImpl::Nexmark(n) = split {
                     generator.split_index = n.split_index;

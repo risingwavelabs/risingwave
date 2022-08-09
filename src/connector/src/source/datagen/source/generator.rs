@@ -20,13 +20,13 @@ use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration, Instant};
 
 use super::DEFAULT_DATAGEN_INTERVAL;
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,
     pub events_so_far: u64,
     pub rows_per_second: u64,
-    pub split_id: String,
+    pub split_id: SplitId,
     pub partition_size: u64,
 }
 
@@ -35,7 +35,7 @@ impl DatagenEventGenerator {
         fields_map: HashMap<String, FieldGeneratorImpl>,
         rows_per_second: u64,
         events_so_far: u64,
-        split_id: String,
+        split_id: SplitId,
         split_num: u64,
         split_index: u64,
     ) -> Result<Self> {
@@ -103,7 +103,7 @@ mod tests {
         rows_per_second: u64,
         expected_length: usize,
     ) {
-        let split_id = format!("{}-{}", split_num, split_index);
+        let split_id = format!("{}-{}", split_num, split_index).into();
         let mut fields_map = HashMap::new();
         fields_map.insert(
             "v1".to_string(),

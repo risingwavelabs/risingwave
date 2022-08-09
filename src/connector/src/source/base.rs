@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -158,18 +159,20 @@ pub struct Column {
     pub data_type: DataType,
 }
 
+pub type SplitId = Arc<String>;
+
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
-    pub split_id: String,
+    pub split_id: SplitId,
 }
 
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
-    fn id(&self) -> String;
+    fn id(&self) -> SplitId;
     fn encode_to_bytes(&self) -> Bytes;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }

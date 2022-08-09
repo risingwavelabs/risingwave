@@ -34,7 +34,7 @@ impl From<KinesisMessage> for SourceMessage {
                 .as_ref()
                 .map(|payload| Bytes::copy_from_slice(payload)),
             offset: msg.sequence_number.clone(),
-            split_id: msg.shard_id,
+            split_id: msg.shard_id.into(),
         }
     }
 }

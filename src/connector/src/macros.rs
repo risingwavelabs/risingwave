@@ -70,7 +70,7 @@ macro_rules! impl_split {
         }
 
         impl SplitMetaData for SplitImpl {
-            fn id(&self) -> String {
+            fn id(&self) -> SplitId {
                 match self {
                     $( Self::$variant_name(inner) => inner.id(), )*
                 }

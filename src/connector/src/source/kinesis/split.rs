@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::SplitMetaData;
+use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum KinesisOffset {
@@ -35,8 +35,9 @@ pub struct KinesisSplit {
 }
 
 impl SplitMetaData for KinesisSplit {
-    fn id(&self) -> String {
-        self.shard_id.to_string()
+    fn id(&self) -> SplitId {
+        // TODO: should avoid constructing a string every time
+        self.shard_id.to_string().into()
     }
 
     fn encode_to_bytes(&self) -> Bytes {

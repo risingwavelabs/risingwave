@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::base::SplitMetaData;
+use crate::source::{base::SplitMetaData, SplitId};
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq, Hash)]
 pub struct DatagenSplit {
@@ -26,8 +26,9 @@ pub struct DatagenSplit {
 }
 
 impl SplitMetaData for DatagenSplit {
-    fn id(&self) -> String {
-        format!("{}-{}", self.split_num, self.split_index)
+    fn id(&self) -> SplitId {
+        // TODO: should avoid constructing a string every time
+        format!("{}-{}", self.split_num, self.split_index).into()
     }
 
     fn encode_to_bytes(&self) -> Bytes {

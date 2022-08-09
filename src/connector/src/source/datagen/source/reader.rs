@@ -22,7 +22,7 @@ use super::generator::DatagenEventGenerator;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::{
-    Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader,
+    Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader, SplitId,
 };
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
@@ -45,7 +45,7 @@ impl SplitReader for DatagenSplitReader {
         Self: Sized,
     {
         let mut assigned_split = DatagenSplit::default();
-        let mut split_id = String::new();
+        let mut split_id = SplitId::default();
         let mut events_so_far = u64::default();
         if let Some(splits) = state {
             log::debug!("Splits for datagen found! {:?}", splits);

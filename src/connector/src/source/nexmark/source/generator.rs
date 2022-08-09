@@ -20,7 +20,7 @@ use risingwave_common::bail;
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::{Event, EventType};
 use crate::source::nexmark::source::message::NexmarkMessage;
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkEventGenerator {
@@ -30,7 +30,7 @@ pub struct NexmarkEventGenerator {
     pub wall_clock_base_time: usize,
     pub split_index: i32,
     pub split_num: i32,
-    pub split_id: String,
+    pub split_id: SplitId,
     pub last_event: Option<Event>,
     pub event_type: EventType,
     pub use_real_time: bool,

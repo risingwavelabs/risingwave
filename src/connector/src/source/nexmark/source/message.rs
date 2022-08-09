@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
 use crate::source::nexmark::source::event::Event;
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct NexmarkMessage {
-    pub shard_id: String,
+    pub shard_id: SplitId,
     pub sequence_number: String,
     pub payload: Bytes,
 }
@@ -36,7 +35,7 @@ impl From<NexmarkMessage> for SourceMessage {
 }
 
 impl NexmarkMessage {
-    pub fn new(shard_id: String, offset: u64, event: Event) -> Self {
+    pub fn new(shard_id: SplitId, offset: u64, event: Event) -> Self {
         NexmarkMessage {
             shard_id,
             sequence_number: offset.to_string(),
