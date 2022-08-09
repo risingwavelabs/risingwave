@@ -59,6 +59,9 @@ pub struct MetaMetrics {
     pub hummock_manager_real_process_time: HistogramVec,
 
     pub time_after_last_observation: AtomicU64,
+
+    /// num of deltas cloned from meta which is about to be sent from meta to CN
+    pub delta_payload_size: IntGauge,
 }
 
 impl MetaMetrics {
@@ -163,6 +166,13 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let delta_payload_size = register_int_gauge_with_registry!(
+            "delta_payload_size",
+            "num of deltas cloned from meta which is about to be sent from meta to CN",
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -182,6 +192,7 @@ impl MetaMetrics {
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
+            delta_payload_size,
         }
     }
 
