@@ -549,24 +549,25 @@ where
         hash_mapping_manager: HashMappingManagerRef,
         table_fragments: &HashMap<TableId, TableFragments>,
     ) -> MetaResult<()> {
-        for fragments in table_fragments.values() {
-            for (fragment_id, fragment) in &fragments.fragments {
-                let mapping = fragment.vnode_mapping.as_ref().unwrap();
-                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
-                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
-                hash_mapping_manager.set_fragment_hash_mapping(*fragment_id, vnode_mapping);
-
-                // Looking at the first actor is enough, since all actors in one fragment have
-                // identical state table id.
-                let actor = fragment.actors.first().unwrap();
-                let stream_node = actor.get_nodes()?;
-                record_table_vnode_mappings(
-                    &hash_mapping_manager,
-                    stream_node,
-                    fragment.fragment_id,
-                )?;
-            }
-        }
-        Ok(())
+        // for fragments in table_fragments.values() {
+        //     for (fragment_id, fragment) in &fragments.fragments {
+        //         let mapping = fragment.vnode_mapping.as_ref().unwrap();
+        //         let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
+        //         assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+        //         hash_mapping_manager.set_fragment_hash_mapping(*fragment_id, vnode_mapping);
+        //
+        //         // Looking at the first actor is enough, since all actors in one fragment have
+        //         // identical state table id.
+        //         let actor = fragment.actors.first().unwrap();
+        //         let stream_node = actor.get_nodes()?;
+        //         record_table_vnode_mappings(
+        //             &hash_mapping_manager,
+        //             stream_node,
+        //             fragment.fragment_id,
+        //         )?;
+        //     }
+        // }
+        // Ok(())
+        todo!()
     }
 }

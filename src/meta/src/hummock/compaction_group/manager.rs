@@ -493,10 +493,8 @@ mod tests {
     async fn test_manager() {
         let (env, ..) = setup_compute_env(8080).await;
         let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
-        let table_fragment_1 =
-            TableFragments::new(TableId::new(10), Default::default(), [11, 12, 13].into());
-        let table_fragment_2 =
-            TableFragments::new(TableId::new(20), Default::default(), [21, 22, 23].into());
+        let table_fragment_1 = TableFragments::new(TableId::new(10), Default::default());
+        let table_fragment_2 = TableFragments::new(TableId::new(20), Default::default());
         let source_1 = 100;
         let source_2 = 200;
         let source_3 = 300;

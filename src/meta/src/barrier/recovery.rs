@@ -227,16 +227,16 @@ where
             .update_table_mapping(&new_fragments, &migrate_map)
             .await;
         // update hash mapping
-        for fragments in new_fragments {
-            for (fragment_id, fragment) in fragments.fragments {
-                let mapping = fragment.vnode_mapping.as_ref().unwrap();
-                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
-                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
-                self.env
-                    .hash_mapping_manager()
-                    .set_fragment_hash_mapping(fragment_id, vnode_mapping);
-            }
-        }
+        // for fragments in new_fragments {
+        //     for (fragment_id, fragment) in fragments.fragments {
+        //         let mapping = fragment.vnode_mapping.as_ref().unwrap();
+        //         let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
+        //         assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+        //         self.env
+        //             .hash_mapping_manager()
+        //             .set_fragment_hash_mapping(fragment_id, vnode_mapping);
+        //     }
+        // }
         debug!("migrate actors succeed.");
         res
     }

@@ -253,23 +253,6 @@ where
             .drop_materialized_view(&TableId::new(sink_id))
             .await?;
 
-        self.env
-            .hash_mapping_manager()
-            .delete_table_hash_mapping(table_fragments.table_id().table_id);
-        self.notify_table_mapping(table_fragments.table_id().table_id, Operation::Delete)
-            .await;
-        for table_id in table_fragments.internal_table_ids() {
-            self.env
-                .hash_mapping_manager()
-                .delete_table_hash_mapping(table_id);
-            self.notify_table_mapping(table_id, Operation::Delete).await;
-        }
-        for fragment_id in table_fragments.fragment_ids() {
-            self.env
-                .hash_mapping_manager()
-                .delete_fragment_hash_mapping(fragment_id);
-        }
-
         Ok(Response::new(DropSinkResponse {
             status: None,
             version,
@@ -326,27 +309,12 @@ where
             .await?;
 
         // 2. drop mv in stream manager
-        let table_fragments = self
+        let _table_fragments = self
             .stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
 
-        self.env
-            .hash_mapping_manager()
-            .delete_table_hash_mapping(table_fragments.table_id().table_id);
-        self.notify_table_mapping(table_fragments.table_id().table_id, Operation::Delete)
-            .await;
-        for table_id in table_fragments.internal_table_ids() {
-            self.env
-                .hash_mapping_manager()
-                .delete_table_hash_mapping(table_id);
-            self.notify_table_mapping(table_id, Operation::Delete).await;
-        }
-        for fragment_id in table_fragments.fragment_ids() {
-            self.env
-                .hash_mapping_manager()
-                .delete_fragment_hash_mapping(fragment_id);
-        }
+        // FIXME: should notify vnode mapping change proactively or through drop table.
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -471,24 +439,16 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn notify_table_mapping(&self, table_id: u32, operation: Operation) {
-        let mapping = self
-            .env
-            .hash_mapping_manager()
-            .get_table_hash_mapping(&table_id)
-            .expect("no data distribution found");
-        let (original_indices, data) = compress_data(&mapping);
-        self.env
-            .notification_manager()
-            .notify_frontend(
-                operation,
-                Info::Mapping(ParallelUnitMapping {
-                    table_id,
-                    original_indices,
-                    data,
-                }),
-            )
-            .await;
+    async fn notify_table_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
+        for table_id in table_fragment.internal_table_ids() {
+            let mapping = table_fragment
+                .get_internal_table_hash_mapping(table_id)
+                .expect("no data distribution found");
+            self.env
+                .notification_manager()
+                .notify_frontend(operation, Info::Mapping(mapping))
+                .await;
+        }
     }
 
     // Creates relation. `Relation` can be either a `Table` or a `Sink`.
@@ -527,10 +487,10 @@ where
             affiliated_source: None,
             ..Default::default()
         };
-        if let Err(err) = self
+        let res = self
             .create_relation_on_compute_node(relation, fragment_graph, id, &mut ctx)
-            .await
-        {
+            .await;
+        if let Err(err) = res {
             self.stream_manager
                 .remove_processing_table(ctx.internal_table_ids())
                 .await;
@@ -540,16 +500,13 @@ where
                 .await?;
             return Err(err);
         };
-
-        let internal_tables = ctx.internal_tables();
+        let table_fragment = res?;
 
         // 4. Notify vnode mapping info to frontend.
         match relation {
-            Relation::Table(table) | Relation::Index(_, table) => {
-                self.notify_table_mapping(table.id, Operation::Add).await;
-                for table in &internal_tables {
-                    self.notify_table_mapping(table.id, Operation::Add).await;
-                }
+            Relation::Table(_) | Relation::Index(..) => {
+                self.notify_table_mapping(&table_fragment, Operation::Add)
+                    .await
             }
             _ => {}
         }
@@ -559,7 +516,7 @@ where
             .catalog_manager
             .finish_create_procedure(
                 match relation {
-                    Relation::Table(_) | Relation::Index(..) => Some(internal_tables),
+                    Relation::Table(_) | Relation::Index(..) => Some(ctx.internal_tables()),
                     Relation::Sink(_) => None,
                 },
                 relation,
@@ -579,7 +536,7 @@ where
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
         ctx: &mut CreateMaterializedViewContext,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<TableFragments> {
         use risingwave_common::catalog::TableId;
 
         // Get relation_id and make fragment_graph immutable.
@@ -635,15 +592,18 @@ where
             )
             .await?;
 
-        assert_eq!(fragment_graph.table_ids_cnt, ctx.internal_table_ids().len());
+        assert_eq!(
+            fragment_graph.table_ids_cnt,
+            ctx.internal_table_ids().len() as u32
+        );
 
-        let table_fragments = TableFragments::new(relation_id, graph, internal_table_id_set);
+        let mut table_fragments = TableFragments::new(relation_id, graph);
 
         // Create on compute node.
         self.stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(&mut table_fragments, ctx)
             .await?;
-        Ok(())
+        Ok(table_fragments)
     }
 
     async fn create_materialized_source_inner(
@@ -718,15 +678,16 @@ where
             ..Default::default()
         };
 
-        if let Err(err) = self
+        let res = self
             .create_relation_on_compute_node(
                 &Relation::Table(mview.clone()),
                 fragment_graph,
                 mview_id,
                 &mut ctx,
             )
-            .await
-        {
+            .await;
+
+        if let Err(err) = res {
             self.stream_manager
                 .remove_processing_table(ctx.internal_table_ids())
                 .await;
@@ -737,18 +698,16 @@ where
             self.source_manager.drop_source(source_id).await?;
             return Err(err);
         }
-        let internal_tables = ctx.internal_tables();
+        let table_fragment = res?;
 
         // Notify vnode mapping info to frontend.
-        self.notify_table_mapping(mview_id, Operation::Add).await;
-        for table in &internal_tables {
-            self.notify_table_mapping(table.id, Operation::Add).await;
-        }
+        self.notify_table_mapping(&table_fragment, Operation::Add)
+            .await;
 
         // Finally, update the catalog.
         let version = self
             .catalog_manager
-            .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
+            .finish_create_materialized_source_procedure(&source, &mview, ctx.internal_tables())
             .await;
 
         self.stream_manager
@@ -779,22 +738,7 @@ where
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
 
-        self.env
-            .hash_mapping_manager()
-            .delete_table_hash_mapping(table_fragments.table_id().table_id);
-        self.notify_table_mapping(table_fragments.table_id().table_id, Operation::Delete)
-            .await;
-        for table_id in table_fragments.internal_table_ids() {
-            self.env
-                .hash_mapping_manager()
-                .delete_table_hash_mapping(table_id);
-            self.notify_table_mapping(table_id, Operation::Delete).await;
-        }
-        for fragment_id in table_fragments.fragment_ids() {
-            self.env
-                .hash_mapping_manager()
-                .delete_fragment_hash_mapping(fragment_id);
-        }
+        // FIXME: should notify vnode mapping change proactively or through drop table.
 
         self.source_manager.drop_source(source_id).await?;
 

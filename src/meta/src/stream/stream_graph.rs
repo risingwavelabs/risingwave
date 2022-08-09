@@ -917,7 +917,7 @@ impl ActorGraphBuilder {
                             FragmentDistributionType::Hash
                         } as i32,
                         actors,
-                        vnode_mapping: None,
+                        ..Default::default()
                     },
                 )
             })

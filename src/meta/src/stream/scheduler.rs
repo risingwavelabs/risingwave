@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -177,7 +177,8 @@ where
                 };
 
             // Build vnode mapping. However, we'll leave vnode field of actors unset for singletons.
-            self.set_fragment_vnode_mapping(fragment, &[parallel_unit.clone()])?;
+            let _vnode_mapping =
+                self.set_fragment_vnode_mapping(fragment, &[parallel_unit.clone()])?;
 
             // Record actor locations.
             locations
@@ -193,13 +194,7 @@ where
             parallel_units.truncate(fragment.actors.len());
 
             // Build vnode mapping according to the parallel units.
-            self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
-
-            // Find out the vnodes that a parallel unit owns.
-            let vnode_mapping = self
-                .hash_mapping_manager
-                .get_fragment_hash_mapping(&fragment.fragment_id)
-                .unwrap();
+            let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
 
             let mut vnode_bitmaps = HashMap::new();
             vnode_mapping
@@ -244,10 +239,8 @@ where
         &self,
         fragment: &mut Fragment,
         parallel_units: &[ParallelUnit],
-    ) -> MetaResult<()> {
-        let vnode_mapping = self
-            .hash_mapping_manager
-            .build_fragment_hash_mapping(fragment.fragment_id, parallel_units);
+    ) -> MetaResult<Vec<ParallelUnitId>> {
+        let vnode_mapping = Self::build_hash_mapping(parallel_units);
         let (original_indices, data) = compress_data(&vnode_mapping);
         fragment.vnode_mapping = Some(ParallelUnitMapping {
             original_indices,
@@ -258,12 +251,31 @@ where
         // state table id.
         let actor = fragment.actors.first().unwrap();
         let stream_node = actor.get_nodes()?;
-        record_table_vnode_mappings(
-            &self.hash_mapping_manager,
-            stream_node,
-            fragment.fragment_id,
-        )?;
-        Ok(())
+        record_table_vnode_mappings(stream_node, fragment)?;
+        Ok(vnode_mapping)
+    }
+
+    /// Build a vnode mapping according to parallel units where the fragment is scheduled.
+    fn build_hash_mapping(parallel_units: &[ParallelUnit]) -> Vec<ParallelUnitId> {
+        let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
+
+        let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
+        let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
+        let mut init_bound = 0;
+
+        parallel_units.iter().for_each(|parallel_unit| {
+            let vnode_count = if one_more_count > 0 {
+                one_more_count -= 1;
+                hash_shard_size + 1
+            } else {
+                hash_shard_size
+            };
+            let parallel_unit_id = parallel_unit.id;
+            init_bound += vnode_count;
+            vnode_mapping.resize(init_bound, parallel_unit_id);
+        });
+
+        vnode_mapping
     }
 }
 
@@ -360,7 +372,7 @@ mod test {
                     fragment_type: 0,
                     distribution_type: FragmentDistributionType::Hash as i32,
                     actors,
-                    vnode_mapping: None,
+                    ..Default::default()
                 }
             })
             .collect_vec();
@@ -370,17 +382,7 @@ mod test {
             scheduler.schedule(fragment, &mut locations).await.unwrap();
         }
         for fragment in single_fragments {
-            assert_ne!(
-                env.hash_mapping_manager()
-                    .get_fragment_hash_mapping(&fragment.fragment_id),
-                None
-            );
-            // We use fragment id as table id here.
-            assert_eq!(
-                env.hash_mapping_manager()
-                    .get_table_hash_mapping(&fragment.fragment_id),
-                None
-            );
+            assert_ne!(fragment.vnode_mapping, None);
             for actor in fragment.actors {
                 assert!(actor.vnode_bitmap.is_none());
             }
@@ -405,17 +407,7 @@ mod test {
             node_count as usize * parallel_degree
         );
         for fragment in normal_fragments {
-            assert_ne!(
-                env.hash_mapping_manager()
-                    .get_fragment_hash_mapping(&fragment.fragment_id),
-                None
-            );
-            // We use fragment id as table id here.
-            assert_ne!(
-                env.hash_mapping_manager()
-                    .get_table_hash_mapping(&fragment.fragment_id),
-                None
-            );
+            assert_ne!(fragment.vnode_mapping, None,);
             let mut vnode_sum = 0;
             for actor in fragment.actors {
                 vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).num_high_bits();

@@ -328,7 +328,7 @@ where
     /// then upstream.)
     pub async fn create_materialized_view(
         &self,
-        mut table_fragments: TableFragments,
+        table_fragments: &mut TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
             upstream_worker_actors,
@@ -385,7 +385,7 @@ where
         // 1. insert upstream actor id in merge node
         // 2. insert parallel unit id in batch query node
         self.resolve_chain_node(
-            &mut table_fragments,
+            table_fragments,
             dependent_table_ids,
             dispatchers,
             upstream_worker_actors,
@@ -674,7 +674,7 @@ where
         if let Err(err) = self
             .barrier_manager
             .run_command(Command::CreateMaterializedView {
-                table_fragments,
+                table_fragments: table_fragments.clone(),
                 table_sink_map: table_sink_map.clone(),
                 dispatchers: dispatchers.clone(),
                 source_state: init_split_assignment.clone(),
@@ -1084,15 +1084,15 @@ mod tests {
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 vnode_mapping: None,
+                state_table_ids: vec![],
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments, HashSet::default());
-
+        let mut table_fragments = TableFragments::new(table_id, fragments);
         let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, &mut ctx)
+            .create_materialized_view(&mut table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1159,18 +1159,15 @@ mod tests {
                 fragment_type: FragmentType::Sink as i32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
-                vnode_mapping: None,
+                ..Default::default()
             },
         );
-        let internal_table_id = HashSet::from([2, 3, 5, 7]);
-
-        let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
-
+        let mut table_fragments = TableFragments::new(table_id, fragments);
         let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, &mut ctx)
+            .create_materialized_view(&mut table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1265,18 +1262,16 @@ mod tests {
                 fragment_type: FragmentType::Sink as i32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
-                vnode_mapping: None,
+                ..Default::default()
             },
         );
-        let internal_table_id = HashSet::from([2, 3, 5, 7]);
 
-        let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
-
+        let mut table_fragments = TableFragments::new(table_id, fragments);
         let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, &mut ctx)
+            .create_materialized_view(&mut table_fragments, &mut ctx)
             .await
             .unwrap();
 

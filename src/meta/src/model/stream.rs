@@ -17,7 +17,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
-use risingwave_pb::common::ParallelUnit;
+use risingwave_common::util::compress::decompress_data;
+use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -48,12 +49,12 @@ pub struct TableFragments {
     pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
 
     /// Internal TableIds from all Fragment
-    internal_table_ids: Vec<u32>,
+    internal_table_to_fragment_map: HashMap<u32, FragmentId>,
 }
 
 impl MetadataModel for TableFragments {
-    type ProstType = ProstTableFragments;
     type KeyType = u32;
+    type ProstType = ProstTableFragments;
 
     fn cf_name() -> String {
         TABLE_FRAGMENTS_CF_NAME.to_string()
@@ -64,16 +65,21 @@ impl MetadataModel for TableFragments {
             table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
-            internal_table_ids: self.internal_table_ids.clone(),
         }
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
+        let internal_table_to_fragment_map: HashMap<u32, FragmentId> = prost
+            .fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.iter().map(|&t| (t, f.fragment_id)))
+            .collect();
+
         Self {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
-            internal_table_ids: prost.internal_table_ids,
+            internal_table_to_fragment_map,
         }
     }
 
@@ -83,16 +89,18 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(
-        table_id: TableId,
-        fragments: BTreeMap<FragmentId, Fragment>,
-        internal_table_id_set: HashSet<u32>,
-    ) -> Self {
+    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+        let internal_table_to_fragment_map: HashMap<u32, FragmentId> = prost
+            .fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.iter().map(|&t| (t, f.fragment_id)))
+            .collect();
+
         Self {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
-            internal_table_ids: Vec::from_iter(internal_table_id_set),
+            internal_table_to_fragment_map,
         }
     }
 
@@ -407,6 +415,15 @@ impl TableFragments {
     }
 
     pub fn internal_table_ids(&self) -> Vec<u32> {
-        self.internal_table_ids.clone()
+        self.fragments
+            .values()
+            .flat_map(|f| f.state_table_ids)
+            .collect_vec()
+    }
+
+    pub fn get_internal_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
+        self.internal_table_to_fragment_map
+            .get(&table_id)
+            .map(|f| self.fragments[f].vnode_mapping.unwrap())
     }
 }

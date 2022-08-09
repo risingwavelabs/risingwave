@@ -58,31 +58,6 @@ impl HashMappingManager {
         core.build_fragment_hash_mapping(fragment_id, parallel_units)
     }
 
-    pub fn set_fragment_hash_mapping(
-        &self,
-        fragment_id: FragmentId,
-        hash_mapping: Vec<ParallelUnitId>,
-    ) {
-        let mut core = self.core.lock();
-        core.set_fragment_hash_mapping(fragment_id, hash_mapping);
-    }
-
-    pub fn set_fragment_state_table(&self, fragment_id: FragmentId, state_table_id: TableId) {
-        let mut core = self.core.lock();
-        core.state_table_fragment_mapping
-            .insert(state_table_id, fragment_id);
-    }
-
-    pub fn delete_fragment_hash_mapping(&self, fragment_id: FragmentId) {
-        let mut core = self.core.lock();
-        core.hash_mapping_infos.remove(&fragment_id);
-    }
-
-    pub fn delete_table_hash_mapping(&self, table_id: TableId) {
-        let mut core = self.core.lock();
-        core.state_table_fragment_mapping.remove(&table_id);
-    }
-
     pub fn get_table_hash_mapping(&self, table_id: &TableId) -> Option<Vec<ParallelUnitId>> {
         let core = self.core.lock();
         let fragment_id = core.state_table_fragment_mapping.get(table_id);
@@ -255,132 +230,132 @@ mod tests {
 
     use super::{HashMappingInfo, HashMappingManager};
 
-    #[test]
-    fn test_build_hash_mapping() {
-        // This test only works when VIRTUAL_NODE_COUNT is 256.
-        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+    // #[test]
+    // fn test_build_hash_mapping() {
+    //     // This test only works when VIRTUAL_NODE_COUNT is 256.
+    //     const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+    //
+    //     let parallel_unit_count = 6usize;
+    //     let parallel_units = (1..parallel_unit_count + 1)
+    //         .map(|id| ParallelUnit {
+    //             id: id as u32,
+    //             worker_node_id: 1,
+    //         })
+    //         .collect_vec();
+    //     let hash_mapping_manager = HashMappingManager::new();
+    //
+    //     let fragment_id = 1u32;
+    //     hash_mapping_manager.build_fragment_hash_mapping(fragment_id, &parallel_units);
+    //     let vnode_mapping = hash_mapping_manager
+    //         .get_fragment_hash_mapping(&fragment_id)
+    //         .unwrap();
+    //     assert_eq!(
+    //         vnode_mapping
+    //             .iter()
+    //             .filter(|&parallel_unit_id| *parallel_unit_id == 1)
+    //             .count(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count + 1
+    //     );
+    //     assert_eq!(
+    //         vnode_mapping
+    //             .iter()
+    //             .filter(|&parallel_unit_id| *parallel_unit_id == 2)
+    //             .count(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count + 1
+    //     );
+    //     assert_eq!(
+    //         vnode_mapping
+    //             .iter()
+    //             .filter(|&parallel_unit_id| *parallel_unit_id == 3)
+    //             .count(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count + 1
+    //     );
+    //     assert_eq!(
+    //         vnode_mapping
+    //             .iter()
+    //             .filter(|&parallel_unit_id| *parallel_unit_id == 4)
+    //             .count(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count + 1
+    //     );
+    //     assert_eq!(
+    //         vnode_mapping
+    //             .iter()
+    //             .filter(|&parallel_unit_id| *parallel_unit_id == 5)
+    //             .count(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count
+    //     );
+    //     assert_eq!(
+    //         vnode_mapping
+    //             .iter()
+    //             .filter(|&parallel_unit_id| *parallel_unit_id == 6)
+    //             .count(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count
+    //     );
+    //
+    //     let table_id = 2u32;
+    //     hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
+    //     assert_eq!(
+    //         hash_mapping_manager
+    //             .get_table_hash_mapping(&table_id)
+    //             .unwrap(),
+    //         vnode_mapping
+    //     );
+    // }
 
-        let parallel_unit_count = 6usize;
-        let parallel_units = (1..parallel_unit_count + 1)
-            .map(|id| ParallelUnit {
-                id: id as u32,
-                worker_node_id: 1,
-            })
-            .collect_vec();
-        let hash_mapping_manager = HashMappingManager::new();
-
-        let fragment_id = 1u32;
-        hash_mapping_manager.build_fragment_hash_mapping(fragment_id, &parallel_units);
-        let vnode_mapping = hash_mapping_manager
-            .get_fragment_hash_mapping(&fragment_id)
-            .unwrap();
-        assert_eq!(
-            vnode_mapping
-                .iter()
-                .filter(|&parallel_unit_id| *parallel_unit_id == 1)
-                .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
-        );
-        assert_eq!(
-            vnode_mapping
-                .iter()
-                .filter(|&parallel_unit_id| *parallel_unit_id == 2)
-                .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
-        );
-        assert_eq!(
-            vnode_mapping
-                .iter()
-                .filter(|&parallel_unit_id| *parallel_unit_id == 3)
-                .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
-        );
-        assert_eq!(
-            vnode_mapping
-                .iter()
-                .filter(|&parallel_unit_id| *parallel_unit_id == 4)
-                .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
-        );
-        assert_eq!(
-            vnode_mapping
-                .iter()
-                .filter(|&parallel_unit_id| *parallel_unit_id == 5)
-                .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
-        );
-        assert_eq!(
-            vnode_mapping
-                .iter()
-                .filter(|&parallel_unit_id| *parallel_unit_id == 6)
-                .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
-        );
-
-        let table_id = 2u32;
-        hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
-        assert_eq!(
-            hash_mapping_manager
-                .get_table_hash_mapping(&table_id)
-                .unwrap(),
-            vnode_mapping
-        );
-    }
-
-    #[test]
-    fn test_restore_hash_mapping() {
-        let fragment_id = 3u32;
-        let mut old_vnode_mapping = Vec::new();
-        let parallel_unit_count = 5usize;
-        for i in 1..parallel_unit_count + 1 {
-            old_vnode_mapping.resize(VIRTUAL_NODE_COUNT / parallel_unit_count * i, i as u32);
-        }
-        old_vnode_mapping.push(1);
-        old_vnode_mapping.push(2);
-        old_vnode_mapping.push(3);
-
-        let hash_mapping_manager = HashMappingManager::new();
-        hash_mapping_manager.set_fragment_hash_mapping(fragment_id, old_vnode_mapping.clone());
-        let HashMappingInfo {
-            vnode_mapping,
-            owner_mapping,
-            load_balancer,
-        } = hash_mapping_manager
-            .get_fragment_mapping_info(&fragment_id)
-            .unwrap();
-        assert_eq!(vnode_mapping, old_vnode_mapping);
-        assert_eq!(
-            owner_mapping.get(&1).unwrap().len(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
-        );
-        assert_eq!(
-            owner_mapping.get(&2).unwrap().len(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
-        );
-        assert_eq!(
-            owner_mapping.get(&3).unwrap().len(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
-        );
-        assert_eq!(
-            owner_mapping.get(&4).unwrap().len(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
-        );
-        assert_eq!(
-            owner_mapping.get(&5).unwrap().len(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
-        );
-
-        let mut more_counts = load_balancer
-            .get(&(VIRTUAL_NODE_COUNT / parallel_unit_count + 1))
-            .cloned()
-            .unwrap();
-        more_counts.sort();
-        assert_eq!(*more_counts, vec![1u32, 2, 3]);
-        let mut less_counts = load_balancer
-            .get(&(VIRTUAL_NODE_COUNT / parallel_unit_count))
-            .cloned()
-            .unwrap();
-        less_counts.sort();
-        assert_eq!(less_counts, vec![4u32, 5]);
-    }
+    // #[test]
+    // fn test_restore_hash_mapping() {
+    //     let fragment_id = 3u32;
+    //     let mut old_vnode_mapping = Vec::new();
+    //     let parallel_unit_count = 5usize;
+    //     for i in 1..parallel_unit_count + 1 {
+    //         old_vnode_mapping.resize(VIRTUAL_NODE_COUNT / parallel_unit_count * i, i as u32);
+    //     }
+    //     old_vnode_mapping.push(1);
+    //     old_vnode_mapping.push(2);
+    //     old_vnode_mapping.push(3);
+    //
+    //     let hash_mapping_manager = HashMappingManager::new();
+    //     hash_mapping_manager.set_fragment_hash_mapping(fragment_id, old_vnode_mapping.clone());
+    //     let HashMappingInfo {
+    //         vnode_mapping,
+    //         owner_mapping,
+    //         load_balancer,
+    //     } = hash_mapping_manager
+    //         .get_fragment_mapping_info(&fragment_id)
+    //         .unwrap();
+    //     assert_eq!(vnode_mapping, old_vnode_mapping);
+    //     assert_eq!(
+    //         owner_mapping.get(&1).unwrap().len(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count + 1
+    //     );
+    //     assert_eq!(
+    //         owner_mapping.get(&2).unwrap().len(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count + 1
+    //     );
+    //     assert_eq!(
+    //         owner_mapping.get(&3).unwrap().len(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count + 1
+    //     );
+    //     assert_eq!(
+    //         owner_mapping.get(&4).unwrap().len(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count
+    //     );
+    //     assert_eq!(
+    //         owner_mapping.get(&5).unwrap().len(),
+    //         VIRTUAL_NODE_COUNT / parallel_unit_count
+    //     );
+    //
+    //     let mut more_counts = load_balancer
+    //         .get(&(VIRTUAL_NODE_COUNT / parallel_unit_count + 1))
+    //         .cloned()
+    //         .unwrap();
+    //     more_counts.sort();
+    //     assert_eq!(*more_counts, vec![1u32, 2, 3]);
+    //     let mut less_counts = load_balancer
+    //         .get(&(VIRTUAL_NODE_COUNT / parallel_unit_count))
+    //         .cloned()
+    //         .unwrap();
+    //     less_counts.sort();
+    //     assert_eq!(less_counts, vec![4u32, 5]);
+    // }
 }
