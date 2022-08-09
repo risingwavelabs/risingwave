@@ -39,7 +39,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use async_stack_trace::StackTrace;
-pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
+pub use meta_client::{GrpcMetaClient, MetaClient};
 use moka::future::Cache;
 use tonic::transport::{Channel, Endpoint};
 mod compute_client;
@@ -119,3 +119,19 @@ pub trait ExtraInfoSource: Send + Sync {
 }
 
 pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
+
+#[macro_export]
+macro_rules! rpc_client_method_impl {
+    ([], $( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(
+            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                Ok(self
+                    .$client
+                    .to_owned()
+                    .$fn_name(request)
+                    .await?
+                    .into_inner())
+            }
+        )*
+    }
+}

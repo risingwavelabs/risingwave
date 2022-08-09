@@ -55,7 +55,7 @@ use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 mod command;
 mod info;
@@ -667,7 +667,7 @@ where
                     span: vec![],
                 };
                 async move {
-                    let mut client = self.env.stream_client_pool().get(node).await?;
+                    let client = self.env.stream_client_pool().get(node).await?;
 
                     let request = InjectBarrierRequest {
                         request_id,
@@ -681,11 +681,7 @@ where
                     );
 
                     // This RPC returns only if this worker node has injected this barrier.
-                    client
-                        .inject_barrier(request)
-                        .await
-                        .map(tonic::Response::<_>::into_inner)
-                        .map_err(MetaError::from)
+                    client.inject_barrier(request).await
                 }
                 .into()
             }
@@ -702,7 +698,7 @@ where
                     let request_id = Uuid::new_v4().to_string();
                     let env = env.clone();
                     async move {
-                        let mut client = env.stream_client_pool().get(node).await?;
+                        let client = env.stream_client_pool().get(node).await?;
                         let request = BarrierCompleteRequest {
                             request_id,
                             prev_epoch,
@@ -713,18 +709,16 @@ where
                         );
 
                         // This RPC returns only if this worker node has collected this barrier.
-                        client
-                            .barrier_complete(request)
-                            .await
-                            .map(tonic::Response::<_>::into_inner)
-                            .map_err(MetaError::from)
+                        client.barrier_complete(request).await
                     }
                     .into()
                 }
             });
 
             let result = try_join_all(collect_futures).await;
-            barrier_complete_tx.send((prev_epoch, result)).unwrap();
+            barrier_complete_tx
+                .send((prev_epoch, result.map_err(Into::into)))
+                .unwrap();
         });
         Ok(())
     }

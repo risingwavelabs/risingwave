@@ -458,8 +458,7 @@ where
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
+            .await? as u32;
         relation.set_id(id);
 
         // 1. Resolve the dependent relations.
@@ -484,11 +483,18 @@ where
             affiliated_source: None,
             ..Default::default()
         };
+
         let internal_tables = match self
             .create_relation_on_compute_node(relation, fragment_graph, id, &mut ctx)
             .await
         {
             Err(e) => {
+                let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids)
+                    .await;
+
                 self.catalog_manager
                     .cancel_create_procedure(relation)
                     .await?;
@@ -520,6 +526,8 @@ where
             ctx.internal_table_id_map.len()
         );
 
+        let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+
         // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
@@ -530,9 +538,13 @@ where
                 },
                 relation,
             )
-            .await?;
+            .await;
 
-        Ok((id, version))
+        self.stream_manager
+            .remove_processing_table(internal_table_ids)
+            .await;
+
+        Ok((id, version?))
     }
 
     async fn create_relation_on_compute_node(
@@ -699,6 +711,12 @@ where
             .await
         {
             Err(e) => {
+                let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids)
+                    .await;
+
                 self.catalog_manager
                     .cancel_create_materialized_source_procedure(&source, &mview)
                     .await?;
@@ -711,13 +729,18 @@ where
             }
         };
 
+        let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+
         // Finally, update the catalog.
         let version = self
             .catalog_manager
             .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
-            .await?;
+            .await;
 
-        Ok((source_id, mview_id, version))
+        self.stream_manager
+            .remove_processing_table(internal_table_ids)
+            .await;
+        Ok((source_id, mview_id, version?))
     }
 
     async fn drop_materialized_source_inner(
