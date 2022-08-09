@@ -58,6 +58,11 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
         let Some(pattern_node) = children.next() else {
             bail!("Expected argument pattern");
         };
+        if let Some(_flag) = children.next() {
+            return Err(ExprError::UnsupportedFunction(
+                "flag in regexp_match".to_string(),
+            ));
+        }
         let RexNode::Constant(pattern_value) = pattern_node.get_rex_node().unwrap() else {
             return Err(ExprError::UnsupportedFunction("non-constant pattern in regexp_match".to_string()))
         };

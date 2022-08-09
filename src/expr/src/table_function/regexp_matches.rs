@@ -136,8 +136,25 @@ pub fn new_regexp_matches(prost: &TableFunctionProst) -> Result<BoxedTableFuncti
     let Some(pattern_node) = args.next() else {
         bail!("Expected argument pattern");
     };
+    if let Some(flag) = args.next() {
+        let RexNode::Constant(flag) = flag.get_rex_node().unwrap() else {
+            bail!("Expected flag to be a constant");
+        };
+        let flag =
+            ScalarImpl::bytes_to_scalar(flag.get_body(), pattern_node.get_return_type().unwrap())?;
+        let ScalarImpl::Utf8(flag) = flag else {
+            bail!("Expected flag to be a String");
+        };
+        if flag != "g" {
+            return Err(ExprError::UnsupportedFunction(
+                "flag in regexp_matches".to_string(),
+            ));
+        }
+        // Currently when 'g' is not present, regexp_matches will also return multiple rows.
+        // This is intuitive, but differs from PG's default behavior.
+    }
     let RexNode::Constant(pattern_value) = pattern_node.get_rex_node().unwrap() else {
-        return Err(ExprError::UnsupportedFunction("non-constant pattern in regexp_match".to_string()))
+        return Err(ExprError::UnsupportedFunction("non-constant pattern in regexp_matches".to_string()))
     };
     let pattern_scalar = ScalarImpl::bytes_to_scalar(
         pattern_value.get_body(),
