@@ -99,16 +99,14 @@ impl StreamFragmenter {
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
     /// fragments.
     fn rewrite_stream_node(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<StreamNode> {
         let insert_exchange_flag = Self::is_stateful_executor(&stream_node);
-        self.rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
+        Self::rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
     }
 
     fn rewrite_stream_node_inner(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
         insert_exchange_flag: bool,
@@ -120,7 +118,7 @@ impl StreamFragmenter {
             // add an exchange.
             let input = if Self::is_stateful_executor(&child_node) {
                 if insert_exchange_flag {
-                    let child_node = self.rewrite_stream_node_inner(state, child_node, true)?;
+                    let child_node = Self::rewrite_stream_node_inner(state, child_node, true)?;
 
                     let strategy = DispatchStrategy {
                         r#type: DispatcherType::NoShuffle.into(),
@@ -139,16 +137,16 @@ impl StreamFragmenter {
                         append_only,
                     }
                 } else {
-                    self.rewrite_stream_node_inner(state, child_node, true)?
+                    Self::rewrite_stream_node_inner(state, child_node, true)?
                 }
             } else {
                 match child_node.get_node_body()? {
                     // For exchanges, reset the flag.
                     NodeBody::Exchange(_) => {
-                        self.rewrite_stream_node_inner(state, child_node, false)?
+                        Self::rewrite_stream_node_inner(state, child_node, false)?
                     }
                     // Otherwise, recursively visit the children.
-                    _ => self.rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
+                    _ => Self::rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
                 }
             };
             inputs.push(input);
@@ -162,11 +160,10 @@ impl StreamFragmenter {
 
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<()> {
-        let stream_node = self.rewrite_stream_node(state, stream_node)?;
+        let stream_node = Self::rewrite_stream_node(state, stream_node)?;
         Self::build_and_add_fragment(state, stream_node)?;
         Ok(())
     }
@@ -282,8 +279,6 @@ impl StreamFragmenter {
     }
 
     pub fn build_graph(stream_node: StreamNode) -> StreamFragmentGraphProto {
-        let fragmenter = Self {};
-
         let BuildFragmentGraphState {
             fragment_graph,
             next_local_fragment_id: _,
@@ -292,9 +287,7 @@ impl StreamFragmenter {
             next_table_id,
         } = {
             let mut state = BuildFragmentGraphState::default();
-            fragmenter
-                .generate_fragment_graph(&mut state, stream_node)
-                .unwrap();
+            Self::generate_fragment_graph(&mut state, stream_node).unwrap();
             state
         };
 
