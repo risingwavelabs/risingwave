@@ -178,7 +178,7 @@
     /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
     create table t(x int);
     create index i on t(x);
-    select * from i join i as ii on i.x=ii.x;
+    select i.x as ix, ii.x as iix from i join i as ii on i.x=ii.x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchHashJoin { type: Inner, predicate: i.x = i.x, output: all }
@@ -186,11 +186,19 @@
           BatchScan { table: i, columns: [i.x], distribution: SomeShard }
         BatchExchange { order: [], dist: HashShard(i.x) }
           BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [ix, iix, i.t._row_id(hidden), i.t._row_id#1(hidden)], pk_columns: [i.t._row_id, i.t._row_id#1] }
+      StreamExchange { dist: HashShard(i.t._row_id, i.t._row_id) }
+        StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id] }
+          StreamExchange { dist: HashShard(i.x) }
+            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+          StreamExchange { dist: HashShard(i.x) }
+            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
 - sql: |
     /* Left & right has same SomeShard distribution. There should still be exchanges below hash join */
     create table t(x int);
     create index i on t(x);
-    select * from i join t on i.x=t.x;
+    select i.x as ix, t.x as tx from i join t on i.x=t.x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchHashJoin { type: Inner, predicate: i.x = t.x, output: all }
@@ -198,6 +206,14 @@
           BatchScan { table: i, columns: [i.x], distribution: SomeShard }
         BatchExchange { order: [], dist: HashShard(t.x) }
           BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [ix, tx, i.t._row_id(hidden), t._row_id(hidden)], pk_columns: [i.t._row_id, t._row_id] }
+      StreamExchange { dist: HashShard(i.t._row_id, t._row_id) }
+        StreamHashJoin { type: Inner, predicate: i.x = t.x, output: [i.x, t.x, i.t._row_id, t._row_id] }
+          StreamExchange { dist: HashShard(i.x) }
+            StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+          StreamExchange { dist: HashShard(t.x) }
+            StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     /* Left & right has same HashShard distribution. There should be no exchange below hash join */
     create table t(x int);
@@ -221,6 +237,21 @@
               BatchScan { table: i, columns: [i.x], distribution: SomeShard }
             BatchExchange { order: [], dist: HashShard(i.x) }
               BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [x, i.t._row_id(hidden), i.t._row_id#1(hidden), i.t._row_id#2(hidden), i.t._row_id#3(hidden)], pk_columns: [i.t._row_id, i.t._row_id#1, i.t._row_id#2, i.t._row_id#3] }
+      StreamExchange { dist: HashShard(i.t._row_id, i.t._row_id, i.t._row_id, i.t._row_id) }
+        StreamProject { exprs: [Coalesce(i.x, i.x), i.t._row_id, i.t._row_id, i.t._row_id, i.t._row_id] }
+          StreamHashJoin { type: FullOuter, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id, i.t._row_id, i.t._row_id] }
+            StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id] }
+              StreamExchange { dist: HashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+              StreamExchange { dist: HashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+            StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id] }
+              StreamExchange { dist: HashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
+              StreamExchange { dist: HashShard(i.x) }
+                StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: SomeHashShard(i.x) }
 - sql: |
     /* Use lookup join */
     create table t1 (v1 int, v2 int);
