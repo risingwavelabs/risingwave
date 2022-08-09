@@ -34,6 +34,9 @@ use crate::object::disk::DiskObjectStore;
 
 pub const LOCAL_OBJECT_STORE_PATH_PREFIX: &str = "@local:";
 
+pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
+pub type ObjectStreamingUploader = MonitoredStreamingUploader<StreamingUploaderImpl>;
+
 #[derive(Debug)]
 pub enum ObjectStorePath<'a> {
     Local(&'a str),
@@ -159,8 +162,6 @@ pub trait ObjectStore: Send + Sync {
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
 }
-
-pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
