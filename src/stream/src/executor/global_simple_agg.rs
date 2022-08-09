@@ -142,10 +142,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_array_refs(agg_calls, &columns);
         let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
-        let input_pk_data_types = input_pk_indices
-            .iter()
-            .map(|idx| input_schema.fields[*idx].data_type.clone())
-            .collect();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
@@ -163,9 +159,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 None,
                 agg_calls,
                 input_pk_indices.to_vec(),
-                input_pk_data_types,
                 epoch,
-                None,
                 state_tables,
                 state_table_col_mappings,
             )

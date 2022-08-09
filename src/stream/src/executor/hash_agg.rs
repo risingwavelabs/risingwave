@@ -32,10 +32,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
-use super::{
-    expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
-    StreamExecutorResult,
-};
+use super::{expect_first_barrier, pk_input_arrays, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -235,11 +232,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let all_agg_input_arrays = agg_input_arrays(agg_calls, &columns);
         let pk_input_arrays = pk_input_arrays(input_pk_indices, &columns);
 
-        let input_pk_data_types: PkDataTypes = input_pk_indices
-            .iter()
-            .map(|idx| input_schema.fields[*idx].data_type.clone())
-            .collect();
-
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
             .into_iter()
@@ -251,7 +243,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let key_data_types = &schema.data_types()[..key_indices.len()];
         let mut futures = vec![];
-        for (key, hash_code, _) in &unique_keys {
+        for (key, _hash_code, _) in &unique_keys {
             // Retrieve previous state from the KeyedState.
             let states = state_map.put(key.to_owned(), None);
 
@@ -269,9 +261,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
                                 input_pk_indices.clone(),
-                                input_pk_data_types.clone(),
                                 epoch,
-                                Some(hash_code.clone()),
                                 state_tables,
                                 state_table_col_mappings,
                             )

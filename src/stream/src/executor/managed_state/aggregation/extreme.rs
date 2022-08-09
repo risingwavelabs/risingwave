@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_chunk::{Op, Ops};
-use risingwave_common::array::{Array, ArrayImpl, Row};
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair, OrderType};
@@ -29,19 +29,13 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::common::StateTableColumnMapping;
-use crate::executor::aggregation::{AggArgs, AggCall};
+use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
-pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
-pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MAX }>;
-
-/// All possible extreme types.
-pub mod variants {
-    pub const EXTREME_MIN: usize = 0;
-    pub const EXTREME_MAX: usize = 1;
-}
+// TODO(rc): update all doc comments in this file
+// TODO(rc): convert GenericExtremeState to GenericTableState later
 
 #[derive(Debug)]
 struct Cache {
@@ -115,13 +109,9 @@ impl Cache {
 /// * The output of an `ExtremeState` is only correct when all changes have been flushed to the
 ///   state store.
 /// * The `RowIDs` must be i64
-pub struct GenericExtremeState<S: StateStore, A: Array, const EXTREME_TYPE: usize>
-where
-    A::OwnedItem: Ord,
-{
+pub struct GenericExtremeState<S: StateStore> {
     // TODO(rc): Remove the phantoms.
     _phantom_data: PhantomData<S>,
-    _phantom_data_2: PhantomData<A>,
 
     /// Group key to aggregate with group.
     /// None for simple agg, Some for group key of hash agg.
@@ -171,12 +161,7 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()>;
 }
 
-// TODO(rc): kill EXTREME_TYPE and A
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-    for<'a> &'a A: From<&'a ArrayImpl>,
-{
+impl<S: StateStore> GenericExtremeState<S> {
     /// Create a managed extreme state. If `cache_capacity` is `None`, the cache will be
     /// fully synced, otherwise it will only retain top entries.
     pub fn new(
@@ -186,7 +171,7 @@ where
         col_mapping: Arc<StateTableColumnMapping>,
         row_count: usize,
         cache_capacity: Option<usize>,
-    ) -> StreamExecutorResult<Self> {
+    ) -> Self {
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(agg_call.args.val_indices()[0])
@@ -211,15 +196,14 @@ where
         }))
         .collect();
 
-        Ok(Self {
+        Self {
             _phantom_data: PhantomData,
-            _phantom_data_2: PhantomData,
             group_key: group_key.cloned(),
             state_table_col_mapping: col_mapping,
             state_table_agg_col_idx,
             total_count: row_count,
             cache: Cache::new(cache_capacity, order_pairs),
-        })
+        }
     }
 
     /// Apply a batch of data to the state.
@@ -304,12 +288,7 @@ where
 }
 
 #[async_trait]
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> ManagedTableState<S>
-    for GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-    for<'a> &'a A: From<&'a ArrayImpl>,
-{
+impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -338,78 +317,6 @@ where
     fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         Ok(())
     }
-}
-
-pub fn create_streaming_extreme_state<S: StateStore>(
-    agg_call: AggCall,
-    group_key: Option<&Row>,
-    pk_indices: PkIndices,
-    col_mapping: Arc<StateTableColumnMapping>,
-    row_count: usize,
-    cache_capacity: Option<usize>,
-) -> StreamExecutorResult<Box<dyn ManagedTableState<S>>> {
-    match &agg_call.args {
-        AggArgs::Unary(x, _) => {
-            if agg_call.return_type != *x {
-                panic!(
-                    "extreme state input doesn't match return value: {:?}",
-                    agg_call
-                );
-            }
-        }
-        _ => panic!("extreme state should only have one arg: {:?}", agg_call),
-    }
-
-    macro_rules! match_new_extreme_state {
-        ($( { $( $kind:pat_param )|+, $array:ty } ),* $(,)?) => {{
-            use DataType::*;
-            use risingwave_common::array::*;
-
-            match (agg_call.kind.clone(), agg_call.return_type.clone()) {
-                // TODO(rc): this two can be merged
-                $(
-                    (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-                        ManagedMaxState::<_, $array>::new(
-                            agg_call,
-                            group_key,
-                            pk_indices,
-                            col_mapping,
-                            row_count,
-                            cache_capacity,
-                        )?,
-                    )),
-                    (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-                        ManagedMinState::<_, $array>::new(
-                            agg_call,
-                            group_key,
-                            pk_indices,
-                            col_mapping,
-                            row_count,
-                            cache_capacity,
-                        )?,
-                    )),
-                )*
-                (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
-            }
-        }};
-    }
-
-    match_new_extreme_state!(
-        { Boolean, BoolArray },
-        { Int64, I64Array },
-        { Int32, I32Array },
-        { Int16, I16Array },
-        { Float64, F64Array },
-        { Float32, F32Array },
-        { Decimal, DecimalArray },
-        { Date, NaiveDateArray },
-        { Varchar, Utf8Array },
-        { Time, NaiveTimeArray },
-        { Timestamp, NaiveDateTimeArray },
-        { Interval, IntervalArray },
-        { Struct { fields: _ }, StructArray },
-        { List { datatype: _ }, ListArray },
-    )
 }
 
 #[cfg(test)]
