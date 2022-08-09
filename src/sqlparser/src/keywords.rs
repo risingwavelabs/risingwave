@@ -411,6 +411,7 @@ define_keywords!(
     SHOW,
     SIMILAR,
     SINK,
+    SINKS,
     SMALLINT,
     SNAPSHOT,
     SOME,

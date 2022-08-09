@@ -82,3 +82,23 @@ query T
 values('12:34:56'::time::interval);
 ----
 12:34:56
+
+query T
+values('2020-01-01 12:34:56'::timestamp::date);
+----
+2020-01-01
+
+query T
+values('2020-01-01 12:34:56'::timestamp::time);
+----
+12:34:56
+
+query T
+values(interval '50 h'::time);
+----
+02:00:00
+
+query T
+values(interval '-50 h'::time);
+----
+22:00:00
