@@ -898,7 +898,9 @@ mod tests {
             let meta_metrics = Arc::new(MetaMetrics::new());
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
-            let compactor_manager = Arc::new(CompactorManager::new());
+            // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
+            // heartbeat thread here, so it doesn't matter.
+            let compactor_manager = Arc::new(CompactorManager::new(1));
 
             let hummock_manager = Arc::new(
                 HummockManager::new(

@@ -19,15 +19,13 @@ use std::time::SystemTime;
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse, VacuumTask,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
-const TASK_HEARTBEAT_TTL_SECONDS: u64 = 60;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
 type TaskId = u64;
@@ -37,6 +35,7 @@ pub struct Compactor {
     // Tasks only register a heartbeat if they make progress since the last block.
     // Else, they may have stalled even if they are still running within the compactor.
     task_heartbeats: Mutex<HashMap<TaskId, TaskHeartbeat>>,
+    task_heartbeat_interval_seconds: u64,
 }
 
 struct TaskHeartbeat {
@@ -71,7 +70,7 @@ impl Compactor {
                     task,
                     num_blocks_sealed: 0,
                     num_blocks_uploaded: 0,
-                    expire_at: now + TASK_HEARTBEAT_TTL_SECONDS,
+                    expire_at: now + self.task_heartbeat_interval_seconds,
                 },
             );
         }
@@ -90,7 +89,7 @@ impl Compactor {
                     || task_ref.num_blocks_uploaded < progress.num_blocks_uploaded
                 {
                     // Refresh the expiry of the task as it is showing progress.
-                    task_ref.expire_at = now + TASK_HEARTBEAT_TTL_SECONDS;
+                    task_ref.expire_at = now + self.task_heartbeat_interval_seconds;
                 }
             }
         }
@@ -135,18 +134,20 @@ impl CompactorManagerInner {
 ///   `CompactStatus::report_compact_task`. It's the final state.
 pub struct CompactorManager {
     inner: parking_lot::RwLock<CompactorManagerInner>,
+    pub task_heartbeat_interval_seconds: u64,
 }
 
 impl Default for CompactorManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(1)
     }
 }
 
 impl CompactorManager {
-    pub fn new() -> Self {
+    pub fn new(task_heartbeat_interval_seconds: u64) -> Self {
         Self {
             inner: parking_lot::RwLock::new(CompactorManagerInner::new()),
+            task_heartbeat_interval_seconds,
         }
     }
 
@@ -159,12 +160,13 @@ impl CompactorManager {
         let mut cancellable_tasks = vec![];
         for compactor in guard.compactor_map.values() {
             let mut cancellable_task_ids = vec![];
-            for (id, TaskHeartbeat { expire_at, .. }) in compactor.task_heartbeats.lock().unwrap().iter() {
+            let mut hb_guard = compactor.task_heartbeats.lock().unwrap();
+            #[allow(clippy::significant_drop_in_scrutinee)]
+            for (id, TaskHeartbeat { expire_at, .. }) in hb_guard.iter() {
                 if *expire_at < now {
                     cancellable_task_ids.push(*id);
                 }
             }
-            let mut hb_guard = compactor.task_heartbeats.lock().unwrap();
             for id in cancellable_task_ids {
                 if let Some(TaskHeartbeat { task, .. }) = hb_guard.remove(&id) {
                     cancellable_tasks.push((compactor.context_id(), task));
@@ -213,6 +215,7 @@ impl CompactorManager {
                 context_id,
                 sender: tx,
                 task_heartbeats: Mutex::new(HashMap::new()),
+                task_heartbeat_interval_seconds: self.task_heartbeat_interval_seconds,
             }),
         );
         tracing::info!("Added compactor {}", context_id);
@@ -304,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_remove_compactor() {
-        let compactor_manager = CompactorManager::new();
+        let compactor_manager = CompactorManager::new(1);
         // No compactors by default.
         assert_eq!(compactor_manager.inner.read().compactors.len(), 0);
 
@@ -351,7 +354,7 @@ mod tests {
             .build();
         let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;
-        let compactor_manager = CompactorManager::new();
+        let compactor_manager = CompactorManager::new(1);
         add_compact_task(hummock_manager.as_ref(), context_id, 1).await;
 
         // No compactor available.
@@ -387,7 +390,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_compactor_round_robin() {
-        let compactor_manager = CompactorManager::new();
+        let compactor_manager = CompactorManager::new(1);
         let mut receivers = vec![];
         for context_id in 0..5 {
             receivers.push(compactor_manager.add_compactor(context_id));

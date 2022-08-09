@@ -19,6 +19,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
@@ -47,16 +48,17 @@ impl CompactionRequestChannel {
     }
 
     /// Enqueues only if the target is not yet in queue.
-    pub fn try_send(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send(
+        &self,
+        compaction_group: CompactionGroupId,
+    ) -> Result<bool, SendError<CompactionGroupId>> {
         let mut guard = self.scheduled.lock();
         if guard.contains(&compaction_group) {
-            return false;
+            return Ok(false);
         }
-        if self.request_tx.send(compaction_group).is_err() {
-            return false;
-        }
+        self.request_tx.send(compaction_group)?;
         guard.insert(compaction_group);
-        true
+        Ok(true)
     }
 
     fn unschedule(&self, compaction_group: CompactionGroupId) {
@@ -100,6 +102,8 @@ where
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
                         None => {
+                            // There are no new compaction groups, lets wait for a bit.
+                            tokio::time::sleep(Duration::from_millis(200)).await;
                             break 'compaction_trigger;
                         }
                     }
@@ -194,7 +198,7 @@ where
                         compact_task_to_string(&compact_task)
                     );
                     // Reschedule it in case there are more tasks from this compaction group.
-                    request_channel.try_send(compaction_group);
+                    let _ = request_channel.try_send(compaction_group);
                     return true;
                 }
                 Err(err) => {

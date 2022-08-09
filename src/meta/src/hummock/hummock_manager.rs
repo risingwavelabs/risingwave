@@ -58,6 +58,8 @@ use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
 
+const REPORT_COMPACT_TASK_RETRIES: usize = 5;
+
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -279,7 +281,9 @@ where
         Ok(instance)
     }
 
-    pub fn start_compaction_heartbeat(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub async fn start_compaction_heartbeat(
+        hummock_manager: Arc<Self>,
+    ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let compactor_manager = hummock_manager.compactor_manager.clone();
         let join_handle = tokio::spawn(async move {
@@ -287,7 +291,9 @@ where
             loop {
                 tokio::select! {
                     // Wait for interval
-                    _ = min_interval.tick() => {},
+                    _ = min_interval.tick() => {
+                        println!("TICK!")
+                    },
                     // Shutdown
                     _ = &mut shutdown_rx => {
                         tracing::info!("Compaction heartbeat checker is stopped");
@@ -295,11 +301,49 @@ where
                     }
                 }
                 for (context_id, mut task) in compactor_manager.get_cancellable_tasks() {
+                    println!("TASK: {}", task.task_id);
                     task.task_status = false; // Change task status to failed
-                    if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await {
-                        tracing::info!("Compaction task cancellation due to missing heartbeat failed: hummock context: {context_id}, task_id: {}, {:?}", task.task_id, e);
+
+                    // TODO: this needs to be reliable, in other words, we cannot tolerate errors.
+                    // So, we retry and also have an idempotent fail-all which
+                    // we also retry (manually trigger `try_send_compaction_request`).
+                    // If all else fails, we report that we may never recover from this failure and
+                    // may fail to balance the LSM tree.
+                    let mut success = false;
+                    let mut last_err = None;
+                    for attempt_id in 0..REPORT_COMPACT_TASK_RETRIES {
+                        if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await
+                        {
+                            tracing::error!("Failed to cancel compaction task due to missing heartbeat (attempt {attempt_id}). \
+                                {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
+                            last_err = Some(e);
+                        } else {
+                            success = true;
+                            break;
+                        }
                     }
-                    // compactor_manager.cancel_task(context_id, &task);
+                    if !success {
+                        tracing::error!("Failed to cancel compaction task due to missing heartbeat after {REPORT_COMPACT_TASK_RETRIES} retries. \
+                            THIS MAY RESULT IN A PERMANENTLY IMBALANCED LSM TREE. hummock context: {context_id}, task_id: {}, ERR: {:?}", task.task_id, last_err);
+                        let mut reschedule_success = false;
+                        for _ in 0..REPORT_COMPACT_TASK_RETRIES {
+                            if hummock_manager
+                                .try_send_compaction_request(task.compaction_group_id)
+                                .is_ok()
+                            {
+                                reschedule_success = true;
+                                break;
+                            }
+                        }
+                        if !reschedule_success {
+                            tracing::error!("Failed to reschedule compaction group due to missing heartbeat. \
+                                THIS MAY STALL THE ENTIRE COMPACTION GROUP AND RESULT IN A PERMANENTLY IMBALANCED \
+                                LSM TREE: compaction_group_id: {}, task_id: {}", task.compaction_group_id, task.task_id);
+                        }
+                    }
+                    // This is just to have fast cancellation on compactor in case compactor is
+                    // alive but task is stalled. compactor_manager.
+                    // cancel_task(context_id, &task);
                 }
             }
         });
@@ -984,6 +1028,8 @@ where
             )?;
         }
 
+        // TODO: remove compaction task from `CompactorManager` heartbeat table.
+
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
             compact_task_to_string(compact_task),
@@ -1002,7 +1048,7 @@ where
             compact_task.compaction_group_id,
         );
 
-        self.try_send_compaction_request(compact_task.compaction_group_id);
+        self.try_send_compaction_request(compact_task.compaction_group_id)?;
 
         #[cfg(test)]
         {
@@ -1153,7 +1199,7 @@ where
 
         // commit_epoch may contains SSTs from any compaction group
         for id in modified_compaction_groups {
-            self.try_send_compaction_request(id);
+            self.try_send_compaction_request(id)?;
         }
 
         #[cfg(test)]
@@ -1421,11 +1467,14 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
-            return sender.try_send(compaction_group);
+            sender
+                .try_send(compaction_group)
+                .map_err(|e| Error::InternalError(e.to_string()))
+        } else {
+            Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
         }
-        false
     }
 
     #[named]

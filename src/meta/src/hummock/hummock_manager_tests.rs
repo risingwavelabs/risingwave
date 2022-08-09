@@ -24,14 +24,14 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    CompactTaskProgress, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
 
 use crate::cluster::WorkerId;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::HummockManagerRef;
+use crate::hummock::{HummockManager, HummockManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MemStore;
 
@@ -939,12 +939,16 @@ async fn test_trigger_manual_compaction() {
     }
 }
 
-
 #[tokio::test]
 async fn test_hummock_compaction_task_heartbeat() {
     let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
+
+    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    let _tx = compactor_manager.add_compactor(context_id);
+    let (join_handle, shutdown_tx) =
+        HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
     // Construct vnode mappings for generating compaction tasks.
     let parallel_units = cluster_manager.list_parallel_units().await;
@@ -998,15 +1002,25 @@ async fn test_hummock_compaction_task_heartbeat() {
         0
     );
     assert_eq!(compact_task.get_task_id(), 2);
+    // send task
+    compactor_manager
+        .random_compactor()
+        .unwrap()
+        .send_task(Some(compact_task.clone()), None)
+        .await
+        .unwrap();
 
-    // Cancel the task and succeed.
+    // send heartbeats to the task immediately
+    let req = CompactTaskProgress {
+        task_id: compact_task.task_id,
+        num_blocks_sealed: 1,
+        num_blocks_uploaded: 1,
+    };
+    compactor_manager.update_compaction_task_progress(context_id, vec![req]);
+
+    // Cancel the task immediately and succeed.
     compact_task.task_status = false;
     assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
-        .await
-        .unwrap());
-    // Cancel the task and told the task is not found, which may have been processed previously.
-    assert!(!hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
         .unwrap());
@@ -1022,16 +1036,23 @@ async fn test_hummock_compaction_task_heartbeat() {
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
-    // Finish the task and succeed.
-    compact_task.task_status = true;
-
-    assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
+    // send task
+    compactor_manager
+        .random_compactor()
+        .unwrap()
+        .send_task(Some(compact_task.clone()), None)
         .await
-        .unwrap());
-    // Finish the task and told the task is not found, which may have been processed previously.
+        .unwrap();
+
+    // do not send heartbeats to the task for 2.5 seconds (ttl = 1s, heartbeat check freq. = 1s)
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+
+    // Cancel the task after heartbeat has triggered and fail.
+    compact_task.task_status = false;
     assert!(!hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
         .unwrap());
+    shutdown_tx.send(()).unwrap();
+    join_handle.await.unwrap();
 }

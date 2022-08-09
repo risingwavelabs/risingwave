@@ -310,7 +310,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     monitor_process(meta_metrics.registry()).unwrap();
-    let compactor_manager = Arc::new(hummock::CompactorManager::new());
+    let compactor_manager = Arc::new(hummock::CompactorManager::new(
+        max_heartbeat_interval.as_secs(),
+    ));
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
@@ -468,7 +470,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         compaction_scheduler,
     )
     .await;
-    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager));
+    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
     sub_tasks.push((lease_handle, lease_shutdown));
     #[cfg(not(test))]
     {
