@@ -262,7 +262,7 @@ message CompactTaskProgress {
 message ReportCompactionTaskProgressRequest {
   uint32 context_id = 1;
   repeated CompactTaskProgress progress = 2;
-} 
+}
 
 message ReportCompactionTaskProgressResponse {
   common.Status status = 1;
