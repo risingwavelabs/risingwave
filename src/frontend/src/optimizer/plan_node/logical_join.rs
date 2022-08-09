@@ -1556,10 +1556,10 @@ mod tests {
         //  FD: l0 --> l1, r0 --> { r1, r2 }, {} --> l0, l1 --> r1, r1 --> l1
         // Left Outer Join:
         //  Schema: [l0, l1, r0, r1, r2]
-        //  FD: r0 --> { r1, r2 }
+        //  FD: l0 --> l1
         // Right Outer Join:
         //  Schema: [l0, l1, r0, r1, r2]
-        //  FD: l0 --> l1
+        //  FD: r0 --> { r1, r2 }
         // Full Outer Join:
         //  Schema: [l0, l1, r0, r1, r2]
         //  FD: empty
