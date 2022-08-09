@@ -65,7 +65,6 @@ incremental = false
 lto = 'off'
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
-debug = 1
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
