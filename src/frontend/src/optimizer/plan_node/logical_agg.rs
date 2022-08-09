@@ -915,7 +915,7 @@ impl LogicalAgg {
             .any(|e| e.has_table_function())
         {
             return Err(ErrorCode::NotImplemented(
-                "Table functions in agg call or group by is not suppported yet".to_string(),
+                "Table functions in agg call or group by is not supported yet".to_string(),
                 3814.into(),
             )
             .into());
