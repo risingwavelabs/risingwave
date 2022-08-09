@@ -118,12 +118,6 @@ impl From<MetaError> for tonic::Status {
     }
 }
 
-impl From<tonic::Status> for MetaError {
-    fn from(status: tonic::Status) -> Self {
-        RpcError::from(status).into()
-    }
-}
-
 /// Convert `MetaError` into `tonic::Status`. Generally used in `map_err`.
 pub fn meta_error_to_tonic(err: impl Into<MetaError>) -> tonic::Status {
     err.into().into()
