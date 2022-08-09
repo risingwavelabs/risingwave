@@ -36,7 +36,9 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
-use risingwave_pb::hummock::{CompactTask, CompactTaskProgress, LevelType, SstableInfo, SubscribeCompactTasksResponse};
+use risingwave_pb::hummock::{
+    CompactTask, CompactTaskProgress, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -934,7 +936,7 @@ impl Compactor {
                 };
 
                 // This inner loop is to consume stream.
-                'consume_stream: loop {
+                loop {
                     let message = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
@@ -950,7 +952,7 @@ impl Compactor {
                             if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
                                 tracing::warn!("Failed to report task progress. {e:?}");
                             }
-                            continue 'inner;
+                            continue;
                         }
                         message = stream.message() => {
                             message
@@ -963,11 +965,7 @@ impl Compactor {
                     };
                     match message {
                         // The inner Some is the side effect of generated code.
-                        Ok(Some(SubscribeCompactTasksResponse { task })) => {
-                            let task = match task {
-                                Some(task) => task,
-                                None => continue 'consume_stream,
-                            };
+                        Ok(Some(SubscribeCompactTasksResponse { task: Some(task) })) => {
                             tokio::spawn(process_task(
                                 task,
                                 compactor_context.clone(),

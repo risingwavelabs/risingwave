@@ -19,7 +19,7 @@ use std::time::SystemTime;
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
-use risingwave_pb::hummock::{SubscribeCompactTasksResponse, CompactTask, CompactTaskProgress};
+use risingwave_pb::hummock::{CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::MetaResult;
@@ -51,10 +51,12 @@ impl Compactor {
     pub async fn send_task(&self, task: Task) -> MetaResult<()> {
         // TODO: compactor node backpressure
         self.sender
-            .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
+            .send(Ok(SubscribeCompactTasksResponse {
+                task: Some(task.clone()),
+            }))
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        if let Task::CompactTask(task) = compact_task {
+        if let Task::CompactTask(task) = task {
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .expect("Clock may have gone backwards")
@@ -327,7 +329,10 @@ mod tests {
             let compactor_id = guard.compactors.first().unwrap();
             guard.compactor_map.get(compactor_id).unwrap().clone()
         };
-        compactor.send_task(Task::CompactTask(task.clone()), None).await.unwrap();
+        compactor
+            .send_task(Task::CompactTask(task.clone()))
+            .await
+            .unwrap();
         // Receive a compact task.
         let received_task = receiver.try_recv().unwrap().unwrap().task.unwrap();
         let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();

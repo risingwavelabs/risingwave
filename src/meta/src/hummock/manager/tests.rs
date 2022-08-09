@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CompactTaskProgress, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
@@ -1006,7 +1007,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     compactor_manager
         .random_compactor()
         .unwrap()
-        .send_task(Some(compact_task.clone()), None)
+        .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
 
@@ -1040,7 +1041,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     compactor_manager
         .random_compactor()
         .unwrap()
-        .send_task(Some(compact_task.clone()), None)
+        .send_task(Task::CompactTask(compact_task.clone()))
         .await
         .unwrap();
 
