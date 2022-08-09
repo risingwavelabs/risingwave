@@ -167,18 +167,17 @@ impl StreamFragmenter {
         stream_node: StreamNode,
     ) -> Result<()> {
         let stream_node = self.rewrite_stream_node(state, stream_node)?;
-        self.build_and_add_fragment(state, stream_node)?;
+        Self::build_and_add_fragment(state, stream_node)?;
         Ok(())
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
     fn build_and_add_fragment(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<StreamFragment> {
         let mut fragment = state.new_stream_fragment();
-        let node = self.build_fragment(state, &mut fragment, stream_node)?;
+        let node = Self::build_fragment(state, &mut fragment, stream_node)?;
 
         assert!(fragment.node.is_none());
         fragment.node = Some(Box::new(node));
@@ -192,7 +191,6 @@ impl StreamFragmenter {
     /// tree, count how many table ids should be allocated in this fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
     fn build_fragment(
-        &self,
         state: &mut BuildFragmentGraphState,
         current_fragment: &mut StreamFragment,
         mut stream_node: StreamNode,
@@ -226,7 +224,11 @@ impl StreamFragmenter {
             if delta_index_join.get_join_type()? == JoinType::Inner
                 && delta_index_join.condition.is_none()
             {
-                return self.build_delta_join_without_arrange(state, current_fragment, stream_node);
+                return Self::build_delta_join_without_arrange(
+                    state,
+                    current_fragment,
+                    stream_node,
+                );
             } else {
                 panic!("only inner join without non-equal condition is supported for delta joins");
             }
@@ -249,7 +251,7 @@ impl StreamFragmenter {
 
                         assert_eq!(child_node.input.len(), 1);
                         let child_fragment =
-                            self.build_and_add_fragment(state, child_node.input.remove(0))?;
+                            Self::build_and_add_fragment(state, child_node.input.remove(0))?;
                         state.fragment_graph.add_edge(
                             child_fragment.fragment_id,
                             current_fragment.fragment_id,
@@ -269,7 +271,7 @@ impl StreamFragmenter {
                     }
 
                     // For other children, visit recursively.
-                    _ => self.build_fragment(state, current_fragment, child_node),
+                    _ => Self::build_fragment(state, current_fragment, child_node),
                 }
             })
             .try_collect()?;
