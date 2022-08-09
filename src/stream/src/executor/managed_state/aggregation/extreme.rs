@@ -177,9 +177,8 @@ where
     A::OwnedItem: Ord,
     for<'a> &'a A: From<&'a ArrayImpl>,
 {
-    /// Create a managed min state. When `top_n_count` is `None`, the cache will
-    /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
-    /// after each flush.
+    /// Create a managed extreme state. If `cache_capacity` is `None`, the cache will be
+    /// fully synced, otherwise it will only retain top entries.
     pub fn new(
         agg_call: AggCall,
         group_key: Option<&Row>,
@@ -264,7 +263,7 @@ where
         Ok(())
     }
 
-    // TODO(rc): This is the only part that differs between different agg states.
+    // TODO(rc): This is the only part that differs between different managed states.
     // So we may introduce a trait for this later, and other code can be reused
     // for each type of state.
     fn get_output_from_cache(&self) -> Option<Datum> {
@@ -315,11 +314,11 @@ where
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        chunk_cols: &[&ArrayImpl],
         _epoch: u64,
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
-        self.apply_batch_inner(ops, visibility, data, state_table)
+        self.apply_batch_inner(ops, visibility, chunk_cols, state_table)
     }
 
     async fn get_output(
