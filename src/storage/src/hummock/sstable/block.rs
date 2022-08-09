@@ -47,7 +47,7 @@ impl Block {
         // Decompress.
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         let compressed_data = &buf[..buf.len() - 9];
-        let mut buf = match compression {
+        let buf = match compression {
             CompressionAlgorithm::None => buf[..buf.len() - 9].to_vec(),
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
@@ -72,7 +72,7 @@ impl Block {
         Ok(Self::decode_from_raw(buf))
     }
 
-    pub fn decode_from_raw(buf: Bytes) -> Self {
+    pub fn decode_from_raw(buf: Vec<u8>) -> Self {
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -82,7 +82,6 @@ impl Block {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
-        buf.truncate(data_len);
         Block {
             data: buf,
             data_len,
@@ -124,7 +123,7 @@ impl Block {
     }
 
     pub fn data(&self) -> &[u8] {
-        &self.data
+        &self.data[..self.data_len]
     }
 
     pub fn raw_data(&self) -> &[u8] {
