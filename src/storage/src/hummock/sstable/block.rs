@@ -75,7 +75,7 @@ impl Block {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
-        buf.resize(data_len, 0);
+        buf.truncate(data_len);
 
         Ok(Block {
             data: buf,

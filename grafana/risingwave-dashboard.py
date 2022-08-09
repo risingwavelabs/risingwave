@@ -203,7 +203,7 @@ def section_compaction(panels):
             ),
         ]),
 
-        panels.timeseries_count("Compactor Task Splits Count", [
+        panels.timeseries_count("Compactor Running Task Count", [
             panels.target(
                 "avg(storage_compact_task_pending_num) by(job, instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
             ),
