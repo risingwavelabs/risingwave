@@ -36,6 +36,7 @@ pub enum FilterKeyExtractorImpl {
     FullKey(FullKeyFilterKeyExtractor),
     Dummy(DummyFilterKeyExtractor),
     Multi(MultiFilterKeyExtractor),
+    FixedLength(FixedLengthFilterKeyExtractor),
 }
 
 impl FilterKeyExtractorImpl {
@@ -69,7 +70,8 @@ macro_rules! for_all_filter_key_extractor_variants {
             { Schema },
             { FullKey },
             { Dummy },
-            { Multi }
+            { Multi },
+            { FixedLength }
         }
     };
 }
@@ -94,6 +96,24 @@ impl FilterKeyExtractor for DummyFilterKeyExtractor {
 }
 
 /// [`SchemaFilterKeyExtractor`] build from table_catalog and extract a `full_key` to prefix for
+#[derive(Default)]
+pub struct FixedLengthFilterKeyExtractor {
+    fixed_length: usize,
+}
+
+impl FilterKeyExtractor for FixedLengthFilterKeyExtractor {
+    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+        &full_key[0..self.fixed_length]
+    }
+}
+
+impl FixedLengthFilterKeyExtractor {
+    pub fn new(fixed_length: usize) -> Self {
+        Self { fixed_length }
+    }
+}
+
+/// [`SchemaFilterKeyExtractor`] build from table_catalog and transform a `full_key` to prefix for
 /// prefix_bloom_filter
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
@@ -197,7 +217,7 @@ impl Debug for MultiFilterKeyExtractor {
 
 impl FilterKeyExtractor for MultiFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
+        // assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
 
         let table_id = get_table_id(full_key).unwrap();
         let mut last_state = self.last_filter_key_extractor_state.try_lock().unwrap();
@@ -260,9 +280,24 @@ impl FilterKeyExtractorManagerInner {
         self.notify.notify_waiters();
     }
 
-    async fn acquire(&self, mut table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
-        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+    async fn acquire(&self, mut table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
+        if table_id_set.is_empty() {
+            // table_id_set is empty
+            // the table in sst has been deleted
 
+            // use full key as default
+            return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
+        }
+
+        #[cfg(debug_assertions)]
+        {
+            // for some unit-test not config table_id_set
+            if table_id_set.iter().any(|table_id| *table_id == 0) {
+                return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
+            }
+        }
+
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         while !table_id_set.is_empty() {
             let notified = self.notify.notified();
 
@@ -284,7 +319,7 @@ impl FilterKeyExtractorManagerInner {
             }
         }
 
-        multi_filter_key_extractor
+        FilterKeyExtractorImpl::Multi(multi_filter_key_extractor)
     }
 }
 
@@ -314,7 +349,7 @@ impl FilterKeyExtractorManager {
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// table_id does not util version update (notify), and retry to get
-    pub async fn acquire(&self, table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
+    pub async fn acquire(&self, table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
         self.inner.acquire(table_id_set).await
     }
 }
@@ -639,6 +674,14 @@ mod tests {
             .acquire(remaining_table_id_set)
             .await;
 
-        assert_eq!(1, multi_filter_key_extractor.size());
+        match multi_filter_key_extractor {
+            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor) => {
+                assert_eq!(1, multi_filter_key_extractor.size());
+            }
+
+            _ => {
+                unreachable!()
+            }
+        }
     }
 }

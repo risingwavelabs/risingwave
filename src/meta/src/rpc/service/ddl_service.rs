@@ -461,6 +461,12 @@ where
             .await? as u32;
         relation.set_id(id);
 
+        let mview_id = match relation {
+            Relation::Table(table) => table.id,
+            Relation::Index(_, table) => table.id,
+            _ => 0,
+        };
+
         // 1. Resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
         assert!(
@@ -489,10 +495,15 @@ where
             .await
         {
             Err(e) => {
-                let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+                let internal_table_ids = ctx
+                    .internal_table_id_map
+                    .keys()
+                    .cloned()
+                    .chain(std::iter::once(mview_id))
+                    .collect_vec();
 
                 self.stream_manager
-                    .remove_processing_table(internal_table_ids)
+                    .remove_processing_table(internal_table_ids, true)
                     .await;
 
                 self.catalog_manager
@@ -526,7 +537,12 @@ where
             ctx.internal_table_id_map.len()
         );
 
-        let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+        let internal_table_ids = ctx
+            .internal_table_id_map
+            .keys()
+            .cloned()
+            .chain(std::iter::once(mview_id))
+            .collect_vec();
 
         // 4. Finally, update the catalog.
         let version = self
@@ -541,7 +557,7 @@ where
             .await;
 
         self.stream_manager
-            .remove_processing_table(internal_table_ids)
+            .remove_processing_table(internal_table_ids, false)
             .await;
 
         Ok((id, version?))
@@ -624,7 +640,7 @@ where
 
         // Create on compute node.
         self.stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(relation, table_fragments, ctx)
             .await?;
         Ok(())
     }
@@ -711,10 +727,15 @@ where
             .await
         {
             Err(e) => {
-                let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+                let internal_table_ids = ctx
+                    .internal_table_id_map
+                    .keys()
+                    .cloned()
+                    .chain(std::iter::once(mview_id))
+                    .collect_vec();
 
                 self.stream_manager
-                    .remove_processing_table(internal_table_ids)
+                    .remove_processing_table(internal_table_ids, true)
                     .await;
 
                 self.catalog_manager
@@ -729,7 +750,12 @@ where
             }
         };
 
-        let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
+        let internal_table_ids = ctx
+            .internal_table_id_map
+            .keys()
+            .cloned()
+            .chain(std::iter::once(mview_id))
+            .collect_vec();
 
         // Finally, update the catalog.
         let version = self
@@ -738,7 +764,7 @@ where
             .await;
 
         self.stream_manager
-            .remove_processing_table(internal_table_ids)
+            .remove_processing_table(internal_table_ids, false)
             .await;
         Ok((source_id, mview_id, version?))
     }
