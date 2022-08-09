@@ -19,10 +19,10 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use futures::Future;
-use risingwave_common::cache::{CachableEntry, LruCache};
+use risingwave_common::cache::{CachableEntry, LruCache, LruCacheEventListener};
 use risingwave_hummock_sdk::HummockSstableId;
 
-use super::{Block, HummockResult};
+use super::{Block, HummockResult, TieredCacheEntry, TieredCacheValue};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
@@ -62,6 +62,13 @@ impl BlockHolder {
             block: ptr,
         }
     }
+
+    pub fn from_tiered_cache(entry: TieredCacheEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
+        match entry {
+            TieredCacheEntry::Cache(entry) => Self::from_cached_block(entry),
+            TieredCacheEntry::Owned(block) => Self::from_owned_block(*block),
+        }
+    }
 }
 
 impl Deref for BlockHolder {
@@ -75,20 +82,44 @@ impl Deref for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
+type BlockCacheEventListener =
+    Arc<dyn LruCacheEventListener<K = (HummockSstableId, u64), T = Box<Block>>>;
+
 #[derive(Clone)]
 pub struct BlockCache {
     inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize, mut max_shard_bits: usize) -> Self {
+    pub fn new(capacity: usize, max_shard_bits: usize) -> Self {
+        Self::new_inner(capacity, max_shard_bits, None)
+    }
+
+    pub fn with_event_listener(
+        capacity: usize,
+        max_shard_bits: usize,
+        listener: BlockCacheEventListener,
+    ) -> Self {
+        Self::new_inner(capacity, max_shard_bits, Some(listener))
+    }
+
+    fn new_inner(
+        capacity: usize,
+        mut max_shard_bits: usize,
+        listener: Option<BlockCacheEventListener>,
+    ) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
         while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
             max_shard_bits -= 1;
         }
-        let cache = LruCache::new(max_shard_bits, capacity);
+
+        let cache = match listener {
+            Some(listener) => LruCache::with_event_listener(max_shard_bits, capacity, listener),
+            None => LruCache::new(max_shard_bits, capacity),
+        };
+
         Self {
             inner: Arc::new(cache),
         }

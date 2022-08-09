@@ -112,7 +112,7 @@ impl ToStreamProst for StreamIndexScan {
 }
 
 impl StreamIndexScan {
-    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
@@ -138,12 +138,8 @@ impl StreamIndexScan {
                 },
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
-                    operator_id: if auto_fields {
-                        self.batch_plan_id.0 as u64
-                    } else {
-                        0
-                    },
-                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
@@ -175,16 +171,8 @@ impl StreamIndexScan {
                 is_singleton: false,
             })),
             pk_indices,
-            operator_id: if auto_fields {
-                self.base.id.0 as u64
-            } else {
-                0
-            },
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
+            operator_id: self.base.id.0 as u64,
+            identity: format!("{}", self),
             append_only: self.append_only(),
         }
     }
