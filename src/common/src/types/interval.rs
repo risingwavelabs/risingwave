@@ -68,6 +68,10 @@ impl IntervalUnit {
         self.ms
     }
 
+    pub fn get_ms_of_day(&self) -> u64 {
+        self.ms.rem_euclid(DAY_MS) as u64
+    }
+
     pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
         // TODO: remove IntervalType later.
         match ty {

@@ -131,6 +131,9 @@ macro_rules! gen_cast {
 
             { date, timestamp, general_cast },
             { time, interval, general_cast },
+            { timestamp, date, timestamp_to_date },
+            { timestamp, time, timestamp_to_time },
+            { interval, time, interval_to_time },
         }
     };
 }
