@@ -53,7 +53,7 @@ impl PlanBase {
             id,
             ctx,
             schema,
-            logical_pk: logical_pk,
+            logical_pk,
             dist: Distribution::Single,
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
@@ -77,7 +77,7 @@ impl PlanBase {
             schema,
             dist,
             order: Order::any(),
-            logical_pk: logical_pk,
+            logical_pk,
             append_only,
             functional_dependency,
         }
