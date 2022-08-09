@@ -74,6 +74,21 @@ pub struct CreateMaterializedViewContext {
     pub table_properties: HashMap<String, String>,
 }
 
+impl CreateMaterializedViewContext {
+    pub fn internal_tables(&self) -> Vec<Table> {
+        self.internal_table_id_map
+            .values()
+            .filter(|t| t.is_some())
+            .cloned()
+            .map(|t| t.unwrap())
+            .collect_vec()
+    }
+
+    pub fn internal_table_ids(&self) -> Vec<u32> {
+        self.internal_table_id_map.keys().cloned().collect_vec()
+    }
+}
+
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
@@ -140,7 +155,7 @@ where
     ) -> MetaResult<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
-            /// Records what's the correspoding actor of each parallel unit of one table.
+            /// Records what's the corresponding actor of each parallel unit of one table.
             upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
             /// Records what's the actors on each worker of one table.
             tables_worker_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,

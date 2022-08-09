@@ -314,8 +314,16 @@ where
         self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
         // 1. Drop table in catalog. Ref count will be checked.
-        let version = self.catalog_manager.drop_table(table_id).await?;
+        let version = self
+            .catalog_manager
+            .drop_table(table_id, internal_tables)
+            .await?;
 
         // 2. drop mv in stream manager
         let table_fragments = self
@@ -341,6 +349,66 @@ where
         }
 
         Ok(Response::new(DropMaterializedViewResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn create_index(
+        &self,
+        request: Request<CreateIndexRequest>,
+    ) -> Result<Response<CreateIndexResponse>, Status> {
+        self.ddl_lock.read().await;
+        self.env.idle_manager().record_activity();
+
+        let req = request.into_inner();
+        let index = req.get_index().map_err(meta_error_to_tonic)?.clone();
+        let index_table = req.get_index_table().map_err(meta_error_to_tonic)?.clone();
+        let fragment_graph = req
+            .get_fragment_graph()
+            .map_err(meta_error_to_tonic)?
+            .clone();
+
+        let (index_id, version) = self
+            .create_relation(&mut Relation::Index(index, index_table), fragment_graph)
+            .await?;
+
+        Ok(Response::new(CreateIndexResponse {
+            status: None,
+            index_id,
+            version,
+        }))
+    }
+
+    async fn drop_index(
+        &self,
+        request: Request<DropIndexRequest>,
+    ) -> Result<Response<DropIndexResponse>, Status> {
+        self.ddl_lock.read().await;
+        use risingwave_common::catalog::TableId;
+
+        self.env.idle_manager().record_activity();
+
+        let index_id = request.into_inner().index_id;
+        let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&index_table_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
+
+        // 1. Drop index in catalog. Ref count will be checked.
+        let version = self
+            .catalog_manager
+            .drop_index(index_id, index_table_id, internal_tables)
+            .await?;
+
+        // 2. drop mv(index) in stream manager
+        self.stream_manager
+            .drop_materialized_view(&TableId::new(index_table_id))
+            .await?;
+
+        Ok(Response::new(DropIndexResponse {
             status: None,
             version,
         }))
@@ -397,74 +465,12 @@ where
             .map_err(meta_error_to_tonic)?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
-
-    async fn create_index(
-        &self,
-        request: Request<CreateIndexRequest>,
-    ) -> Result<Response<CreateIndexResponse>, Status> {
-        self.ddl_lock.read().await;
-        self.env.idle_manager().record_activity();
-
-        let req = request.into_inner();
-        let index = req.get_index().map_err(meta_error_to_tonic)?.clone();
-        let index_table = req.get_index_table().map_err(meta_error_to_tonic)?.clone();
-        let fragment_graph = req
-            .get_fragment_graph()
-            .map_err(meta_error_to_tonic)?
-            .clone();
-
-        let (index_id, version) = self
-            .create_relation(&mut Relation::Index(index, index_table), fragment_graph)
-            .await?;
-
-        Ok(Response::new(CreateIndexResponse {
-            status: None,
-            index_id,
-            version,
-        }))
-    }
-
-    async fn drop_index(
-        &self,
-        request: Request<DropIndexRequest>,
-    ) -> Result<Response<DropIndexResponse>, Status> {
-        self.ddl_lock.read().await;
-        use risingwave_common::catalog::TableId;
-
-        self.env.idle_manager().record_activity();
-
-        let index_id = request.into_inner().index_id;
-
-        // 1. Drop index in catalog. Ref count will be checked.
-        let (index_table_id, version) = self.catalog_manager.drop_index(index_id).await?;
-
-        // 2. drop mv(index) in stream manager
-        self.stream_manager
-            .drop_materialized_view(&TableId::new(index_table_id))
-            .await?;
-
-        Ok(Response::new(DropIndexResponse {
-            status: None,
-            version,
-        }))
-    }
 }
 
 impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    fn get_internal_table(&self, ctx: &CreateMaterializedViewContext) -> MetaResult<Vec<Table>> {
-        let internal_table = ctx
-            .internal_table_id_map
-            .iter()
-            .filter(|(_, table)| table.is_some())
-            .map(|(_, table)| table.clone().unwrap())
-            .collect_vec();
-
-        Ok(internal_table)
-    }
-
     async fn notify_table_mapping(&self, table_id: u32, operation: Operation) {
         let mapping = self
             .env
@@ -525,10 +531,8 @@ where
             .create_relation_on_compute_node(relation, fragment_graph, id, &mut ctx)
             .await
         {
-            let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
-
             self.stream_manager
-                .remove_processing_table(internal_table_ids)
+                .remove_processing_table(ctx.internal_table_ids())
                 .await;
 
             self.catalog_manager
@@ -537,7 +541,7 @@ where
             return Err(err);
         };
 
-        let internal_tables = self.get_internal_table(&ctx)?;
+        let internal_tables = ctx.internal_tables();
 
         // 4. Notify vnode mapping info to frontend.
         match relation {
@@ -563,7 +567,7 @@ where
             .await;
 
         self.stream_manager
-            .remove_processing_table(internal_table_ids)
+            .remove_processing_table(ctx.internal_table_ids())
             .await;
 
         Ok((id, version?))
@@ -631,16 +635,7 @@ where
             )
             .await?;
 
-        let internal_table_id_set = ctx
-            .internal_table_id_map
-            .iter()
-            .map(|(table_id, _)| *table_id)
-            .collect::<HashSet<u32>>();
-
-        assert_eq!(
-            fragment_graph.table_ids_cnt,
-            internal_table_id_set.len() as u32
-        );
+        assert_eq!(fragment_graph.table_ids_cnt, ctx.internal_table_ids().len());
 
         let table_fragments = TableFragments::new(relation_id, graph, internal_table_id_set);
 
@@ -732,10 +727,8 @@ where
             )
             .await
         {
-            let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
-
             self.stream_manager
-                .remove_processing_table(internal_table_ids)
+                .remove_processing_table(ctx.internal_table_ids())
                 .await;
 
             self.catalog_manager
@@ -744,15 +737,13 @@ where
             self.source_manager.drop_source(source_id).await?;
             return Err(err);
         }
-        let internal_tables = self.get_internal_table(&ctx)?;
+        let internal_tables = ctx.internal_tables();
 
         // Notify vnode mapping info to frontend.
         self.notify_table_mapping(mview_id, Operation::Add).await;
         for table in &internal_tables {
             self.notify_table_mapping(table.id, Operation::Add).await;
         }
-
-        let internal_table_ids = ctx.internal_table_id_map.keys().cloned().collect_vec();
 
         // Finally, update the catalog.
         let version = self
@@ -761,7 +752,7 @@ where
             .await;
 
         self.stream_manager
-            .remove_processing_table(internal_table_ids)
+            .remove_processing_table(ctx.internal_table_ids())
             .await;
         Ok((source_id, mview_id, version?))
     }

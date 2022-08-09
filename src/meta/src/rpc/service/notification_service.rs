@@ -82,10 +82,9 @@ where
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        // let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
-
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let (databases, schemas, tables, sources, sinks, indexes) = catalog_guard.get_catalog().await?;
+        let (databases, schemas, mut tables, sources, sinks, indexes) =
+            catalog_guard.get_catalog().await?;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
@@ -98,6 +97,9 @@ where
             .collect::<Vec<_>>();
 
         let hummock_version = Some(self.hummock_manager.get_current_version().await);
+
+        let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
+
         let hash_mapping_guard = self
             .env
             .hash_mapping_manager()
@@ -110,8 +112,6 @@ where
             })
             .map(|mapping| mapping.unwrap())
             .collect_vec();
-
-        let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {
