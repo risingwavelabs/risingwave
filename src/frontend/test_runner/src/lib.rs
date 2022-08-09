@@ -69,9 +69,9 @@ pub struct TestCase {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
-    /// Proto JSON of generated stream plan
-    pub stream_plan_proto: Option<String>,
-
+    // TODO: uncomment for Proto JSON of generated stream plan
+    //  was: "stream_plan_proto": Option<String>
+    // pub plan_graph_proto: Option<String>,
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -126,9 +126,6 @@ pub struct TestCaseResult {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
-    /// Proto JSON of generated stream plan
-    pub stream_plan_proto: Option<String>,
-
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -168,7 +165,6 @@ impl TestCaseResult {
             batch_plan: self.batch_plan,
             batch_local_plan: self.batch_local_plan,
             stream_plan: self.stream_plan,
-            stream_plan_proto: self.stream_plan_proto,
             batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
@@ -404,14 +400,14 @@ impl TestCase {
             }
         }
 
-        if self.stream_plan.is_some() || self.stream_plan_proto.is_some() {
+        if self.stream_plan.is_some() {
             let q = if let Statement::Query(q) = stmt {
                 q.as_ref().clone()
             } else {
                 return Err(anyhow!("expect a query"));
             };
 
-            let (stream_plan, table) = create_mv::gen_create_mv_plan(
+            let (stream_plan, _table) = create_mv::gen_create_mv_plan(
                 &session,
                 context,
                 Box::new(q),
@@ -421,14 +417,6 @@ impl TestCase {
             // Only generate stream_plan if it is specified in test case
             if self.stream_plan.is_some() {
                 ret.stream_plan = Some(explain_plan(&stream_plan));
-            }
-
-            // Only generate stream_plan_proto if it is specified in test case
-            if self.stream_plan_proto.is_some() {
-                ret.stream_plan_proto = Some(
-                    serde_yaml::to_string(&stream_plan.to_stream_prost_auto_fields(false))?
-                        + &serde_yaml::to_string(&table)?,
-                );
             }
         }
 
@@ -467,11 +455,6 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &actual.batch_local_plan,
     )?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
-    check_option_plan_eq(
-        "stream_plan_proto",
-        &expected.stream_plan_proto,
-        &actual.stream_plan_proto,
-    )?;
     check_option_plan_eq(
         "batch_plan_proto",
         &expected.batch_plan_proto,
