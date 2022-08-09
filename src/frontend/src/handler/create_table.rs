@@ -31,7 +31,7 @@ use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::{StreamFragmenterV2};
+use crate::stream_fragmenter::StreamFragmenterV2;
 
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
