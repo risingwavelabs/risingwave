@@ -739,4 +739,35 @@ mod tests {
         let r = ListRef::ValueRef { val: &v };
         assert_eq!("{1,NULL}".to_string(), format!("{}", r));
     }
+
+    #[test]
+    fn test_to_protobuf_owned() {
+        use crate::array::*;
+        let arr = ListArray::from_slices(
+            &[true, true],
+            vec![
+                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
+                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
+            ],
+            DataType::Int32,
+        )
+        .unwrap();
+        let list_ref = arr.value_at(0).unwrap();
+        let output = list_ref.to_protobuf_owned();
+        let expect = ListValue::new(vec![
+            Some(1i32.to_scalar_value()),
+            Some(2i32.to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
+
+        let list_ref = arr.value_at(1).unwrap();
+        let output = list_ref.to_protobuf_owned();
+        let expect = ListValue::new(vec![
+            Some(3i32.to_scalar_value()),
+            Some(4i32.to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
+    }
 }

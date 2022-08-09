@@ -570,4 +570,26 @@ mod tests {
             StructValue::new(vec![Some(1.into()), None]),
         );
     }
+
+    #[test]
+    fn test_to_protobuf_owned() {
+        use crate::array::*;
+        let arr = StructArray::from_slices(
+            &[true],
+            vec![
+                array! { I32Array, [Some(1)] }.into(),
+                array! { F32Array, [Some(2.0)] }.into(),
+            ],
+            vec![DataType::Int32, DataType::Float32],
+        )
+        .unwrap();
+        let struct_ref = arr.value_at(0).unwrap();
+        let output = struct_ref.to_protobuf_owned();
+        let expect = StructValue::new(vec![
+            Some(1i32.to_scalar_value()),
+            Some(OrderedF32::from(2.0f32).to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
+    }
 }
