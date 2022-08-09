@@ -744,9 +744,26 @@ impl ScalarRefImpl<'_> {
             &Self::List(ListRef::ValueRef { val }) => {
                 ser.serialize_struct_or_list(val.to_protobuf_owned())?
             }
-            _ => {
-                panic!("Type is unable to be serialized.")
-            }
+            // For StructRef::Indexed
+            &Self::Struct(val) => ser.serialize_struct_or_list(
+                StructValue::new(
+                    val.fields_ref()
+                        .into_iter()
+                        .map(|datum_ref| datum_ref.to_owned_datum())
+                        .collect(),
+                )
+                .to_protobuf_owned(),
+            )?,
+            // For ListRef::Indexed
+            &Self::List(val) => ser.serialize_struct_or_list(
+                ListValue::new(
+                    val.flatten()
+                        .into_iter()
+                        .map(|datum_ref| datum_ref.to_owned_datum())
+                        .collect(),
+                )
+                .to_protobuf_owned(),
+            )?,
         };
         Ok(())
     }
@@ -1003,11 +1020,13 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
 #[cfg(test)]
 mod tests {
     use std::ops::Neg;
+    use std::sync::Arc;
 
     use itertools::Itertools;
     use rand::thread_rng;
 
     use super::*;
+    use crate::array::{ArrayBuilder, ArrayImpl, ArrayMeta, ListArrayBuilder, StructArrayBuilder};
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -1108,5 +1127,116 @@ mod tests {
         let actual =
             ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
         assert_eq!(v, actual);
+    }
+
+    #[test]
+    fn test_struct_serialize() {
+        let values = vec![
+            StructValue::new(vec![
+                Some(OrderedF64::from(1.23f64).to_scalar_value()),
+                Some(345i16.to_scalar_value()),
+            ]),
+            StructValue::new(vec![Some(OrderedF64::from(0f64).to_scalar_value()), None]),
+            StructValue::new(vec![None, Some(123i16.to_scalar_value())]),
+            StructValue::new(vec![None, None]),
+        ];
+        let array: ArrayImpl = {
+            let mut builder = StructArrayBuilder::with_meta(
+                0,
+                ArrayMeta::Struct {
+                    children: Arc::new([DataType::Float64, DataType::Int16]),
+                },
+            );
+            for val in &values {
+                builder.append(Some(StructRef::ValueRef { val })).unwrap()
+            }
+            builder.finish().unwrap().into()
+        };
+
+        for (i, value) in values.into_iter().enumerate() {
+            let output = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                array
+                    .value_at(i)
+                    .unwrap()
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let expect = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                ScalarImpl::Struct(value)
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(output, expect);
+
+            let mut deserializer = memcomparable::Deserializer::new(&output[..]);
+            let output = ScalarImpl::deserialize(
+                DataType::Struct {
+                    fields: Arc::new([DataType::Float64, DataType::Int16]),
+                },
+                &mut deserializer,
+            )
+            .unwrap();
+            assert_eq!(array.value_at(i).to_owned_datum(), Some(output));
+        }
+    }
+
+    #[test]
+    fn test_list_serialize() {
+        let values = vec![
+            ListValue::new(vec![
+                Some("abcdef".to_string().to_scalar_value()),
+                Some("12345".to_string().to_scalar_value()),
+                Some("".to_string().to_scalar_value()),
+                Some("abcdefghjijkl".to_string().to_scalar_value()),
+            ]),
+            ListValue::new(vec![
+                Some("以下为emoji".to_string().to_scalar_value()),
+                Some("👿👴😇".to_string().to_scalar_value()),
+            ]),
+        ];
+        let array: ArrayImpl = {
+            let mut builder = ListArrayBuilder::with_meta(
+                0,
+                ArrayMeta::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+            );
+            for val in &values {
+                builder.append(Some(ListRef::ValueRef { val })).unwrap()
+            }
+            builder.finish().unwrap().into()
+        };
+
+        for (i, value) in values.into_iter().enumerate() {
+            let output = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                array
+                    .value_at(i)
+                    .unwrap()
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let expect = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                ScalarImpl::List(value).serialize(&mut serializer).unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(output, expect);
+
+            let mut deserializer = memcomparable::Deserializer::new(&output[..]);
+            let output = ScalarImpl::deserialize(
+                DataType::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+                &mut deserializer,
+            )
+            .unwrap();
+            assert_eq!(array.value_at(i).to_owned_datum(), Some(output));
+        }
     }
 }
