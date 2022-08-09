@@ -239,7 +239,7 @@
               BatchHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey] }
                 BatchExchange { order: [], dist: HashShard(supplier.s_nationkey) }
                   BatchHashJoin { type: Inner, predicate: part.p_partkey = part.p_partkey AND partsupp.ps_supplycost = min(partsupp.ps_supplycost), output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                    BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                    BatchExchange { order: [], dist: HashShard(part.p_partkey, partsupp.ps_supplycost) }
                       BatchHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
                         BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
                           BatchHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr] }
@@ -251,27 +251,28 @@
                                   BatchScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], distribution: SomeShard }
                         BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                           BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], distribution: SomeShard }
-                    BatchHashAgg { group_key: [part.p_partkey], aggs: [min(partsupp.ps_supplycost)] }
-                      BatchHashJoin { type: LeftOuter, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost] }
-                        BatchHashAgg { group_key: [part.p_partkey], aggs: [] }
-                          BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                            BatchScan { table: part, columns: [part.p_partkey], distribution: SomeShard }
-                        BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
-                          BatchHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
-                            BatchExchange { order: [], dist: HashShard(nation.n_regionkey) }
-                              BatchHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey] }
-                                BatchExchange { order: [], dist: HashShard(supplier.s_nationkey) }
-                                  BatchHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey] }
-                                    BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
-                                      BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: SomeShard }
-                                    BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
-                                      BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: SomeShard }
-                                BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
-                                  BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], distribution: SomeShard }
-                            BatchExchange { order: [], dist: HashShard(region.r_regionkey) }
-                              BatchProject { exprs: [region.r_regionkey] }
-                                BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                                  BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: SomeShard }
+                    BatchExchange { order: [], dist: HashShard(part.p_partkey, min(partsupp.ps_supplycost)) }
+                      BatchHashAgg { group_key: [part.p_partkey], aggs: [min(partsupp.ps_supplycost)] }
+                        BatchHashJoin { type: LeftOuter, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost] }
+                          BatchHashAgg { group_key: [part.p_partkey], aggs: [] }
+                            BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                              BatchScan { table: part, columns: [part.p_partkey], distribution: SomeShard }
+                          BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
+                            BatchHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
+                              BatchExchange { order: [], dist: HashShard(nation.n_regionkey) }
+                                BatchHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey] }
+                                  BatchExchange { order: [], dist: HashShard(supplier.s_nationkey) }
+                                    BatchHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey] }
+                                      BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
+                                        BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: SomeShard }
+                                      BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
+                                        BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: SomeShard }
+                                  BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
+                                    BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], distribution: SomeShard }
+                              BatchExchange { order: [], dist: HashShard(region.r_regionkey) }
+                                BatchProject { exprs: [region.r_regionkey] }
+                                  BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
+                                    BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: SomeShard }
                 BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
                   BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], distribution: SomeShard }
             BatchExchange { order: [], dist: HashShard(region.r_regionkey) }
@@ -1024,7 +1025,7 @@
                     BatchHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost, orders.o_orderdate] }
                       BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
                         BatchHashJoin { type: Inner, predicate: lineitem.l_suppkey = partsupp.ps_suppkey AND lineitem.l_partkey = partsupp.ps_partkey, output: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, partsupp.ps_supplycost] }
-                          BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
+                          BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey, lineitem.l_partkey) }
                             BatchHashJoin { type: Inner, predicate: lineitem.l_suppkey = supplier.s_suppkey, output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey] }
                               BatchExchange { order: [], dist: HashShard(lineitem.l_suppkey) }
                                 BatchHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount] }
@@ -1036,7 +1037,7 @@
                                         BatchScan { table: part, columns: [part.p_partkey, part.p_name], distribution: SomeShard }
                               BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                                 BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: SomeShard }
-                          BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                          BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey, partsupp.ps_partkey) }
                             BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: SomeShard }
                       BatchExchange { order: [], dist: HashShard(orders.o_orderkey) }
                         BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], distribution: SomeShard }

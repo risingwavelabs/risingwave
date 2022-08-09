@@ -183,9 +183,9 @@
     BatchExchange { order: [], dist: Single }
       BatchHashJoin { type: Inner, predicate: i.x = i.x, output: all }
         BatchExchange { order: [], dist: HashShard(i.x) }
-          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+          BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
         BatchExchange { order: [], dist: HashShard(i.x) }
-          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+          BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [ix, iix, i.t._row_id(hidden), i.t._row_id#1(hidden)], pk_columns: [i.t._row_id, i.t._row_id#1] }
       StreamExchange { dist: HashShard(i.t._row_id, i.t._row_id) }
@@ -203,7 +203,7 @@
     BatchExchange { order: [], dist: Single }
       BatchHashJoin { type: Inner, predicate: i.x = t.x, output: all }
         BatchExchange { order: [], dist: HashShard(i.x) }
-          BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+          BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
         BatchExchange { order: [], dist: HashShard(t.x) }
           BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |
@@ -229,14 +229,14 @@
         BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
           BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
             BatchExchange { order: [], dist: HashShard(i.x) }
-              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+              BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
             BatchExchange { order: [], dist: HashShard(i.x) }
-              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+              BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
           BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
             BatchExchange { order: [], dist: HashShard(i.x) }
-              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+              BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
             BatchExchange { order: [], dist: HashShard(i.x) }
-              BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+              BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [x, i.t._row_id(hidden), i.t._row_id#1(hidden), i.t._row_id#2(hidden), i.t._row_id#3(hidden)], pk_columns: [i.t._row_id, i.t._row_id#1, i.t._row_id#2, i.t._row_id#3] }
       StreamExchange { dist: HashShard(i.t._row_id, i.t._row_id, i.t._row_id, i.t._row_id) }

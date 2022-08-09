@@ -707,8 +707,7 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [count] }
         BatchHashAgg { group_key: [i.x], aggs: [count] }
-          BatchExchange { order: [], dist: HashShard(i.x) }
-            BatchScan { table: i, columns: [i.x], distribution: SomeShard }
+          BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [cnt, i.x(hidden)], pk_columns: [i.x] }
       StreamProject { exprs: [sum(count), i.x] }

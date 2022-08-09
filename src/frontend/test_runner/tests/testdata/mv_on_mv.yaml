@@ -29,7 +29,7 @@
     select v from mv; -- FIXME: there should not be a `Single` exchange here
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+      BatchScan { table: mv, columns: [mv.v], distribution: UpstreamHashShard() }
 - id: single_fragment_mv_on_singleton_mv
   before:
   - create_singleton_mv
