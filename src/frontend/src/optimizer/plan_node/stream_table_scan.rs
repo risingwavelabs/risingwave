@@ -137,7 +137,7 @@ impl ToStreamProst for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
@@ -163,12 +163,8 @@ impl StreamTableScan {
                 },
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
-                    operator_id: if auto_fields {
-                        self.batch_plan_id.0 as u64
-                    } else {
-                        0
-                    },
-                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
@@ -190,7 +186,7 @@ impl StreamTableScan {
                         name: x.name.clone(),
                     })
                     .collect(),
-                // The column idxs need to be forwarded to the downstream
+                // The column indices need to be forwarded to the downstream
                 upstream_column_indices: self
                     .logical
                     .output_column_indices()
@@ -200,16 +196,8 @@ impl StreamTableScan {
                 is_singleton: *self.distribution() == Distribution::Single,
             })),
             pk_indices,
-            operator_id: if auto_fields {
-                self.base.id.0 as u64
-            } else {
-                0
-            },
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
+            operator_id: self.base.id.0 as u64,
+            identity: format!("{}", self),
             append_only: self.append_only(),
         }
     }
