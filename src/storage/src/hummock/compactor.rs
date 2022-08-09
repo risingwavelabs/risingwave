@@ -40,7 +40,7 @@ use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, LevelType, SstableInfo, SubscribeCompactTasksResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::{channel as oneshot_channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 
 use super::multi_builder::CapacitySplitTableBuilder;
@@ -150,6 +150,8 @@ impl StateCleanUpCompactionFilter {
         }
     }
 }
+
+pub type CompactionShutdowSenderMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
 
 impl CompactionFilter for StateCleanUpCompactionFilter {
     fn should_delete(&mut self, key: &[u8]) -> bool {
@@ -466,7 +468,11 @@ impl Compactor {
 
     /// Handles a compaction task and reports its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
+    pub async fn compact(
+        context: Arc<CompactorContext>,
+        compact_task: CompactTask,
+        mut shutdown_rx: Receiver<()>,
+    ) -> bool {
         use risingwave_common::catalog::TableOption;
 
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
@@ -605,18 +611,29 @@ impl Compactor {
         }
 
         let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
-        while let Some(future_result) = buffered.next().await {
-            match future_result.unwrap() {
-                Ok((split_index, ssts)) => {
-                    output_ssts.push((split_index, ssts));
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => {
+                    tracing::warn!("Compaction task cancelled externally");
+                    return false;
                 }
-                Err(e) => {
-                    compact_success = false;
-                    tracing::warn!(
-                        "Compaction task {} failed with error: {:#?}",
-                        compact_task.task_id,
-                        e
-                    );
+                future_result = buffered.next() => {
+                    match future_result {
+                        Some(Ok(Ok((split_index, ssts)))) => {
+                            output_ssts.push((split_index, ssts));
+                        }
+                        Some(Ok(Err(e))) => {
+                            compact_success = false;
+                            tracing::warn!(
+                                "Compaction task {} failed with error: {:#?}",
+                                compact_task.task_id,
+                                e
+                            );
+                            break;
+                        }
+                        Some(_) => unreachable!("assume that join will not result in `JoinError`"),
+                        None => break,
+                    }
                 }
             }
         }
@@ -872,6 +889,7 @@ impl Compactor {
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         memory_limiter: Arc<MemoryLimiter>,
         sstable_id_manager: SstableIdManagerRef,
+        shutdown_map: CompactionShutdowSenderMap,
     ) -> (JoinHandle<()>, Sender<()>) {
         let task_progress = TaskProgressTracker::default();
         let compactor_context = Arc::new(CompactorContext {
@@ -890,19 +908,53 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(60);
         let task_progress_update_interval = Duration::from_millis(1000);
         let join_handle = tokio::spawn(async move {
-            let process_task = |task, compactor_context, sstable_store, hummock_meta_client| async {
-                match task {
-                    Task::CompactTask(compact_task) => {
-                        Compactor::compact(compactor_context, compact_task).await;
+            let process_task =
+                |task,
+                 compactor_context,
+                 sstable_store,
+                 hummock_meta_client,
+                 shutdown_map: CompactionShutdowSenderMap| async move {
+                    match task {
+                        Task::CompactTask(compact_task) => {
+                            let (tx, rx) = oneshot_channel();
+                            shutdown_map
+                                .lock()
+                                .unwrap()
+                                .insert(compact_task.task_id, tx);
+                            Compactor::compact(compactor_context, compact_task, rx).await;
+                        }
+                        Task::VacuumTask(vacuum_task) => {
+                            Vacuum::vacuum(vacuum_task, sstable_store, hummock_meta_client).await;
+                        }
+                        Task::FullScanTask(full_scan_task) => {
+                            Vacuum::full_scan(full_scan_task, sstable_store, hummock_meta_client)
+                                .await;
+                        }
+                        Task::CancelCompactTask(cancel_compact_task) => {
+                            if let Some(tx) = shutdown_map
+                                .lock()
+                                .unwrap()
+                                .remove(&cancel_compact_task.task_id)
+                            {
+                                tracing::warn!(
+                                    "Cancelling compaction task. task_id: {}",
+                                    cancel_compact_task.task_id
+                                );
+                                if tx.send(()).is_err() {
+                                    tracing::warn!(
+                                        "Cancellation of compaction task failed. task_id: {}",
+                                        cancel_compact_task.task_id
+                                    );
+                                }
+                            } else {
+                                tracing::warn!(
+                                    "Attempting to cancel non-existent compaction task. task_id: {}",
+                                    cancel_compact_task.task_id
+                                );
+                            }
+                        }
                     }
-                    Task::VacuumTask(vacuum_task) => {
-                        Vacuum::vacuum(vacuum_task, sstable_store, hummock_meta_client).await;
-                    }
-                    Task::FullScanTask(full_scan_task) => {
-                        Vacuum::full_scan(full_scan_task, sstable_store, hummock_meta_client).await;
-                    }
-                }
-            };
+                };
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
             // This outer loop is to recreate stream.
@@ -971,6 +1023,7 @@ impl Compactor {
                                 compactor_context.clone(),
                                 sstable_store.clone(),
                                 hummock_meta_client.clone(),
+                                shutdown_map.clone(),
                             ));
                         }
                         Err(e) => {

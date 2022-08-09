@@ -33,7 +33,7 @@ use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
-use risingwave_storage::hummock::compactor::Compactor;
+use risingwave_storage::hummock::compactor::{CompactionShutdowSenderMap, Compactor};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
@@ -135,6 +135,8 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
+    let shutdown_map = CompactionShutdowSenderMap::default();
+
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
         extra_info_sources.push(storage.sstable_id_manager());
@@ -158,6 +160,7 @@ pub async fn compute_node_serve(
                 filter_key_extractor_manager.clone(),
                 memory_limiter.clone(),
                 storage.sstable_id_manager(),
+                shutdown_map,
             );
             sub_tasks.push((handle, shutdown_sender));
         }

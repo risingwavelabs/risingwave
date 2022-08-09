@@ -19,7 +19,9 @@ use std::time::SystemTime;
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
-use risingwave_pb::hummock::{CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse};
+use risingwave_pb::hummock::{
+    CancelCompactTask, CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse,
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::MetaResult;
@@ -71,6 +73,19 @@ impl Compactor {
                 },
             );
         }
+        Ok(())
+    }
+
+    pub async fn cancel_task(&self, task_id: u64) -> MetaResult<()> {
+        self.sender
+            .send(Ok(SubscribeCompactTasksResponse {
+                task: Some(Task::CancelCompactTask(CancelCompactTask {
+                    context_id: self.context_id,
+                    task_id,
+                })),
+            }))
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
     }
 
@@ -148,32 +163,34 @@ impl CompactorManager {
         }
     }
 
-    pub fn get_cancellable_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
+    pub fn get_timed_out_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs();
-        let guard = self.inner.write();
         let mut cancellable_tasks = vec![];
-        for compactor in guard.compactor_map.values() {
-            let mut cancellable_task_ids = vec![];
-            let mut hb_guard = compactor.task_heartbeats.lock().unwrap();
-            #[allow(clippy::significant_drop_in_scrutinee)]
-            for (id, TaskHeartbeat { expire_at, .. }) in hb_guard.iter() {
-                if *expire_at < now {
-                    cancellable_task_ids.push(*id);
-                }
-            }
-            for id in cancellable_task_ids {
-                if let Some(TaskHeartbeat { task, .. }) = hb_guard.remove(&id) {
-                    cancellable_tasks.push((compactor.context_id(), task));
+        {
+            let guard = self.inner.write();
+            for compactor in guard.compactor_map.values() {
+                let mut cancellable_task_ids = vec![];
+                {
+                    let mut hb_guard = compactor.task_heartbeats.lock().unwrap();
+                    #[allow(clippy::significant_drop_in_scrutinee)]
+                    for (id, TaskHeartbeat { expire_at, .. }) in hb_guard.iter() {
+                        if *expire_at < now {
+                            cancellable_task_ids.push(*id);
+                        }
+                    }
+                    for id in &cancellable_task_ids {
+                        if let Some(TaskHeartbeat { task, .. }) = hb_guard.remove(id) {
+                            cancellable_tasks.push((compactor.context_id(), task));
+                        }
+                    }
                 }
             }
         }
         cancellable_tasks
     }
-
-    // pub fn cancel_task(context_id: HummockContextId, )
 
     /// Gets next compactor to assign task.
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
@@ -241,6 +258,10 @@ impl CompactorManager {
                 context_id
             );
         }
+    }
+
+    pub fn get_compactor(&self, context_id: u32) -> Option<Arc<Compactor>> {
+        self.inner.read().compactor_map.get(&context_id).cloned()
     }
 }
 

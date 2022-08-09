@@ -211,7 +211,6 @@ where
                 tokio::select! {
                     // Wait for interval
                     _ = min_interval.tick() => {
-                        println!("TICK!")
                     },
                     // Shutdown
                     _ = &mut shutdown_rx => {
@@ -219,9 +218,16 @@ where
                         return;
                     }
                 }
-                for (context_id, mut task) in compactor_manager.get_cancellable_tasks() {
-                    println!("TASK: {}", task.task_id);
-                    task.task_status = false; // Change task status to failed
+                for (context_id, mut task) in compactor_manager.get_timed_out_tasks() {
+                    if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                        let _ = compactor.cancel_task(task.task_id).await;
+                    }
+                    // Since we cannot rely on the compactor to return, we will try to update the
+                    // compact task status ourselves which is an idempotent,
+                    // serializable operation.
+
+                    // Change task status to failed
+                    task.task_status = false;
 
                     // TODO: this needs to be reliable, in other words, we cannot tolerate errors.
                     // So, we retry and also have an idempotent fail-all which
@@ -233,7 +239,7 @@ where
                     for attempt_id in 0..REPORT_COMPACT_TASK_RETRIES {
                         if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await
                         {
-                            tracing::error!("Failed to cancel compaction task due to missing heartbeat (attempt {attempt_id}). \
+                            tracing::error!("Failed to cancel compaction task due to missing heartbeat (attempt: {attempt_id}). \
                                 {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
                             last_err = Some(e);
                         } else {
@@ -260,9 +266,6 @@ where
                                 LSM TREE: compaction_group_id: {}, task_id: {}", task.compaction_group_id, task.task_id);
                         }
                     }
-                    // This is just to have fast cancellation on compactor in case compactor is
-                    // alive but task is stalled. compactor_manager.
-                    // cancel_task(context_id, &task);
                 }
             }
         });
