@@ -15,6 +15,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
@@ -39,13 +41,14 @@ pub struct ComputeClient {
 impl ComputeClient {
     pub async fn new(addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &addr))?
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
-        Ok(Self::new_with_channel(addr, channel))
+        Ok(Self::with_channel(addr, channel))
     }
 
-    pub fn new_with_channel(addr: HostAddr, channel: Channel) -> Self {
+    pub fn with_channel(addr: HostAddr, channel: Channel) -> Self {
         let exchange_client = ExchangeServiceClient::new(channel.clone());
         let task_client = TaskServiceClient::new(channel);
         Self {
@@ -117,9 +120,10 @@ impl ComputeClient {
     }
 }
 
+#[async_trait]
 impl RpcClient for ComputeClient {
-    fn new_client(host_addr: HostAddr, channel: Channel) -> Self {
-        Self::new_with_channel(host_addr, channel)
+    async fn new_client(host_addr: HostAddr) -> Result<Self> {
+        Self::new(host_addr).await
     }
 }
 

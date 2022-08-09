@@ -230,6 +230,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_stack_trace"
+version = "0.1.0"
+dependencies = [
+ "coarsetime",
+ "futures",
+ "futures-async-stream",
+ "indextree",
+ "itertools",
+ "madsim-tokio",
+ "pin-project",
+ "tracing",
+ "triomphe",
+ "workspace-hack",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1297,6 +1313,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8ad8cef104ac57b68b89df3208164d228503abbdce70f6880ffa3d970e7443a"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "coarsetime"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "454038500439e141804c655b4cd1bc6a70bcb95cd2bc9463af5661b6956f0e46"
+dependencies = [
+ "libc",
+ "once_cell",
+ "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2562,6 +2590,12 @@ dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
 ]
+
+[[package]]
+name = "indextree"
+version = "4.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42b4b46b3311ebd8e5cd44f6b03b36e0f48a70552cf6b036afcebc5626794066"
 
 [[package]]
 name = "indicatif"
@@ -4633,6 +4667,7 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
+ "pin-project",
  "postgres-types",
  "procfs",
  "procinfo",
@@ -4664,6 +4699,7 @@ dependencies = [
  "hyper",
  "log",
  "madsim-tokio",
+ "madsim-tonic",
  "prometheus",
  "risingwave_common",
  "risingwave_pb",
@@ -5064,6 +5100,7 @@ name = "risingwave_object_store"
 version = "0.1.11"
 dependencies = [
  "async-trait",
+ "async_stack_trace",
  "aws-config 0.46.0",
  "aws-endpoint 0.46.0",
  "aws-sdk-s3 0.16.0",
@@ -5124,6 +5161,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
+ "async_stack_trace",
  "futures",
  "log",
  "madsim",
@@ -5294,6 +5332,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
+ "async_stack_trace",
  "auto_enums",
  "bitvec",
  "byteorder",
@@ -5363,6 +5402,8 @@ dependencies = [
  "assert_matches",
  "async-stream",
  "async-trait",
+ "async_stack_trace",
+ "auto_enums",
  "byteorder",
  "bytes",
  "chrono",
@@ -6593,6 +6634,10 @@ name = "triomphe"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fe1b3800b35f9b936c28dc59dbda91b195371269396784d931fe2a5a2be3d2f"
+dependencies = [
+ "serde",
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "try-lock"
@@ -7035,6 +7080,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "socket2",
+ "stable_deref_trait",
  "syn",
  "tokio",
  "tokio-stream",

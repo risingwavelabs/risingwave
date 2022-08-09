@@ -5,12 +5,28 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
+while getopts 'p:' opt; do
+    case ${opt} in
+        p )
+            profile=$OPTARG
+            ;;
+        \? )
+            echo "Invalid Option: -$OPTARG" 1>&2
+            exit 1
+            ;;
+        : )
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
+            ;;
+    esac
+done
+shift $((OPTIND -1))
+
 echo "--- Download artifacts"
 mkdir -p target/debug
-buildkite-agent artifact download risingwave-dev target/debug/
-buildkite-agent artifact download risedev-dev-dev target/debug/
-mv target/debug/risingwave-dev target/debug/risingwave
-mv target/debug/risedev-dev-dev target/debug/risedev-dev
+buildkite-agent artifact download risingwave-"$profile" target/debug/
+buildkite-agent artifact download risedev-dev-"$profile" target/debug/
+mv target/debug/risingwave-"$profile" target/debug/risingwave
+mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave

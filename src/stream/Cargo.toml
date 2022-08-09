@@ -8,6 +8,8 @@ edition = "2021"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
+auto_enums = { version = "0.7", features = ["futures"] }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -69,5 +71,6 @@ twox-hash = "1"
 url = "2"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
 [dev-dependencies]
 assert_matches = "1"

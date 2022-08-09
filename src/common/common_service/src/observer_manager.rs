@@ -18,14 +18,15 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_rpc_client::{MetaClient, NotificationStream};
+use risingwave_rpc_client::MetaClient;
 use tokio::task::JoinHandle;
+use tonic::Streaming;
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// We can write the notification logic by implementing `ObserverNodeImpl`.
 pub struct ObserverManager {
-    rx: Box<dyn NotificationStream>,
+    rx: Streaming<SubscribeResponse>,
     meta_client: MetaClient,
     addr: HostAddr,
     worker_type: WorkerType,
@@ -60,7 +61,7 @@ impl ObserverManager {
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// call the `handle_initialization_notification` and `handle_notification` to update node data.
     pub async fn start(mut self) -> Result<JoinHandle<()>> {
-        let first_resp = self.rx.next().await?.ok_or_else(|| {
+        let first_resp = self.rx.message().await?.ok_or_else(|| {
             ErrorCode::InternalError(
                 "ObserverManager start failed, Stream of notification terminated at the start."
                     .to_string(),
@@ -70,7 +71,7 @@ impl ObserverManager {
             .handle_initialization_notification(first_resp)?;
         let handle = tokio::spawn(async move {
             loop {
-                match self.rx.next().await {
+                match self.rx.message().await {
                     Ok(resp) => {
                         if resp.is_none() {
                             tracing::error!("Stream of notification terminated.");
@@ -100,7 +101,7 @@ impl ObserverManager {
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    if let Ok(Some(snapshot_resp)) = self.rx.next().await {
+                    if let Ok(Some(snapshot_resp)) = self.rx.message().await {
                         self.observer_states
                             .handle_initialization_notification(snapshot_resp)
                             .expect("handle snapshot notification failed after re-subscribe");

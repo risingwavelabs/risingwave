@@ -35,12 +35,11 @@
 mod meta_client;
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::anyhow;
-pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
+use async_trait::async_trait;
+pub use meta_client::{GrpcMetaClient, MetaClient};
 use moka::future::Cache;
-use tonic::transport::{Channel, Endpoint};
 mod compute_client;
 pub use compute_client::*;
 mod hummock_meta_client;
@@ -52,10 +51,11 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
 pub use stream_client::*;
 
-use crate::error::{Result, RpcError};
+use crate::error::Result;
 
+#[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
-    fn new_client(host_addr: HostAddr, channel: Channel) -> Self;
+    async fn new_client(host_addr: HostAddr) -> Result<Self>;
 }
 
 #[derive(Clone)]
@@ -93,17 +93,7 @@ where
     /// new client will be created and returned.
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
         self.clients
-            .try_get_with(addr.clone(), async {
-                let endpoint = Endpoint::from_shared(format!("http://{}", addr.clone()))?;
-                let client = S::new_client(
-                    addr,
-                    endpoint
-                        .connect_timeout(Duration::from_secs(5))
-                        .connect()
-                        .await?,
-                );
-                Ok::<_, RpcError>(client)
-            })
+            .try_get_with(addr.clone(), S::new_client(addr))
             .await
             .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
     }
@@ -117,3 +107,19 @@ pub trait ExtraInfoSource: Send + Sync {
 }
 
 pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
+
+#[macro_export]
+macro_rules! rpc_client_method_impl {
+    ([], $( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(
+            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                Ok(self
+                    .$client
+                    .to_owned()
+                    .$fn_name(request)
+                    .await?
+                    .into_inner())
+            }
+        )*
+    }
+}

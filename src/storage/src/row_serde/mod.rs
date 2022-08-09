@@ -21,36 +21,12 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode};
 use risingwave_common::util::ordered::OrderedRowSerializer;
 
-use self::cell_based_row_deserializer::CellBasedRowDeserializer;
-use self::cell_based_row_serializer::CellBasedRowSerializer;
-use self::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use self::row_based_deserializer::RowBasedDeserializer;
 use self::row_based_serializer::RowBasedSerializer;
 
-pub mod cell_based_row_deserializer;
-pub mod cell_based_row_serializer;
-pub mod dedup_pk_cell_based_row_deserializer;
-pub mod dedup_pk_cell_based_row_serializer;
 pub mod row_based_deserializer;
 pub mod row_based_serializer;
 pub mod row_serde_util;
-
-#[derive(Clone)]
-pub struct CellBasedRowSerde;
-
-impl RowSerde for CellBasedRowSerde {
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = CellBasedRowSerializer;
-}
-
-#[derive(Clone)]
-pub struct DedupPkCellBasedRowSerde;
-
-impl RowSerde for DedupPkCellBasedRowSerde {
-    // FIXME: should use `DedupPkCellBasedRowDeserializer` here.
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = DedupPkCellBasedRowSerializer;
-}
 
 #[derive(Clone)]
 pub struct RowBasedSerde;
