@@ -14,7 +14,7 @@
 
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::Bound::{Excluded, Included};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -848,16 +848,28 @@ where
                 .cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, None)
                 .await;
+            let mut global_min = *versioning
+                .hummock_version_deltas
+                .last_key_value()
+                .unwrap()
+                .0;
             for worker_node in worker_nodes {
                 if let Some(min_pinned_id) = versioning
                     .pinned_versions
                     .get(&worker_node.id)
                     .map(|pinned_version| pinned_version.min_pinned_id)
                 {
+                    if min_pinned_id < global_min {
+                        global_min = min_pinned_id;
+                    }
                     host2pin.push((WorkerKey(worker_node.host.unwrap()), min_pinned_id));
                 }
             }
-            deltas_to_send = versioning.hummock_version_deltas.clone();
+            deltas_to_send = versioning
+                .hummock_version_deltas
+                .range((Excluded(global_min), Unbounded))
+                .map(|(k, v)| (*k, v.clone()))
+                .collect();
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -1054,16 +1066,29 @@ where
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, None)
             .await;
+
+        let mut global_min = *versioning
+            .hummock_version_deltas
+            .last_key_value()
+            .unwrap()
+            .0;
         for worker_node in worker_nodes {
             if let Some(min_pinned_id) = versioning
                 .pinned_versions
                 .get(&worker_node.id)
                 .map(|pinned_version| pinned_version.min_pinned_id)
             {
+                if min_pinned_id < global_min {
+                    global_min = min_pinned_id;
+                }
                 host2pin.push((WorkerKey(worker_node.host.unwrap()), min_pinned_id));
             }
         }
-        let deltas_to_send = versioning.hummock_version_deltas.clone();
+        let deltas_to_send = versioning
+            .hummock_version_deltas
+            .range((Excluded(global_min), Unbounded))
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
         self.env
             .notification_manager()
             .notify_compute_asynchronously(
