@@ -136,9 +136,8 @@ mod tests {
     use risingwave_pb::user::grant_privilege::{Action, ActionWithGrantOption, Object};
     use risingwave_pb::user::GrantPrivilege;
 
-    use crate::manager::CatalogManager;
-
     use super::*;
+    use crate::manager::CatalogManager;
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
         UserInfo {
