@@ -36,14 +36,14 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
-    DatabaseId, HashMappingManagerRef, MetaSrvEnv, NotificationManagerRef, SchemaId,
+    ClusterManagerRef, DatabaseId, FragmentManagerRef, HashMappingManagerRef, MetaSrvEnv,
+    NotificationManagerRef, SchemaId, WorkerId,
 };
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
+use crate::stream::{fetch_source_fragments, Scheduler, SourceManagerRef};
 use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -789,15 +789,14 @@ mod tests {
 
     use super::*;
     use crate::barrier::GlobalBarrierManager;
-    use crate::cluster::ClusterManager;
     use crate::error::meta_error_to_tonic;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
-    use crate::manager::{CatalogManager, MetaSrvEnv};
+    use crate::manager::{CatalogManager, ClusterManager, FragmentManager, MetaSrvEnv};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
-    use crate::stream::{FragmentManager, SourceManager};
+    use crate::stream::SourceManager;
     use crate::MetaOpts;
 
     struct FakeFragmentState {

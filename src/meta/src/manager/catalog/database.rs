@@ -29,8 +29,7 @@ use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
-use super::IdCategory;
-use crate::manager::{MetaSrvEnv, NotificationVersion, Relation};
+use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, Relation};
 use crate::model::{MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};

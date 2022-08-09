@@ -35,9 +35,9 @@ use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::barrier::CommandChanges;
+use crate::manager::FragmentManagerRef;
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 use crate::{MetaError, MetaResult};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors

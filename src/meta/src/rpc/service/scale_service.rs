@@ -27,11 +27,10 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::ClusterManagerRef;
-use crate::manager::CatalogManagerRef;
+use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, SourceManagerRef};
+use crate::stream::SourceManagerRef;
 
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_manager: BarrierManagerRef<S>,

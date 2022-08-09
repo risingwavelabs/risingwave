@@ -37,7 +37,7 @@ use uuid::Uuid;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
-use crate::cluster::WorkerId;
+use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};

@@ -49,14 +49,14 @@ use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId,
+};
 use crate::model::{
     ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::FragmentManagerRef;
 use crate::MetaResult;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;

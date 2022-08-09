@@ -44,7 +44,6 @@
 extern crate core;
 
 mod barrier;
-pub mod cluster;
 mod dashboard;
 mod error;
 pub mod hummock;

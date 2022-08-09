@@ -40,11 +40,12 @@ use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::GlobalBarrierManager;
-use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::CompactionScheduler;
-use crate::manager::{CatalogManager, IdleManager, MetaOpts, MetaSrvEnv, UserManager};
+use crate::manager::{
+    CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv, UserManager,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -53,7 +54,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction};
-use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
+use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]

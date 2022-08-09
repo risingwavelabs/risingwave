@@ -21,10 +21,11 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef, WorkerKey,
+};
 use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManagerRef;
 
