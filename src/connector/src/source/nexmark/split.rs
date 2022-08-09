@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::{SplitMetaData, SplitId};
+use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Hash)]
 pub struct NexmarkSplit {

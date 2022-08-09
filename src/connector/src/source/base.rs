@@ -159,6 +159,7 @@ pub struct Column {
     pub data_type: DataType,
 }
 
+/// Split id resides in every source message, use `Arc` to avoid copying.
 pub type SplitId = Arc<String>;
 
 /// The message pumped from the external source service.
