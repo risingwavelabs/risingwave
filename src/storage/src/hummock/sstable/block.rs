@@ -28,9 +28,12 @@ pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 16;
 
+#[derive(Clone)]
 pub struct Block {
-    /// Uncompressed entries data.
+    /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
+    /// Uncompressed entried data length.
+    data_len: usize,
     /// Restart points.
     restart_points: Vec<u32>,
 }
@@ -66,6 +69,10 @@ impl Block {
             }
         };
 
+        Ok(Self::decode_from_raw(buf))
+    }
+
+    pub fn decode_from_raw(buf: Bytes) -> Self {
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -75,17 +82,18 @@ impl Block {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
-        Ok(Block {
-            data: buf.slice(..data_len),
+        Block {
+            data: buf,
+            data_len,
             restart_points,
-        })
+        }
     }
 
     /// Entries data len.
     #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         assert!(!self.data.is_empty());
-        self.data.len()
+        self.data_len
     }
 
     /// Gets restart point by index.
@@ -114,8 +122,12 @@ impl Block {
         self.restart_points.partition_point(pred)
     }
 
-    pub fn data(&self) -> &Bytes {
-        &self.data
+    pub fn data(&self) -> &[u8] {
+        &self.data[..self.data_len]
+    }
+
+    pub fn raw_data(&self) -> &[u8] {
+        &self.data[..]
     }
 }
 

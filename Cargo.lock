@@ -4699,6 +4699,7 @@ dependencies = [
  "hyper",
  "log",
  "madsim-tokio",
+ "madsim-tonic",
  "prometheus",
  "risingwave_common",
  "risingwave_pb",
