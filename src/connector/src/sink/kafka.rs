@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::{Future, TryFutureExt};
 use itertools::Itertools;
@@ -30,6 +30,7 @@ use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use tokio::task;
+use tracing::warn;
 
 use super::{Sink, SinkError};
 use crate::sink::Result;
@@ -174,8 +175,8 @@ impl KafkaSink {
         )
     }
 
-    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
-        let mut update_cache = HashMap::new();
+    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts_ms: u64) -> Result<()> {
+        let mut update_cache: Option<Map<String, Value>> = None;
         for (op, row) in chunk.rows() {
             let event_object = match op {
                 Op::Insert => Some(json!({
@@ -184,6 +185,7 @@ impl KafkaSink {
                         "before": null,
                         "after": record_to_json(row.clone(), schema.fields.clone())?,
                         "op": "c",
+                        "ts_ms": ts_ms,
                     }
                 })),
                 Op::Delete => Some(json!({
@@ -192,28 +194,27 @@ impl KafkaSink {
                         "before": record_to_json(row.clone(), schema.fields.clone())?,
                         "after": null,
                         "op": "d",
+                        "ts_ms": ts_ms,
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache.insert(
-                        row.index(),
-                        record_to_json(row.clone(), schema.fields.clone())?,
-                    );
-                    None
+                    update_cache = Some( record_to_json(row.clone(), schema.fields.clone())? );
+                    continue;
                 }
                 Op::UpdateInsert => {
-                    let before = update_cache.get(&row.index());
-                    if let Some(before) = before {
+                    if let Some(before) = update_cache.take() {
                         Some(json!({
                             "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
                                 "after": record_to_json(row.clone(), schema.fields.clone())?,
                                 "op": "u",
+                                "ts_ms": ts_ms,
                             }
                         }))
                     } else {
-                        None
+                        warn!("not found UpdateDelete in prev row, skipping, row_id {:?}", row.index());
+                        continue;
                     }
                 }
             };
@@ -249,13 +250,25 @@ impl KafkaSink {
 impl Sink for KafkaSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
-            return Ok(())
-        }
+        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
+        //     return Ok(())
+        // }
+
+        println!("sink chunk {:?}", chunk);
 
         match self.config.format.as_str() {
             "append_only" => self.append_only(chunk, schema).await,
-            "debezium" => self.debezium_update(chunk, schema).await,
+            "debezium" => {
+                self.debezium_update(
+                    chunk,
+                    schema,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                )
+                .await
+            }
             _ => unreachable!(),
         }
     }
