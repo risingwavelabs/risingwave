@@ -380,6 +380,7 @@ impl FilterKeyExtractorManager {
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// table_id does not util version update (notify), and retry to get
     pub async fn acquire(&self, table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
+        println!("begin acquire {:?}", table_id_set);
         self.inner.acquire(table_id_set).await
     }
 
