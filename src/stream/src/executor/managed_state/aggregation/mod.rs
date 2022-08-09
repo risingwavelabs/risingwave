@@ -139,12 +139,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 } else {
                     Ok(Self::Table(create_streaming_extreme_state(
                         agg_call,
+                        pk,
+                        pk_indices,
+                        state_table_col_mapping,
                         row_count.unwrap(),
                         // TODO: estimate a good cache size instead of hard-coding
                         Some(1024),
-                        pk_data_types,
-                        key_hash_code,
-                        pk,
                     )?))
                 }
             }

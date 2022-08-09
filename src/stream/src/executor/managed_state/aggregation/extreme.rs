@@ -12,39 +12,88 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
-use itertools::Itertools;
+use futures_async_stream::for_await;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
+use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair, OrderType};
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
-use smallvec::SmallVec;
 
+use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
-use crate::executor::PkDataTypes;
+use crate::executor::PkIndices;
 
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MAX }>;
-
-type ExtremePkItem = Datum;
-
-pub type ExtremePk = SmallVec<[ExtremePkItem; 1]>;
 
 /// All possible extreme types.
 pub mod variants {
     pub const EXTREME_MIN: usize = 0;
     pub const EXTREME_MAX: usize = 1;
 }
+
+#[derive(Debug)]
+struct Cache {
+    synced: bool,            // `false` means not synced with state table (cold start)
+    capacity: Option<usize>, // `None` means unlimited capacity
+    order_pairs: Arc<Vec<OrderPair>>, // order requirements used to sort cached rows
+    rows: BTreeSet<DescOrderedRow>, // in reverse order of `order_pairs`
+}
+
+impl Cache {
+    fn new(capacity: Option<usize>, order_pairs: Vec<OrderPair>) -> Self {
+        Self {
+            synced: false,
+            capacity,
+            order_pairs: Arc::new(order_pairs),
+            rows: BTreeSet::new(),
+        }
+    }
+
+    fn set_synced(&mut self) {
+        self.synced = true;
+    }
+
+    fn insert(&mut self, row: Row) {
+        if self.synced {
+            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
+            self.rows.insert(ordered_row);
+            // evict if capacity is reached
+            if let Some(capacity) = self.capacity {
+                while self.rows.len() > capacity {
+                    self.rows.pop_first();
+                }
+            }
+        }
+    }
+
+    fn remove(&mut self, row: Row) {
+        if self.synced {
+            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
+            self.rows.remove(&ordered_row);
+        }
+    }
+
+    fn first(&self) -> Option<&Row> {
+        if self.synced {
+            self.rows.last().map(|row| &row.row)
+        } else {
+            None
+        }
+    }
+}
+
 /// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
 ///
 /// There are several prerequisites for using the `MinState`.
@@ -70,26 +119,25 @@ pub struct GenericExtremeState<S: StateStore, A: Array, const EXTREME_TYPE: usiz
 where
     A::OwnedItem: Ord,
 {
-    /// Top N elements in the state, which stores the mapping of (sort key, pk) ->
-    /// (original sort key). This BTreeMap always maintain the elements that we are sure
-    /// it's top n.
-    top_n: BTreeMap<(Option<A::OwnedItem>, ExtremePk), Datum>,
+    // TODO(rc): Remove the phantoms.
+    _phantom_data: PhantomData<S>,
+    _phantom_data_2: PhantomData<A>,
+
+    /// Group key to aggregate with group.
+    /// None for simple agg, Some for group key of hash agg.
+    group_key: Option<Row>,
+
+    /// Contains the column mapping between upstream schema and state table.
+    state_table_col_mapping: Arc<StateTableColumnMapping>,
+
+    /// The column to aggregate in state table.
+    state_table_agg_col_idx: usize,
 
     /// Number of items in the state including those not in top n cache but in state store.
-    total_count: usize,
+    total_count: usize, // TODO(rc): is this really needed?
 
-    /// Number of entries to retain in memory after each flush.
-    top_n_count: Option<usize>,
-
-    // TODO: Remove this phantom to get rid of S: StateStore.
-    _phantom_data: PhantomData<S>,
-
-    /// The upstream pk. Assembled as pk of relational table.
-    upstream_pk_len: usize,
-
-    /// Primary key to look up in relational table. For value state, there is only one row.
-    /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
-    group_key: Option<Row>,
+    /// Cache for top N elements in the state.
+    cache: Cache,
 }
 
 /// A trait over all table-structured states.
@@ -123,6 +171,7 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()>;
 }
 
+// TODO(rc): kill EXTREME_TYPE and A
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
@@ -132,44 +181,46 @@ where
     /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
     /// after each flush.
     pub fn new(
-        top_n_count: Option<usize>,
-        row_count: usize,
-        pk_data_types: PkDataTypes,
-        _group_key_hash_code: HashCode,
+        agg_call: AggCall,
         group_key: Option<&Row>,
+        pk_indices: PkIndices,
+        col_mapping: Arc<StateTableColumnMapping>,
+        row_count: usize,
+        cache_capacity: Option<usize>,
     ) -> StreamExecutorResult<Self> {
-        // Create the internal state based on the value we get.
+        // map agg column to state table column index
+        let state_table_agg_col_idx = col_mapping
+            .upstream_to_state_table(agg_call.args.val_indices()[0])
+            .expect("the column to be aggregate must appear in the state table");
+        // map order by columns to state table column indices
+        let order_pairs = [OrderPair::new(
+            state_table_agg_col_idx,
+            match agg_call.kind {
+                AggKind::Min => OrderType::Ascending,
+                AggKind::Max => OrderType::Descending,
+                _ => unreachable!(),
+            },
+        )]
+        .into_iter()
+        .chain(pk_indices.iter().map(|idx| {
+            OrderPair::new(
+                col_mapping
+                    .upstream_to_state_table(*idx)
+                    .expect("the pk columns must appear in the state table"),
+                OrderType::Ascending,
+            )
+        }))
+        .collect();
+
         Ok(Self {
-            top_n: BTreeMap::new(),
-            total_count: row_count,
-            _phantom_data: PhantomData::default(),
-            upstream_pk_len: pk_data_types.len(),
-            top_n_count,
+            _phantom_data: PhantomData,
+            _phantom_data_2: PhantomData,
             group_key: group_key.cloned(),
+            state_table_col_mapping: col_mapping,
+            state_table_agg_col_idx,
+            total_count: row_count,
+            cache: Cache::new(cache_capacity, order_pairs),
         })
-    }
-
-    fn pk_length(&self) -> usize {
-        self.upstream_pk_len
-    }
-
-    /// Retain only top n elements in the cache
-    fn retain_top_n(&mut self) {
-        if let Some(count) = self.top_n_count {
-            match EXTREME_TYPE {
-                variants::EXTREME_MIN => {
-                    while self.top_n.len() > count {
-                        self.top_n.pop_last();
-                    }
-                }
-                variants::EXTREME_MAX => {
-                    while self.top_n.len() > count {
-                        self.top_n.pop_first();
-                    }
-                }
-                _ => unimplemented!(),
-            }
-        }
     }
 
     /// Apply a batch of data to the state.
@@ -177,112 +228,48 @@ where
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        chunk_cols: &[&ArrayImpl], // contains all upstream columns
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, data));
+        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
 
-        // For extreme state, there's only one column for data, and following columns are for
-        // primary keys!
-        assert_eq!(
-            data.len(),
-            1 + self.pk_length(),
-            "mismatched data input with pk_length"
-        );
-
-        let data_column: &A = data[0].into();
-        let pk_columns = (0..self.pk_length()).map(|idx| data[idx + 1]).collect_vec();
-
-        // `self.top_n` only contains parts of the top keys. When applying batch, we only:
-        // 1. Insert keys that is in the range of top n, so that we only maintain the top keys we
-        // are sure the minimum.
-        // 2. Delete keys if exists in top_n cache.
-        // If the top n cache becomes empty after applying the batch, we will merge data from
-        // flush_buffer and state store when getting the output.
-
-        for (id, (op, key)) in ops.iter().zip_eq(data_column.iter()).enumerate() {
-            let visible = visibility.map(|x| x.is_set(id).unwrap()).unwrap_or(true);
+        for (i, op) in ops.iter().enumerate() {
+            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
             if !visible {
                 continue;
             }
 
-            // sort key may be null
-            let key: Option<A::OwnedItem> = option_to_owned_scalar(&key);
-
-            // Concat pk with the original key to create a composed key
-            let composed_key = (
-                key.clone(),
-                // Collect pk from columns
-                pk_columns
+            let state_row = Row::new(
+                self.state_table_col_mapping
+                    .upstream_columns()
                     .iter()
-                    .map(|col| col.datum_at(id))
-                    .collect::<ExtremePk>(),
+                    .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
+                    .collect(),
             );
-
-            // Get relational pk and value.
-            let sort_key = key.map(|key| key.into());
-            let relational_value =
-                self.get_relational_value(sort_key.clone(), composed_key.1.clone());
 
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    let mut do_insert = false;
-                    if self.total_count == self.top_n.len() {
-                        // Data fully cached in memory
-                        do_insert = true;
-                    } else {
-                        match EXTREME_TYPE {
-                            variants::EXTREME_MIN => {
-                                if let Some((last_key, _)) = self.top_n.last_key_value() {
-                                    if &composed_key < last_key {
-                                        do_insert = true;
-                                    }
-                                }
-                            }
-                            variants::EXTREME_MAX => {
-                                if let Some((first_key, _)) = self.top_n.first_key_value() {
-                                    if &composed_key > first_key {
-                                        do_insert = true;
-                                    }
-                                }
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                    if do_insert {
-                        self.top_n.insert(composed_key.clone(), sort_key);
-                    }
-                    state_table.insert(relational_value)?;
+                    self.cache.insert(state_row.clone());
+                    state_table.insert(state_row)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    self.top_n.remove(&composed_key);
-                    state_table.delete(relational_value)?;
+                    self.cache.remove(state_row.clone());
+                    state_table.delete(state_row)?;
                     self.total_count -= 1;
                 }
             }
         }
 
-        self.retain_top_n();
-
         Ok(())
     }
 
-    fn get_output_from_cache(&self) -> Datum {
-        match EXTREME_TYPE {
-            variants::EXTREME_MIN => {
-                if let Some((_, v)) = self.top_n.first_key_value() {
-                    return v.clone();
-                }
-            }
-            variants::EXTREME_MAX => {
-                if let Some((_, v)) = self.top_n.last_key_value() {
-                    return v.clone();
-                }
-            }
-            _ => unimplemented!(),
-        }
-        None
+    // TODO(rc): This is the only part that differs between different agg states.
+    // So we may introduce a trait for this later, and other code can be reused
+    // for each type of state.
+    fn get_output_from_cache(&self) -> Option<Datum> {
+        let row = self.cache.first()?;
+        Some(row[self.state_table_agg_col_idx].clone())
     }
 
     async fn get_output_inner(
@@ -290,75 +277,30 @@ where
         epoch: u64,
         state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
-        // To make things easier, we do not allow get_output before flushing. Otherwise we will need
-        // to merge data from flush_buffer and state store, which is hard to implement.
-        //
-        // To make ExtremeState produce the correct result, the write batch must be flushed into the
-        // state store before getting the output. Note that calling `.flush()` is not enough, as it
-        // only generates a write batch without flushing to store.
-
-        // Firstly, check if datum is available in cache.
-        if let Some(v) = self.get_output_from_cache() {
-            Ok(Some(v))
+        // try to get the result from cache
+        if let Some(datum) = self.get_output_from_cache() {
+            Ok(datum)
         } else {
-            // Then, fetch from the state store.
-            //
-            // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
-            // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
-            // following logic.
+            // read from state table and fill in the cache
             let all_data_iter =
                 iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
-            for _ in 0..self.top_n_count.unwrap_or(usize::MAX) {
-                if let Some(inner) = all_data_iter.next().await {
-                    let row = inner?;
+            self.cache.set_synced(); // after the following loop the cache should be synced
 
-                    let group_key_len = self.group_key.as_ref().map_or(0, |row| row.size());
-                    // Get the agg call value. Same as sort key.
-                    let value = row[group_key_len].clone();
-
-                    // Get sort key and extreme pk.
-                    let sort_key = value.as_ref().map(|v| v.clone().try_into().unwrap());
-                    let mut extreme_pk = ExtremePk::with_capacity(1);
-                    // The layout is group_key/sort_key/extreme_pk. So the range
-                    // should be [group_key_len + 1, row.0.len()).
-                    for extreme_pk_index in group_key_len + 1..row.0.len() {
-                        extreme_pk.push(row[extreme_pk_index].clone());
-                    }
-
-                    self.top_n.insert((sort_key, extreme_pk), value);
-                } else {
-                    break;
-                }
+            #[for_await]
+            for state_row in all_data_iter.take(self.cache.capacity.unwrap_or(usize::MAX)) {
+                let state_row = state_row?;
+                self.cache.insert(state_row.as_ref().to_owned());
             }
 
-            if let Some(v) = self.get_output_from_cache() {
-                Ok(Some(v))
+            // try to get the result from cache again
+            if let Some(datum) = self.get_output_from_cache() {
+                Ok(datum)
             } else {
                 Ok(None)
             }
         }
-    }
-
-    /// TODO: Revisit all `.flush` and remove if necessary. Because now the state table flush is
-    /// controlled by executor, the `.flush_inner` of agg states do not persist.
-    fn flush_inner(&mut self) -> StreamExecutorResult<()> {
-        self.retain_top_n();
-        Ok(())
-    }
-
-    /// Assemble value for relational table used by extreme state. Should be `group_key` +
-    /// `sort_key` + input pk + agg call value.
-    fn get_relational_value(&self, sort_key: Datum, extreme_pk: ExtremePk) -> Row {
-        let mut sort_key_vec = if let Some(group_key) = self.group_key.as_ref() {
-            group_key.0.to_vec()
-        } else {
-            vec![]
-        };
-        sort_key_vec.push(sort_key);
-        sort_key_vec.extend(extreme_pk.into_iter());
-        Row::new(sort_key_vec)
     }
 }
 
@@ -395,17 +337,17 @@ where
     }
 
     fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
-        self.flush_inner()
+        Ok(())
     }
 }
 
 pub fn create_streaming_extreme_state<S: StateStore>(
     agg_call: AggCall,
+    group_key: Option<&Row>,
+    pk_indices: PkIndices,
+    col_mapping: Arc<StateTableColumnMapping>,
     row_count: usize,
-    top_n_count: Option<usize>,
-    pk_data_types: PkDataTypes,
-    key_hash_code: Option<HashCode>,
-    pk: Option<&Row>,
+    cache_capacity: Option<usize>,
 ) -> StreamExecutorResult<Box<dyn ManagedTableState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
@@ -424,24 +366,27 @@ pub fn create_streaming_extreme_state<S: StateStore>(
             use DataType::*;
             use risingwave_common::array::*;
 
-            match (agg_call.kind, agg_call.return_type.clone()) {
+            match (agg_call.kind.clone(), agg_call.return_type.clone()) {
+                // TODO(rc): this two can be merged
                 $(
                     (AggKind::Max, $( $kind )|+) => Ok(Box::new(
                         ManagedMaxState::<_, $array>::new(
-                            top_n_count,
+                            agg_call,
+                            group_key,
+                            pk_indices,
+                            col_mapping,
                             row_count,
-                            pk_data_types,
-                            key_hash_code.unwrap_or_default(),
-                            pk
+                            cache_capacity,
                         )?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
                         ManagedMinState::<_, $array>::new(
-                            top_n_count,
+                            agg_call,
+                            group_key,
+                            pk_indices,
+                            col_mapping,
                             row_count,
-                            pk_data_types,
-                            key_hash_code.unwrap_or_default(),
-                            pk
+                            cache_capacity,
                         )?,
                     )),
                 )*
