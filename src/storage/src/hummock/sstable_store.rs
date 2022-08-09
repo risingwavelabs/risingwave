@@ -184,13 +184,11 @@ impl SstableStore {
         // Meta
         self.store
             .delete(self.get_sst_meta_path(sst_id).as_str())
-            .await
-            .map_err(HummockError::object_io_error)?;
+            .await?;
         // Data
         self.store
             .delete(self.get_sst_data_path(sst_id).as_str())
-            .await
-            .map_err(HummockError::object_io_error)?;
+            .await?;
         self.meta_cache.erase(sst_id, &sst_id);
         Ok(())
     }
@@ -271,10 +269,7 @@ impl SstableStore {
                     return Ok(holder.into_owned());
                 }
 
-                let block_data = store
-                    .read(&data_path, Some(block_loc))
-                    .await
-                    .map_err(HummockError::object_io_error)?;
+                let block_data = store.read(&data_path, Some(block_loc)).await?;
                 let block = Block::decode(&block_data)?;
                 Ok(Box::new(block))
             }
@@ -382,18 +377,12 @@ impl SstableStore {
                         let meta = match meta_data {
                             Some(data) => data,
                             None => {
-                                let buf = store
-                                    .read(&meta_path, None)
-                                    .await
-                                    .map_err(HummockError::object_io_error)?;
+                                let buf = store.read(&meta_path, None).await?;
                                 SstableMeta::decode(&mut &buf[..])?
                             }
                         };
                         let sst = if load_data {
-                            let block_data = store
-                                .read(&data_path, None)
-                                .await
-                                .map_err(HummockError::object_io_error)?;
+                            let block_data = store.read(&data_path, None).await?;
                             Sstable::new_with_data(sst_id, meta, block_data)?
                         } else {
                             Sstable::new(sst_id, meta)
