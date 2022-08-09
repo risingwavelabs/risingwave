@@ -92,6 +92,10 @@ macro_rules! gen_cast {
             { float32, varchar, general_to_string },
             { float64, varchar, general_to_string },
             { decimal, varchar, general_to_string },
+            { time, varchar, general_to_string },
+            { interval, varchar, general_to_string },
+            { date, varchar, general_to_string },
+            { timestamp, varchar, general_to_string },
 
             { boolean, int32, general_cast },
             { int32, boolean, int32_to_bool },
