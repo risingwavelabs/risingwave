@@ -143,7 +143,7 @@ impl HopWindowExecutor {
             ..
         } = *self;
 
-        if !window_size.is_positive() || !window_size.is_positive() {
+        if !window_size.is_positive() || !window_slide.is_positive() {
             return Err(ExprError::InvalidParam {
                 name: "window",
                 reason: format!(
