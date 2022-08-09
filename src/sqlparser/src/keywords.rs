@@ -168,6 +168,7 @@ define_keywords!(
     DATE,
     DAY,
     DEALLOCATE,
+    DEBEZIUM_JSON,
     DEC,
     DECIMAL,
     DECLARE,

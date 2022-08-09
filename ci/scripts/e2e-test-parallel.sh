@@ -15,7 +15,7 @@ while getopts 'p:' opt; do
             exit 1
             ;;
         : )
-            echo "Invalid option: $OPTARG requires an arguemnt" 1>&2
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
             ;;
     esac
 done
@@ -41,6 +41,7 @@ cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
+# Please make sure the regression is expected before increasing the timeout.
 timeout 5m sqllogictest -p 4566 -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
 echo "--- Kill cluster"

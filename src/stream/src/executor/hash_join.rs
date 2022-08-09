@@ -15,7 +15,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use futures::StreamExt;
+use async_stack_trace::StackTrace;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
@@ -510,8 +511,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             self.actor_id,
             self.metrics.clone(),
         );
-        #[for_await]
-        for msg in aligned_stream {
+
+        pin_mut!(aligned_stream);
+        while let Some(msg) = aligned_stream
+            .next()
+            .stack_trace("hash_join_barrier_align")
+            .await
+        {
             match msg? {
                 AlignedMessage::Left(chunk) => {
                     #[for_await]

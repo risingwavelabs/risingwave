@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{
@@ -43,16 +42,15 @@ use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
-use tonic::{Status, Streaming};
+use tonic::Streaming;
 
 use crate::error::Result;
 use crate::hummock_meta_client::HummockMetaClient;
-use crate::ExtraInfoSourceRef;
+use crate::{rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -86,7 +84,7 @@ impl MetaClient {
         &self,
         addr: &HostAddr,
         worker_type: WorkerType,
-    ) -> Result<Box<dyn NotificationStream>> {
+    ) -> Result<Streaming<SubscribeResponse>> {
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -641,23 +639,6 @@ impl GrpcMetaClient {
     }
 }
 
-macro_rules! grpc_meta_client_impl {
-    ([], $( { $client:ident, $fn_name:ident, $req:ty, $resp:ty }),*) => {
-        $(paste! {
-            impl GrpcMetaClient {
-                pub async fn [<$fn_name>](&self, request: $req) -> Result<$resp> {
-                    Ok(self
-                        .$client
-                        .to_owned()
-                        .$fn_name(request)
-                        .await?
-                        .into_inner())
-                }
-            }
-        })*
-    }
-}
-
 macro_rules! for_all_meta_rpc {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
@@ -706,45 +687,11 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, pause, PauseRequest, PauseResponse }
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
+            ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
         }
     };
 }
 
-for_all_meta_rpc! { grpc_meta_client_impl }
-
 impl GrpcMetaClient {
-    pub async fn subscribe(
-        &self,
-        request: SubscribeRequest,
-    ) -> Result<Box<dyn NotificationStream>> {
-        Ok(Box::new(
-            self.notification_client
-                .to_owned()
-                .subscribe(request)
-                .await?
-                .into_inner(),
-        ))
-    }
-}
-
-#[async_trait::async_trait]
-pub trait NotificationStream: Send {
-    /// Ok(Some) => receive a `SubscribeResponse`.
-    /// Ok(None) => stream terminates.
-    /// Err => error happens.
-    async fn next(&mut self) -> Result<Option<SubscribeResponse>>;
-}
-
-#[async_trait::async_trait]
-impl NotificationStream for Streaming<SubscribeResponse> {
-    async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
-        self.message().await.map_err(Into::into)
-    }
-}
-
-#[async_trait::async_trait]
-impl NotificationStream for Receiver<std::result::Result<SubscribeResponse, Status>> {
-    async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
-        self.recv().await.transpose().map_err(Into::into)
-    }
+    for_all_meta_rpc! { rpc_client_method_impl }
 }
