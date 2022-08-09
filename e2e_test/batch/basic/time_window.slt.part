@@ -105,19 +105,15 @@ group by window_start, uid order by window_start, uid;
 3 8 2022-01-01 11:00:00
 
 statement error
-create materialized view invalid_hop as
 select * from hop(t1, created_at, interval '0', interval '1');
 
 statement error
-create materialized view invalid_hop as
 select * from hop(t1, created_at, interval '1', interval '-1');
 
 statement error
-create materialized view invalid_hop as
 select * from hop(t1, created_at, interval '-1', interval '1');
 
 statement error
-create materialized view invalid_hop as
 select * from hop(t1, created_at, interval '-1', interval '-1');
 
 statement ok
