@@ -85,7 +85,8 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json, // Keyword::JSON
+    Json,         // Keyword::JSON
+    DebeziumJson, // Keyword::DEBEZIUM_JSON
 }
 
 impl ParseTo for SourceSchema {
@@ -95,6 +96,8 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::PROTOBUF]) {
             impl_parse_to!(protobuf_schema: ProtobufSchema, p);
             SourceSchema::Protobuf(protobuf_schema)
+        } else if p.parse_keywords(&[Keyword::DEBEZIUM_JSON]) {
+            SourceSchema::DebeziumJson
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF after ROW FORMAT".to_string(),
@@ -109,6 +112,7 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
         }
     }
 }
