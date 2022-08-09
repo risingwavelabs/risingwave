@@ -17,7 +17,6 @@ use std::sync::Arc;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compaction_executor::CompactionExecutor;
@@ -126,24 +125,7 @@ impl SharedBufferUploader {
             Compactor::compact_shared_buffer_by_compaction_group(mem_compactor_ctx, payload)
                 .await?;
 
-        let uploaded_sst_info = tables
-            .into_iter()
-            .map(|(compaction_group_id, sst, table_ids)| {
-                (
-                    compaction_group_id,
-                    SstableInfo {
-                        id: sst.id,
-                        key_range: Some(risingwave_pb::hummock::KeyRange {
-                            left: sst.meta.smallest_key.clone(),
-                            right: sst.meta.largest_key.clone(),
-                            inf: false,
-                        }),
-                        file_size: sst.meta.estimated_size as u64,
-                        table_ids,
-                    },
-                )
-            })
-            .collect();
+        let uploaded_sst_info = tables.into_iter().collect();
 
         // TODO: re-enable conflict detector after we have a better way to determine which actor
         // writes the batch. if let Some(detector) = &self.write_conflict_detector {
