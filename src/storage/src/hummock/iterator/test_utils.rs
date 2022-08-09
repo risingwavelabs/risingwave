@@ -27,7 +27,7 @@ pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
 use crate::hummock::{
     HummockValue, Sstable, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreRef,
+    SstableStoreRef, TieredCache,
 };
 use crate::monitor::ObjectStoreMetrics;
 
@@ -58,7 +58,13 @@ pub fn mock_sstable_store() -> SstableStoreRef {
 
 pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(store, path, 64 << 20, 64 << 20))
+    Arc::new(SstableStore::new(
+        store,
+        path,
+        64 << 20,
+        64 << 20,
+        TieredCache::none(),
+    ))
 }
 
 /// Generates keys like `key_test_00002` with epoch 233.

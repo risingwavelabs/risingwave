@@ -35,7 +35,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tonic::Streaming;
-use tracing::{error, info};
+use tracing::error;
 use uuid::Uuid;
 use StageEvent::Failed;
 
@@ -354,10 +354,6 @@ impl StageRunner {
 
                 // TODO: handle task failure.
             }
-            info!(
-                "task status {:?}!",
-                status.task_info.as_ref().unwrap().task_status
-            );
         }
 
         // After processing all stream status, we must have sent signal (Either Scheduled or
