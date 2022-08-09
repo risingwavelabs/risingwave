@@ -33,7 +33,7 @@ pub struct LocalVersion {
     pinned_version: Arc<PinnedVersion>,
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
-    /// Save uncommitted data that needs to be synced.
+    /// Save uncommitted data that needs to be synced or finished syncing.
     pub sync_uncommitted_tasks_ssts: Vec<(HummockEpoch, SyncUncommittedTaskSst)>,
 }
 

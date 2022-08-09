@@ -33,7 +33,7 @@ use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::jitter;
 use tracing::{error, info};
@@ -147,6 +147,7 @@ pub struct LocalVersionManager {
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     max_sync_epoch: RwLock<u64>,
     sstable_id_manager: SstableIdManagerRef,
+    sync_epoch_notify: Arc<Notify>,
 }
 
 impl LocalVersionManager {
@@ -205,6 +206,7 @@ impl LocalVersionManager {
             )),
             max_sync_epoch: RwLock::new(0),
             sstable_id_manager,
+            sync_epoch_notify: Arc::new(Notify::new()),
         });
 
         // Pin and get the latest version.
@@ -509,17 +511,23 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
+        let notify1 = self.sync_epoch_notify.clone();
         // TODO(xuxinhao): modify it after supporting uploading multiple shared buffers.#4442
         loop {
-            let max_sync_epoch_guard = self.max_sync_epoch.read();
-            let local_version_guard = self.local_version.read();
-            let epoch1 = local_version_guard
+            let epoch1 = self
+                .local_version
+                .read()
                 .iter_shared_buffer()
-                .find(|(key, _)| key > &&max_sync_epoch_guard.clone());
-            if epoch1.is_none() || epoch1.unwrap().0 == &epoch {
+                .find(|(key, _)| key > &&self.max_sync_epoch.read().clone())
+                .map(|(key, _)| key)
+                .cloned();
+            if epoch1.is_none() || epoch1.unwrap() == epoch {
                 break;
+            } else {
+                notify1.notified().await;
             }
         }
+        self.sync_epoch_notify.notify_waiters();
         let (uncommitted_data, task_write_batch_size) = {
             // We keep the lock on max_sync_epoch until the task is saved in the sync task vec.
             let mut max_sync_epoch_guard = self.max_sync_epoch.write();
