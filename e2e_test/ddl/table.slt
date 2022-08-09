@@ -1,13 +1,13 @@
 # Create a table.
 statement ok
-create table ddl_t (v1 int not null);
+create table ddl_t (v1 int);
 
 statement ok
 explain select v1 from ddl_t;
 
 # Create another table with duplicated name.
 statement error
-create table ddl_t (v2 int not null);
+create table ddl_t (v2 int);
 
 # Drop the table.
 statement ok
@@ -19,7 +19,7 @@ drop table ddl_t;
 
 # Create another table with the same name.
 statement ok
-create table ddl_t (v2 int not null);
+create table ddl_t (v2 int);
 
 statement ok
 explain select v2 from ddl_t;
@@ -111,4 +111,10 @@ statement ok
 insert into "T2" ("V1") values (1);
 
 statement error
-create tabke C1 (c1 varchar(5));
+create table C1 (c1 varchar(5));
+
+statement error
+create table t (v1 int not null);
+
+statement error
+create table t (v1 varchar collate "en_US");

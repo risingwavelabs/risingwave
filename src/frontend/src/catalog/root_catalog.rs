@@ -216,6 +216,18 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
     }
 
+    pub fn get_table_name_by_id(
+        &self,
+        table_id: TableId,
+        db_name: &str,
+        schema_name: &str,
+    ) -> Result<String> {
+        self.get_schema_by_name(db_name, schema_name)
+            .unwrap()
+            .get_table_name_by_id(table_id)
+            .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()).into())
+    }
+
     pub fn get_schema_by_id(
         &self,
         db_id: &DatabaseId,

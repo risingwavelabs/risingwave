@@ -123,6 +123,12 @@ message SyncSourcesResponse {
   common.Status status = 1;
 }
 
+message ActorTraceRequest {}
+
+message ActorTraceResponse {
+  map<uint32, string> actor_traces = 1;
+}
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
@@ -134,6 +140,7 @@ service StreamService {
   rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
+  rpc ActorTrace(ActorTraceRequest) returns (ActorTraceResponse);
 }
 
 // TODO: Lifecycle management for actors.
