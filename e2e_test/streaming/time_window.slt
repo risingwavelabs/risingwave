@@ -22,19 +22,19 @@ select * from hop(t1, created_at, interval '15' minute, interval '30' minute);
 
 statement err
 create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '0' minute, interval '1' minute);
+select * from hop(t1, created_at, interval '0', interval '1');
 
 statement err
 create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '1' minute, interval '-1' minute);
+select * from hop(t1, created_at, interval '1', interval '-1');
 
 statement err
 create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '-1' minute, interval '1' minute);
+select * from hop(t1, created_at, interval '-1', interval '1');
 
 statement err
 create materialized view invalid_hop as
-select * from hop(t1, created_at, interval '-1' minute, interval '-1' minute);
+select * from hop(t1, created_at, interval '-1', interval '-1');
 
 statement ok
 create materialized view mv_tumble_agg_1 as
