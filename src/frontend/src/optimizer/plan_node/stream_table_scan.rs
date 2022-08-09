@@ -48,7 +48,6 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
-                
                 Distribution::UpstreamHashShard(distribution_key)
             }
         };

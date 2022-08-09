@@ -247,8 +247,8 @@ impl RequiredDist {
         }
     }
 
-    /// Used by HashJoin to ensure both sides have not only the same distribution key, but also the
-    /// same vnode mapping. [`Distribution::UpstreamHashShard`] is rejected.
+    /// Used by `HashJoin` to ensure both sides have not only the same distribution key, but also
+    /// the same vnode mapping. [`Distribution::UpstreamHashShard`] is rejected.
     pub fn hash_shard(key: &[usize]) -> Self {
         assert!(!key.is_empty());
         Self::PhysicalDist(Distribution::HashShard(key.to_vec()))
