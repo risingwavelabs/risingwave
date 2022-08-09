@@ -22,16 +22,13 @@ use crate::source::SourceMessage;
 pub struct NexmarkMessage {
     pub shard_id: String,
     pub sequence_number: String,
-    pub payload: Option<Vec<u8>>,
+    pub payload: Bytes,
 }
 
 impl From<NexmarkMessage> for SourceMessage {
     fn from(msg: NexmarkMessage) -> Self {
         SourceMessage {
-            payload: msg
-                .payload
-                .as_ref()
-                .map(|payload| Bytes::copy_from_slice(payload)),
+            payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.shard_id,
         }
@@ -43,7 +40,7 @@ impl NexmarkMessage {
         NexmarkMessage {
             shard_id,
             sequence_number: offset.to_string(),
-            payload: Some(event.to_json().as_bytes().to_vec()),
+            payload: event.to_json().into(),
         }
     }
 }

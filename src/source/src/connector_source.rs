@@ -189,9 +189,7 @@ impl StreamSourceReader for ConnectorSourceReader {
 
         for msg in batch {
             if let Some(content) = msg.payload {
-                *split_offset_mapping
-                    .entry(msg.split_id.clone())
-                    .or_insert_with(|| "".to_string()) = msg.offset.to_string();
+                split_offset_mapping.insert(msg.split_id, msg.offset);
                 match self.parser.parse(content.as_ref(), &self.columns) {
                     Err(e) => {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
@@ -201,19 +199,12 @@ impl StreamSourceReader for ConnectorSourceReader {
                 }
             }
         }
-        let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
-        let mut rows = Vec::with_capacity(events.iter().map(|e| e.rows.len()).sum());
 
-        for event in events {
-            rows.extend(event.rows);
-            ops.extend(event.ops);
-        }
+        let columns = Self::build_columns(&self.columns, events.iter().flat_map(|e| &e.rows))?;
+        let ops = events.into_iter().flat_map(|e| e.ops).collect();
+
         Ok(StreamChunkWithState {
-            chunk: StreamChunk::new(
-                ops,
-                Self::build_columns(&self.columns, rows.as_ref())?,
-                None,
-            ),
+            chunk: StreamChunk::new(ops, columns, None),
             split_offset_mapping: Some(split_offset_mapping),
         })
     }
