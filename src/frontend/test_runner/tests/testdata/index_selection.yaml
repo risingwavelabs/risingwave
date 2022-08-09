@@ -82,3 +82,40 @@
         BatchSimpleAgg { aggs: [count(1:Int32)] }
           BatchProject { exprs: [1:Int32] }
             BatchScan { table: idx2, columns: [], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where c = 1 and a < 10;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: (idx3.a < 10:Int32) }
+        BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c], scan_ranges: [idx3.c = Int64(1)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where a = 1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where a = 1 and b = 2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: idx2, columns: [idx2.a, idx2.b, idx2.c], scan_ranges: [idx2.b = Decimal(Normalized(2)), idx2.a = Int32(1)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where b = 2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: idx2, columns: [idx2.a, idx2.b, idx2.c], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: SomeShard }

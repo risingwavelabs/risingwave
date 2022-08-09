@@ -58,7 +58,7 @@ const INDEX_MAX_LEN: usize = 5;
 const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
     [1, 1, 1, 1, 1],
     [10, 8, 5, 5, 5],
-    [100, 50, 20, 10, 10],
+    [500, 50, 20, 10, 10],
     [10000, 100, 50, 20, 20],
 ];
 
