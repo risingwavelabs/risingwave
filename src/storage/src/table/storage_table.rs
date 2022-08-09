@@ -17,6 +17,7 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
 use bytes::BufMut;
 use futures::future::try_join_all;
@@ -41,9 +42,9 @@ use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::cell_based_encoding_util::serialize_pk_and_column_id;
+use crate::row_serde::row_serde_util::serialize_pk_and_column_id;
 use crate::row_serde::{
-    serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowDeserialize, RowSerde, RowSerialize,
+    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -60,10 +61,9 @@ pub const READ_WRITE: AccessType = true;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
-/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with cell-based
-/// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
-/// if the key of the column id does not exist, it will be Null in the relation
-pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
+/// [`RowBasedStorageTable`] is the interface accessing relational data in KV(`StateStore`) with
+/// row-based encoding format.
+pub type RowBasedStorageTable<S, const T: AccessType> = StorageTableBase<S, RowBasedSerde, T>;
 /// [`StorageTableBase`] is the interface accessing relational data in KV(`StateStore`) with
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation.
@@ -139,6 +139,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
     /// This is parameterized on cell based row serializer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,
         table_id: TableId,
@@ -147,6 +148,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         distribution: Distribution,
+        table_options: TableOption,
     ) -> Self {
         Self::new_inner(
             store,
@@ -156,7 +158,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
             order_types,
             pk_indices,
             distribution,
-            Default::default(),
+            table_options,
             0,
         )
     }
@@ -368,7 +370,10 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
         tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
-        self.check_vnode_is_set(vnode);
+        // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
+        if !indices.is_empty() {
+            self.check_vnode_is_set(vnode);
+        }
         vnode
     }
 
@@ -478,7 +483,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         ReadOptions {
             epoch,
             table_id: Some(self.keyspace.table_id()),
-            ttl: self.table_option.ttl,
+            retention_seconds: self.table_option.retention_seconds,
         }
     }
 }
@@ -650,6 +655,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         encoded_key_range: R,
         epoch: u64,
         vnode_hint: Option<VirtualNode>,
@@ -679,17 +685,23 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+            let prefix_hint = prefix_hint
+                .clone()
+                .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
 
             async move {
+                let read_options = self.get_read_option(epoch);
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
+                    prefix_hint,
                     raw_key_range,
                     wait_epoch,
-                    self.get_read_option(epoch),
+                    read_options,
                 )
                 .await?
                 .into_stream();
+
                 Ok::<_, StorageError>(iter)
             }
         }))
@@ -781,13 +793,23 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             false,
         );
 
+        let prefix_hint = if pk_prefix.size() == 0 {
+            None
+        } else {
+            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+            Some(serialized_pk_prefix)
+        };
+
         trace!(
-            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
+            "iter_with_pk_bounds: prefix_hint {:?} start_key: {:?}, end_key: {:?}",
+            prefix_hint,
             start_key,
             end_key
         );
 
         self.iter_with_encoded_key_range(
+            prefix_hint,
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
@@ -860,6 +882,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
+        prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         wait_epoch: bool,
         read_options: ReadOptions,
@@ -876,9 +899,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
         }
 
         let row_deserializer = RS::create_deserializer(table_descs);
-
         let iter = keyspace
-            .iter_with_range(raw_key_range, read_options)
+            .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
         let iter = Self {
             iter,
@@ -890,7 +912,12 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(mut self) {
-        while let Some((key, value)) = self.iter.next().await? {
+        while let Some((key, value)) = self
+            .iter
+            .next()
+            .stack_trace("storage_table_iter_next")
+            .await?
+        {
             if let Some((_vnode, pk, row)) = self
                 .row_deserializer
                 .deserialize(&key, &value)

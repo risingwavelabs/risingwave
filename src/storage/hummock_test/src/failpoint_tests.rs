@@ -87,7 +87,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -131,18 +131,19 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await;
     assert!(result.is_err());
     let result = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await;
@@ -154,7 +155,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -186,7 +187,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 5,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -195,11 +196,12 @@ async fn test_failpoints_state_store_read_upload() {
     assert_eq!(value, Bytes::from("111"));
     let mut iters = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: 5,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await

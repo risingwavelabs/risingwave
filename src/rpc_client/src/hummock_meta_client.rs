@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+};
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta,
     SubscribeCompactTasksResponse, VacuumTask,
@@ -34,7 +36,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
     async fn get_epoch(&self) -> Result<HummockEpoch>;
-    async fn get_new_table_id(&self) -> Result<HummockSstableId>;
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange>;
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark like ssbench.
     async fn commit_epoch(
@@ -51,4 +53,5 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
     ) -> Result<()>;
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()>;
 }

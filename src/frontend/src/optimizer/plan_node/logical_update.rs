@@ -24,6 +24,7 @@ use super::{
 };
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
@@ -50,7 +51,8 @@ impl LogicalUpdate {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = PlanBase::new_logical(ctx, schema, vec![]);
+        let fd_set = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
             table_source_name,

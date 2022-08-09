@@ -29,6 +29,8 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
+use crate::optimizer::PlanRef;
+
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -69,6 +71,14 @@ impl BuildFragmentGraphState {
         let ret = self.next_table_id;
         self.next_table_id += 1;
         ret
+    }
+}
+
+pub struct StreamFragmenterV2 {}
+
+impl StreamFragmenterV2 {
+    pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+        StreamFragmenter::build_graph(plan_node.to_stream_prost())
     }
 }
 
@@ -211,40 +221,15 @@ impl StreamFragmenter {
         Self::assign_local_table_id_to_stream_node(state, &mut stream_node);
 
         // handle join logic
-        match stream_node.node_body.as_mut().unwrap() {
-            // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-            // with only equal conditions
-            NodeBody::HashJoin(hash_join_node) => {
-                if hash_join_node.is_delta_join {
-                    if hash_join_node.get_join_type()? == JoinType::Inner
-                        && hash_join_node.condition.is_none()
-                    {
-                        return self.build_delta_join(state, current_fragment, stream_node);
-                    } else {
-                        panic!(
-                            "only inner join without non-equal condition is supported for delta joins"
-                        );
-                    }
-                }
+        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
+        {
+            if delta_index_join.get_join_type()? == JoinType::Inner
+                && delta_index_join.condition.is_none()
+            {
+                return self.build_delta_join_without_arrange(state, current_fragment, stream_node);
+            } else {
+                panic!("only inner join without non-equal condition is supported for delta joins");
             }
-
-            NodeBody::DeltaIndexJoin(delta_index_join) => {
-                if delta_index_join.get_join_type()? == JoinType::Inner
-                    && delta_index_join.condition.is_none()
-                {
-                    return self.build_delta_join_without_arrange(
-                        state,
-                        current_fragment,
-                        stream_node,
-                    );
-                } else {
-                    panic!(
-                        "only inner join without non-equal condition is supported for delta joins"
-                    );
-                }
-            }
-
-            _ => {}
         }
 
         let inputs = std::mem::take(&mut stream_node.input);

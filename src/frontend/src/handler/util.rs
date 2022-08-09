@@ -40,22 +40,7 @@ fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
             _ => d.to_string().into(),
         }
     } else {
-        match d {
-            ScalarRefImpl::Int16(d) => d.to_be_bytes().to_vec().into(),
-            ScalarRefImpl::Int32(d) => d.to_be_bytes().to_vec().into(),
-            ScalarRefImpl::Int64(d) => d.to_be_bytes().to_vec().into(),
-            ScalarRefImpl::Float32(_) => todo!(),
-            ScalarRefImpl::Float64(_) => todo!(),
-            ScalarRefImpl::Utf8(d) => d.to_string().into(),
-            ScalarRefImpl::Bool(_) => todo!(),
-            ScalarRefImpl::Decimal(_) => todo!(),
-            ScalarRefImpl::Interval(_) => todo!(),
-            ScalarRefImpl::NaiveDate(_) => todo!(),
-            ScalarRefImpl::NaiveDateTime(_) => todo!(),
-            ScalarRefImpl::NaiveTime(_) => todo!(),
-            ScalarRefImpl::Struct(_) => todo!(),
-            ScalarRefImpl::List(_) => todo!(),
-        }
+        d.binary_serialize()
     }
 }
 

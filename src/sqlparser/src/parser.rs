@@ -435,9 +435,18 @@ impl Parser {
                 } else {
                     UnaryOperator::Minus
                 };
+                let mut sub_expr = self.parse_subexpr(Self::PLUS_MINUS_PREC)?;
+                // TODO: Deal with nested unary exp: -(-(-(1))) => -1
+                // Tracked by: <https://github.com/singularity-data/risingwave/issues/4344>
+                if let Expr::Value(Value::Number(ref mut s, _)) = sub_expr {
+                    if tok == Token::Minus {
+                        *s = format!("-{}", s);
+                    }
+                    return Ok(sub_expr);
+                }
                 Ok(Expr::UnaryOp {
                     op,
-                    expr: Box::new(self.parse_subexpr(Self::PLUS_MINUS_PREC)?),
+                    expr: Box::new(sub_expr),
                 })
             }
             tok @ Token::DoubleExclamationMark
@@ -1517,6 +1526,7 @@ impl Parser {
     // where option can be:
     //       SUPERUSER | NOSUPERUSER
     //     | CREATEDB | NOCREATEDB
+    //     | CREATEUSER | NOCREATEUSER
     //     | LOGIN | NOLOGIN
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
     fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
@@ -1539,10 +1549,17 @@ impl Parser {
         self.expect_token(&Token::LParen)?;
         let columns = self.parse_comma_separated(Parser::parse_order_by_expr)?;
         self.expect_token(&Token::RParen)?;
+        let mut include = vec![];
+        if self.parse_keyword(Keyword::INCLUDE) {
+            self.expect_token(&Token::LParen)?;
+            include = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_token(&Token::RParen)?;
+        }
         Ok(Statement::CreateIndex {
             name: index_name,
             table_name,
             columns,
+            include,
             unique,
             if_not_exists,
         })
@@ -2660,6 +2677,11 @@ impl Parser {
                     return Ok(Statement::ShowObjects(ShowObject::Source {
                         schema: self.parse_from_and_identifier()?,
                     }));
+                }
+                Keyword::SINKS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Sink {
+                        schema: self.parse_from_and_identifier()?,
+                    }))
                 }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowObjects(ShowObject::Database));

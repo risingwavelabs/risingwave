@@ -14,9 +14,10 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Instant;
 
+use async_stack_trace::{SpanValue, StackTrace};
 use futures::pin_mut;
-use madsim::time::Instant;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
 use tokio_stream::StreamExt;
@@ -24,6 +25,7 @@ use tracing_futures::Instrument;
 
 use super::monitor::StreamingMetrics;
 use super::{Message, StreamConsumer};
+use crate::executor::Epoch;
 use crate::task::{ActorId, SharedContext};
 
 pub struct OperatorInfo {
@@ -149,11 +151,22 @@ where
             res
         };
 
+        let mut last_epoch: Option<Epoch> = None;
+
         let stream = Box::new(self.consumer).execute();
         pin_mut!(stream);
 
         // Drive the streaming task with an infinite loop
-        while let Some(barrier) = stream.next().instrument(span).await.transpose()? {
+        while let Some(barrier) = stream
+            .next()
+            .instrument(span)
+            .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
+                format!("Epoch {}", e.curr).into()
+            }))
+            .await
+            .transpose()?
+        {
+            last_epoch = Some(barrier.epoch);
             {
                 // Calculate metrics
                 let prev_epoch = barrier.epoch.prev;

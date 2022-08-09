@@ -3478,7 +3478,7 @@ fn parse_rollback() {
 
 #[test]
 fn parse_create_index() {
-    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC)";
+    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC) INCLUDE(other)";
     let indexed_columns = vec![
         OrderByExpr {
             expr: Expr::Identifier(Ident::new("name")),
@@ -3491,17 +3491,21 @@ fn parse_create_index() {
             nulls_first: None,
         },
     ];
+
+    let include_columns = vec![Ident::new("other")];
     match verified_stmt(sql) {
         Statement::CreateIndex {
             name,
             table_name,
             columns,
+            include,
             unique,
             if_not_exists,
         } => {
             assert_eq!("idx_name", name.to_string());
             assert_eq!("test", table_name.to_string());
             assert_eq!(indexed_columns, columns);
+            assert_eq!(include_columns, include);
             assert!(unique);
             assert!(if_not_exists)
         }

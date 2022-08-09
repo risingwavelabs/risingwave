@@ -19,11 +19,9 @@ use itertools::Itertools;
 use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use risingwave_frontend::binder::Binder;
-use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::LocalFrontend;
-use risingwave_frontend::{handler, FrontendOpts};
+use risingwave_frontend::{handler, Binder, FrontendOpts, Planner};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
@@ -106,6 +104,32 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
     (tables, setup_sql)
 }
 
+async fn test_stream_query(
+    session: Arc<SessionImpl>,
+    tables: Vec<Table>,
+    seed: u64,
+    setup_sql: &str,
+) {
+    let mut rng;
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+        rng = SmallRng::from_entropy();
+    } else {
+        rng = SmallRng::seed_from_u64(seed);
+    }
+
+    let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+    reproduce_failing_queries(setup_sql, &sql);
+    // The generated SQL must be parsable.
+    let statements = parse_sql(&sql);
+    let stmt = statements[0].clone();
+    handle(session.clone(), stmt, &sql).await;
+
+    let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
+    let drop_stmts = parse_sql(&drop_sql);
+    let drop_stmt = drop_stmts[0].clone();
+    handle(session.clone(), drop_stmt, &drop_sql).await;
+}
+
 fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, setup_sql: &str) {
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
@@ -114,25 +138,22 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
         rng = SmallRng::seed_from_u64(seed);
     }
 
-    let sql = sql_gen(&mut rng, tables.clone());
+    let sql = sql_gen(&mut rng, tables);
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
     let statements = parse_sql(&sql);
     let stmt = statements[0].clone();
     let context: OptimizerContextRef =
-        OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
+        OptimizerContext::new(session.clone(), Arc::from(sql)).into();
 
-    match stmt.clone() {
+    match stmt {
         Statement::Query(_) => {
-            let mut binder = Binder::new(
-                session.env().catalog_reader().read_guard(),
-                session.database().to_string(),
-            );
+            let mut binder = Binder::new(&session);
             let bound = binder
-                .bind(stmt.clone())
+                .bind(stmt)
                 .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
-            let mut planner = Planner::new(context.clone());
+            let mut planner = Planner::new(context);
             let logical_plan = planner
                 .plan(bound)
                 .unwrap_or_else(|e| panic!("Failed to generate logical plan:\nReason:\n{}", e));
@@ -193,7 +214,14 @@ pub fn run() {
             tables,
             setup_sql,
         } = &*SQLSMITH_ENV;
-        test_batch_query(session.clone(), tables.clone(), test.data, &setup_sql);
+        test_batch_query(session.clone(), tables.clone(), test.data, setup_sql);
+        let test_stream_query =
+            test_stream_query(session.clone(), tables.clone(), test.data, setup_sql);
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(test_stream_query);
         Outcome::Passed
     })
     .exit();

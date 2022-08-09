@@ -18,10 +18,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -30,16 +30,21 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use risingwave_rpc_client::StreamClientPoolRef;
+// use parking_lot::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
+use crate::manager::{
+    DatabaseId, HashMappingManagerRef, MetaSrvEnv, NotificationManagerRef, SchemaId,
+};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
+use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
@@ -93,6 +98,10 @@ pub struct GlobalStreamManager<S: MetaStore> {
     client_pool: StreamClientPoolRef,
 
     compaction_group_manager: CompactionGroupManagerRef<S>,
+
+    notification_manager: NotificationManagerRef,
+
+    processing_table: Mutex<HashMap<u32, Table>>, // mutex for immutable self
 }
 
 impl<S> GlobalStreamManager<S>
@@ -106,7 +115,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-    ) -> Result<Self> {
+    ) -> MetaResult<Self> {
         Ok(Self {
             scheduler: Scheduler::new(cluster_manager.clone(), env.hash_mapping_manager_ref()),
             fragment_manager,
@@ -116,6 +125,8 @@ where
             _hash_mapping_manager: env.hash_mapping_manager_ref(),
             client_pool: env.stream_client_pool_ref(),
             compaction_group_manager,
+            notification_manager: env.notification_manager_ref(),
+            processing_table: Mutex::new(HashMap::default()),
         })
     }
 
@@ -126,7 +137,7 @@ where
         dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
         upstream_worker_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &ScheduledLocations,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
             /// Records what's the correspoding actor of each parallel unit of one table.
@@ -148,7 +159,7 @@ where
                 actor_id: ActorId,
                 same_worker_node_as_upstream: bool,
                 is_singleton: bool,
-            ) -> Result<()> {
+            ) -> MetaResult<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
@@ -309,9 +320,10 @@ where
             table_sink_map,
             dependent_table_ids,
             table_properties,
+            internal_table_id_map,
             ..
         }: &mut CreateMaterializedViewContext,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
         // It MUST be cleared before Ok returns.
         let mut revert_funcs = scopeguard::guard(
@@ -540,7 +552,7 @@ where
         // allocation, but not actually builds it. We initialize all channels in this stage.
         for (worker_id, actors) in &worker_actors {
             let worker_node = locations.worker_locations.get(worker_id).unwrap();
-            let mut client = self.client_pool.get(worker_node).await?;
+            let client = self.client_pool.get(worker_node).await?;
 
             client
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -567,7 +579,7 @@ where
         // Build remaining hanging channels on compute nodes.
         for (worker_id, hanging_channels) in hanging_channels {
             let worker_node = locations.worker_locations.get(&worker_id).unwrap();
-            let mut client = self.client_pool.get(worker_node).await?;
+            let client = self.client_pool.get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
 
@@ -581,22 +593,39 @@ where
         }
 
         // Register to compaction group beforehand.
-        let registered_table_ids = self
-            .compaction_group_manager
+        let compaction_group_manager_ref = self.compaction_group_manager.clone();
+        let registered_table_ids = compaction_group_manager_ref
             .register_table_fragments(&table_fragments, table_properties)
             .await?;
-        let compaction_group_manager_ref = self.compaction_group_manager.clone();
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
 
+        {
+            // lock before notify to avoid notify when some node re-subscribe
+            let mut processing_table_guard = self.processing_table.lock().await;
+            // Success Register to compaction group, we can push catalog to CN / Compactor
+            for (table_id, table_catalog) in internal_table_id_map {
+                let table_catalog = table_catalog.to_owned().unwrap_or_default();
+                processing_table_guard.insert(*table_id, table_catalog.clone());
+
+                self.notification_manager
+                    .notify_compute(Operation::Add, Info::Table(table_catalog.clone()))
+                    .await;
+
+                self.notification_manager
+                    .notify_compactor(Operation::Add, Info::Table(table_catalog))
+                    .await;
+            }
+        }
+
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         for (worker_id, actors) in worker_actors {
             let worker_node = locations.worker_locations.get(&worker_id).unwrap();
-            let mut client = self.client_pool.get(worker_node).await?;
+            let client = self.client_pool.get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
@@ -652,7 +681,7 @@ where
 
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
-    pub async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()> {
+    pub async fn drop_materialized_view(&self, table_id: &TableId) -> MetaResult<()> {
         let table_fragments = self
             .fragment_manager
             .select_table_fragments_by_table_id(table_id)
@@ -696,7 +725,40 @@ where
             );
         }
 
+        // Remove internal_tables push to CN and Compactor
+        self.remove_processing_table(table_fragments.internal_table_ids())
+            .await;
+        for table_id in table_fragments.internal_table_ids() {
+            let delete_table = Table {
+                id: table_id,
+                ..Default::default()
+            };
+
+            self.notification_manager
+                .notify_compute(Operation::Delete, Info::Table(delete_table.clone()))
+                .await;
+
+            self.notification_manager
+                .notify_compactor(Operation::Delete, Info::Table(delete_table))
+                .await;
+        }
+
         Ok(())
+    }
+
+    pub fn processing_table(&self) -> HashMap<u32, Table> {
+        self.processing_table.try_lock().unwrap().clone()
+    }
+
+    pub async fn remove_processing_table(&self, table_ids: Vec<u32>) {
+        let mut processing_table_guard = self.processing_table.lock().await;
+        for table_id in table_ids {
+            processing_table_guard.remove(&table_id);
+        }
+    }
+
+    pub async fn get_processing_table_guard(&self) -> MutexGuard<'_, HashMap<u32, Table>> {
+        self.processing_table.lock().await
     }
 }
 #[cfg(test)]
@@ -704,11 +766,9 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
-    use std::thread::sleep;
     use std::time::Duration;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
@@ -724,11 +784,13 @@ mod tests {
     #[cfg(feature = "failpoints")]
     use tokio::sync::Notify;
     use tokio::task::JoinHandle;
+    use tokio::time::sleep;
     use tonic::{Request, Response, Status};
 
     use super::*;
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
+    use crate::error::meta_error_to_tonic;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{CatalogManager, MetaSrvEnv};
@@ -788,7 +850,7 @@ mod tests {
             for info in req.get_info() {
                 guard.insert(
                     info.get_actor_id(),
-                    info.get_host().map_err(tonic_err)?.clone(),
+                    info.get_host().map_err(meta_error_to_tonic)?.clone(),
                 );
             }
 
@@ -845,6 +907,13 @@ mod tests {
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse::default()))
         }
+
+        async fn actor_trace(
+            &self,
+            _request: Request<ActorTraceRequest>,
+        ) -> std::result::Result<Response<ActorTraceResponse>, Status> {
+            Ok(Response::new(ActorTraceResponse::default()))
+        }
     }
 
     struct MockServices {
@@ -856,7 +925,7 @@ mod tests {
     }
 
     impl MockServices {
-        async fn start(host: &str, port: u16) -> Result<Self> {
+        async fn start(host: &str, port: u16) -> MetaResult<Self> {
             let addr = SocketAddr::new(host.parse().unwrap(), port);
             let state = Arc::new(FakeFragmentState {
                 actor_streams: Mutex::new(HashMap::new()),
@@ -878,7 +947,7 @@ mod tests {
                     .unwrap();
             });
 
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true, false))).await;
             let cluster_manager =
@@ -983,8 +1052,8 @@ mod tests {
             .collect_vec()
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_create_materialized_view() -> Result<()> {
+    #[tokio::test]
+    async fn test_create_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12333).await?;
 
         let table_id = TableId::new(0);
@@ -1060,7 +1129,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_drop_materialized_view() -> Result<()> {
+    async fn test_drop_materialized_view() -> MetaResult<()> {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 
         let table_id = TableId::new(0);
@@ -1156,10 +1225,7 @@ mod tests {
             .unwrap_err();
 
         // TODO: check memory and metastore consistent
-        assert_eq!(
-            select_err_1.to_string(),
-            "internal error: table_fragment not exist: id=0"
-        );
+        assert_eq!(select_err_1.to_string(), "table_fragment not exist: id=0");
 
         services.stop().await;
         Ok(())
@@ -1282,10 +1348,7 @@ mod tests {
             .unwrap_err();
 
         // TODO: check memory and metastore consistent
-        assert_eq!(
-            select_err_1.to_string(),
-            "internal error: table_fragment not exist: id=0"
-        );
+        assert_eq!(select_err_1.to_string(), "table_fragment not exist: id=0");
 
         services.stop().await;
     }

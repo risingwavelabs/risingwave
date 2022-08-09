@@ -17,7 +17,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +50,7 @@ use itertools::Itertools;
 pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
+use postgres_types::{ToSql, Type};
 use prost::Message;
 use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
 
@@ -651,6 +652,67 @@ pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
 }
 
 impl ScalarRefImpl<'_> {
+    /// Encode the scalar to postgresql binary format.
+    /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
+    pub fn binary_serialize(&self) -> Bytes {
+        let placeholder = Type::ANY;
+        let mut output = BytesMut::new();
+        match self {
+            Self::Int64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Utf8(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Bool(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int16(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Decimal(v) => match v {
+                Decimal::Normalized(v) => {
+                    v.to_sql(&placeholder, &mut output).unwrap();
+                }
+                Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF => {
+                    output.reserve(8);
+                    output.put_u16(0);
+                    output.put_i16(0);
+                    output.put_u16(0xC000);
+                    output.put_i16(0);
+                }
+            },
+            Self::NaiveDate(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveDateTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Struct(_) => {
+                todo!("Don't support struct serialization yet")
+            }
+            Self::List(_) => {
+                todo!("Don't support list serialization yet")
+            }
+            Self::Interval(_) => {
+                todo!("Don't support interval serialization yet")
+            }
+        };
+        output.freeze()
+    }
+
     /// Serialize the scalar.
     pub fn serialize(
         &self,
@@ -676,15 +738,8 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            &Self::Struct(StructRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            &Self::List(ListRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            _ => {
-                panic!("Type is unable to be serialized.")
-            }
+            &Self::Struct(val) => ser.serialize_struct_or_list(val.to_protobuf_owned())?,
+            &Self::List(val) => ser.serialize_struct_or_list(val.to_protobuf_owned())?,
         };
         Ok(())
     }
@@ -941,11 +996,13 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
 #[cfg(test)]
 mod tests {
     use std::ops::Neg;
+    use std::sync::Arc;
 
     use itertools::Itertools;
     use rand::thread_rng;
 
     use super::*;
+    use crate::array::{ArrayBuilder, ArrayImpl, ArrayMeta, ListArrayBuilder, StructArrayBuilder};
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -1046,5 +1103,121 @@ mod tests {
         let actual =
             ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
         assert_eq!(v, actual);
+    }
+
+    #[test]
+    fn test_struct_serialize() {
+        let values = vec![
+            StructValue::new(vec![
+                Some(OrderedF64::from(1.23f64).to_scalar_value()),
+                Some(345i16.to_scalar_value()),
+            ]),
+            StructValue::new(vec![Some(OrderedF64::from(0f64).to_scalar_value()), None]),
+            StructValue::new(vec![None, Some(123i16.to_scalar_value())]),
+            StructValue::new(vec![None, None]),
+        ];
+        let array: ArrayImpl = {
+            let mut builder = StructArrayBuilder::with_meta(
+                0,
+                ArrayMeta::Struct {
+                    children: Arc::new([DataType::Float64, DataType::Int16]),
+                },
+            );
+            for val in &values {
+                builder.append(Some(StructRef::ValueRef { val })).unwrap()
+            }
+            builder.finish().unwrap().into()
+        };
+
+        for (i, value) in values.into_iter().enumerate() {
+            let output = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                array
+                    .value_at(i)
+                    .unwrap()
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let expect = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                ScalarImpl::Struct(value)
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(output, expect);
+
+            let mut deserializer = memcomparable::Deserializer::new(&output[..]);
+            let output = ScalarImpl::deserialize(
+                DataType::Struct {
+                    fields: Arc::new([DataType::Float64, DataType::Int16]),
+                },
+                &mut deserializer,
+            )
+            .unwrap();
+            assert_eq!(array.value_at(i).to_owned_datum(), Some(output));
+        }
+    }
+
+    #[test]
+    fn test_list_serialize() {
+        let values = vec![
+            ListValue::new(vec![
+                Some("abcdef".to_string().to_scalar_value()),
+                Some("12345".to_string().to_scalar_value()),
+                None,
+                None,
+                // FIXME: it seems empty strings are transformed to NULL after deserialization
+                // Some("".to_string().to_scalar_value()),
+                Some("abcdefghjijkl".to_string().to_scalar_value()),
+            ]),
+            ListValue::new(vec![
+                None,
+                Some("以下为emoji".to_string().to_scalar_value()),
+                Some("👿👴😇".to_string().to_scalar_value()),
+            ]),
+        ];
+        let array: ArrayImpl = {
+            let mut builder = ListArrayBuilder::with_meta(
+                0,
+                ArrayMeta::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+            );
+            for val in &values {
+                builder.append(Some(ListRef::ValueRef { val })).unwrap()
+            }
+            builder.finish().unwrap().into()
+        };
+
+        for (i, value) in values.into_iter().enumerate() {
+            let output = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                array
+                    .value_at(i)
+                    .unwrap()
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let expect = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                ScalarImpl::List(value).serialize(&mut serializer).unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(output, expect);
+            println!("{:?}", output);
+
+            let mut deserializer = memcomparable::Deserializer::new(&output[..]);
+            let output = ScalarImpl::deserialize(
+                DataType::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+                &mut deserializer,
+            )
+            .unwrap();
+            assert_eq!(array.value_at(i).to_owned_datum(), Some(output));
+        }
     }
 }
