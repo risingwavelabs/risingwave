@@ -149,8 +149,6 @@ where
 
             core.add_database(database);
             let mut version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
             for schema in schemas {
@@ -188,8 +186,6 @@ where
             core.drop_database(&database);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Database(database))
                 .await;
 
@@ -206,8 +202,6 @@ where
             core.add_schema(schema);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Schema(schema.to_owned()))
                 .await;
 
@@ -225,8 +219,6 @@ where
             core.drop_schema(&schema);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Schema(schema))
                 .await;
 
@@ -307,7 +299,7 @@ where
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
 
-                self.broadcast_info_op(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
@@ -572,7 +564,7 @@ where
 
             for table in tables {
                 core.add_table(&table);
-                self.broadcast_info_op(Operation::Add, Info::Table(table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
             self.broadcast_info_op(Operation::Add, Info::Table(mview.to_owned()))
@@ -773,8 +765,6 @@ where
             core.add_sink(sink);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
                 .await;
 
@@ -802,8 +792,6 @@ where
             core.add_sink(sink);
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
                 .await;
 
@@ -824,8 +812,6 @@ where
             }
 
             let version = self
-                .env
-                .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Sink(sink))
                 .await;
 
@@ -853,6 +839,13 @@ where
             .filter(|s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect())
+    }
+
+    async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend(operation, info)
+            .await
     }
 
     async fn broadcast_info_op(&self, operation: Operation, info: Info) -> NotificationVersion {
