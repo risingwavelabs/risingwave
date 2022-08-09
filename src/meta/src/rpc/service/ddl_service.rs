@@ -294,8 +294,16 @@ where
         self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
         // 1. Drop table in catalog. Ref count will be checked.
-        let version = self.catalog_manager.drop_table(table_id).await?;
+        let version = self
+            .catalog_manager
+            .drop_table(table_id, internal_tables)
+            .await?;
 
         // 2. drop mv in stream manager
         self.stream_manager
@@ -344,9 +352,18 @@ where
         self.env.idle_manager().record_activity();
 
         let index_id = request.into_inner().index_id;
+        let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&index_table_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
 
         // 1. Drop index in catalog. Ref count will be checked.
-        let (index_table_id, version) = self.catalog_manager.drop_index(index_id).await?;
+        let version = self
+            .catalog_manager
+            .drop_index(index_id, index_table_id, internal_tables)
+            .await?;
 
         // 2. drop mv(index) in stream manager
         self.stream_manager
