@@ -95,7 +95,6 @@ impl S3StreamingUploader {
         let key = self.key.clone();
         let upload_id = self.upload_id.clone();
         self.join_handles.push(tokio::spawn(async move {
-            println!("{:?}: {:?}", part_id, len);
             let upload_output = client_cloned
                 .upload_part()
                 .bucket(bucket)
@@ -110,7 +109,6 @@ impl S3StreamingUploader {
                 .lock()
                 .map_err(ObjectError::internal)?
                 .insert(part_id, upload_output);
-            println!("{:?} done", part_id);
             Ok(())
         }));
     }
@@ -129,7 +127,6 @@ impl S3StreamingUploader {
         {
             result?;
         }
-        println!("all joined");
 
         let completed_parts = Some(
             self.uploaded_parts
