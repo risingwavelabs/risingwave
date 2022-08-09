@@ -78,8 +78,8 @@
           StreamExchange { dist: HashShard(t3.v2) }
             StreamTableScan { table: t3, columns: [t3.v1, t3.v2, t3._row_id], pk: [t3._row_id], distribution: HashShard(t3._row_id) }
 - sql: |
-    create table t1 (v1 int not null, v2 int not null);
-    create table t2 (v1 int not null, v2 int not null);
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
     select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -103,8 +103,8 @@
           StreamExchange { dist: HashShard(t2.v1) }
             StreamTableScan { table: t2, columns: [t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], distribution: HashShard(t2._row_id) }
 - sql: |
-    create table t1 (v1 int not null, v2 int not null);
-    create table t2 (v1 int not null, v2 int not null);
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
     select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 > t2.v1 and t1.v2 < 10;
   batch_plan: |
     BatchNestedLoopJoin { type: Inner, predicate: (t1.v1 > t2.v1), output: [t1.v2, t2.v2] }

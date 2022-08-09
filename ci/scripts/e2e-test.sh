@@ -15,7 +15,7 @@ while getopts 'p:' opt; do
             exit 1
             ;;
         : )
-            echo "Invalid option: $OPTARG requires an arguemnt" 1>&2
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
             ;;
     esac
 done
@@ -41,7 +41,8 @@ cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
-timeout 8m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+# Please make sure the regression is expected before increasing the timeout.
+timeout 3m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
@@ -49,7 +50,7 @@ cargo make ci-kill
 echo "--- e2e, ci-3cn-1fe, batch distributed"
 cargo make ci-start ci-3cn-1fe
 timeout 2m sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
-timeout 2m sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' --junit "batch-${profile}"
+timeout 3m sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' --junit "batch-${profile}"
 timeout 2m sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 timeout 2m sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
