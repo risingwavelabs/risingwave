@@ -38,7 +38,7 @@ impl GrpcExchangeSource {
         let addr = exchange_source.get_host()?.into();
         let task_output_id = exchange_source.get_task_output_id()?.clone();
         let task_id = task_output_id.get_task_id()?.clone();
-        let client = ComputeClient::with_address(addr).await?;
+        let client = ComputeClient::new(addr).await?;
         let local_execute_plan = exchange_source.local_execute_plan;
         let stream = match local_execute_plan {
             // When in the local execution mode, `GrpcExchangeSource` would send out

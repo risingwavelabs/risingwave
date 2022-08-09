@@ -19,12 +19,11 @@ use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
-use tonic::transport::{Endpoint, Channel};
+use risingwave_pb::stream_service::*;
+use tonic::transport::{Channel, Endpoint};
 
 use crate::error::Result;
-use crate::{RpcClient, RpcClientPool,rpc_client_method_impl};
-use risingwave_pb::stream_service::*;
-
+use crate::{rpc_client_method_impl, RpcClient, RpcClientPool};
 
 #[derive(Clone)]
 pub struct StreamClient(StreamServiceClient<Channel>);
@@ -32,12 +31,18 @@ pub struct StreamClient(StreamServiceClient<Channel>);
 #[async_trait]
 impl RpcClient for StreamClient {
     async fn new_client(host_addr: HostAddr) -> Result<Self> {
+        Self::new(host_addr).await
+    }
+}
+
+impl StreamClient {
+    async fn new(host_addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
-            Ok(Self(StreamServiceClient::new(channel)))
+        Ok(Self(StreamServiceClient::new(channel)))
     }
 }
 
