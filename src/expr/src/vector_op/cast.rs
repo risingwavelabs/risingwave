@@ -211,9 +211,10 @@ pub fn bool_out(input: bool) -> Result<String> {
 mod tests {
     use num_traits::FromPrimitive;
 
+    use super::*;
+
     #[test]
     fn parse_str() {
-        use super::*;
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         str_to_date("1999-01-08").unwrap();
@@ -274,5 +275,25 @@ mod tests {
         );
 
         assert_eq!(general_to_string(Decimal::NaN).unwrap(), "NaN");
+    }
+
+    #[test]
+    fn temporal_cast() {
+        assert_eq!(
+            timestamp_to_date(str_to_timestamp("1999-01-08 04:02").unwrap()).unwrap(),
+            str_to_date("1999-01-08").unwrap(),
+        );
+        assert_eq!(
+            timestamp_to_time(str_to_timestamp("1999-01-08 04:02").unwrap()).unwrap(),
+            str_to_time("04:02").unwrap(),
+        );
+        assert_eq!(
+            interval_to_time(IntervalUnit::new(1, 2, 61003)).unwrap(),
+            str_to_time("00:01:01.003").unwrap(),
+        );
+        assert_eq!(
+            interval_to_time(IntervalUnit::new(0, 0, -61003)).unwrap(),
+            str_to_time("23:58:58.997").unwrap(),
+        );
     }
 }
