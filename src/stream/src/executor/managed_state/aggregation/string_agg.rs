@@ -35,6 +35,7 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
+// TODO(rc): this can be merged with extreme::Cache
 #[derive(Debug)]
 struct Cache {
     synced: bool, // `false` means not synced with state table (cold start)
