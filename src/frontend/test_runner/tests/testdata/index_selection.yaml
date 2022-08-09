@@ -66,7 +66,6 @@
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
-    create index idx2 on t1(b, a) include(c);
     select a,b from t1 where a in (1,2) and b in (2,3)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
