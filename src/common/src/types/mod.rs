@@ -738,32 +738,8 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            &Self::Struct(StructRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            &Self::List(ListRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            // For StructRef::Indexed
-            &Self::Struct(val) => ser.serialize_struct_or_list(
-                StructValue::new(
-                    val.fields_ref()
-                        .into_iter()
-                        .map(|datum_ref| datum_ref.to_owned_datum())
-                        .collect(),
-                )
-                .to_protobuf_owned(),
-            )?,
-            // For ListRef::Indexed
-            &Self::List(val) => ser.serialize_struct_or_list(
-                ListValue::new(
-                    val.flatten()
-                        .into_iter()
-                        .map(|datum_ref| datum_ref.to_owned_datum())
-                        .collect(),
-                )
-                .to_protobuf_owned(),
-            )?,
+            &Self::Struct(val) => ser.serialize_struct_or_list(val.to_protobuf_owned())?,
+            &Self::List(val) => ser.serialize_struct_or_list(val.to_protobuf_owned())?,
         };
         Ok(())
     }

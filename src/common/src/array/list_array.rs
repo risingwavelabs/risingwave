@@ -390,6 +390,26 @@ impl<'a> ListRef<'a> {
             }
         }
     }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        match self {
+            ListRef::ValueRef { val } => val.to_protobuf_owned(),
+            ListRef::Indexed { arr, idx } => {
+                let value = ProstListValue {
+                    fields: (arr.offsets[*idx]..arr.offsets[*idx + 1])
+                        .map(|o| {
+                            let datum_ref = arr.value.value_at(o);
+                            match datum_ref {
+                                None => vec![],
+                                Some(s) => s.into_scalar_impl().to_protobuf(),
+                            }
+                        })
+                        .collect_vec(),
+                };
+                value.encode_to_vec()
+            }
+        }
+    }
 }
 
 impl Hash for ListRef<'_> {

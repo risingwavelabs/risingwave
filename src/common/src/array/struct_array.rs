@@ -366,6 +366,28 @@ impl<'a> StructRef<'a> {
             StructRef::ValueRef { val } => val.fields.iter().map(to_datum_ref).collect(),
         }
     }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        match self {
+            StructRef::ValueRef { val } => val.to_protobuf_owned(),
+            StructRef::Indexed { arr, idx } => {
+                let value = ProstStructValue {
+                    fields: arr
+                        .children
+                        .iter()
+                        .map(|a| {
+                            let datum_ref = a.value_at(*idx);
+                            match datum_ref {
+                                None => vec![],
+                                Some(s) => s.into_scalar_impl().to_protobuf(),
+                            }
+                        })
+                        .collect_vec(),
+                };
+                value.encode_to_vec()
+            }
+        }
+    }
 }
 
 impl Hash for StructRef<'_> {
