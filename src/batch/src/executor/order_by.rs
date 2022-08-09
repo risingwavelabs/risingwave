@@ -131,11 +131,17 @@ impl OrderByExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use futures::StreamExt;
-    use risingwave_common::array::{Array, DataChunk};
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{
+        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        OrderedF32, Scalar,
+    };
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -282,5 +288,437 @@ mod tests {
             assert_eq!(col0.array().as_utf8().value_at(1), Some("2.2"));
             assert_eq!(col0.array().as_utf8().value_at(2), Some("1.1"));
         }
+    }
+
+    // TODO: write following tests in a more concise way
+    #[tokio::test]
+    async fn test_encoding_for_boolean_int32_float64() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Boolean),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float64),
+            ],
+        };
+        // f   3    .
+        // t   3    .
+        // .   .    3.5
+        // .   .    -4.3
+        // .   .    .
+        let input_chunk = DataChunk::new(
+            vec![
+                column! { BoolArray, [Some(false), Some(true), None, None, None] },
+                column! { I32Array, [Some(3), Some(3), None, None, None] },
+                column! { F64Array, [None, None, Some(3.5), Some(-4.3), None] },
+            ],
+            5,
+        );
+        // .   .   -4.3
+        // .   .   3.5
+        // .   .   .
+        // f   3   .
+        // t   3   .
+        let output_chunk = DataChunk::new(
+            vec![
+                column! { BoolArray, [None, None, None, Some(false), Some(true)] },
+                column! { I32Array, [None, None, None, Some(3), Some(3)] },
+                column! { F64Array, [Some(-4.3), Some(3.5), None, None, None] },
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 2,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Descending,
+            },
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Ascending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
+
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
+
+    #[tokio::test]
+    async fn test_encoding_for_decimal_date_varchar() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Varchar),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Date),
+            ],
+        };
+        // abc       .     123
+        // b         -3    789
+        // abc       .     456
+        // abcdefgh  .     .
+        // b         7     345
+        let input_chunk = DataChunk::new(
+            vec![
+                column! { Utf8Array, [Some("abc"), Some("b"), Some("abc"), Some("abcdefgh"), Some("b")] },
+                column! { DecimalArray, [None, Some(-3), None, None, Some(7)] },
+                column! { NaiveDateArray, [
+                Some(NaiveDateWrapper::with_days(123).unwrap()),
+                Some(NaiveDateWrapper::with_days(789).unwrap()),
+                Some(NaiveDateWrapper::with_days(456).unwrap()),
+                None,
+                Some(NaiveDateWrapper::with_days(345).unwrap())] },
+            ],
+            5,
+        );
+        // b         7     345
+        // b         -3    789
+        // abcdefgh  .     .
+        // abc       .     123
+        // abc       .     456
+        let output_chunk = DataChunk::new(
+            vec![
+                column! { Utf8Array, [Some("b"), Some("b"), Some("abcdefgh"), Some("abc"), Some("abc")] },
+                column! { DecimalArray, [Some(7), Some(-3), None, None, None] },
+                column! { NaiveDateArray, [
+                Some(NaiveDateWrapper::with_days(345).unwrap()),
+                Some(NaiveDateWrapper::with_days(789).unwrap()),
+                None,
+                Some(NaiveDateWrapper::with_days(123).unwrap()),
+                Some(NaiveDateWrapper::with_days(456).unwrap())] },
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Descending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Descending,
+            },
+            OrderPair {
+                column_idx: 2,
+                order_type: OrderType::Ascending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
+
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
+
+    #[tokio::test]
+    async fn test_encoding_for_time_timestamp_interval() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Time),
+                Field::unnamed(DataType::Timestamp),
+                Field::unnamed(DataType::Interval),
+            ],
+        };
+        // .     1:23  .
+        // 4:56  4:56  1:2:3
+        // .     7:89  .
+        // 4:56  4:56  4:5:6
+        // 7:89  .     .
+        let input_chunk = DataChunk::new(
+            vec![
+                column! { NaiveTimeArray, [
+                None,
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                None,
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap())] },
+                column! { NaiveDateTimeArray, [
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                None] },
+                column! { IntervalArray, [
+                None,
+                Some(IntervalUnit::new(1, 2, 3)),
+                None,
+                Some(IntervalUnit::new(4, 5, 6)),
+                None] },
+            ],
+            5,
+        );
+        // 4:56  4:56  4:5:6
+        // 4:56  4:56  1:2:3
+        // 7:89  .     .
+        // .     1:23  .
+        // .     7:89  .
+        let output_chunk = DataChunk::new(
+            vec![
+                column! { NaiveTimeArray, [
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap()),
+                None,
+                None] },
+                column! { NaiveDateTimeArray, [
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                None,
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
+                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap())] },
+                column! { IntervalArray, [
+                Some(IntervalUnit::new(4, 5, 6)),
+                Some(IntervalUnit::new(1, 2, 3)),
+                None,
+                None,
+                None] },
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 2,
+                order_type: OrderType::Descending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
+
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
+
+    #[tokio::test]
+    async fn test_encoding_for_struct_list() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Struct {
+                    fields: Arc::new([DataType::Varchar, DataType::Float32]),
+                }),
+                Field::unnamed(DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                }),
+            ],
+        };
+        let mut struct_builder = StructArrayBuilder::with_meta(
+            0,
+            ArrayMeta::Struct {
+                children: Arc::new([DataType::Varchar, DataType::Float32]),
+            },
+        );
+        let mut list_builder = ListArrayBuilder::with_meta(
+            0,
+            ArrayMeta::List {
+                datatype: Box::new(DataType::Int64),
+            },
+        );
+        // {abcd, -1.2}   .
+        // {c, 0}         [1, ., 3]
+        // {c, .}         .
+        // {c, 0}         [2]
+        // {., 3.4}       .
+        let input_chunk = DataChunk::new(
+            vec![
+                Column::new(Arc::new({
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("abcd".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                None,
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                None,
+                                Some(OrderedF32::from(3.4).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder.finish().unwrap().into()
+                })),
+                Column::new(Arc::new({
+                    list_builder.append(None).unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![
+                                Some(1i64.to_scalar_value()),
+                                None,
+                                Some(3i64.to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
+                        }))
+                        .unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder.finish().unwrap().into()
+                })),
+            ],
+            5,
+        );
+        let mut struct_builder = StructArrayBuilder::with_meta(
+            0,
+            ArrayMeta::Struct {
+                children: Arc::new([DataType::Varchar, DataType::Float32]),
+            },
+        );
+        let mut list_builder = ListArrayBuilder::with_meta(
+            0,
+            ArrayMeta::List {
+                datatype: Box::new(DataType::Int64),
+            },
+        );
+        // {abcd, -1.2}   .
+        // {c, 0}         [2]
+        // {c, 0}         [1, ., 3]
+        // {c, .}         .
+        // {., 3.4}       .
+        let output_chunk = DataChunk::new(
+            vec![
+                Column::new(Arc::new({
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("abcd".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                Some(OrderedF32::from(0.0).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                Some("c".to_string().to_scalar_value()),
+                                None,
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder
+                        .append(Some(StructRef::ValueRef {
+                            val: &StructValue::new(vec![
+                                None,
+                                Some(OrderedF32::from(3.4).to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    struct_builder.finish().unwrap().into()
+                })),
+                Column::new(Arc::new({
+                    list_builder.append(None).unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
+                        }))
+                        .unwrap();
+                    list_builder
+                        .append(Some(ListRef::ValueRef {
+                            val: &ListValue::new(vec![
+                                Some(1i64.to_scalar_value()),
+                                None,
+                                Some(3i64.to_scalar_value()),
+                            ]),
+                        }))
+                        .unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder.append(None).unwrap();
+                    list_builder.finish().unwrap().into()
+                })),
+            ],
+            5,
+        );
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(input_chunk);
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Descending,
+            },
+        ];
+        let order_by_executor = Box::new(OrderByExecutor::new(
+            Box::new(mock_executor),
+            order_pairs,
+            "OrderByExecutor".to_string(),
+        ));
+
+        let mut stream = order_by_executor.execute();
+        let res = stream.next().await;
+        assert_eq!(res.unwrap().unwrap(), output_chunk)
     }
 }
