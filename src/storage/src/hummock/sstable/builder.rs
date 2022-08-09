@@ -120,7 +120,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
     }
 
     /// Add kv pair to sstable.
-    pub async fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) -> HummockResult<()> {
+    pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) -> HummockResult<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
@@ -145,7 +145,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.user_key_hashes.push(farmhash::fingerprint32(user_key));
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block().await?;
+            self.build_block()?;
         }
         self.key_count += 1;
 
@@ -171,9 +171,9 @@ impl<W: SstableWriter> SstableBuilder<W> {
         } else {
             self.block_builder.get_last_key().to_vec()
         };
-        self.build_block().await?;
+        self.build_block()?;
         let size_footer = self.block_metas.len() as u32;
-        self.writer.write(&size_footer.to_le_bytes()).await?;
+        self.writer.write(&size_footer.to_le_bytes())?;
         assert!(!smallest_key.is_empty());
 
         let meta = SstableMeta {
@@ -206,7 +206,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.writer.data_len() + self.block_builder.approximate_len() + 4
     }
 
-    async fn build_block(&mut self) -> HummockResult<()> {
+    fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
             return Ok(());
@@ -216,7 +216,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             .extend_from_slice(self.block_builder.get_last_key());
         let mut block_meta = self.block_metas.last_mut().unwrap();
         let block = self.block_builder.build();
-        self.writer.write(block).await?;
+        self.writer.write(block)?;
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())
@@ -268,7 +268,6 @@ pub(super) mod tests {
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)))
-                .await
                 .unwrap();
         }
 

@@ -94,7 +94,6 @@ async fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, 
         full_key[(user_len - 8)..user_len].copy_from_slice(&i.to_be_bytes());
         builder
             .add(&full_key, HummockValue::put(&value[start..end]))
-            .await
             .unwrap();
     }
     let output = builder.finish().await.unwrap();

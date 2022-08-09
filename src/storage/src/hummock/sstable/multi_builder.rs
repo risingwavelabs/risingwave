@@ -201,7 +201,7 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key.into_inner(), value).await?;
+        builder.add(full_key.into_inner(), value)?;
         Ok(())
     }
 

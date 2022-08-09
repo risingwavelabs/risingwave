@@ -124,7 +124,7 @@ pub async fn gen_test_sstable_data(
 ) -> (Bytes, SstableMeta, Vec<u32>) {
     let mut b = SstableBuilder::new(0, default_sst_writer_from_opt(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice()).await.unwrap();
+        b.add(&key, value.as_slice()).unwrap();
     }
     let output = b.finish().await.unwrap();
     (output.writer_output, output.meta, output.table_ids)

@@ -22,7 +22,7 @@ use crate::hummock::{HummockResult, SstableBuilderOptions};
 pub trait SstableWriter: Send {
     type Output;
 
-    async fn write(&mut self, data: &[u8]) -> HummockResult<()>;
+    fn write(&mut self, data: &[u8]) -> HummockResult<()>;
     async fn finish(self) -> HummockResult<Self::Output>;
     fn data_len(&self) -> usize;
 }
@@ -44,7 +44,7 @@ impl InMemSstableWriter {
 impl SstableWriter for InMemSstableWriter {
     type Output = Bytes;
 
-    async fn write(&mut self, data: &[u8]) -> HummockResult<()> {
+    fn write(&mut self, data: &[u8]) -> HummockResult<()> {
         self.buf.put_slice(data);
         Ok(())
     }
