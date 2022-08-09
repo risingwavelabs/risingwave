@@ -131,16 +131,12 @@ impl OrderByExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures::StreamExt;
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{
         DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, Scalar,
     };
     use risingwave_common::util::sort_util::OrderType;
 
