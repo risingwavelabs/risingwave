@@ -36,6 +36,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.bound_relations = old_rels;
         self.bound_columns = old_cols;
     }
+
+    pub(crate) fn clone_local_context(&mut self) -> Context{
+        let current_bound_relations = self.bound_relations.clone();
+        let current_bound_columns = self.bound_coloumns.clone();
+        (current_bound_columns, current_bound_relations)
+    }
 }
 
 /// Gen utils
