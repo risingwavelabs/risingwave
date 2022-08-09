@@ -13,96 +13,138 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
 use fail::fail_point;
 use futures::future::try_join_all;
+use futures::stream;
+use hyper::Body;
 use itertools::Itertools;
-use tokio::sync::Mutex;
+use madsim::task::JoinHandle;
 
-use crate::object::multipart::{
-    MultipartUploadHandle, MultipartUploadHandleImpl, PartId, PartIdGenerator, PartIdGeneratorImpl,
-};
 use crate::object::{
-    BlockLocation, Bytes, MultipartUpload, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+    BlockLocation, Bytes, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+    StreamingUploader, StreamingUploaderImpl,
 };
 
-const MIN_PART_ID: i32 = 1;
-const MAX_PART_ID: i32 = 10000;
+type PartId = i32;
 
-/// Part number generator for S3 multipart upload.
-pub struct S3PartIdGenerator {
-    next_id: AtomicI32,
-}
-
-impl S3PartIdGenerator {
-    fn new() -> S3PartIdGenerator {
-        Self {
-            next_id: AtomicI32::new(MIN_PART_ID),
-        }
-    }
-}
-
-impl PartIdGenerator for S3PartIdGenerator {
-    fn gen(&self) -> ObjectResult<PartId> {
-        let part_id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        if part_id > MAX_PART_ID {
-            Err(ObjectError::internal(format!(
-                "reached maximum S3 part number {}",
-                MAX_PART_ID
-            )))
-        } else {
-            Ok(part_id.try_into().unwrap())
-        }
-    }
-}
+const MIN_PART_ID: PartId = 1;
+const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
+const PART_SIZE: usize = 16 * 1024 * 1024;
 
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
-#[derive(Clone)]
-pub struct S3MultipartUploadHandle {
+pub struct S3StreamingUploader {
     client: Arc<Client>,
     bucket: String,
     /// The key of the object.
     key: String,
     /// The identifier of multipart upload task for S3.
     upload_id: String,
+    /// Next part ID.
+    next_part_id: PartId,
+    /// Join handles for part uploads.
+    join_handles: Vec<JoinHandle<ObjectResult<()>>>,
     /// Parts that are already uploaded to S3.
-    /// The bool member indicates whether the upload is finished.
-    uploaded_parts: Arc<Mutex<BTreeMap<i32, UploadPartOutput>>>,
+    uploaded_parts: Arc<Mutex<BTreeMap<PartId, UploadPartOutput>>>,
+    /// Buffer for bytes.
+    buf: Vec<Bytes>,
+    /// Length of the data that have not been uploaded to S3.
+    not_uploaded_len: usize,
+    /// Length of the data that exceeds the current part to be uploaded in the buffer.
+    next_part_len: usize,
+    /// Two pointers into` buf` indicating the bytes to group into a part for the next upload.
+    /// `part_end` is exclusive.
+    part_begin: usize,
+    part_end: usize,
 }
 
-#[async_trait::async_trait]
-impl MultipartUploadHandle for S3MultipartUploadHandle {
-    async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
-        fail_point!("s3_upload_part_err", |_| Err(ObjectError::internal(
-            "s3 upload part error"
-        )));
-        let mut upload_guard = self.uploaded_parts.lock().await;
-        let part_id = part_id as i32;
-        let upload_output = self
-            .client
-            .upload_part()
-            .bucket(&self.bucket)
-            .key(&self.key)
-            .upload_id(&self.upload_id)
-            .part_number(part_id)
-            .body(aws_sdk_s3::types::ByteStream::from(part))
-            .send()
-            .await?;
-        upload_guard.insert(part_id, upload_output);
-        Ok(())
+impl S3StreamingUploader {
+    pub fn new(
+        client: Arc<Client>,
+        bucket: String,
+        key: String,
+        upload_id: String,
+    ) -> S3StreamingUploader {
+        Self {
+            client,
+            bucket,
+            key,
+            upload_id,
+            next_part_id: MIN_PART_ID,
+            join_handles: Default::default(),
+            uploaded_parts: Default::default(),
+            buf: Default::default(),
+            not_uploaded_len: 0,
+            next_part_len: 0,
+            part_begin: 0,
+            part_end: 0,
+        }
     }
 
-    async fn finish(self) -> ObjectResult<()> {
-        fail_point!("s3_finish_multipart_upload_err", |_| Err(
-            ObjectError::internal("s3 finish multipart upload error")
-        ));
-        let upload_guard = self.uploaded_parts.lock().await;
+    fn upload_part(&mut self, data: Vec<Bytes>, len: usize) {
+        let part_id = self.next_part_id;
+        self.next_part_id += 1;
+        let client_cloned = self.client.clone();
+        let uploaded_parts_cloned = self.uploaded_parts.clone();
+        let bucket = self.bucket.clone();
+        let key = self.key.clone();
+        let upload_id = self.upload_id.clone();
+        self.join_handles.push(tokio::spawn(async move {
+            println!("{:?}: {:?}", part_id, len);
+            let upload_output = client_cloned
+                .upload_part()
+                .bucket(bucket)
+                .key(key)
+                .upload_id(upload_id)
+                .part_number(part_id)
+                .body(get_upload_body(data))
+                .content_length(len as i64)
+                .send()
+                .await?;
+            uploaded_parts_cloned
+                .lock()
+                .map_err(ObjectError::internal)?
+                .insert(part_id, upload_output);
+            println!("{:?} done", part_id);
+            Ok(())
+        }));
+    }
+
+    async fn flush_and_complete(&mut self) -> ObjectResult<()> {
+        self.upload_part(
+            Vec::from_iter(self.buf[self.part_begin..].iter().cloned()),
+            self.not_uploaded_len,
+        );
+
+        // If any part fails to upload, abort the upload.
+        let join_handles = self.join_handles.drain(..).collect_vec();
+        for result in try_join_all(join_handles)
+            .await
+            .map_err(ObjectError::internal)?
+        {
+            result?;
+        }
+        println!("all joined");
+
+        let completed_parts = Some(
+            self.uploaded_parts
+                .lock()
+                .map_err(ObjectError::internal)?
+                .iter()
+                .map(|(part_id, output)| {
+                    CompletedPart::builder()
+                        .set_e_tag(output.e_tag.clone())
+                        .set_part_number(Some(*part_id))
+                        .build()
+                })
+                .collect_vec(),
+        );
+        // If fail to complete the upload, abort the upload.
         self.client
             .complete_multipart_upload()
             .bucket(&self.bucket)
@@ -110,24 +152,84 @@ impl MultipartUploadHandle for S3MultipartUploadHandle {
             .upload_id(&self.upload_id)
             .multipart_upload(
                 CompletedMultipartUpload::builder()
-                    .set_parts(Some(
-                        upload_guard
-                            .iter()
-                            .map(|(part_id, output)| {
-                                CompletedPart::builder()
-                                    .set_e_tag(output.e_tag.clone())
-                                    .set_part_number(Some(*part_id))
-                                    .build()
-                            })
-                            .collect_vec(),
-                    ))
+                    .set_parts(completed_parts)
                     .build(),
             )
             .send()
             .await?;
+
         Ok(())
     }
 }
+
+#[async_trait::async_trait]
+impl StreamingUploader for S3StreamingUploader {
+    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        fail_point!("s3_write_bytes_err", |_| Err(ObjectError::internal(
+            "s3 write bytes error"
+        )));
+        let data_len = data.len();
+        self.not_uploaded_len += data_len;
+        self.buf.push(data);
+
+        if self.not_uploaded_len > PART_SIZE {
+            if self.part_begin == self.part_end {
+                // Mark current slice of buffer to be the next part to be uploaded.
+                self.part_end = self.buf.len();
+                assert!(self.part_begin < self.part_end);
+            } else {
+                // `data` should be uploaded in the next part.
+                self.next_part_len += data_len;
+            }
+        }
+        if self.next_part_len >= MIN_PART_SIZE {
+            // Take a 16MiB part and upload it. `Bytes` performs shallow clone.
+            self.upload_part(
+                Vec::from_iter(self.buf[self.part_begin..self.part_end].iter().cloned()),
+                self.not_uploaded_len - self.next_part_len,
+            );
+            self.not_uploaded_len = self.next_part_len;
+            self.next_part_len = 0;
+            self.part_begin = self.part_end;
+        }
+        Ok(())
+    }
+
+    /// If the data in the buffer is smaller than `MIN_PART_SIZE`, abort multipart upload
+    /// and use `PUT` to upload the data. Otherwise flush the remaining data of the buffer
+    /// to S3 as a new part.
+    async fn finish(mut self) -> ObjectResult<()> {
+        fail_point!("s3_finish_streaming_upload_err", |_| Err(
+            ObjectError::internal("s3 finish streaming upload error")
+        ));
+        if (self.part_begin == 0 && self.part_end == 0) || self.flush_and_complete().await.is_err()
+        {
+            self.client
+                .abort_multipart_upload()
+                .bucket(&self.bucket)
+                .key(&self.key)
+                .upload_id(&self.upload_id)
+                .send()
+                .await?;
+            // As abort should happen very rarely, it's ok to recalculate the whole data length.
+            let data_len = self.buf.iter().map(|b| b.len() as i64).sum();
+            self.client
+                .put_object()
+                .bucket(&self.bucket)
+                .key(&self.key)
+                .body(get_upload_body(self.buf))
+                .content_length(data_len)
+                .send()
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
+    Body::wrap_stream(stream::iter(data.into_iter().map(ObjectResult::Ok))).into()
+}
+
 /// Object store with S3 backend
 pub struct S3ObjectStore {
     client: Arc<Client>,
@@ -136,6 +238,8 @@ pub struct S3ObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
+    type Uploader = StreamingUploaderImpl;
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
             "s3 upload error"
@@ -148,6 +252,25 @@ impl ObjectStore for S3ObjectStore {
             .send()
             .await?;
         Ok(())
+    }
+
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader> {
+        fail_point!("s3_streaming_upload_err", |_| Err(ObjectError::internal(
+            "s3 streaming upload error"
+        )));
+        let resp = self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.bucket)
+            .key(path)
+            .send()
+            .await?;
+        Ok(Self::Uploader::S3(S3StreamingUploader::new(
+            self.client.clone(),
+            self.bucket.clone(),
+            path.to_string(),
+            resp.upload_id.unwrap(),
+        )))
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
@@ -265,38 +388,6 @@ impl ObjectStore for S3ObjectStore {
             }
         }
         Ok(ret)
-    }
-}
-
-#[async_trait::async_trait]
-impl MultipartUpload for S3ObjectStore {
-    type Handle = MultipartUploadHandleImpl;
-    type IdGen = PartIdGeneratorImpl;
-
-    async fn create_multipart_upload(
-        &self,
-        path: &str,
-    ) -> ObjectResult<(Self::Handle, Self::IdGen)> {
-        fail_point!("s3_create_multipart_upload_err", |_| Err(
-            ObjectError::internal("s3 create multipart upload error")
-        ));
-        let resp = self
-            .client
-            .create_multipart_upload()
-            .bucket(&self.bucket)
-            .key(path)
-            .send()
-            .await?;
-        Ok((
-            Self::Handle::S3(S3MultipartUploadHandle {
-                client: self.client.clone(),
-                bucket: self.bucket.clone(),
-                key: path.to_string(),
-                upload_id: resp.upload_id.unwrap(),
-                uploaded_parts: Default::default(),
-            }),
-            Self::IdGen::S3(S3PartIdGenerator::new()),
-        ))
     }
 }
 

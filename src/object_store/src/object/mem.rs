@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,43 +22,40 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use super::multipart::{
-    MultipartUploadHandle, MultipartUploadHandleImpl, PartId, PartIdGeneratorImpl,
-};
 use crate::object::{
-    BlockLocation, MultipartUpload, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+    BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore, StreamingUploader,
+    StreamingUploaderImpl,
 };
 
 /// Store multiple parts in a map, and concatenate them on finish.
-#[derive(Clone)]
-pub struct InMemMultipartUploadHandle {
+pub struct InMemStreamingUploader {
     path: String,
-    parts: Arc<Mutex<BTreeMap<PartId, Bytes>>>,
+    buf: BytesMut,
     objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
 }
 
 #[async_trait::async_trait]
-impl MultipartUploadHandle for InMemMultipartUploadHandle {
-    async fn upload_part(&self, part_id: PartId, part: Bytes) -> ObjectResult<()> {
-        fail_point!("mem_upload_part_err", |_| Err(ObjectError::internal(
-            "mem upload part error"
+impl StreamingUploader for InMemStreamingUploader {
+    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        fail_point!("mem_write_bytes_err", |_| Err(ObjectError::internal(
+            "mem write bytes error"
         )));
-        self.parts.lock().await.insert(part_id, part);
+        self.buf.put(data);
         Ok(())
     }
 
     async fn finish(self) -> ObjectResult<()> {
-        fail_point!("mem_finish_multipart_upload_err", |_| Err(
-            ObjectError::internal("mem finish multipart upload error")
+        fail_point!("mem_finish_streaming_upload_err", |_| Err(
+            ObjectError::internal("mem finish streaming upload error")
         ));
-        let parts = self.parts.lock().await;
-        let object_size = parts.values().map(|p| p.len()).sum();
-        let mut buf = BytesMut::with_capacity(object_size);
-        parts.values().for_each(|p| buf.put_slice(p));
-        let obj = buf.freeze();
-        let metadata = get_obj_meta(&self.path, &obj)?;
-        self.objects.lock().await.insert(self.path, (metadata, obj));
-        Ok(())
+        let obj = self.buf.freeze();
+        if obj.is_empty() {
+            Err(ObjectError::internal("upload empty object"))
+        } else {
+            let metadata = get_obj_meta(&self.path, &obj)?;
+            self.objects.lock().await.insert(self.path, (metadata, obj));
+            Ok(())
+        }
     }
 }
 
@@ -70,6 +67,8 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
+    type Uploader = StreamingUploaderImpl;
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
             "mem upload error"
@@ -84,6 +83,14 @@ impl ObjectStore for InMemObjectStore {
                 .insert(path.into(), (metadata, obj));
             Ok(())
         }
+    }
+
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader> {
+        Ok(StreamingUploaderImpl::InMem(InMemStreamingUploader {
+            path: path.to_string(),
+            buf: BytesMut::new(),
+            objects: self.objects.clone(),
+        }))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -137,29 +144,6 @@ impl ObjectStore for InMemObjectStore {
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
             .collect_vec())
-    }
-}
-
-#[async_trait::async_trait]
-impl MultipartUpload for InMemObjectStore {
-    type Handle = MultipartUploadHandleImpl;
-    type IdGen = PartIdGeneratorImpl;
-
-    async fn create_multipart_upload(
-        &self,
-        path: &str,
-    ) -> ObjectResult<(Self::Handle, Self::IdGen)> {
-        fail_point!("mem_create_multipart_upload_err", |_| Err(
-            ObjectError::internal("mem create multipart upload error")
-        ));
-        Ok((
-            Self::Handle::InMem(InMemMultipartUploadHandle {
-                path: path.to_string(),
-                parts: Default::default(),
-                objects: self.objects.clone(),
-            }),
-            Self::IdGen::Local(Default::default()),
-        ))
     }
 }
 
@@ -217,11 +201,9 @@ fn get_obj_meta(path: &str, obj: &Bytes) -> ObjectResult<ObjectMetadata> {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use futures::future;
     use itertools::enumerate;
 
     use super::*;
-    use crate::object::multipart::PartIdGenerator;
 
     #[tokio::test]
     async fn test_upload() {
@@ -255,28 +237,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multipart_upload() {
+    async fn test_streaming_upload() {
         let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
         let obj = Bytes::from("123456789");
 
         let store = InMemObjectStore::new();
-        let (handle, id_gen) = store.create_multipart_upload("/abc").await.unwrap();
+        let mut uploader = store.streaming_upload("/abc").await.unwrap();
 
-        future::join_all(
-            blocks
-                .into_iter()
-                .map(|b| async {
-                    handle.upload_part(id_gen.gen().unwrap(), b).await.unwrap();
-                })
-                .collect_vec(),
-        )
-        .await;
-        handle.finish().await.unwrap();
+        blocks.into_iter().for_each(|b| {
+            uploader.write_bytes(b).unwrap();
+        });
+        uploader.finish().await.unwrap();
 
         // Read whole object.
         let read_obj = store.read("/abc", None).await.unwrap();
         assert!(read_obj.eq(&obj));
 
+        // Read part of the object.
         let read_obj = store
             .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
             .await

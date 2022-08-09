@@ -22,9 +22,6 @@ pub use mem::*;
 pub mod s3;
 pub use s3::*;
 
-pub mod multipart;
-use multipart::MultipartUpload;
-
 mod disk;
 pub mod error;
 pub mod object_metrics;
@@ -99,11 +96,44 @@ impl BlockLocation {
     }
 }
 
+#[async_trait::async_trait]
+pub trait StreamingUploader: Send {
+    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
+
+    async fn finish(self) -> ObjectResult<()>;
+}
+
+pub enum StreamingUploaderImpl {
+    InMem(InMemStreamingUploader),
+    S3(S3StreamingUploader),
+}
+
+#[async_trait::async_trait]
+impl StreamingUploader for StreamingUploaderImpl {
+    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        match self {
+            Self::InMem(inner) => inner.write_bytes(data),
+            Self::S3(inner) => inner.write_bytes(data),
+        }
+    }
+
+    async fn finish(self) -> ObjectResult<()> {
+        match self {
+            Self::InMem(inner) => inner.finish().await,
+            Self::S3(inner) => inner.finish().await,
+        }
+    }
+}
+
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
-pub trait ObjectStore: MultipartUpload {
+pub trait ObjectStore: Send + Sync {
+    type Uploader: StreamingUploader;
+
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
+
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader>;
 
     /// If the `block_loc` is None, the whole object will be returned.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
@@ -201,8 +231,14 @@ pub(crate) use object_store_impl_method_body;
 
 #[async_trait::async_trait]
 impl ObjectStore for ObjectStoreImpl {
+    type Uploader = MonitoredStreamingUploader<StreamingUploaderImpl>;
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         object_store_impl_method_body!(self, upload, path, obj)
+    }
+
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader> {
+        object_store_impl_method_body!(self, streaming_upload, path)
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -226,6 +262,43 @@ impl ObjectStore for ObjectStoreImpl {
     }
 }
 
+pub struct MonitoredStreamingUploader<U: StreamingUploader> {
+    inner: U,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+}
+
+impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
+    pub fn new(handle: U, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
+        Self {
+            inner: handle,
+            object_store_metrics,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<U: StreamingUploader> StreamingUploader for MonitoredStreamingUploader<U> {
+    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        self.object_store_metrics
+            .write_bytes
+            .inc_by(data.len() as u64);
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["write_bytes"])
+            .start_timer();
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&["write_bytes"])
+            .observe(data.len() as f64);
+        self.inner.write_bytes(data)
+    }
+
+    async fn finish(self) -> ObjectResult<()> {
+        self.inner.finish().await
+    }
+}
+
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
@@ -239,8 +312,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             object_store_metrics,
         }
     }
+}
 
-    pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+#[async_trait::async_trait]
+impl<OS: ObjectStore> ObjectStore for MonitoredObjectStore<OS> {
+    type Uploader = MonitoredStreamingUploader<OS::Uploader>;
+
+    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         self.object_store_metrics
             .write_bytes
             .inc_by(obj.len() as u64);
@@ -256,7 +334,15 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         self.inner.upload(path, obj).await
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader> {
+        let handle = self.inner.streaming_upload(path).await?;
+        Ok(MonitoredStreamingUploader::new(
+            handle,
+            self.object_store_metrics.clone(),
+        ))
+    }
+
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
         let _timer = self
             .object_store_metrics
             .operation_latency
@@ -279,11 +365,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         Ok(ret)
     }
 
-    pub async fn readv(
-        &self,
-        path: &str,
-        block_locs: &[BlockLocation],
-    ) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
         let _timer = self
             .object_store_metrics
             .operation_latency
@@ -296,7 +378,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         Ok(ret)
     }
 
-    pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let _timer = self
             .object_store_metrics
             .operation_latency
@@ -305,7 +387,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         self.inner.metadata(path).await
     }
 
-    pub async fn delete(&self, path: &str) -> ObjectResult<()> {
+    async fn delete(&self, path: &str) -> ObjectResult<()> {
         let _timer = self
             .object_store_metrics
             .operation_latency

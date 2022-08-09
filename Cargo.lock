@@ -5073,6 +5073,7 @@ dependencies = [
  "bytes",
  "fail",
  "futures",
+ "hyper",
  "itertools",
  "lazy_static",
  "madsim",

@@ -25,9 +25,8 @@ use futures::future::try_join_all;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
-use crate::object::multipart::{MultipartUploadHandleImpl, PartIdGeneratorImpl};
 use crate::object::{
-    BlockLocation, MultipartUpload, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+    BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore, StreamingUploaderImpl,
 };
 
 pub(super) mod utils {
@@ -175,6 +174,8 @@ impl DiskObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
+    type Uploader = StreamingUploaderImpl;
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let mut file =
             utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
@@ -185,6 +186,10 @@ impl ObjectStore for DiskObjectStore {
             .await
             .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
         Ok(())
+    }
+
+    async fn streaming_upload(&self, _path: &str) -> ObjectResult<Self::Uploader> {
+        unimplemented!("streaming upload is not implemented for disk object store");
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -329,19 +334,6 @@ impl ObjectStore for DiskObjectStore {
         }
         list_result.sort_by(|a, b| Ord::cmp(&a.key, &b.key));
         Ok(list_result)
-    }
-}
-
-#[async_trait::async_trait]
-impl MultipartUpload for DiskObjectStore {
-    type Handle = MultipartUploadHandleImpl;
-    type IdGen = PartIdGeneratorImpl;
-
-    async fn create_multipart_upload(
-        &self,
-        _path: &str,
-    ) -> ObjectResult<(Self::Handle, Self::IdGen)> {
-        unimplemented!("memory object store does not support multipart upload for now");
     }
 }
 
