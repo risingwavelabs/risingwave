@@ -35,6 +35,13 @@ impl ObserverNodeImpl for CompactorObserverNode {
             return;
         };
 
+        assert!(
+            resp.version > self.version,
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            self.version
+        );
+
         match info.to_owned() {
             Info::Table(table_catalog) => {
                 self.handle_catalog_notification(resp.operation(), table_catalog);
@@ -48,12 +55,7 @@ impl ObserverNodeImpl for CompactorObserverNode {
                 panic!("error type notification");
             }
         }
-        assert!(
-            resp.version > self.version,
-            "resp version={:?}, current version={:?}",
-            resp.version,
-            self.version
-        );
+
         self.version = resp.version;
     }
 

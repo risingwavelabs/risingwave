@@ -77,3 +77,8 @@ query T
 values(2132::smallint::varchar);
 ----
 2132
+
+query T
+values('12:34:56'::time::interval);
+----
+12:34:56

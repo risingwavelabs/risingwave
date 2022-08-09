@@ -29,7 +29,7 @@ use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
-use crate::MetaError;
+use crate::stream::GlobalStreamManagerRef;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -38,6 +38,7 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     user_manager: UserInfoManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -50,6 +51,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         user_manager: UserInfoManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
     ) -> Self {
         Self {
             env,
@@ -57,13 +59,31 @@ where
             cluster_manager,
             user_manager,
             hummock_manager,
+            stream_manager,
         }
     }
+}
 
-    async fn build_snapshot_by_type(
+#[async_trait::async_trait]
+impl<S> NotificationService for NotificationServiceImpl<S>
+where
+    S: MetaStore,
+{
+    type SubscribeStream = UnboundedReceiverStream<Notification>;
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn subscribe(
         &self,
-        worker_type: WorkerType,
-    ) -> Result<MetaSnapshot, MetaError> {
+        request: Request<SubscribeRequest>,
+    ) -> Result<Response<Self::SubscribeStream>, Status> {
+        let req = request.into_inner();
+        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
+        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
+
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        // let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
+
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
         let (databases, schemas, tables, sources, sinks, indexes) = catalog_guard.get_catalog().await?;
 
@@ -91,8 +111,10 @@ where
             .map(|mapping| mapping.unwrap())
             .collect_vec();
 
+        let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
+
         // Send the snapshot on subscription. After that we will send only updates.
-        let result = match worker_type {
+        let meta_snapshot = match worker_type {
             WorkerType::Frontend => MetaSnapshot {
                 nodes,
                 databases,
@@ -106,43 +128,27 @@ where
                 hummock_version: None,
             },
 
-            WorkerType::Compactor => MetaSnapshot {
-                tables,
-                ..Default::default()
-            },
+            WorkerType::Compactor => {
+                tables.extend(processing_table_guard.values().cloned());
 
-            WorkerType::ComputeNode => MetaSnapshot {
-                tables,
-                hummock_version,
-                ..Default::default()
-            },
+                MetaSnapshot {
+                    tables,
+                    ..Default::default()
+                }
+            }
+
+            WorkerType::ComputeNode => {
+                tables.extend(processing_table_guard.values().cloned());
+
+                MetaSnapshot {
+                    tables,
+                    hummock_version,
+                    ..Default::default()
+                }
+            }
 
             _ => unreachable!(),
         };
-
-        Ok(result)
-    }
-}
-
-#[async_trait::async_trait]
-impl<S> NotificationService for NotificationServiceImpl<S>
-where
-    S: MetaStore,
-{
-    type SubscribeStream = UnboundedReceiverStream<Notification>;
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn subscribe(
-        &self,
-        request: Request<SubscribeRequest>,
-    ) -> Result<Response<Self::SubscribeStream>, Status> {
-        let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
-        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
-
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
 
         tx.send(Ok(SubscribeResponse {
             status: None,
