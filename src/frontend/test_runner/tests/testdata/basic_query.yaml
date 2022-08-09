@@ -13,7 +13,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamExchange { dist: HashShard(t._row_id) }
-        StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
+        StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -29,7 +29,7 @@
     StreamMaterialize { columns: [t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamExchange { dist: HashShard(t._row_id) }
         StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
-          StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], distribution: SomeShard }
+          StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
@@ -41,7 +41,7 @@
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamExchange { dist: HashShard(t._row_id) }
         StreamFilter { predicate: (t.v1 < 1:Int32) }
-          StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
+          StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     /* test boolean expression common factor extraction */
     create table t (v1 Boolean, v2 Boolean, v3 Boolean);
@@ -99,7 +99,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamExchange { dist: HashShard(t._row_id) }
-        StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeShard }
+        StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: select 1
   batch_plan: |
     BatchProject { exprs: [1:Int32] }

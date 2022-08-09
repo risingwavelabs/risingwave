@@ -27,9 +27,8 @@
           BatchScan { table: t, columns: [t._row_id, t.x], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [projected_row_id(hidden), unnest, t._row_id(hidden)], pk_columns: [t._row_id, projected_row_id] }
-      StreamExchange { dist: HashShard(projected_row_id, t._row_id) }
-        StreamProjectSet { select_list: [Unnest($1), $0] }
-          StreamTableScan { table: t, columns: [t._row_id, t.x], pk: [t._row_id], distribution: SomeShard }
+      StreamProjectSet { select_list: [Unnest($1), $0] }
+        StreamTableScan { table: t, columns: [t._row_id, t.x], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     /* table functions used with usual expressions */
     create table t(x int[]);
@@ -69,10 +68,9 @@
             BatchScan { table: t, columns: [t._row_id, t.x], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [projected_row_id(hidden), a, b, t._row_id(hidden), projected_row_id#1(hidden)], pk_columns: [t._row_id, projected_row_id#1, projected_row_id] }
-      StreamExchange { dist: HashShard(projected_row_id, t._row_id, projected_row_id) }
-        StreamProjectSet { select_list: [($3 * $4), Unnest($2), $1, $0] }
-          StreamProjectSet { select_list: [$0, $1, Unnest($1), Unnest($1)] }
-            StreamTableScan { table: t, columns: [t._row_id, t.x], pk: [t._row_id], distribution: SomeShard }
+      StreamProjectSet { select_list: [($3 * $4), Unnest($2), $1, $0] }
+        StreamProjectSet { select_list: [$0, $1, Unnest($1), Unnest($1)] }
+          StreamTableScan { table: t, columns: [t._row_id, t.x], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     /* table functions as parameters of table functions */
     create table t(x int[]);

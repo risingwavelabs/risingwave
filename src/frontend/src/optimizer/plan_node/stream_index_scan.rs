@@ -47,7 +47,7 @@ impl StreamIndexScan {
             // The upstream MV can be scaled independently, and has different vnode mapping with
             // the current MV. So we just specify its distribution as
             // `SomeShard` to force an exchange is inserted.
-            Distribution::SomeShard,
+            Distribution::SomeHashShard(logical.distribution_key().unwrap()),
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {

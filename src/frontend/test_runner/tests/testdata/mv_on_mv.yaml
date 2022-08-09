@@ -15,9 +15,9 @@
       StreamExchange { dist: HashShard(m1.t1._row_id, m2.t1._row_id) }
         StreamHashJoin { type: Inner, predicate: m1.v1 = m2.v1, output: [m1.v1, m1.v2, m2.v1, m2.v2, m1.t1._row_id, m2.t1._row_id] }
           StreamExchange { dist: HashShard(m1.v1) }
-            StreamTableScan { table: m1, columns: [m1.v1, m1.v2, m1.t1._row_id], pk: [m1.t1._row_id], distribution: SomeShard }
+            StreamTableScan { table: m1, columns: [m1.v1, m1.v2, m1.t1._row_id], pk: [m1.t1._row_id], distribution: SomeHashShard(m1.t1._row_id) }
           StreamExchange { dist: HashShard(m2.v1) }
-            StreamTableScan { table: m2, columns: [m2.v1, m2.v2, m2.t1._row_id], pk: [m2.t1._row_id], distribution: SomeShard }
+            StreamTableScan { table: m2, columns: [m2.v1, m2.v2, m2.t1._row_id], pk: [m2.t1._row_id], distribution: SomeHashShard(m2.t1._row_id) }
 - id: create_singleton_mv
   sql: |
     create table t (v int);

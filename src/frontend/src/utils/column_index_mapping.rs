@@ -307,6 +307,16 @@ impl ColIndexMapping {
                     None => Distribution::SomeShard,
                 }
             }
+            Distribution::SomeHashShard(col_idxes) => {
+                let mapped_dist = col_idxes
+                    .iter()
+                    .map(|col_idx| self.try_map(*col_idx))
+                    .collect::<Option<Vec<_>>>();
+                match mapped_dist {
+                    Some(col_idx) => Distribution::HashShard(col_idx),
+                    None => Distribution::SomeShard,
+                }
+            }
             _ => dist.clone(),
         }
     }

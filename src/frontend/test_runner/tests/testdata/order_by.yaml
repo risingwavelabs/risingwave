@@ -10,7 +10,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id] }
       StreamExchange { dist: HashShard(t._row_id) }
-        StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
+        StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     /* output names are not quailified after table names */
     create table t (v1 bigint, v2 double precision);
@@ -66,9 +66,8 @@
             BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, (1:Int32 + 1:Int32)(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [(1:Int32 + 1:Int32), t._row_id] }
-      StreamExchange { dist: HashShard(t._row_id) }
-        StreamProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32), t._row_id] }
-          StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
+      StreamProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32), t._row_id] }
+        StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;
@@ -85,7 +84,7 @@
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id] }
       StreamTopN { order: "[t.v1 DESC]", limit: 5, offset: 0 }
         StreamExchange { dist: Single }
-          StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
+          StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t limit 3 offset 4;
@@ -114,7 +113,7 @@
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id] }
       StreamTopN { order: "[t.v1 DESC]", limit: 5, offset: 7 }
         StreamExchange { dist: Single }
-          StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeShard }
+          StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     /* order by expression that would be valid in select list */
     create table t (x int, y int, z int);
@@ -130,9 +129,8 @@
             BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [x, y, (t.x + t.y)(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [(t.x + t.y), t.z, t._row_id] }
-      StreamExchange { dist: HashShard(t._row_id) }
-        StreamProject { exprs: [t.x, t.y, (t.x + t.y), t.z, t._row_id] }
-          StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], distribution: SomeShard }
+      StreamProject { exprs: [t.x, t.y, (t.x + t.y), t.z, t._row_id] }
+        StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], distribution: SomeHashShard(t._row_id) }
 - sql: |
     /* order by the number of an output column */
     create table t (x int, y int);

@@ -105,13 +105,16 @@ impl StreamHashJoin {
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(_), Distribution::HashShard(_) | Distribution::SomeShard) => {
-                l2o_mapping.rewrite_provided_distribution(left)
-            }
-            (Distribution::SomeShard, Distribution::HashShard(_)) => {
+            (
+                Distribution::HashShard(_),
+                Distribution::HashShard(_) | Distribution::SomeHashShard(_),
+            ) => l2o_mapping.rewrite_provided_distribution(left),
+            (Distribution::SomeHashShard(_), Distribution::HashShard(_)) => {
                 r2o_mapping.rewrite_provided_distribution(right)
             }
-            (Distribution::SomeShard, Distribution::SomeShard) => Distribution::SomeShard,
+            (Distribution::SomeHashShard(_), Distribution::SomeHashShard(_)) => {
+                Distribution::SomeShard
+            }
             (_, _) => unreachable!(
                 "suspicious distribution: left: {:?}, right: {:?}",
                 left, right

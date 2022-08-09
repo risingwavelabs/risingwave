@@ -51,7 +51,7 @@ impl StreamTableScan {
                 // The upstream MV can be scaled independently, and has different vnode mapping with
                 // the current MV. So we just specify its distribution as
                 // `SomeShard` to force an exchange is inserted.
-                Distribution::SomeShard
+                Distribution::SomeHashShard(distribution_key)
             }
         };
         let base = PlanBase::new_stream(
