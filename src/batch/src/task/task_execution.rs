@@ -394,13 +394,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         })?;
         self.change_state(TaskStatus::Aborting);
         // Stop task execution.
-        sender.send(0).map_err(|err| {
+        if let Err(e) = sender.send(0).map_err(|err| {
             ErrorCode::InternalError(format!(
                 "Task{:?};s shutdown channel send error:{:?}",
                 self.task_id, err
             ))
-            .into()
-        })
+        }) {
+            info!("the task has already been abort")
+        }
+        Ok(())
     }
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
