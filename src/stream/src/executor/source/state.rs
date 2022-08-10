@@ -22,7 +22,6 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
 /// `SourceState` Represents an abstraction of state,
@@ -117,9 +116,7 @@ impl<S: StateStore> SourceStateHandler<S> {
         let s = self.restore_states(stream_source_split.id(), epoch).await?;
 
         let split = match s {
-            Some(s) => {
-                Some(SplitImpl::restore_from_bytes(&s)?)
-            }
+            Some(s) => Some(SplitImpl::restore_from_bytes(&s)?),
             None => None,
         };
 
