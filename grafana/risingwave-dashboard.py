@@ -203,9 +203,9 @@ def section_compaction(panels):
             ),
         ]),
 
-        panels.timeseries_count("Compactor Task Splits Count", [
+        panels.timeseries_count("Compactor Running Task Count", [
             panels.target(
-                "sum(rate(storage_compact_parallelism[$__rate_interval])) by(job,instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
+                "avg(storage_compact_task_pending_num) by(job, instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
             ),
         ]),
 
@@ -831,7 +831,7 @@ def section_hummock(panels):
                 "avg(state_store_block_cache_size) by (job,instance)", "data cache - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "avg(state_store_limit_memory_size) by (job)", "data cache - {{job}}"
+                "sum(state_store_limit_memory_size) by (job)", "uploading memory - {{job}}"
             ),
         ]),
         panels.timeseries_latency("Row SeqScan Next Duration", [

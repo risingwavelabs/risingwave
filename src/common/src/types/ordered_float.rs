@@ -196,6 +196,16 @@ impl<T: Float> Hash for OrderedFloat<T> {
 impl<T: Float + fmt::Display> fmt::Display for OrderedFloat<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let v = self.0;
+        if v.is_nan() {
+            return write!(f, "NaN");
+        }
+        if v.is_infinite() {
+            if v.is_sign_negative() {
+                write!(f, "-")?
+            }
+            return write!(f, "Infinity");
+        }
         self.0.fmt(f)
     }
 }

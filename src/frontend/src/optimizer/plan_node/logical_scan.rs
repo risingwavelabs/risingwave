@@ -470,7 +470,7 @@ impl ToStream for LogicalScan {
                 None.into(),
             )));
         }
-        match self.base.pk_indices.is_empty() {
+        match self.base.logical_pk.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();
 
