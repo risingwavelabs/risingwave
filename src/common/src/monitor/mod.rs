@@ -16,7 +16,9 @@ pub mod my_stats;
 pub mod process_linux;
 pub mod rwlock;
 
-use prometheus::core::{AtomicU64, Collector, GenericCounter, GenericCounterVec, Metric};
+use prometheus::core::{
+    AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
+};
 use prometheus::{Histogram, HistogramVec};
 
 use crate::monitor::my_stats::MyHistogram;
@@ -30,6 +32,14 @@ impl Print for GenericCounter<AtomicU64> {
     fn print(&self) {
         let desc = &self.desc()[0].fq_name;
         let counter = self.metric().get_counter().get_value() as u64;
+        println!("{desc} COUNT : {counter}");
+    }
+}
+
+impl Print for GenericGauge<AtomicI64> {
+    fn print(&self) {
+        let desc = &self.desc()[0].fq_name;
+        let counter = self.get();
         println!("{desc} COUNT : {counter}");
     }
 }
