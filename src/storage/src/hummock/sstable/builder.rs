@@ -178,7 +178,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         };
         self.build_block()?;
         let size_footer = self.block_metas.len() as u32;
-        self.writer.write(&size_footer.to_le_bytes())?;
+        let (data_len, writer_output) = self.writer.finish(size_footer).await?;
         assert!(!smallest_key.is_empty());
 
         let meta = SstableMeta {
@@ -192,7 +192,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             } else {
                 vec![]
             },
-            estimated_size: self.writer.data_len() as u32,
+            estimated_size: data_len as u32,
             key_count: self.key_count as u32,
             smallest_key,
             largest_key,
@@ -202,7 +202,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         Ok(SstableBuilderOutput::<W::Output> {
             sstable_id: self.sstable_id,
             meta,
-            writer_output: self.writer.finish().await?,
+            writer_output,
             table_ids: self.table_ids.into_iter().collect(),
         })
     }
@@ -221,7 +221,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             .extend_from_slice(self.block_builder.get_last_key());
         let mut block_meta = self.block_metas.last_mut().unwrap();
         let block = self.block_builder.build();
-        self.writer.write(block)?;
+        self.writer.write_block(block)?;
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())

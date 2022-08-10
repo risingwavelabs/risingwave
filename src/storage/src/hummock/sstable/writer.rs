@@ -22,16 +22,21 @@ use crate::hummock::{HummockResult, SstableBuilderOptions};
 pub trait SstableWriter: Send {
     type Output;
 
-    fn write(&mut self, data: &[u8]) -> HummockResult<()>;
-    async fn finish(self) -> HummockResult<Self::Output>;
+    /// Write an SST block to the writer.
+    fn write_block(&mut self, block: &[u8]) -> HummockResult<()>;
+
+    /// Get the length of data that has already been written.
     fn data_len(&self) -> usize;
+
+    /// Finish writing the SST. Return the output along with final data length.
+    async fn finish(mut self, size_footer: u32) -> HummockResult<(usize, Self::Output)>;
 }
 
 pub struct InMemSstableWriter {
     buf: BytesMut,
 }
 
-/// Append sst data to a buffer.
+/// Append SST data to a buffer.
 impl InMemSstableWriter {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -44,13 +49,14 @@ impl InMemSstableWriter {
 impl SstableWriter for InMemSstableWriter {
     type Output = Bytes;
 
-    fn write(&mut self, data: &[u8]) -> HummockResult<()> {
-        self.buf.put_slice(data);
+    fn write_block(&mut self, block: &[u8]) -> HummockResult<()> {
+        self.buf.put_slice(block);
         Ok(())
     }
 
-    async fn finish(self) -> HummockResult<Bytes> {
-        Ok(self.buf.freeze())
+    async fn finish(mut self, size_footer: u32) -> HummockResult<(usize, Self::Output)> {
+        self.buf.put_slice(&size_footer.to_le_bytes());
+        Ok((self.buf.len(), self.buf.freeze()))
     }
 
     fn data_len(&self) -> usize {
