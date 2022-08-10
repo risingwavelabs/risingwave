@@ -16,7 +16,6 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
@@ -32,7 +31,7 @@ use tokio::task::JoinHandle;
 
 use crate::common::SourceChunkBuilder;
 use crate::monitor::SourceMetrics;
-use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
+use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState};
 
 #[derive(Clone, Debug)]
 pub struct SourceContext {
@@ -188,9 +187,8 @@ impl InnerConnectorSourceReader {
 
 impl SourceChunkBuilder for ConnectorSourceReader {}
 
-#[async_trait]
-impl StreamSourceReader for ConnectorSourceReader {
-    async fn next(&mut self) -> Result<StreamChunkWithState> {
+impl ConnectorSourceReader {
+    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
         let batch = self.message_rx.recv().await.unwrap()?;
 
         let mut events = Vec::with_capacity(batch.len());
