@@ -657,10 +657,12 @@ where
         };
         trigger_sst_stat(
             &self.metrics,
-            compaction
-                .compaction_statuses
-                .get(&compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+            Some(
+                compaction
+                    .compaction_statuses
+                    .get(&compaction_group_id)
+                    .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+            ),
             &current_version,
             compaction_group_id,
         );
@@ -867,12 +869,14 @@ where
 
         trigger_sst_stat(
             &self.metrics,
-            compaction
-                .compaction_statuses
-                .get(&compact_task.compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(
-                    compact_task.compaction_group_id,
-                ))?,
+            Some(
+                compaction
+                    .compaction_statuses
+                    .get(&compact_task.compaction_group_id)
+                    .ok_or(Error::InvalidCompactionGroup(
+                        compact_task.compaction_group_id,
+                    ))?,
+            ),
             read_lock!(self, versioning).await.current_version.borrow(),
             compact_task.compaction_group_id,
         );
@@ -1009,6 +1013,14 @@ where
 
         // Update metrics
         trigger_commit_stat(&self.metrics, &versioning.current_version);
+        for compaction_group_id in &modified_compaction_groups {
+            trigger_sst_stat(
+                &self.metrics,
+                None,
+                &versioning.current_version,
+                *compaction_group_id,
+            );
+        }
 
         tracing::trace!("new committed epoch {}", epoch);
 
