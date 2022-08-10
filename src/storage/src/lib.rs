@@ -58,6 +58,7 @@ pub mod store;
 pub mod error;
 pub mod store_impl;
 pub mod table;
+pub mod table_v2;
 pub mod write_batch;
 
 #[cfg(test)]
