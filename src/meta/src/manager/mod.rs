@@ -14,7 +14,6 @@
 
 mod catalog;
 mod env;
-mod hash_mapping;
 mod id;
 mod idle;
 mod notification;
@@ -23,7 +22,6 @@ mod user;
 
 pub use catalog::*;
 pub use env::*;
-pub use hash_mapping::*;
 pub use id::*;
 pub use idle::*;
 pub use notification::*;

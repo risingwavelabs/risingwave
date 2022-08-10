@@ -14,9 +14,8 @@
 
 use std::collections::HashSet;
 
-use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::{ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
@@ -29,7 +28,7 @@ use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
-use crate::stream::GlobalStreamManagerRef;
+use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef};
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -39,6 +38,7 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     user_manager: UserInfoManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -52,6 +52,7 @@ where
         user_manager: UserInfoManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         Self {
             env,
@@ -60,6 +61,7 @@ where
             user_manager,
             hummock_manager,
             stream_manager,
+            fragment_manager,
         }
     }
 }
@@ -100,18 +102,27 @@ where
 
         let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
 
-        let hash_mapping_guard = self
-            .env
-            .hash_mapping_manager()
-            .get_hash_mapping_core_guard();
         let table_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.id));
-        let parallel_unit_mappings = hash_mapping_guard
-            .list_table_mappings()
-            .filter(|mapping| {
-                mapping.is_some() && table_ids.contains(&mapping.as_ref().unwrap().table_id)
-            })
-            .map(|mapping| mapping.unwrap())
-            .collect_vec();
+        let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
+        let mut parallel_unit_mappings = vec![];
+        for (table_id, fragments) in &fragment_guard.table_fragments {
+            if !table_ids.contains(&table_id.table_id) {
+                continue;
+            }
+            for fragment in fragments.fragments.values() {
+                let parallel_unit_mapping = fragment.vnode_mapping.as_ref().unwrap();
+                for internal_table_id in &fragment.state_table_ids {
+                    if !table_ids.contains(internal_table_id) {
+                        continue;
+                    }
+                    parallel_unit_mappings.push(ParallelUnitMapping {
+                        table_id: *internal_table_id,
+                        original_indices: parallel_unit_mapping.original_indices.clone(),
+                        data: parallel_unit_mapping.data.clone(),
+                    })
+                }
+            }
+        }
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {

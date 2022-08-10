@@ -30,7 +30,6 @@ use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use risingwave_rpc_client::StreamClientPoolRef;
-// use parking_lot::Mutex;
 use tokio::sync::{Mutex, MutexGuard};
 use uuid::Uuid;
 
@@ -38,9 +37,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{
-    DatabaseId, HashMappingManagerRef, MetaSrvEnv, NotificationManagerRef, SchemaId,
-};
+use crate::manager::{DatabaseId, MetaSrvEnv, NotificationManagerRef, SchemaId};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
@@ -103,9 +100,6 @@ pub struct GlobalStreamManager<S: MetaStore> {
     /// Maintains streaming sources from external system like kafka
     source_manager: SourceManagerRef<S>,
 
-    /// Maintains vnode mapping of all fragments and state tables.
-    _hash_mapping_manager: HashMappingManagerRef,
-
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
 
@@ -132,12 +126,11 @@ where
         compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> MetaResult<Self> {
         Ok(Self {
-            scheduler: Scheduler::new(cluster_manager.clone(), env.hash_mapping_manager_ref()),
+            scheduler: Scheduler::new(cluster_manager.clone()),
             fragment_manager,
             barrier_manager,
             cluster_manager,
             source_manager,
-            _hash_mapping_manager: env.hash_mapping_manager_ref(),
             client_pool: env.stream_client_pool_ref(),
             compaction_group_manager,
             notification_manager: env.notification_manager_ref(),
@@ -610,7 +603,7 @@ where
         // Register to compaction group beforehand.
         let compaction_group_manager_ref = self.compaction_group_manager.clone();
         let registered_table_ids = compaction_group_manager_ref
-            .register_table_fragments(&table_fragments, table_properties)
+            .register_table_fragments(table_fragments, table_properties)
             .await?;
         let compaction_group_manager_ref = self.compaction_group_manager.clone();
         revert_funcs.push(Box::pin(async move {
@@ -656,7 +649,7 @@ where
         // Extract the fragments that include source operators.
         let source_fragments = {
             let mut source_fragments = HashMap::new();
-            fetch_source_fragments(&mut source_fragments, &table_fragments);
+            fetch_source_fragments(&mut source_fragments, table_fragments);
             source_fragments
         };
 

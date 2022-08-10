@@ -58,6 +58,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
+            Info::Mapping(_) => todo!(),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",

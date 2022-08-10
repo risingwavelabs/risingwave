@@ -19,24 +19,22 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_common::util::compress::decompress_data;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::cluster::WorkerId;
-use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
+use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::record_table_vnode_mappings;
 use crate::MetaResult;
 
-struct FragmentManagerCore {
-    table_fragments: HashMap<TableId, TableFragments>,
+pub struct FragmentManagerCore {
+    pub(crate) table_fragments: HashMap<TableId, TableFragments>,
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
@@ -79,13 +77,14 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
-        // Extract vnode mapping info from listed `table_fragments` to hash mapping manager.
-        Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
-
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
         })
+    }
+
+    pub async fn get_fragment_read_guard(&self) -> RwLockReadGuard<'_, FragmentManagerCore> {
+        self.core.read().await
     }
 
     pub async fn list_table_fragments(&self) -> MetaResult<Vec<TableFragments>> {
@@ -543,31 +542,5 @@ where
         }
 
         Ok(info)
-    }
-
-    fn restore_vnode_mappings(
-        hash_mapping_manager: HashMappingManagerRef,
-        table_fragments: &HashMap<TableId, TableFragments>,
-    ) -> MetaResult<()> {
-        // for fragments in table_fragments.values() {
-        //     for (fragment_id, fragment) in &fragments.fragments {
-        //         let mapping = fragment.vnode_mapping.as_ref().unwrap();
-        //         let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
-        //         assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
-        //         hash_mapping_manager.set_fragment_hash_mapping(*fragment_id, vnode_mapping);
-        //
-        //         // Looking at the first actor is enough, since all actors in one fragment have
-        //         // identical state table id.
-        //         let actor = fragment.actors.first().unwrap();
-        //         let stream_node = actor.get_nodes()?;
-        //         record_table_vnode_mappings(
-        //             &hash_mapping_manager,
-        //             stream_node,
-        //             fragment.fragment_id,
-        //         )?;
-        //     }
-        // }
-        // Ok(())
-        todo!()
     }
 }

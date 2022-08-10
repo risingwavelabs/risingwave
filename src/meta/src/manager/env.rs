@@ -23,7 +23,6 @@ use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
-use super::{HashMappingManager, HashMappingManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -49,9 +48,6 @@ where
 
     /// notification manager.
     notification_manager: NotificationManagerRef,
-
-    /// hash mapping manager.
-    hash_mapping_manager: HashMappingManagerRef,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -122,14 +118,12 @@ where
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new());
-        let hash_mapping_manager = Arc::new(HashMappingManager::new());
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
-            hash_mapping_manager,
             stream_client_pool,
             idle_manager,
             info,
@@ -159,14 +153,6 @@ where
 
     pub fn notification_manager(&self) -> &NotificationManager {
         self.notification_manager.deref()
-    }
-
-    pub fn hash_mapping_manager_ref(&self) -> HashMappingManagerRef {
-        self.hash_mapping_manager.clone()
-    }
-
-    pub fn hash_mapping_manager(&self) -> &HashMappingManager {
-        self.hash_mapping_manager.deref()
     }
 
     pub fn idle_manager_ref(&self) -> IdleManagerRef {
@@ -228,14 +214,12 @@ impl MetaSrvEnv<MemStore> {
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new());
         let stream_client_pool = Arc::new(StreamClientPool::default());
-        let hash_mapping_manager = Arc::new(HashMappingManager::new());
         let idle_manager = Arc::new(IdleManager::disabled());
 
         Self {
             id_gen_manager,
             meta_store,
             notification_manager,
-            hash_mapping_manager,
             stream_client_pool,
             idle_manager,
             info: leader_info,

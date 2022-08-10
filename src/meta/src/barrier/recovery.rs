@@ -20,8 +20,6 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
-use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};

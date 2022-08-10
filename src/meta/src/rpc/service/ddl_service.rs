@@ -15,14 +15,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::types::ParallelUnitId;
-use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -248,7 +243,7 @@ where
         let version = self.catalog_manager.drop_sink(sink_id).await?;
 
         // 2. drop sink in stream manager
-        let table_fragments = self
+        let _table_fragments = self
             .stream_manager
             .drop_materialized_view(&TableId::new(sink_id))
             .await?;
@@ -733,7 +728,7 @@ where
         // 2. Drop source and mv separately.
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
         // `SourceManager` before we can drop the source
-        let table_fragments = self
+        let _table_fragments = self
             .stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;

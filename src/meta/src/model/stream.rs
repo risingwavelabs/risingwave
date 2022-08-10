@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
-use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
@@ -90,8 +89,7 @@ impl MetadataModel for TableFragments {
 
 impl TableFragments {
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
-        let internal_table_to_fragment_map: HashMap<u32, FragmentId> = prost
-            .fragments
+        let internal_table_to_fragment_map: HashMap<u32, FragmentId> = fragments
             .values()
             .flat_map(|f| f.state_table_ids.iter().map(|&t| (t, f.fragment_id)))
             .collect();
@@ -417,13 +415,13 @@ impl TableFragments {
     pub fn internal_table_ids(&self) -> Vec<u32> {
         self.fragments
             .values()
-            .flat_map(|f| f.state_table_ids)
+            .flat_map(|f| f.state_table_ids.clone())
             .collect_vec()
     }
 
     pub fn get_internal_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
         self.internal_table_to_fragment_map
             .get(&table_id)
-            .map(|f| self.fragments[f].vnode_mapping.unwrap())
+            .map(|f| self.fragments[f].vnode_mapping.clone().unwrap())
     }
 }

@@ -27,7 +27,6 @@ use risingwave_pb::meta::table_fragments::Fragment;
 
 use super::record_table_vnode_mappings;
 use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
-use crate::manager::HashMappingManagerRef;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -35,8 +34,6 @@ use crate::MetaResult;
 /// [`Scheduler`] defines schedule logic for mv actors.
 pub struct Scheduler<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
-    /// Maintains vnode mappings of all scheduled fragments.
-    hash_mapping_manager: HashMappingManagerRef,
 }
 
 /// [`ScheduledLocations`] represents the location of scheduled result.
@@ -134,14 +131,8 @@ impl<S> Scheduler<S>
 where
     S: MetaStore,
 {
-    pub fn new(
-        cluster_manager: ClusterManagerRef<S>,
-        hash_mapping_manager: HashMappingManagerRef,
-    ) -> Self {
-        Self {
-            cluster_manager,
-            hash_mapping_manager,
-        }
+    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
+        Self { cluster_manager }
     }
 
     /// [`Self::schedule`] schedules input fragments to different parallel units (workers).
@@ -250,8 +241,8 @@ where
         // Looking at the first actor is enough, since all actors in one fragment have identical
         // state table id.
         let actor = fragment.actors.first().unwrap();
-        let stream_node = actor.get_nodes()?;
-        record_table_vnode_mappings(stream_node, fragment)?;
+        let stream_node = actor.get_nodes()?.clone();
+        record_table_vnode_mappings(&stream_node, fragment)?;
         Ok(vnode_mapping)
     }
 
@@ -315,7 +306,7 @@ mod test {
             cluster_manager.activate_worker_node(host).await?;
         }
 
-        let scheduler = Scheduler::new(cluster_manager, env.hash_mapping_manager_ref());
+        let scheduler = Scheduler::new(cluster_manager);
         let mut locations = ScheduledLocations::new();
 
         let mut actor_id = 1u32;
@@ -339,7 +330,7 @@ mod test {
                         same_worker_node_as_upstream: false,
                         vnode_bitmap: None,
                     }],
-                    vnode_mapping: None,
+                    ..Default::default()
                 };
                 actor_id += 1;
                 fragment

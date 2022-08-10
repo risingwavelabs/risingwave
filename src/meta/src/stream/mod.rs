@@ -29,8 +29,6 @@ pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
 
-use crate::manager::HashMappingManagerRef;
-use crate::model::FragmentId;
 use crate::MetaResult;
 
 /// Record vnode mapping for stateful operators in meta.

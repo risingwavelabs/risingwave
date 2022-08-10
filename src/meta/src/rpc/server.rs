@@ -455,6 +455,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         user_manager,
         hummock_manager.clone(),
         stream_manager.clone(),
+        fragment_manager.clone(),
     );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
