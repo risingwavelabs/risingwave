@@ -68,7 +68,7 @@ impl KinesisSplitReader {
         Ok(Self {
             client,
             stream_name,
-            shard_id: split.shard_id.into(),
+            shard_id: split.shard_id,
             shard_iter: None,
             latest_offset: None,
             start_position: split.start_position,
@@ -278,7 +278,7 @@ mod tests {
         let mut trim_horizen_reader = KinesisSplitReader::new(
             properties.clone(),
             KinesisSplit {
-                shard_id: "shardId-000000000001".to_string(),
+                shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::Earliest,
                 end_position: KinesisOffset::None,
             },
@@ -290,7 +290,7 @@ mod tests {
         let mut offset_reader = KinesisSplitReader::new(
             properties.clone(),
             KinesisSplit {
-                shard_id: "shardId-000000000001".to_string(),
+                shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::SequenceNumber(
                     "49629139817504901062972448413535783695568426186596941842".to_string(),
                 ),
@@ -330,7 +330,7 @@ mod tests {
             .iter()
             .map(|split| {
                 SplitImpl::Kinesis(KinesisSplit {
-                    shard_id: split.to_string(),
+                    shard_id: split.to_string().into(),
                     start_position: KinesisOffset::Earliest,
                     end_position: KinesisOffset::None,
                 })

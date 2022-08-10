@@ -71,7 +71,7 @@ impl<S: StateStore> SourceStateHandler<S> {
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
                 let value = state.encode_to_bytes();
-                local_batch.put(&*state.id(), StorageValue::new_default_put(value));
+                local_batch.put(state.id().as_str(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
             write_batch.ingest().await.inspect_err(|e| {
@@ -96,7 +96,7 @@ impl<S: StateStore> SourceStateHandler<S> {
     ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
             .get(
-                &*state_identifier,
+                state_identifier.as_str(),
                 ReadOptions {
                     epoch,
                     table_id: Some(self.keyspace.table_id()),

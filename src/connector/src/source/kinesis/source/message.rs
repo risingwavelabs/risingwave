@@ -30,7 +30,7 @@ impl From<KinesisMessage> for SourceMessage {
         SourceMessage {
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
-            split_id: msg.shard_id.into(),
+            split_id: msg.shard_id,
         }
     }
 }
