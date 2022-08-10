@@ -252,3 +252,10 @@ where
         })
         .ok()
 }
+
+/// Get the current context. Returns `None` if we're not traced.
+///
+/// This is useful if you want to check which component or runtime task is calling this function.
+pub fn current_context() -> Option<String> {
+    try_with_context(|c| c.to_string())
+}
