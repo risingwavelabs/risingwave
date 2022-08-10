@@ -202,10 +202,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let position = self.rng.gen_range(0..10);
         let mut args = (0..10).map(|_| Expr::Value(Value::Null)).collect_vec();
         args[position] = non_null;
-        Expr::Function(make_simple_func(
-            "concat",
-            &args,
-        ))
+        Expr::Function(make_simple_func("concat", &args))
     }
 
     fn gen_concat(&mut self, can_agg: bool, inside_agg: bool) -> Expr {
