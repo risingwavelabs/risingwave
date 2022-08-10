@@ -19,7 +19,7 @@ use std::time::Duration;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::config::{ComputeNodeConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -126,6 +126,7 @@ pub async fn compute_node_serve(
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
+        &opts.file_cache_dir,
         storage_config.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -202,6 +203,15 @@ pub async fn compute_node_serve(
         state_store,
     );
 
+    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
+    // if this is not the case, we can use the following command to get it printed into the logs
+    // periodically.
+    //
+    // Comment out the following line to enable.
+    // TODO: may optionally enable based on the features
+    #[cfg(any())]
+    stream_mgr.clone().spawn_print_trace();
+
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
@@ -211,6 +221,7 @@ pub async fn compute_node_serve(
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))

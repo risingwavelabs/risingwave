@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::user_key;
-use risingwave_hummock_sdk::{is_remote_sst_id, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -163,7 +163,7 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     Ok(OrderedMergeIteratorInner::new(ordered_iters, stats.clone()))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SharedBuffer {
     uncommitted_data: KeyIndexedUncommittedData,
     replicate_batches: BTreeMap<Vec<u8>, SharedBufferBatch>,
@@ -481,29 +481,6 @@ impl SharedBuffer {
         }
         // TODO: may want to delete the sst
         previous_sst
-    }
-
-    pub fn get_ssts_to_commit(&self) -> Vec<LocalSstableInfo> {
-        assert!(
-            self.uploading_tasks.is_empty(),
-            "when committing sst there should not be uploading task"
-        );
-        let mut ret = Vec::new();
-        for data in self.uncommitted_data.values() {
-            match data {
-                UncommittedData::Batch(_) => {
-                    panic!("there should not be any batch when committing sst");
-                }
-                UncommittedData::Sst((compaction_group_id, sst)) => {
-                    assert!(
-                        is_remote_sst_id(sst.id),
-                        "all sst should be remote when trying to get ssts to commit"
-                    );
-                    ret.push((*compaction_group_id, sst.clone()));
-                }
-            }
-        }
-        ret
     }
 
     pub fn size(&self) -> usize {

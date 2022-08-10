@@ -28,6 +28,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -83,11 +84,17 @@ impl LogicalScan {
             .pk
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default();
+            .collect::<Option<Vec<_>>>();
 
         let schema = Schema { fields };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let (functional_dependency, pk_indices) = match pk_indices {
+            Some(pk_indices) => (
+                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
+                pk_indices,
+            ),
+            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
 
         let mut required_col_idx = output_col_idx.clone();
         let mut visitor =
@@ -463,7 +470,7 @@ impl ToStream for LogicalScan {
                 None.into(),
             )));
         }
-        match self.base.pk_indices.is_empty() {
+        match self.base.logical_pk.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();
 

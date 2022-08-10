@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 aws-config = { version = "0.46", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-endpoint = { version = "0.46", default-features = false }
 aws-sdk-s3 = { version = "0.16", default-features = false, features = ["rt-tokio", "native-tls"] }
