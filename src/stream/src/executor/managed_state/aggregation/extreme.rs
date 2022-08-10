@@ -321,720 +321,646 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeSet, HashSet};
+    use std::collections::HashSet;
 
     use itertools::Itertools;
     use rand::prelude::*;
-    use risingwave_common::array::{I64Array, Op};
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use smallvec::smallvec;
 
     use super::*;
+    use crate::executor::aggregation::AggArgs;
 
-    #[tokio::test]
-    async fn test_managed_extreme_state() {
-        let store = MemoryStateStore::new();
-        let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
-
-        let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            Some(5),
-            0,
-            PkDataTypes::new(),
-            HashCode(567),
-            None,
-        )
-        .unwrap();
-        assert!(!state_table.is_dirty());
-
-        let mut epoch: u64 = 0;
-        // insert 0, 10, 20
-        managed_state
-            .apply_batch(
-                &[Op::Insert, Op::Insert, Op::Insert],
-                None,
-                &[&I64Array::from_slice(&[Some(0), Some(10), Some(20)])
-                    .unwrap()
-                    .into()],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-        assert!(state_table.is_dirty());
-
-        // flush to write batch and write to state store
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should be 0
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Int64(0))
-        );
-
-        // insert 5, 15, 25, and do a flush. After that, `25`, `27, and `30` should be evicted from
-        // the top n cache.
-        managed_state
-            .apply_batch(
-                &[Op::Insert; 5],
-                None,
-                &[
-                    &I64Array::from_slice(&[Some(5), Some(15), Some(25), Some(27), Some(30)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush to write batch and write to state store
-        epoch += 1;
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should be 0
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Int64(0))
-        );
-
-        // delete 0, 10, 5, 15, so that the top n cache now contains only 20.
-        managed_state
-            .apply_batch(
-                &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
-                None,
-                &[
-                    &I64Array::from_slice(&[Some(0), Some(10), Some(15), Some(5)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush to write batch and write to state store
-        epoch += 1;
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should be 20
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Int64(20))
-        );
-
-        // delete 20, 27, so that the top n cache is empty, and we should get minimum 25.
-        managed_state
-            .apply_batch(
-                &[Op::Delete, Op::Delete],
-                None,
-                &[&I64Array::from_slice(&[Some(20), Some(27)]).unwrap().into()],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush to write batch and write to state store
-        epoch += 1;
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should be 25
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Int64(25))
-        );
-
-        // delete 25, and we should get minimum 30.
-        managed_state
-            .apply_batch(
-                &[Op::Delete],
-                None,
-                &[&I64Array::from_slice(&[Some(25)]).unwrap().into()],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush to write batch and write to state store
-        epoch += 1;
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should be 30
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Int64(30))
-        );
-
-        let row_count = managed_state.total_count;
-
-        // test recovery
-        let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            Some(5),
-            row_count,
-            PkDataTypes::new(),
-            HashCode(567),
-            None,
-        )
-        .unwrap();
-
-        // The minimum should still be 30
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Int64(30))
-        );
-    }
-
-    #[tokio::test]
-    async fn test_replicated_value_min() {
-        test_replicated_value_not_null::<{ variants::EXTREME_MIN }>().await
-    }
-
-    #[tokio::test]
-    async fn test_replicated_value_max() {
-        test_replicated_value_not_null::<{ variants::EXTREME_MAX }>().await
-    }
-
-    #[tokio::test]
-    async fn test_replicated_value_min_with_null() {
-        test_replicated_value_with_null::<{ variants::EXTREME_MIN }>().await
-    }
-
-    #[tokio::test]
-    async fn test_replicated_value_max_with_null() {
-        test_replicated_value_with_null::<{ variants::EXTREME_MAX }>().await
-    }
-
-    fn state_table_create_helper<S: StateStore>(
-        store: S,
-        table_id: TableId,
-        column_cnt: usize,
-        order_type: OrderType,
-    ) -> RowBasedStateTable<S> {
-        let mut column_descs = Vec::with_capacity(column_cnt);
-        for id in 0..column_cnt {
-            column_descs.push(ColumnDesc::unnamed(
-                ColumnId::new(id as i32),
-                DataType::Int64,
-            ));
+    fn create_agg_call(kind: AggKind, arg_type: DataType, arg_idx: usize) -> AggCall {
+        AggCall {
+            kind,
+            args: AggArgs::Unary(arg_type.clone(), arg_idx),
+            return_type: arg_type,
+            order_pairs: vec![],
+            append_only: false,
+            filter: None,
         }
-        let relational_pk_len = column_descs.len();
-        RowBasedStateTable::new_without_distribution(
-            store,
+    }
+
+    #[tokio::test]
+    async fn test_extreme_state_basic_min() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, b: int32, c: int32, _row_id: int64)
+
+        let input_pk_indices = vec![3]; // _row_id
+        let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 2); // min(c)
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(0x2333);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // c
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
+        ];
+        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
             table_id,
-            column_descs,
-            vec![order_type; relational_pk_len],
-            (0..relational_pk_len).collect(),
-        )
-    }
+            columns,
+            vec![
+                OrderType::Ascending, // for AggKind::Min
+                OrderType::Ascending,
+            ],
+            vec![0, 1], // [c, _row_id]
+        );
 
-    async fn test_replicated_value_not_null<const EXTREME_TYPE: usize>() {
-        let store = MemoryStateStore::new();
-        let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
-            OrderType::Descending
-        } else {
-            OrderType::Ascending
-        };
-        let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
-
-        let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
-            Some(3),
-            0,
-            smallvec![DataType::Int64],
-            HashCode(567),
+        let mut managed_state = GenericExtremeState::new(
+            agg_call.clone(),
             None,
-        )
-        .unwrap();
-        assert!(!state_table.is_dirty());
-
-        let value_buffer =
-            I64Array::from_slice(&[Some(1), Some(1), Some(4), Some(5), Some(1), Some(4)])
-                .unwrap()
-                .into();
-
-        let pk_buffer = I64Array::from_slice(&[
-            Some(1001),
-            Some(1002),
-            Some(1003),
-            Some(1004),
-            Some(1005),
-            Some(1006),
-        ])
-        .unwrap()
-        .into();
-
-        let extreme = match EXTREME_TYPE {
-            variants::EXTREME_MIN => Some(ScalarImpl::Int64(1)),
-            variants::EXTREME_MAX => Some(ScalarImpl::Int64(5)),
-            _ => unreachable!(),
-        };
+            input_pk_indices.clone(),
+            state_table_col_mapping.clone(),
+            0,
+            None,
+        );
 
         let mut epoch = 0;
 
-        // insert 1, 5
-        managed_state
-            .apply_batch(
-                &[Op::Insert; 2],
-                None,
-                &[
-                    &I64Array::from_slice(&[Some(1), Some(5)]).unwrap().into(),
-                    &I64Array::from_slice(&[Some(2001), Some(2002)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // insert 1 1 4 5 1 4
-        managed_state
-            .apply_batch(
-                &[Op::Insert; 6],
-                None,
-                &[&value_buffer, &pk_buffer],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should be 1, or the maximum should be 5
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            extreme
-        );
-
-        // delete 1 1 4 5 1 4
-        managed_state
-            .apply_batch(
-                &[Op::Delete; 6],
-                None,
-                &[&value_buffer, &pk_buffer],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush
-        epoch += 1;
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should still be 1, or the maximum should still be 5
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            extreme
-        );
-    }
-
-    async fn test_replicated_value_with_null<const EXTREME_TYPE: usize>() {
-        let store = MemoryStateStore::new();
-        let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
-            OrderType::Descending
-        } else {
-            OrderType::Ascending
-        };
-        let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
-
-        let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
-            Some(3),
-            0,
-            smallvec![DataType::Int64],
-            HashCode(567),
-            None,
-        )
-        .unwrap();
-        assert!(!state_table.is_dirty());
-
-        let value_buffer =
-            I64Array::from_slice(&[Some(1), Some(1), Some(4), Some(5), Some(1), Some(4)])
-                .unwrap()
-                .into();
-
-        let pk_buffer = I64Array::from_slice(&[
-            Some(1001),
-            Some(1002),
-            Some(1003),
-            Some(1004),
-            Some(1005),
-            Some(1006),
-        ])
-        .unwrap()
-        .into();
-
-        let extreme = match EXTREME_TYPE {
-            variants::EXTREME_MIN => None,
-            variants::EXTREME_MAX => Some(ScalarImpl::Int64(5)),
-            _ => unreachable!(),
-        };
-
-        let mut epoch = 0;
-
-        // insert 1, 5
-        managed_state
-            .apply_batch(
-                &[Op::Insert; 2],
-                None,
-                &[
-                    &I64Array::from_slice(&[Some(1), Some(5)]).unwrap().into(),
-                    &I64Array::from_slice(&[Some(2001), Some(2002)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        let null_buffer = &I64Array::from_slice(&[None, None, None]).unwrap().into();
-        let null_pk_buffer = &I64Array::from_slice(&[Some(3001), Some(3002), Some(3003)])
-            .unwrap()
-            .into();
-
-        // insert None None None
-        managed_state
-            .apply_batch(
-                &[Op::Insert; 3],
-                None,
-                &[null_buffer, null_pk_buffer],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // insert 1 1 4 5 1 4
-        managed_state
-            .apply_batch(
-                &[Op::Insert; 6],
-                None,
-                &[&value_buffer, &pk_buffer],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should be None, or the maximum should be 5
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            extreme
-        );
-
-        // delete 1 1 4 5 1 4
-        managed_state
-            .apply_batch(
-                &[Op::Delete; 6],
-                None,
-                &[&value_buffer, &pk_buffer],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // flush
-        epoch += 1;
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // The minimum should still be None, or the maximum should still be 5
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            extreme
-        );
-    }
-
-    #[tokio::test]
-    async fn test_same_group_of_value() {
-        let store = MemoryStateStore::new();
-        let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            Some(3),
-            0,
-            PkDataTypes::new(),
-            HashCode(567),
-            None,
-        )
-        .unwrap();
-        let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
-
-        assert!(!state_table.is_dirty());
-
-        let value_buffer =
-            I64Array::from_slice(&[Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)])
-                .unwrap()
-                .into();
-        let mut epoch: u64 = 0;
-
-        managed_state
-            .apply_batch(
-                &[Op::Insert],
-                None,
-                &[&I64Array::from_slice(&[Some(6)]).unwrap().into()],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        for i in 0..100 {
-            managed_state
-                .apply_batch(
-                    &[Op::Insert; 6],
-                    None,
-                    &[&value_buffer],
-                    epoch,
-                    &mut state_table,
-                )
-                .await
-                .unwrap();
-
-            if i % 2 == 0 {
-                // only ingest after insert in some cases
-                // flush to write batch and write to state store
-                epoch += 1;
-                helper_flush(&mut managed_state, epoch, &mut state_table).await;
-            }
-
-            managed_state
-                .apply_batch(
-                    &[Op::Delete; 6],
-                    None,
-                    &[&value_buffer],
-                    epoch,
-                    &mut state_table,
-                )
-                .await
-                .unwrap();
-
-            // flush to write batch and write to state store
-            epoch += 1;
-            helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-            // The minimum should be 6
-            assert_eq!(
-                managed_state.get_output(epoch, &state_table).await.unwrap(),
-                Some(ScalarImpl::Int64(6))
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + a 1 8 123
+                + b 5 2 128
+                - b 5 2 128
+                + c 1 3 130",
             );
-        }
-    }
-
-    #[tokio::test]
-    async fn chaos_test_min() {
-        chaos_test::<{ variants::EXTREME_MIN }>().await;
-    }
-
-    #[tokio::test]
-    async fn chaos_test_max() {
-        chaos_test::<{ variants::EXTREME_MAX }>().await;
-    }
-
-    async fn chaos_test<const EXTREME_TYPE: usize>() {
-        let mut rng = thread_rng();
-        let mut values_to_insert = (0..5000i64).collect_vec();
-        values_to_insert.shuffle(&mut rng);
-        let mut remaining_values = &values_to_insert[..];
-
-        let store = MemoryStateStore::new();
-        let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
-            OrderType::Descending
-        } else {
-            OrderType::Ascending
-        };
-        let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 1, order_type);
-
-        let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
-            Some(3),
-            0,
-            PkDataTypes::new(),
-            HashCode(567),
-            None,
-        )
-        .unwrap();
-
-        let mut heap = BTreeSet::new();
-
-        loop {
-            let insert_cnt = rng.gen_range(1..=10);
-            let ops = vec![Op::Insert; insert_cnt];
-            if remaining_values.len() < insert_cnt {
-                break;
-            }
-            let batch = &remaining_values[..insert_cnt];
-            let arr = I64Array::from_slice(&batch.iter().map(|x| Some(*x)).collect_vec()).unwrap();
-            for data in batch {
-                heap.insert(*data);
-            }
-            let epoch: u64 = 0;
-
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(&ops, None, &[&arr.into()], epoch, &mut state_table)
-                .await
-                .unwrap();
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
 
-            remaining_values = &remaining_values[insert_cnt..];
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
 
-            let delete_cnt = rng.gen_range(1..=10.min(heap.len()));
-            let ops = vec![Op::Delete; delete_cnt];
-            let mut delete_ids = (0..heap.len()).collect_vec();
-            delete_ids.shuffle(&mut rng);
-            let to_be_delete_idx: HashSet<usize> =
-                delete_ids.iter().take(delete_cnt).cloned().collect();
-            let mut to_be_delete = vec![];
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 3);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
 
-            for (idx, item) in heap.iter().enumerate() {
-                if to_be_delete_idx.contains(&idx) {
-                    to_be_delete.push(*item);
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + d 0 8 134
+                + e 2 2 137",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 2);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            // test recovery (cold start)
+            let row_count = managed_state.total_count;
+            let mut managed_state = GenericExtremeState::new(
+                agg_call,
+                None,
+                input_pk_indices,
+                state_table_col_mapping,
+                row_count,
+                None,
+            );
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 2);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extreme_state_basic_max() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, b: int32, c: int32, _row_id: int64)
+
+        let input_pk_indices = vec![3]; // _row_id
+        let agg_call = create_agg_call(AggKind::Max, DataType::Int32, 2); // max(c)
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(0x2333);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // c
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
+        ];
+        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Descending, // for AggKind::Max
+                OrderType::Ascending,
+            ],
+            vec![0, 1], // [c, _row_id]
+        );
+
+        let mut managed_state = GenericExtremeState::new(
+            agg_call.clone(),
+            None,
+            input_pk_indices.clone(),
+            state_table_col_mapping.clone(),
+            0,
+            None,
+        );
+
+        let mut epoch = 0;
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + a 1 8 123
+                + b 5 2 128
+                - b 5 2 128
+                + c 1 3 130",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 8);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + d 0 9 134
+                + e 2 2 137",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 9);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            // test recovery (cold start)
+            let row_count = managed_state.total_count;
+            let mut managed_state = GenericExtremeState::new(
+                agg_call,
+                None,
+                input_pk_indices,
+                state_table_col_mapping,
+                row_count,
+                None,
+            );
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 9);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extreme_state_with_null_value() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, b: int32, c: int32, _row_id: int64)
+
+        let input_pk_indices = vec![3]; // _row_id
+        let agg_call_1 = create_agg_call(AggKind::Min, DataType::Varchar, 0); // min(a)
+        let agg_call_2 = create_agg_call(AggKind::Max, DataType::Varchar, 1); // max(b)
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(0x6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),   // _row_id
+        ];
+        let state_table_col_mapping_1 = Arc::new(StateTableColumnMapping::new(vec![0, 3]));
+        let mut state_table_1 = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending, // for AggKind::Min
+                OrderType::Ascending,
+            ],
+            vec![0, 1], // [b, _row_id]
+        );
+        let table_id = TableId::new(0x2333);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // b
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
+        ];
+        let state_table_col_mapping_2 = Arc::new(StateTableColumnMapping::new(vec![1, 3]));
+        let mut state_table_2 = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Descending, // for AggKind::Max
+                OrderType::Ascending,
+            ],
+            vec![0, 1], // [b, _row_id]
+        );
+
+        let mut managed_state_1 = GenericExtremeState::new(
+            agg_call_1.clone(),
+            None,
+            input_pk_indices.clone(),
+            state_table_col_mapping_1.clone(),
+            0,
+            None,
+        );
+        let mut managed_state_2 = GenericExtremeState::new(
+            agg_call_2.clone(),
+            None,
+            input_pk_indices.clone(),
+            state_table_col_mapping_2.clone(),
+            0,
+            None,
+        );
+
+        let mut epoch = 0;
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + a 1 8 123
+                + b 5 2 128
+                - b 5 2 128
+                + c 1 3 130
+                + . 9 4 131
+                + . 6 5 132
+                + c . 3 133",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state_1
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table_1,
+                )
+                .await?;
+            managed_state_2
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table_2,
+                )
+                .await?;
+
+            managed_state_1.flush(&mut state_table_1)?;
+            managed_state_2.flush(&mut state_table_2)?;
+            state_table_1.commit(epoch).await.unwrap();
+            state_table_2.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            match managed_state_1.get_output(epoch, &state_table_1).await? {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "a".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+            match managed_state_2.get_output(epoch, &state_table_2).await? {
+                None => {} // pass
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extreme_state_grouped() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, b: int32, c: int32, _row_id: int64)
+
+        let input_pk_indices = vec![3];
+        let agg_call = create_agg_call(AggKind::Max, DataType::Int32, 1); // max(b)
+
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // group by c
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32), // b
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
+        ];
+        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 1, 3]));
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending,  // c ASC
+                OrderType::Descending, // b DESC for AggKind::Max
+                OrderType::Ascending,  // _row_id ASC
+            ],
+            vec![0, 1, 2], // [c, b, _row_id]
+        );
+
+        let group_key = Row::new(vec![Some(8.into())]);
+
+        let mut managed_state = GenericExtremeState::new(
+            agg_call.clone(),
+            Some(&group_key),
+            input_pk_indices.clone(),
+            state_table_col_mapping.clone(),
+            0,
+            None,
+        );
+
+        let mut epoch = 0;
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + a 1 8 123
+                + b 5 8 128
+                + c 7 3 130 D // hide this row",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 5);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + d 9 2 134 D // hide this row
+                + e 8 8 137",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 8);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            // test recovery (cold start)
+            let row_count = managed_state.total_count;
+            let mut managed_state = GenericExtremeState::new(
+                agg_call,
+                Some(&group_key),
+                input_pk_indices,
+                state_table_col_mapping,
+                row_count,
+                None,
+            );
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 8);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_extreme_state_with_random_values() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: int32, _row_id: int64)
+
+        let input_pk_indices = vec![1]; // _row_id
+        let agg_call = create_agg_call(AggKind::Min, DataType::Int32, 0); // min(a)
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(0x2333);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // a
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
+        ];
+        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![0, 1]));
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending, // for AggKind::Min
+                OrderType::Ascending,
+            ],
+            vec![0, 1], // [a, _row_id]
+        );
+
+        let mut managed_state = GenericExtremeState::new(
+            agg_call.clone(),
+            None,
+            input_pk_indices.clone(),
+            state_table_col_mapping.clone(),
+            0,
+            Some(1024),
+        );
+
+        let mut rng = thread_rng();
+        let insert_values: Vec<i32> = (0..10000).map(|_| rng.gen()).collect_vec();
+        let delete_values: HashSet<_> = insert_values
+            .iter()
+            .choose_multiple(&mut rng, 1000)
+            .into_iter()
+            .collect();
+        let mut min_value = i32::MAX;
+
+        let mut epoch = 0;
+
+        {
+            let mut pretty_lines = vec!["i I".to_string()];
+            for row_id in 0..(insert_values.len() / 2) {
+                let value = insert_values[row_id];
+                pretty_lines.push(format!("+ {} {}", value, row_id));
+                if delete_values.contains(&value) {
+                    pretty_lines.push(format!("- {} {}", value, row_id));
+                    continue;
+                }
+                if value < min_value {
+                    min_value = value;
                 }
             }
 
-            for item in &to_be_delete {
-                heap.remove(item);
-            }
-
-            assert_eq!(to_be_delete.len(), delete_cnt);
-
-            let arr =
-                I64Array::from_slice(&to_be_delete.iter().map(|x| Some(*x)).collect_vec()).unwrap();
+            let chunk = StreamChunk::from_pretty(&pretty_lines.join("\n"));
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(&ops, None, &[&arr.into()], epoch, &mut state_table)
-                .await
-                .unwrap();
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
 
-            // flush to write batch and write to state store
-            helper_flush(&mut managed_state, epoch, &mut state_table).await;
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
 
-            let value = managed_state
-                .get_output(epoch, &state_table)
-                .await
-                .unwrap()
-                .map(|x| x.into_int64());
-
-            match EXTREME_TYPE {
-                variants::EXTREME_MAX => assert_eq!(value, heap.last().cloned()),
-                variants::EXTREME_MIN => assert_eq!(value, heap.first().cloned()),
-                _ => unimplemented!(),
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, min_value);
+                }
+                _ => panic!("unexpected output"),
             }
         }
-    }
 
-    async fn helper_flush<S: StateStore>(
-        managed_state: &mut impl ManagedTableState<S>,
-        epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
-    ) {
-        managed_state.flush(state_table).unwrap();
-        state_table.commit(epoch).await.unwrap();
-    }
+        {
+            let mut pretty_lines = vec!["i I".to_string()];
+            for row_id in (insert_values.len() / 2)..insert_values.len() {
+                let value = insert_values[row_id];
+                pretty_lines.push(format!("+ {} {}", value, row_id));
+                if delete_values.contains(&value) {
+                    pretty_lines.push(format!("- {} {}", value, row_id));
+                    continue;
+                }
+                if value < min_value {
+                    min_value = value;
+                }
+            }
 
-    #[tokio::test]
-    async fn test_same_value_delete() {
-        // In this test, we test this case:
-        //
-        // Delete 6, insert 6, and delete 6 in one epoch.
-        // The 6 should be deleted from the state store.
+            let chunk = StreamChunk::from_pretty(&pretty_lines.join("\n"));
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            managed_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
 
-        let store = MemoryStateStore::new();
-        let mut managed_state = ManagedMinState::<_, I64Array>::new(
-            Some(3),
-            0,
-            PkDataTypes::new(),
-            HashCode(567),
-            None,
-        )
-        .unwrap();
-        let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
+            managed_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
 
-        assert!(!state_table.is_dirty());
+            let res = managed_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, min_value);
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
 
-        let value_buffer =
-            I64Array::from_slice(&[Some(1), Some(2), Some(3), Some(4), Some(5), Some(7)])
-                .unwrap()
-                .into();
-        let epoch: u64 = 0;
-
-        managed_state
-            .apply_batch(
-                &[Op::Insert; 6],
-                None,
-                &[&value_buffer],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        managed_state
-            .apply_batch(
-                &[Op::Insert],
-                None,
-                &[&I64Array::from_slice(&[Some(6)]).unwrap().into()],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // Now we have 1 to 7 in the state store.
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        // Delete 6, insert 6, delete 6
-        managed_state
-            .apply_batch(
-                &[Op::Delete, Op::Insert, Op::Delete],
-                None,
-                &[&I64Array::from_slice(&[Some(6), Some(6), Some(6)])
-                    .unwrap()
-                    .into()],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        // 6 should be deleted by now
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        let value_buffer = I64Array::from_slice(&[Some(1), Some(2), Some(3), Some(4), Some(5)])
-            .unwrap()
-            .into();
-
-        // delete all remaining items
-        managed_state
-            .apply_batch(
-                &[Op::Delete; 5],
-                None,
-                &[&value_buffer],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        helper_flush(&mut managed_state, epoch, &mut state_table).await;
-
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Int64(7))
-        );
+        Ok(())
     }
 }
