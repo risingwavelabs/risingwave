@@ -198,7 +198,7 @@ pub mod agg_executor {
         }
 
         match agg_call.kind {
-            AggKind::Min | AggKind::Max => {
+            AggKind::Min | AggKind::Max if !agg_call.append_only => {
                 add_column_desc(agg_call.args.arg_types()[0].clone());
                 column_mapping.push(agg_call.args.val_indices()[0]);
                 order_types.push(if agg_call.kind == AggKind::Max {
@@ -212,7 +212,9 @@ pub mod agg_executor {
                     order_types.push(OrderType::Ascending);
                 }
             }
-            AggKind::Sum
+            AggKind::Min /* append only */
+            | AggKind::Max /* append only */
+            | AggKind::Sum
             | AggKind::Count
             | AggKind::Avg
             | AggKind::SingleValue

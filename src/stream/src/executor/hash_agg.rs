@@ -299,11 +299,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(state_tables.iter_mut())
             {
                 let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
-                // TODO(rc): make this work for all agg kinds
-                if matches!(
-                    agg_call.kind,
-                    AggKind::Min | AggKind::Max | AggKind::StringAgg
-                ) {
+                // TODO(yuchao): make this work for all agg kinds in later PR
+                if matches!(agg_call.kind, AggKind::StringAgg)
+                    || (matches!(agg_call.kind, AggKind::Min | AggKind::Max)
+                        && !agg_call.append_only)
+                {
                     let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
                     agg_state
                         .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
@@ -929,7 +929,7 @@ mod tests {
                 "  I I  I
                 U- 1 2 8
                 U+ 1 4 1
-                U- 2 3 5 
+                U- 2 3 5
                 U+ 2 5 5
                 "
             )
