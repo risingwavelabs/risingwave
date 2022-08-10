@@ -518,26 +518,26 @@ mod tests {
             .register_table_fragments(&table_fragment_1, &table_properties)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 4);
+        assert_eq!(registered_number().await, 1);
         compaction_group_manager
             .register_table_fragments(&table_fragment_2, &table_properties)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 8);
+        assert_eq!(registered_number().await, 2);
 
         // Test unregister_table_fragments
         compaction_group_manager
             .unregister_table_fragments(&table_fragment_1)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 4);
+        assert_eq!(registered_number().await, 1);
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge_stale_members(&[table_fragment_2], &[], &[])
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 4);
+        assert_eq!(registered_number().await, 1);
         compaction_group_manager
             .purge_stale_members(&[], &[], &[])
             .await

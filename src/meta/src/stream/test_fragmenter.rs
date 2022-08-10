@@ -363,7 +363,7 @@ async fn test_fragmenter() -> MetaResult<()> {
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    let internal_table_ids = table_fragments.internal_table_ids();
+    let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);

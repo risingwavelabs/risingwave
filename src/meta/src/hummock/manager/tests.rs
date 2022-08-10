@@ -143,7 +143,7 @@ async fn test_unpin_snapshot_before() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
 
@@ -842,9 +842,8 @@ async fn test_invalid_sst_id() {
 
 #[tokio::test]
 async fn test_trigger_manual_compaction() {
-    let (_, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2;
 
     {
         let option = ManualCompactionOption::default();

@@ -416,6 +416,7 @@ impl TableFragments {
         self.fragments
             .values()
             .flat_map(|f| f.state_table_ids.clone())
+            .filter(|&t| t != self.table_id.table_id)
             .collect_vec()
     }
 

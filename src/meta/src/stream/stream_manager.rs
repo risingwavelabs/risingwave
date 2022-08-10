@@ -1076,8 +1076,7 @@ mod tests {
                 fragment_type: FragmentType::Sink as i32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
-                vnode_mapping: None,
-                state_table_ids: vec![],
+                ..Default::default()
             },
         );
         let mut table_fragments = TableFragments::new(table_id, fragments);
@@ -1162,6 +1161,7 @@ mod tests {
             .global_stream_manager
             .create_materialized_view(&mut table_fragments, &mut ctx)
             .await?;
+        println!("table fragments: {:?}", table_fragments);
 
         for actor in actors {
             let mut scheduled_actor = services
@@ -1206,13 +1206,6 @@ mod tests {
             .await?;
         assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
-
-        let table_fragments = services
-            .global_stream_manager
-            .fragment_manager
-            .select_table_fragments_by_table_id(&table_id)
-            .await?;
-        assert_eq!(4, table_fragments.internal_table_ids().len());
 
         // test drop materialized_view
         // the table_fragments will be deleted when barrier_manager run_command DropMaterializedView
