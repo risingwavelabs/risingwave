@@ -174,6 +174,10 @@ impl InnerConnectorSourceReader {
                         .with_label_values(&[actor_id.as_str(), source_id.as_str(), &*id])
                         .inc_by(msg.len() as u64);
                     output.send(Ok(msg)).await.ok();
+
+                    // Avoid occupying too much CPU time if the source is a data generator, like
+                    // DataGen and Nexmark.
+                    tokio::task::consume_budget().await;
                 }
             }
         }
