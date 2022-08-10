@@ -44,7 +44,7 @@ impl LogicalFilter {
             assert_input_ref!(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices().to_vec();
+        let pk_indices = input.logical_pk().to_vec();
         let mut functional_dependency = input.functional_dependency().clone();
         for i in &predicate.conjunctions {
             if let Some((col, _)) = i.as_eq_const() {

@@ -3,12 +3,13 @@
     create table t1 (v1 int, v2 int) with (appendonly = true);
     select v1, max(v2) as mx2 from t1 group by v1;
   stream_plan: |
-    StreamMaterialize { columns: [v1, sum(count)(hidden), mx2], pk_columns: [v1] }
-      StreamHashAgg { group_key: [t1.v1], aggs: [sum(count), max(max(t1.v2))] }
-        StreamExchange { dist: HashShard(t1.v1) }
-          StreamAppendOnlyHashAgg { group_key: [t1.v1, Vnode(t1._row_id)], aggs: [count, max(t1.v2)] }
-            StreamProject { exprs: [t1.v1, t1.v2, t1._row_id, Vnode(t1._row_id)] }
-              StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
+    StreamMaterialize { columns: [v1, mx2], pk_columns: [v1] }
+      StreamProject { exprs: [t1.v1, max(max(t1.v2))] }
+        StreamHashAgg { group_key: [t1.v1], aggs: [sum(count), max(max(t1.v2))] }
+          StreamExchange { dist: HashShard(t1.v1) }
+            StreamAppendOnlyHashAgg { group_key: [t1.v1, Vnode(t1._row_id)], aggs: [count, max(t1.v2)] }
+              StreamProject { exprs: [t1.v1, t1.v2, t1._row_id, Vnode(t1._row_id)] }
+                StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int) with (appendonly = true);
     create table t2 (v1 int, v3 int) with (appendonly = true);
@@ -33,8 +34,9 @@
     create table t1 (v1 int, v2 int) with (appendonly = true);
     select max(v1) as max_v1 from t1;
   stream_plan: |
-    StreamMaterialize { columns: [sum(count)(hidden), max_v1], pk_columns: [] }
-      StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), max(max(t1.v1))] }
-        StreamExchange { dist: Single }
-          StreamStatelessLocalSimpleAgg { aggs: [count, max(t1.v1)] }
-            StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
+    StreamMaterialize { columns: [max_v1], pk_columns: [] }
+      StreamProject { exprs: [max(max(t1.v1))] }
+        StreamAppendOnlyGlobalSimpleAgg { aggs: [sum(count), max(max(t1.v1))] }
+          StreamExchange { dist: Single }
+            StreamStatelessLocalSimpleAgg { aggs: [count, max(t1.v1)] }
+              StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: HashShard(t1._row_id) }
