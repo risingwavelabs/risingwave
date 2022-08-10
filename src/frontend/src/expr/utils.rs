@@ -353,7 +353,7 @@ pub struct CollectInputRef {
     input_bits: FixedBitSet,
 }
 
-impl ExprVisitor for CollectInputRef {
+impl ExprVisitor<()> for CollectInputRef {
     fn visit_input_ref(&mut self, expr: &InputRef) {
         self.input_bits.insert(expr.index());
     }

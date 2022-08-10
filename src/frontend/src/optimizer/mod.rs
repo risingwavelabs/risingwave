@@ -282,10 +282,23 @@ impl PlanRoot {
         plan
     }
 
+    /// Batch specific logical optimization
+    fn batch_logical_optimize(&self, plan: PlanRef) -> PlanRef {
+        self.optimize_by_rules(
+            plan,
+            "Index Selection".to_string(),
+            vec![IndexSelectionRule::create()],
+            ApplyOrder::BottomUp,
+        )
+    }
+
     /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
+
+        // Batch specific logical optimization
+        plan = self.batch_logical_optimize(plan);
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -318,6 +331,9 @@ impl PlanRoot {
     pub fn gen_batch_local_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
+
+        // Batch specific logical optimization
+        plan = self.batch_logical_optimize(plan);
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
