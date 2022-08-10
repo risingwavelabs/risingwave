@@ -19,6 +19,7 @@ use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
 use risingwave_expr::ExprError;
 use risingwave_rpc_client::error::RpcError;
+use risingwave_source::error::SourceError;
 use risingwave_storage::error::StorageError;
 
 use super::Barrier;
@@ -41,7 +42,7 @@ enum StreamExecutorErrorInner {
 
     // TODO: remove this
     #[error("Source error: {0}")]
-    SourceError(RwError),
+    SourceError(SourceError),
 
     // TODO: remove this
     #[error("Sink error: {0}")]
@@ -68,7 +69,7 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
 
-    pub fn source_error(error: impl Into<RwError>) -> Self {
+    pub fn source_error(error: impl Into<SourceError>) -> Self {
         StreamExecutorErrorInner::SourceError(error.into()).into()
     }
 

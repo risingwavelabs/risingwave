@@ -15,14 +15,25 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
+use madsim::task::JoinError;
+use risingwave_common::array::ArrayError;
+use risingwave_pb::ProstFieldNotFound;
+
 pub type SourceResult<T> = std::result::Result<T, SourceError>;
 
 #[derive(thiserror::Error, Debug)]
 enum SourceErrorInner {
     #[error("SourceReader error: {0}")]
     SourceReaderError(String),
+    #[error("Array error: {0}")]
+    ArrayError(ArrayError),
+    #[error("Join error: {0}")]
+    JoinError(JoinError),
+    #[error("ProstFieldNotFound error: {0}")]
+    ProstFieldNotFoundError(String),
     #[error(transparent)]
     Internal(anyhow::Error),
+
 }
 
 impl From<SourceErrorInner> for SourceError {
@@ -55,6 +66,31 @@ impl std::fmt::Debug for SourceError {
         Ok(())
     }
 }
+
+impl SourceError {
+    pub fn source_reader_error(s: String) -> Self {
+        SourceErrorInner::SourceReaderError(s).into()
+    }
+}
+
+impl From<ArrayError> for SourceError {
+    fn from(e: ArrayError) -> Self {
+        SourceErrorInner::ArrayError(e).into()
+    }
+}
+
+impl From<JoinError> for SourceError {
+    fn from(e: JoinError) -> Self {
+        SourceErrorInner::JoinError(e).into()
+    }
+}
+
+impl From<ProstFieldNotFound> for SourceError {
+    fn from(e: ProstFieldNotFound) -> Self {
+        SourceErrorInner::ProstFieldNotFoundError(e.0.to_string()).into()
+    }
+}
+
 impl From<anyhow::Error> for SourceError {
     fn from(a: anyhow::Error) -> Self {
         SourceErrorInner::Internal(a).into()

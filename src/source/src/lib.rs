@@ -37,10 +37,10 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
+use error::SourceResult;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::Result;
 pub use table_v2::*;
 
 use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
@@ -54,7 +54,7 @@ pub mod connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table_v2;
-mod error;
+pub mod error;
 
 extern crate core;
 extern crate maplit;
@@ -82,7 +82,7 @@ pub enum SourceStreamReaderImpl {
 
 #[async_trait]
 impl StreamSourceReader for SourceStreamReaderImpl {
-    async fn next(&mut self) -> Result<StreamChunkWithState> {
+    async fn next(&mut self) -> SourceResult<StreamChunkWithState> {
         match self {
             SourceStreamReaderImpl::TableV2(t) => t.next().await,
             SourceStreamReaderImpl::Connector(c) => c.next().await,
@@ -103,5 +103,5 @@ pub struct StreamChunkWithState {
 pub trait StreamSourceReader: Send + Sync + 'static {
     /// `next` always returns a StreamChunk. If the queue is empty, it will
     /// block until new data coming
-    async fn next(&mut self) -> Result<StreamChunkWithState>;
+    async fn next(&mut self) -> SourceResult<StreamChunkWithState>;
 }
