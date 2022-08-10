@@ -738,7 +738,7 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            &Self::Struct(val) => ser.serialize_struct_or_list(val.to_protobuf_owned())?,
+            &Self::Struct(v) => v.serialize(ser)?,
             &Self::List(val) => ser.serialize_struct_or_list(val.to_protobuf_owned())?,
         };
         Ok(())
@@ -791,10 +791,7 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            Ty::Struct { fields: _ } => {
-                let bytes = de.deserialize_struct_or_list()?;
-                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            }
+            Ty::Struct { fields } => StructValue::deserialize(&fields, de)?.to_scalar_value(),
             Ty::List { datatype: _ } => {
                 let bytes = de.deserialize_struct_or_list()?;
                 ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
