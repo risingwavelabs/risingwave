@@ -18,36 +18,38 @@ pub mod source;
 pub mod split;
 
 pub use config::build_client;
-
-const KINESIS_STREAM_NAME: &str = "kinesis.stream.name";
-const KINESIS_STREAM_REGION: &str = "kinesis.stream.region";
-const KINESIS_ENDPOINT: &str = "kinesis.endpoint";
-const KINESIS_CREDENTIALS_ACCESS_KEY: &str = "kinesis.credentials.access";
-const KINESIS_CREDENTIALS_SECRET_ACCESS_KEY: &str = "kinesis.credentials.secret";
-const KINESIS_CREDENTIALS_SESSION_TOKEN: &str = "kinesis.credentials.session_token";
-const KINESIS_ASSUMEROLE_ARN: &str = "kinesis.assumerole.arn";
-const KINESIS_ASSUMEROLE_EXTERNAL_ID: &str = "kinesis.assumerole.external_id";
-
 use serde::Deserialize;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KinesisProperties {
-    #[serde(rename = "kinesis.stream.name")]
+    #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
-    #[serde(rename = "kinesis.stream.region")]
+    #[serde(rename = "aws.region", alias = "kinesis.stream.region")]
     pub stream_region: String,
-    #[serde(rename = "kinesis.endpoint")]
+    #[serde(rename = "endpoint", alias = "kinesis.endpoint")]
     pub endpoint: Option<String>,
-    #[serde(rename = "kinesis.credentials.access")]
+    #[serde(
+        rename = "aws.credentials.access_key_id",
+        alias = "kinesis.credentials.access"
+    )]
     pub credentials_access_key: Option<String>,
-    #[serde(rename = "kinesis.credentials.secret")]
+    #[serde(
+        rename = "aws.credentials.secret_access_key",
+        alias = "kinesis.credentials.secret"
+    )]
     pub credentials_secret_access_key: Option<String>,
-    #[serde(rename = "kinesis.credentials.session_token")]
+    #[serde(
+        rename = "aws.credentials.session_token",
+        alias = "kinesis.credentials.session_token"
+    )]
     pub session_token: Option<String>,
-    #[serde(rename = "kinesis.assumerole.arn")]
+    #[serde(rename = "aws.credentials.role.arn", alias = "kinesis.assumerole.arn")]
     pub assume_role_arn: Option<String>,
-    #[serde(rename = "kinesis.assumerole.external_id")]
+    #[serde(
+        rename = "aws.credentials.role.external_id",
+        alias = "kinesis.assumerole.external_id"
+    )]
     pub assume_role_external_id: Option<String>,
 }
