@@ -537,27 +537,6 @@
               StreamExchange { dist: HashShard(b.x) }
                 StreamTableScan { table: b, columns: [b.x, b._row_id], pk: [b._row_id], distribution: HashShard(b._row_id) }
 - sql: |
-    /* Test that we can join subqueries without aliases */
-    select * from (select 1 as x) join (select 1 as x) using(x);
-  logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
-      LogicalJoin { type: Inner, on: (1:Int32 = 1:Int32), output: all }
-        LogicalProject { exprs: [1:Int32] }
-          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-        LogicalProject { exprs: [1:Int32] }
-          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-- sql: |
-    /* Test that we can join subqueries without aliases */
-    create table t1(x int);
-    select * from (select * from t1) join (select * from t1) using(x);
-  logical_plan: |
-    LogicalProject { exprs: [t1.x] }
-      LogicalJoin { type: Inner, on: (t1.x = t1.x), output: all }
-        LogicalProject { exprs: [t1.x] }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x] }
-        LogicalProject { exprs: [t1.x] }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x] }
-- sql: |
     /* Use lookup join with predicate */
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
