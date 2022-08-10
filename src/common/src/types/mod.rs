@@ -822,14 +822,20 @@ impl ScalarImpl {
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
                     DataType::Timestampz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
-                    DataType::Interval => size_of::<IntervalUnit>(),
-
+                    DataType::Interval => size_of::<i64>(),
                     DataType::Decimal => deserializer.read_decimal_len()?,
-                    DataType::List { .. } | DataType::Struct { .. } => {
-                        // these two types is var-length and should only be determine at runtime.
-                        // TODO: need some test for this case (e.g. e2e test)
-                        deserializer.read_struct_and_list_len()?
+                    // these two types is var-length and should only be determine at runtime.
+                    // TODO: need some test for this case (e.g. e2e test)
+                    DataType::List { datatype } => {
+                        let len = u32::deserialize(&mut *deserializer)?;
+                        (0..len)
+                            .map(|_| Self::encoding_data_size(datatype, deserializer))
+                            .try_fold(size_of::<u32>(), |a, b| b.map(|b| a + b))?
                     }
+                    DataType::Struct { fields } => fields
+                        .iter()
+                        .map(|field| Self::encoding_data_size(field, deserializer))
+                        .try_fold(0, |a, b| b.map(|b| a + b))?,
                     DataType::Varchar => deserializer.read_bytes_len()?,
                 };
 
