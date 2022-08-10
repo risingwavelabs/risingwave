@@ -26,7 +26,7 @@ use super::{
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, ExprType};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
@@ -581,10 +581,23 @@ impl LogicalJoin {
             }
         }
 
+        let left_schema_len = logical_join.left.schema().len();
+        struct Rewriter {
+            offset: usize,
+        }
+        impl ExprRewriter for Rewriter {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
+            }
+        }
+        let mut rewriter = Rewriter {
+            offset: left_schema_len,
+        };
+
         let new_other = predicate
             .other_cond()
             .clone()
-            .and(logical_scan.predicate().clone());
+            .and(logical_scan.predicate().clone().rewrite_expr(&mut rewriter));
         *predicate.other_cond_mut() = new_other;
 
         Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())

@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::barrier::Reschedule;
-use crate::cluster::WorkerId;
+use crate::manager::cluster::WorkerId;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};

@@ -469,7 +469,7 @@ impl LocalVersionManager {
             );
             // TODO: may apply different `is_local` according to whether local spill is enabled.
             let _ = self
-                .run_upload_task(order_index, epoch, payload, true)
+                .run_upload_task(order_index, epoch, payload)
                 .await
                 .inspect_err(|err| {
                     error!(
@@ -524,7 +524,7 @@ impl LocalVersionManager {
             }
         };
 
-        self.run_upload_task(order_index, epoch, task_payload, false)
+        self.run_upload_task(order_index, epoch, task_payload)
             .await?;
         tracing::trace!(
             "sync epoch {} finished. Task size {}",
@@ -544,12 +544,8 @@ impl LocalVersionManager {
         order_index: OrderIndex,
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
-        is_local: bool,
     ) -> HummockResult<()> {
-        let task_result = self
-            .shared_buffer_uploader
-            .flush(epoch, is_local, task_payload)
-            .await;
+        let task_result = self.shared_buffer_uploader.flush(epoch, task_payload).await;
 
         let mut local_version_guard = self.local_version.write();
         let shared_buffer_guard = local_version_guard
