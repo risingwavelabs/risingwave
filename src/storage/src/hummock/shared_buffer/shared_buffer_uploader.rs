@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compactor::{
-    compact_shared_buffer_by_compaction_group, CompactionExecutor, CompactorContext,
+    compact, CompactionExecutor, CompactorContext,
 };
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
@@ -104,7 +104,7 @@ impl SharedBufferUploader {
             .add_watermark_sst_id(Some(epoch))
             .await?;
 
-        let tables = compact_shared_buffer_by_compaction_group(mem_compactor_ctx, payload).await?;
+        let tables = compact(mem_compactor_ctx, payload).await?;
 
         let uploaded_sst_info = tables.into_iter().collect();
 

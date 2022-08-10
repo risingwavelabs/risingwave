@@ -34,7 +34,7 @@ use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
-pub async fn compact_shared_buffer_by_compaction_group(
+pub async fn compact(
     context: Arc<CompactorContext>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {

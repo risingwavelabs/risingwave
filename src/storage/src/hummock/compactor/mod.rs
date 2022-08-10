@@ -15,7 +15,7 @@
 mod compaction_executor;
 mod compaction_filter;
 mod context;
-mod flush;
+mod shared_buffer_compact;
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -30,7 +30,7 @@ pub use compaction_filter::{
     TTLCompactionFilter,
 };
 pub use context::CompactorContext;
-pub use flush::compact_shared_buffer_by_compaction_group;
+pub use shared_buffer_compact::compact;
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
