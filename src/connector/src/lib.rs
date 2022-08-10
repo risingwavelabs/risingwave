@@ -40,3 +40,4 @@ pub mod aws_utils;
 mod macros;
 pub mod sink;
 pub mod source;
+mod error;
