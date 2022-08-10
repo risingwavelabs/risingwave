@@ -822,7 +822,8 @@ impl ScalarImpl {
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
                     DataType::Timestampz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
-                    DataType::Interval => size_of::<i64>(),
+                    // IntervalUnit is serialized as (i32, i32, i64)
+                    DataType::Interval => size_of::<(i32, i32, i64)>(),
                     DataType::Decimal => deserializer.read_decimal_len()?,
                     // these two types is var-length and should only be determine at runtime.
                     // TODO: need some test for this case (e.g. e2e test)

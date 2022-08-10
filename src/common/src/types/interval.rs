@@ -275,10 +275,13 @@ impl Serialize for IntervalUnit {
     where
         S: serde::Serializer,
     {
-        let months_as_ms = self.months as i64 * MONTH_MS;
-        let days_as_ms = self.days as i64 * DAY_MS;
-        let ms = months_as_ms + days_as_ms + self.ms;
-        serializer.serialize_i64(ms)
+        let IntervalUnit { months, days, ms } = {
+            let mut justified = *self;
+            justified.justify_interval();
+            justified
+        };
+        // serialize the `IntervalUnit` as a tuple
+        (months, days, ms).serialize(serializer)
     }
 }
 
@@ -287,7 +290,8 @@ impl<'de> Deserialize<'de> for IntervalUnit {
     where
         D: serde::Deserializer<'de>,
     {
-        Ok(Self::from_total_ms(i64::deserialize(deserializer)?))
+        let (months, days, ms) = <(i32, i32, i64)>::deserialize(deserializer)?;
+        Ok(Self { months, days, ms })
     }
 }
 
