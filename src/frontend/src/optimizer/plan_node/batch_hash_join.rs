@@ -152,44 +152,42 @@ impl_plan_tree_node_for_binary! { BatchHashJoin }
 
 impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let mut left = self.left().to_distributed_with_required(
+        let mut right = self.right().to_distributed_with_required(
             &Order::any(),
             &RequiredDist::shard_by_key(
-                self.left().schema().len(),
-                &self.eq_join_predicate().left_eq_indexes(),
+                self.right().schema().len(),
+                &self.eq_join_predicate().right_eq_indexes(),
             ),
         )?;
-        let mut right = self.right();
-        let left_dist = left.distribution();
-        match left_dist {
+        let mut left = self.left();
+
+        let r2l = self
+            .eq_join_predicate()
+            .r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
+        let l2r = r2l.inverse();
+
+        let right_dist = right.distribution();
+        match right_dist {
             Distribution::HashShard(_) => {
-                let l2r = self
-                    .eq_join_predicate()
-                    .r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len())
-                    .inverse();
-                let right_dist = l2r
-                    .rewrite_required_distribution(&RequiredDist::PhysicalDist(left_dist.clone()));
-                right = right.to_distributed_with_required(&Order::any(), &right_dist)?;
+                let left_dist = r2l
+                    .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
+                left = left.to_distributed_with_required(&Order::any(), &left_dist)?;
             }
             Distribution::UpstreamHashShard(_) => {
-                right = right.to_distributed_with_required(
+                left = left.to_distributed_with_required(
                     &Order::any(),
                     &RequiredDist::shard_by_key(
-                        self.right().schema().len(),
-                        &self.eq_join_predicate().right_eq_indexes(),
+                        self.left().schema().len(),
+                        &self.eq_join_predicate().left_eq_indexes(),
                     ),
                 )?;
-                let right_dist = right.distribution();
-                match right_dist {
+                let left_dist = left.distribution();
+                match left_dist {
                     Distribution::HashShard(_) => {
-                        let r2l = self.eq_join_predicate().r2l_eq_columns_mapping(
-                            self.left().schema().len(),
-                            right.schema().len(),
+                        let right_dist = l2r.rewrite_required_distribution(
+                            &RequiredDist::PhysicalDist(left_dist.clone()),
                         );
-                        let left_dist = r2l.rewrite_required_distribution(
-                            &RequiredDist::PhysicalDist(right_dist.clone()),
-                        );
-                        left = left_dist.enforce_if_not_satisfies(left, &Order::any())?
+                        right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
                     }
                     Distribution::UpstreamHashShard(_) => {
                         left =
