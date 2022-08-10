@@ -14,6 +14,33 @@ services:
       timeout: 5s
       retries: 5
 
+  zookeeper:
+    image: confluentinc/cp-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+
+  kafka:
+    image: confluentinc/cp-kafka
+    ports:
+      - 29092:29092
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://${HOST_IP}:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+    healthcheck:
+      test: nc -z ${HOST_IP} 29092 || exit -1
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
   rw-build-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220822
     volumes:
@@ -24,5 +51,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ..:/risingwave
+
+  benchmark-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    depends_on:
+      - kafka
     volumes:
       - ..:/risingwave
