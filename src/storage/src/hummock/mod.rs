@@ -49,6 +49,8 @@ mod state_store;
 pub mod test_utils;
 pub mod utils;
 pub use utils::MemoryLimiter;
+mod compactor_sstable_store;
+pub use compactor_sstable_store::{CompactorMemoryCollector, CompactorSstableStore};
 pub mod vacuum;
 pub mod value;
 

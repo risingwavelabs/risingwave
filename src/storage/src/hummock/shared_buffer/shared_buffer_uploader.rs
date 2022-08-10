@@ -67,7 +67,7 @@ impl SharedBufferUploader {
             compaction_executor: compaction_executor.clone(),
             filter_key_extractor_manager,
             memory_limiter,
-            sstable_id_manager,
+            sstable_id_manager
         });
         Self {
             options,

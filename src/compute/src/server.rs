@@ -164,7 +164,7 @@ pub async fn compute_node_serve(
                 Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
+        monitor_cache(storage.sstable_store(), &registry).unwrap();
     }
 
     sub_tasks.push(MetaClient::start_heartbeat_loop(

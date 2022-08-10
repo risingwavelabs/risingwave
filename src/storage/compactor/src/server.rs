@@ -28,7 +28,9 @@ use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
+use risingwave_storage::hummock::{
+    CompactorMemoryCollector, CompactorSstableStore, MemoryLimiter, SstableIdManager, SstableStore,
+};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -45,7 +47,7 @@ pub async fn compactor_serve(
     client_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
-    let mut config = {
+    let config = {
         if opts.config_path.is_empty() {
             CompactorConfig::default()
         } else {
@@ -76,9 +78,6 @@ pub async fn compactor_serve(
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
-    // TODO: replace meta-cache with memory limiter.
-    config.storage.meta_cache_capacity_mb = config.storage.compactor_memory_limit_mb / 2;
-
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
     let object_store = Arc::new(
@@ -112,7 +111,17 @@ pub async fn compactor_serve(
     let memory_limiter = Arc::new(MemoryLimiter::new(
         (storage_config.compactor_memory_limit_mb as u64) << 20,
     ));
-    monitor_cache(sstable_store.clone(), memory_limiter.clone(), &registry).unwrap();
+    let block_cache_capacity = (storage_config.block_cache_capacity_mb as u64) << 20;
+    let compact_sstable_store = Arc::new(CompactorSstableStore::new(
+        sstable_store.clone(),
+        Arc::new(MemoryLimiter::new(block_cache_capacity)),
+        block_cache_capacity as usize,
+    ));
+    let memory_collector = Arc::new(CompactorMemoryCollector::new(
+        memory_limiter.clone(),
+        compact_sstable_store.clone(),
+    ));
+    monitor_cache(memory_collector, &registry).unwrap();
     let sstable_id_manager = Arc::new(SstableIdManager::new(
         hummock_meta_client.clone(),
         storage_config.sstable_id_remote_fetch_number,
