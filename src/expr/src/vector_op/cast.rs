@@ -15,7 +15,7 @@
 use std::any::type_name;
 use std::str::FromStr;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use num_traits::ToPrimitive;
 use risingwave_common::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
@@ -74,6 +74,13 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     DateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S %:z")
         .map(|ret| ret.timestamp_nanos() / 1000)
         .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))
+}
+
+#[inline(always)]
+pub fn timestampz_to_utc_string(elem: i64) -> Result<String> {
+    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
+    // from session. See #3552.
+    Ok(Utc.timestamp_nanos(elem * 1000).to_rfc3339())
 }
 
 #[inline(always)]
