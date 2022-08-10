@@ -29,14 +29,15 @@ use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::ClusterManagerRef;
 use crate::error::meta_error_to_tonic;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, Relation, SourceId, TableId};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, Relation,
+    SourceId, TableId,
+};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
-    SourceManagerRef,
+    ActorGraphBuilder, CreateMaterializedViewContext, GlobalStreamManagerRef, SourceManagerRef,
 };
 use crate::MetaResult;
 
