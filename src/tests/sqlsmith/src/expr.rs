@@ -162,22 +162,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         match self.rng.gen_bool(0.1) {
             true => self.gen_variadic_func(ret, can_agg, inside_agg),
-            false => self.gen_invariadic_func(ret, can_agg, inside_agg),
+            false => self.gen_fixed_func(ret, can_agg, inside_agg),
         }
     }
 
-    /// CASE
-    /// COALESCE
-    /// CONCAT
-    /// CONCAT_WS
+    /// Generates functions with variable arity:
+    /// CASE, COALESCE, CONCAT, CONCAT_WS
     fn gen_variadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         use DataTypeName as T;
         match ret {
-            T::Varchar => match self.rng.gen_range(0..=2) {
+            T::Varchar => match self.rng.gen_range(0..=3) {
                 0 => self.gen_case(ret, can_agg, inside_agg),
-                // 1 => self.gen_coalesce(ret, can_agg, inside_agg),
-                1 => self.gen_concat(can_agg, inside_agg),
-                2 => self.gen_concat_ws(can_agg, inside_agg),
+                1 => self.gen_coalesce(ret, can_agg, inside_agg),
+                2 => self.gen_concat(can_agg, inside_agg),
+                3 => self.gen_concat_ws(can_agg, inside_agg),
                 _ => unreachable!(),
             },
             _ => match self.rng.gen_bool(0.5) {
@@ -239,7 +237,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .collect()
     }
 
-    fn gen_invariadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
+    fn gen_fixed_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         let funcs = match FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
