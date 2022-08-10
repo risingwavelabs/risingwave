@@ -303,8 +303,6 @@ mod tests {
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 
-    // TODO(rc): add tests for all data types
-
     #[test]
     fn test_compare_rows() {
         let v10 = Some(ScalarImpl::Int32(42));
