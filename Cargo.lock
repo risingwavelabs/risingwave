@@ -5931,9 +5931,7 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f92dff6ab30d218f0d92b2378485ec7c13b1d341f065b018dfb42819ce35fdc"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "difference",
@@ -5942,6 +5940,7 @@ dependencies = [
  "humantime",
  "itertools",
  "log",
+ "madsim-tokio",
  "tempfile",
  "thiserror",
 ]

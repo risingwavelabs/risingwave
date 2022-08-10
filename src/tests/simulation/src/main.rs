@@ -51,6 +51,12 @@ pub struct Args {
     /// This determines worker_node_parallelism.
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
+
+    #[clap(short, long, default_value = "1")]
+    jobs: usize,
+
+    #[clap(long)]
+    ddl: Option<String>,
 }
 
 #[cfg(madsim)]
@@ -80,7 +86,9 @@ async fn main() {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // frontend node
+    let mut frontend_ip = vec![];
     for i in 1..=args.frontend_nodes {
+        frontend_ip.push(format!("192.168.2.{i}"));
         handle
             .create_node()
             .name(format!("frontend-{i}"))
@@ -125,7 +133,6 @@ async fn main() {
     }
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     // client
     let client_node = handle
         .create_node()
@@ -134,17 +141,48 @@ async fn main() {
         .build();
     client_node
         .spawn(async move {
-            let mut tester = sqllogictest::Runner::new(Postgres::connect("192.168.2.1").await);
-            let files = glob::glob(&args.files).expect("failed to read glob pattern");
-            for file in files {
-                let file = file.unwrap();
-                let path = file.as_path();
-                println!("{}", path.display());
-                tester.run_file_async(path).await.unwrap();
+            match args.ddl {
+                Some(ref file) => run_slt_task(file, &args, &frontend_ip).await,
+                None => (),
             }
+
+            run_slt_task(&args.files, &args, &frontend_ip).await
         })
         .await
         .unwrap();
+}
+
+async fn run_slt_task(glob: &str, args: &Args, frontend_ip: &[String]) {
+    let files = glob::glob(glob).expect("failed to read glob pattern");
+    let mut db = Postgres::connect(&frontend_ip[0], "dev").await;
+    let mut tasks = vec![];
+    let mut idx = 0;
+
+    for file in files {
+        let file = file.unwrap();
+        let db_name = file
+            .file_name()
+            .expect("not a valid filename")
+            .to_str()
+            .expect("not a UTF-8 filename");
+        let db_name = db_name
+            .replace(' ', "_")
+            .replace('.', "_")
+            .replace('-', "_");
+        sqllogictest::AsyncDB::run(&mut db, &format!("CREATE DATABASE {};", db_name))
+            .await
+            .expect("create logical DB failed");
+        tasks.push((
+            Postgres::connect(&frontend_ip[idx % args.frontend_nodes], &db_name).await,
+            file.to_string_lossy().to_string(),
+        ));
+        idx += 1;
+    }
+    let tester = sqllogictest::ParallelRunner {};
+    tester
+        .run_with_db_file_pairs_async(tasks, args.jobs)
+        .await
+        .expect("test failed");
 }
 
 struct Postgres {
@@ -153,11 +191,11 @@ struct Postgres {
 }
 
 impl Postgres {
-    async fn connect(host: &str) -> Self {
+    async fn connect(host: &str, dbname: &str) -> Self {
         let (client, connection) = tokio_postgres::Config::new()
             .host(host)
             .port(4566)
-            .dbname("dev")
+            .dbname(dbname)
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
