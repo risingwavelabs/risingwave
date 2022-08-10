@@ -30,7 +30,6 @@ pub use compaction_filter::{
     TTLCompactionFilter,
 };
 pub use context::CompactorContext;
-pub use shared_buffer_compact::compact;
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
@@ -44,6 +43,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
+pub use shared_buffer_compact::compact;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 

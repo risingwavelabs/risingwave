@@ -19,9 +19,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::compactor::{
-    compact, CompactionExecutor, CompactorContext,
-};
+use crate::hummock::compactor::{compact, CompactionExecutor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
 use crate::hummock::{HummockResult, MemoryLimiter, SstableIdManagerRef, SstableStoreRef};
