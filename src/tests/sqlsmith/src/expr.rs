@@ -188,20 +188,40 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_case(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
-        todo!()
+        let n = self.rng.gen_range(1..10);
+        Expr::Case {
+            operand: None,
+            conditions: self.gen_n_exprs_with_type(n, DataTypeName::Boolean, can_agg, inside_agg),
+            results: self.gen_n_exprs_with_type(n, ret, can_agg, inside_agg),
+            else_result: Some(Box::new(self.gen_expr(ret, can_agg, inside_agg))),
+        }
     }
     fn gen_coalesce(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         todo!()
     }
 
     fn gen_concat(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
-        todo!()
+        Expr::Function(make_simple_func("concat", &self.gen_concat_args(can_agg, inside_agg)))
     }
 
     fn gen_concat_ws(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
-        todo!()
+        let sep = self.gen_expr(DataTypeName::Varchar, can_agg, inside_agg);
+        let mut args = self.gen_concat_args(can_agg, inside_agg);
+        args.insert(0, sep);
+        Expr::Function(make_simple_func("concat_ws", &args))
     }
 
+    // TODO: Gen implicit cast here.
+    // Tracked by: https://github.com/singularity-data/risingwave/issues/3896.
+    fn gen_concat_args(&mut self, can_agg: bool, inside_agg: bool) -> Vec<Expr> {
+        let n = self.rng.gen_range(1..10);
+        self.gen_n_exprs_with_type(n, DataTypeName::Varchar, can_agg, inside_agg)
+    }
+
+    /// Generates `n` expressions of type `ret`.
+    fn gen_n_exprs_with_type(&mut self, n: usize, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Vec<Expr> {
+        (0..n).map(|_| self.gen_expr(ret, can_agg, inside_agg)).collect()
+    }
 
     fn gen_invariadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         let funcs = match FUNC_TABLE.get(&ret) {
