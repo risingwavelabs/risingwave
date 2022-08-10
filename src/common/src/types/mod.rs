@@ -990,13 +990,11 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
 #[cfg(test)]
 mod tests {
     use std::ops::Neg;
-    use std::sync::Arc;
 
     use itertools::Itertools;
     use rand::thread_rng;
 
     use super::*;
-    use crate::array::{ArrayBuilder, ArrayImpl, ArrayMeta, ListArrayBuilder, StructArrayBuilder};
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
