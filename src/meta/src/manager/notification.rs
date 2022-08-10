@@ -22,7 +22,7 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tonic::Status;
 
-use crate::cluster::WorkerKey;
+use crate::manager::cluster::WorkerKey;
 
 pub type Notification = std::result::Result<SubscribeResponse, Status>;
 

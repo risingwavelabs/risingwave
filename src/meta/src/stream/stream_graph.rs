@@ -32,9 +32,10 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-use super::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
-use crate::cluster::WorkerId;
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use super::CreateMaterializedViewContext;
+use crate::manager::{
+    BuildGraphInfo, FragmentManagerRef, IdCategory, IdGeneratorManagerRef, WorkerId,
+};
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::MetaResult;
