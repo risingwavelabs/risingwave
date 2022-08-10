@@ -183,9 +183,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     /// Enable recovery or not when failover.
     enable_recovery: bool,
 
-    /// Enable migrate expired actors to newly joined node
-    enable_migrate: bool,
-
     /// The queue of scheduled barriers.
     scheduled_barriers: ScheduledBarriers,
 
@@ -467,7 +464,6 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
-        let enable_migrate = env.opts.enable_migrate;
         let interval = env.opts.checkpoint_interval;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
         tracing::info!(
@@ -480,7 +476,6 @@ where
         Self {
             interval,
             enable_recovery,
-            enable_migrate,
             cluster_manager,
             catalog_manager,
             fragment_manager,
