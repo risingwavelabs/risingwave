@@ -406,11 +406,9 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         {
             let deserialize_res = deserializer
                 .deserialize(&serialized_pk, &value)
-                .map_err(err)?;
-            match deserialize_res {
-                Some(deserialize_res) => Ok(Some(deserialize_res.2)),
-                None => Ok(None),
-            }
+                .map_err(err)?
+                .unwrap();
+            Ok(Some(deserialize_res.2))
         } else {
             Ok(None)
         }
@@ -495,11 +493,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                     }
 
                     let vnode = self.compute_vnode_by_row(&old_row);
-                    let (key, _) = self
-                        .row_serializer
-                        .serialize(vnode, &pk, old_row)
-                        .map_err(err)?;
 
+                    let key = [vnode.to_be_bytes().as_slice(), &pk].concat();
                     local.delete(key);
                 }
                 RowOp::Update((old_row, new_row)) => {
@@ -838,10 +833,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
             {
                 yield (pk, row)
             }
-        }
-
-        if let Some((_vnode, pk, row)) = self.row_deserializer.take() {
-            yield (pk, row);
         }
     }
 }

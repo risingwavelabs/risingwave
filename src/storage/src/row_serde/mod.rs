@@ -86,9 +86,6 @@ pub trait RowDeserialize {
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>>;
-
-    /// Take the remaining data out of the deserializer.
-    fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
 }
 
 /// `RowSerde` provides the ability to convert between Row and KV entry.

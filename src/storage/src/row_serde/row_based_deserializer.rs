@@ -33,10 +33,6 @@ impl RowDeserialize for RowBasedDeserializer {
         Self { column_mapping }
     }
 
-    fn take(&mut self) -> Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)> {
-        None
-    }
-
     fn deserialize(
         &mut self,
         raw_key: impl AsRef<[u8]>,
