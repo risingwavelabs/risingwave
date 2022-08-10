@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::{NON_RESERVED_PG_CATALOG_TABLE_ID, NON_RESERVED_USER_ID};
 use tokio::sync::RwLock;
 
-use crate::cluster::META_NODE_ID;
+use crate::manager::cluster::META_NODE_ID;
 use crate::model::MetadataModelResult;
 use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 

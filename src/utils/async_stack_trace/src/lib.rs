@@ -31,6 +31,7 @@ use crate::context::{try_with_context, with_context};
 mod context;
 mod manager;
 
+pub use context::current_context;
 pub use manager::{StackTraceManager, StackTraceReport, TraceReporter};
 
 /// A cheaply-cloneable span string.

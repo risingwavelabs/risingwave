@@ -17,7 +17,6 @@ use std::sync::Arc;
 use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
 use tracing::event;
 use tracing_futures::Instrument;
 
@@ -53,20 +52,10 @@ pub async fn trace(
             input_pos = input_pos,
         )
     };
-    let debug_context = || DebugContext::StreamExecutor {
-        actor_id,
-        executor_id: executor_id as u32, // Use the lower 32 bit to match the dashboard.
-        identity: info.identity.clone(),
-    };
 
     pin_mut!(input);
 
-    while let Some(message) = DEBUG_CONTEXT
-        .scope(debug_context(), input.next())
-        .instrument(span())
-        .await
-        .transpose()?
-    {
+    while let Some(message) = input.next().instrument(span()).await.transpose()? {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
                 if ENABLE_EXECUTOR_ROW_COUNT {

@@ -37,7 +37,7 @@ use uuid::Uuid;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
-use crate::cluster::WorkerId;
+use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
@@ -80,10 +80,12 @@ where
             let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
-            if self.enable_migrate {
+            {
                 // Migrate expired actors to newly joined node by changing actor_map
-                self.migrate_actors(&info).await?;
-                info = self.resolve_actor_info_for_recovery().await;
+                let migrated = self.migrate_actors(&info).await?;
+                if migrated {
+                    info = self.resolve_actor_info_for_recovery().await;
+                }
             }
 
             // Reset all compute nodes, stop and drop existing actors.
@@ -200,7 +202,7 @@ where
         (migrate_map, node_map)
     }
 
-    async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<()> {
+    async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
         debug!("start migrate actors.");
         // get expired workers
         let expired_workers = info
@@ -211,7 +213,7 @@ where
             .collect_vec();
         if expired_workers.is_empty() {
             debug!("no expired workers, skipping.");
-            return Ok(());
+            return Ok(false);
         }
         debug!("got expired workers {:#?}", expired_workers);
         let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
@@ -244,8 +246,7 @@ where
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
     /// already.
     async fn sync_sources(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let sources = catalog_guard.list_sources().await?;
+        let sources = self.catalog_manager.list_sources().await?;
 
         let futures = info.node_map.iter().map(|(_, node)| {
             let request = SyncSourcesRequest {

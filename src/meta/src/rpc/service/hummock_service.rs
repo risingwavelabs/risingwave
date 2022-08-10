@@ -24,9 +24,9 @@ use crate::error::meta_error_to_tonic;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
+use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 
 pub struct HummockServiceImpl<S>
 where
