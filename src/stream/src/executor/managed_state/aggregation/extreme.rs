@@ -214,6 +214,14 @@ impl<S: StateStore> GenericExtremeState<S> {
         }
     }
 
+    fn state_row_to_cache_row(&self, state_row: &Row) -> Row {
+        state_row.by_indices(
+            &(0..self.state_table_col_mapping.size())
+                .skip(self.group_key_len())
+                .collect_vec(),
+        )
+    }
+
     /// Apply a batch of data to the state.
     fn apply_batch_inner(
         &mut self,
@@ -237,15 +245,16 @@ impl<S: StateStore> GenericExtremeState<S> {
                     .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
                     .collect(),
             );
+            let cache_row = self.state_row_to_cache_row(&state_row);
 
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.cache.insert(state_row.clone());
+                    self.cache.insert(cache_row);
                     state_table.insert(state_row)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    self.cache.remove(state_row.clone());
+                    self.cache.remove(cache_row);
                     state_table.delete(state_row)?;
                     self.total_count -= 1;
                 }
@@ -282,11 +291,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity.unwrap_or(usize::MAX)) {
                 let state_row = state_row?;
-                let cache_row = state_row.as_ref().by_indices(
-                    &(0..self.state_table_col_mapping.size())
-                        .skip(self.group_key_len())
-                        .collect_vec(),
-                );
+                let cache_row = self.state_row_to_cache_row(state_row.as_ref());
                 self.cache.insert(cache_row);
             }
 
