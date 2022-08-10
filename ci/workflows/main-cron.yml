@@ -76,7 +76,7 @@ steps:
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
-    command: "ci/scripts/deterministic-unit-test.sh -p ci-dev"
+    command: "ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -87,7 +87,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "ci/scripts/deterministic-e2e-test.sh -p ci-dev"
+    command: "ci/scripts/deterministic-e2e-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
