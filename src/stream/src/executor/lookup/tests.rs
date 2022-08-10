@@ -19,12 +19,8 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::types::DataType;
-use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
-use risingwave_storage::store::ReadOptions;
 use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
@@ -265,30 +261,6 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
-
-    for (k, v) in store
-        .scan::<_, Vec<u8>>(
-            None,
-            ..,
-            None,
-            ReadOptions {
-                epoch: u64::MAX,
-                table_id: Default::default(),
-                retention_seconds: None,
-            },
-        )
-        .await
-        .unwrap()
-    {
-        // Do not deserialize datum for SENTINEL_CELL_ID cuz the value length is 0.
-        if deserialize_column_id(&k[k.len() - 4..]).unwrap() != SENTINEL_CELL_ID {
-            println!(
-                "{:?} => {:?}",
-                k,
-                deserialize_cell(v, &DataType::Int64).unwrap()
-            );
-        }
-    }
 
     println!("{:#?}", msgs);
 
