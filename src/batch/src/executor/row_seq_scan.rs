@@ -25,6 +25,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::HummockVersionEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
@@ -230,7 +231,10 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             unreachable!()
                         } else if pk_prefix_value.size() == pk_len {
                             let row = {
-                                keyspace.state_store().wait_epoch(source.epoch).await?;
+                                keyspace
+                                    .state_store()
+                                    .wait_epoch(HummockVersionEpoch::Checkpoint(source.epoch))
+                                    .await?;
                                 table.get_row(&pk_prefix_value, source.epoch).await?
                             };
                             ScanType::PointGet(row)
@@ -238,7 +242,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             assert!(pk_prefix_value.size() < pk_len);
                             let iter = table
                                 .batch_iter_with_pk_bounds(
-                                    source.epoch,
+                                    HummockVersionEpoch::Checkpoint(source.epoch),
                                     &pk_prefix_value,
                                     next_col_bounds,
                                 )

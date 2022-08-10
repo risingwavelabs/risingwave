@@ -57,6 +57,22 @@ pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
     id & LOCAL_SST_ID_MASK == 0
 }
 
+#[derive(Debug, Clone)]
+pub enum HummockVersionEpoch {
+    Checkpoint(HummockEpoch),
+    Reading(HummockEpoch),
+    NoWait(HummockEpoch),
+}
+
+impl HummockVersionEpoch {
+    pub fn get_epoch(&self) -> HummockEpoch {
+        *match self {
+            HummockVersionEpoch::Checkpoint(epoch) => epoch,
+            HummockVersionEpoch::Reading(epoch) => epoch,
+            HummockVersionEpoch::NoWait(epoch) => epoch,
+        }
+    }
+}
 pub struct SstIdRange {
     // inclusive
     pub start_id: HummockSstableId,

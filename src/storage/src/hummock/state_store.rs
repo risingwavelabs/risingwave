@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key};
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{HummockVersionEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
@@ -540,7 +540,7 @@ impl StateStore for HummockStorage {
         self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, epoch: HummockVersionEpoch) -> Self::WaitEpochFuture<'_> {
         async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
     }
 

@@ -16,6 +16,7 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::HummockVersionEpoch;
 
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -117,7 +118,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, _epoch: HummockVersionEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             panic!("should not wait epoch from the panic state store!");
         }

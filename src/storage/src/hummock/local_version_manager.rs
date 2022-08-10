@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -288,7 +288,8 @@ impl LocalVersionManager {
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
+            conflict_detector
+                .set_watermark(newly_pinned_version.max_committed_epoch_for_checkpoint);
         }
 
         let mut new_version = old_version.clone();
@@ -307,21 +308,47 @@ impl LocalVersionManager {
     }
 
     /// Waits until the local hummock version contains the given committed epoch
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
-        if epoch == HummockEpoch::MAX {
+    pub async fn wait_epoch(&self, wait_epoch: HummockVersionEpoch) -> HummockResult<()> {
+        if wait_epoch.get_epoch() == HummockEpoch::MAX {
             panic!("epoch should not be u64::MAX");
         }
         let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
             let (pinned_version_id, pinned_version_epoch) = {
                 let current_version = self.local_version.read();
-                if current_version.pinned_version().max_committed_epoch() >= epoch {
-                    return Ok(());
+                match wait_epoch {
+                    HummockVersionEpoch::Checkpoint(epoch) => {
+                        if current_version
+                            .pinned_version()
+                            .max_committed_epoch_for_checkpoint()
+                            >= epoch
+                        {
+                            return Ok(());
+                        }
+                        (
+                            current_version.pinned_version().id(),
+                            current_version
+                                .pinned_version()
+                                .max_committed_epoch_for_checkpoint(),
+                        )
+                    }
+                    HummockVersionEpoch::Reading(epoch) => {
+                        if current_version
+                            .pinned_version()
+                            .max_committed_epoch_for_read()
+                            >= epoch
+                        {
+                            return Ok(());
+                        }
+                        (
+                            current_version.pinned_version().id(),
+                            current_version
+                                .pinned_version()
+                                .max_committed_epoch_for_read(),
+                        )
+                    }
+                    HummockVersionEpoch::NoWait(_) => panic!("No wait can't wait epoch"),
                 }
-                (
-                    current_version.pinned_version().id(),
-                    current_version.pinned_version().max_committed_epoch(),
-                )
             };
             match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
                 Err(_) => {
@@ -333,8 +360,8 @@ impl LocalVersionManager {
                     // scheduled on the same CN with the same distribution as
                     // the upstream MV. See #3845 for more details.
                     tracing::warn!(
-                        "wait_epoch {} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
-                        epoch, pinned_version_id, pinned_version_epoch
+                        "wait_epoch {:?} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
+                        wait_epoch, pinned_version_id, pinned_version_epoch
                     );
                     continue;
                 }

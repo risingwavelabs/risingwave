@@ -314,7 +314,10 @@ async fn test_hummock_transaction() {
             .unwrap()
             .2
             .unwrap();
-        assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
+        assert_eq!(
+            pinned_version.max_committed_epoch_for_checkpoint,
+            INVALID_EPOCH
+        );
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
         hummock_manager.unpin_version(context_id).await.unwrap();
@@ -336,7 +339,7 @@ async fn test_hummock_transaction() {
             .unwrap()
             .2
             .unwrap();
-        assert_eq!(pinned_version.max_committed_epoch, epoch1);
+        assert_eq!(pinned_version.max_committed_epoch_for_checkpoint, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
@@ -366,7 +369,7 @@ async fn test_hummock_transaction() {
             .unwrap()
             .2
             .unwrap();
-        assert_eq!(pinned_version.max_committed_epoch, epoch1);
+        assert_eq!(pinned_version.max_committed_epoch_for_checkpoint, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
@@ -391,7 +394,7 @@ async fn test_hummock_transaction() {
             .unwrap()
             .2
             .unwrap();
-        assert_eq!(pinned_version.max_committed_epoch, epoch2);
+        assert_eq!(pinned_version.max_committed_epoch_for_checkpoint, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)

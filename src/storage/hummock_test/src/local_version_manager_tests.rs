@@ -49,7 +49,7 @@ async fn test_update_pinned_version() {
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_version_id = pinned_version.id();
-    let initial_max_commit_epoch = pinned_version.max_committed_epoch();
+    let initial_max_commit_epoch = pinned_version.max_committed_epoch_for_checkpoint();
 
     let epochs: Vec<u64> = vec![
         initial_max_commit_epoch + 1,
@@ -91,7 +91,7 @@ async fn test_update_pinned_version() {
     // Update version for epochs[0]
     let version = HummockVersion {
         id: initial_version_id + 1,
-        max_committed_epoch: epochs[0],
+        max_committed_epoch_for_checkpoint: epochs[0],
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version)));
@@ -111,7 +111,7 @@ async fn test_update_pinned_version() {
     // Update version for epochs[1]
     let version = HummockVersion {
         id: initial_version_id + 2,
-        max_committed_epoch: epochs[1],
+        max_committed_epoch_for_checkpoint: epochs[1],
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version)));
@@ -136,7 +136,7 @@ async fn test_update_uncommitted_ssts() {
     .await;
 
     let pinned_version = local_version_manager.get_pinned_version();
-    let max_commit_epoch = pinned_version.max_committed_epoch();
+    let max_commit_epoch = pinned_version.max_committed_epoch_for_checkpoint();
     let initial_id = pinned_version.id();
     let version = pinned_version.version();
 
@@ -279,7 +279,7 @@ async fn test_update_uncommitted_ssts() {
     // Update version for epochs[0]
     let version = HummockVersion {
         id: initial_id + 1,
-        max_committed_epoch: epochs[0],
+        max_committed_epoch_for_checkpoint: epochs[0],
         ..Default::default()
     };
     assert!(local_version_manager
@@ -313,7 +313,7 @@ async fn test_update_uncommitted_ssts() {
     // Update version for epochs[1]
     let version = HummockVersion {
         id: initial_id + 2,
-        max_committed_epoch: epochs[1],
+        max_committed_epoch_for_checkpoint: epochs[1],
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version.clone())));
@@ -343,7 +343,7 @@ async fn test_clear_shared_buffer() {
     .await;
 
     let pinned_version = local_version_manager.get_pinned_version();
-    let initial_max_commit_epoch = pinned_version.max_committed_epoch();
+    let initial_max_commit_epoch = pinned_version.max_committed_epoch_for_checkpoint();
 
     let epochs: Vec<u64> = vec![initial_max_commit_epoch + 1, initial_max_commit_epoch + 2];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =

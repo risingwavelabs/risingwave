@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -292,7 +292,10 @@ async fn test_basic() {
         )
         .await
         .unwrap();
-    hummock_storage.wait_epoch(epoch1).await.unwrap();
+    hummock_storage
+        .wait_epoch(HummockVersionEpoch::Checkpoint(epoch1))
+        .await
+        .unwrap();
     let value = hummock_storage
         .get(
             &Bytes::from("bb"),
@@ -350,7 +353,7 @@ async fn test_state_store_sync() {
     let mut epoch: HummockEpoch = hummock_storage
         .local_version_manager()
         .get_pinned_version()
-        .max_committed_epoch()
+        .max_committed_epoch_for_checkpoint()
         + 1;
 
     // ingest 16B batch
@@ -658,7 +661,7 @@ async fn test_write_anytime() {
         .local_version_manager()
         .get_local_version()
         .pinned_version()
-        .max_committed_epoch();
+        .max_committed_epoch_for_checkpoint();
 
     let epoch1 = initial_epoch + 1;
 
@@ -903,7 +906,7 @@ async fn test_delete_get() {
     let initial_epoch = hummock_storage
         .local_version_manager()
         .get_pinned_version()
-        .max_committed_epoch();
+        .max_committed_epoch_for_checkpoint();
     let epoch1 = initial_epoch + 1;
     let batch1 = vec![
         (Bytes::from("aa"), StorageValue::new_default_put("111")),
@@ -943,7 +946,10 @@ async fn test_delete_get() {
         .commit_epoch(epoch2, ssts)
         .await
         .unwrap();
-    hummock_storage.wait_epoch(epoch2).await.unwrap();
+    hummock_storage
+        .wait_epoch(HummockVersionEpoch::Checkpoint(epoch2))
+        .await
+        .unwrap();
     assert!(hummock_storage
         .get(
             "bb".as_bytes(),

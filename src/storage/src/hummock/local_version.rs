@@ -73,9 +73,11 @@ impl LocalVersion {
 
     pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
-        if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
+        if self.pinned_version.max_committed_epoch_for_checkpoint()
+            < new_pinned_version.max_committed_epoch_for_checkpoint
+        {
             self.shared_buffer
-                .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
+                .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch_for_checkpoint);
         }
 
         self.version_ids_in_use.insert(new_pinned_version.id);
@@ -91,7 +93,8 @@ impl LocalVersion {
         use parking_lot::RwLockReadGuard;
         let (pinned_version, shared_buffer) = {
             let guard = this.read();
-            let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
+            let smallest_uncommitted_epoch =
+                guard.pinned_version.max_committed_epoch_for_checkpoint() + 1;
             let pinned_version = guard.pinned_version.clone();
             (
                 pinned_version,
@@ -164,8 +167,12 @@ impl PinnedVersion {
         }
     }
 
-    pub fn max_committed_epoch(&self) -> u64 {
-        self.version.max_committed_epoch
+    pub fn max_committed_epoch_for_checkpoint(&self) -> u64 {
+        self.version.max_committed_epoch_for_checkpoint
+    }
+
+    pub fn max_committed_epoch_for_read(&self) -> u64 {
+        self.version.max_committed_epoch_for_read
     }
 
     pub fn safe_epoch(&self) -> u64 {

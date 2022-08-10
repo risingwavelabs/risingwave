@@ -29,7 +29,7 @@ use crate::rpc::metrics::MetaMetrics;
 pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
     metrics
         .max_committed_epoch
-        .set(current_version.max_committed_epoch as i64);
+        .set(current_version.max_committed_epoch_for_checkpoint as i64);
     metrics
         .version_size
         .set(current_version.encoded_len() as i64);
