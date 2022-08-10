@@ -792,10 +792,7 @@ impl ScalarImpl {
                 NaiveDateWrapper::with_days(days)?
             }),
             Ty::Struct { fields } => StructValue::deserialize(&fields, de)?.to_scalar_value(),
-            Ty::List { datatype: _ } => {
-                let bytes = de.deserialize_struct_or_list()?;
-                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            }
+            Ty::List { datatype } => ListValue::deserialize(&datatype, de)?.to_scalar_value(),
         })
     }
 
