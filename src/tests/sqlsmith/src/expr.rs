@@ -173,17 +173,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_variadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         use DataTypeName as T;
         match ret {
-            T::Varchar => match self.rng.gen_range(0..=3) {
+            T::Varchar => match self.rng.gen_range(0..=2) {
                 0 => self.gen_case(ret, can_agg, inside_agg),
-                1 => self.gen_coalesce(ret, can_agg, inside_agg),
-                2 => self.gen_concat(ret, can_agg, inside_agg),
-                3 => self.gen_concat_ws(ret, can_agg, inside_agg),
+                // 1 => self.gen_coalesce(ret, can_agg, inside_agg),
+                1 => self.gen_concat(can_agg, inside_agg),
+                2 => self.gen_concat_ws(can_agg, inside_agg),
                 _ => unreachable!(),
-            }
-            _ => match self.rng.gen_bool(0.5) {
-                true => self.gen_case(ret, can_agg, inside_agg),
-                false => self.gen_coalesce(ret, can_agg, inside_agg),
-            }
+            },
+            // _ => match self.rng.gen_bool(0.5) {
+                // true => self.gen_case(ret, can_agg, inside_agg),
+            _ => self.gen_case(ret, can_agg, inside_agg)
+                // false => self.gen_coalesce(ret, can_agg, inside_agg),
+            // },
         }
     }
 
@@ -196,15 +197,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             else_result: Some(Box::new(self.gen_expr(ret, can_agg, inside_agg))),
         }
     }
-    fn gen_coalesce(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
-        todo!()
+
+    // fn gen_coalesce(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
+    //     todo!()
+    // }
+
+    fn gen_concat(&mut self, can_agg: bool, inside_agg: bool) -> Expr {
+        Expr::Function(make_simple_func(
+            "concat",
+            &self.gen_concat_args(can_agg, inside_agg),
+        ))
     }
 
-    fn gen_concat(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
-        Expr::Function(make_simple_func("concat", &self.gen_concat_args(can_agg, inside_agg)))
-    }
-
-    fn gen_concat_ws(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
+    fn gen_concat_ws(&mut self, can_agg: bool, inside_agg: bool) -> Expr {
         let sep = self.gen_expr(DataTypeName::Varchar, can_agg, inside_agg);
         let mut args = self.gen_concat_args(can_agg, inside_agg);
         args.insert(0, sep);
@@ -219,8 +224,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates `n` expressions of type `ret`.
-    fn gen_n_exprs_with_type(&mut self, n: usize, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Vec<Expr> {
-        (0..n).map(|_| self.gen_expr(ret, can_agg, inside_agg)).collect()
+    fn gen_n_exprs_with_type(
+        &mut self,
+        n: usize,
+        ret: DataTypeName,
+        can_agg: bool,
+        inside_agg: bool,
+    ) -> Vec<Expr> {
+        (0..n)
+            .map(|_| self.gen_expr(ret, can_agg, inside_agg))
+            .collect()
     }
 
     fn gen_invariadic_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
