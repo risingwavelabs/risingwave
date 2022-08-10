@@ -739,7 +739,7 @@ impl ScalarRefImpl<'_> {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
             &Self::Struct(v) => v.serialize(ser)?,
-            &Self::List(val) => ser.serialize_struct_or_list(val.to_protobuf_owned())?,
+            &Self::List(v) => v.serialize(ser)?,
         };
         Ok(())
     }
