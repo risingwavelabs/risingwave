@@ -27,8 +27,8 @@ pub struct PlanBase {
     pub id: PlanNodeId,
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
-    /// the pk indices of the PlanNode's output, a empty pk_indices vec means there is no pk
-    pub pk_indices: Vec<usize>,
+    /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk
+    pub logical_pk: Vec<usize>,
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
@@ -45,7 +45,7 @@ impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,
         schema: Schema,
-        pk_indices: Vec<usize>,
+        logical_pk: Vec<usize>,
         functional_dependency: FunctionalDependencySet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
@@ -53,7 +53,7 @@ impl PlanBase {
             id,
             ctx,
             schema,
-            pk_indices,
+            logical_pk,
             dist: Distribution::Single,
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
@@ -65,11 +65,10 @@ impl PlanBase {
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,
-        pk_indices: Vec<usize>,
+        logical_pk: Vec<usize>,
         dist: Distribution,
         append_only: bool,
     ) -> Self {
-        // assert!(!pk_indices.is_empty()); TODO: reopen it when ensure the pk for stream op
         let id = ctx.next_plan_node_id();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         Self {
@@ -78,7 +77,7 @@ impl PlanBase {
             schema,
             dist,
             order: Order::any(),
-            pk_indices,
+            logical_pk,
             append_only,
             functional_dependency,
         }
@@ -98,7 +97,7 @@ impl PlanBase {
             schema,
             dist,
             order,
-            pk_indices: vec![],
+            logical_pk: vec![],
             // Batch plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
@@ -118,8 +117,8 @@ macro_rules! impl_base_delegate {
                 pub fn schema(&self) -> &Schema {
                     &self.plan_base().schema
                 }
-                pub fn pk_indices(&self) -> &[usize] {
-                    &self.plan_base().pk_indices
+                pub fn logical_pk(&self) -> &[usize] {
+                    &self.plan_base().logical_pk
                 }
                 pub fn order(&self) -> &Order {
                     &self.plan_base().order
