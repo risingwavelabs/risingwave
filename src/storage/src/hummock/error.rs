@@ -50,9 +50,11 @@ enum HummockErrorInner {
     CompactionExecutor(String),
     #[error("TieredCache error {0}.")]
     TieredCache(String),
-    #[error("Other error {0}.")]
-    SstIdTrackerError(String),
     #[error("SstIdTracker error {0}.")]
+    SstIdTrackerError(String),
+    #[error("CompactionGroup error {0}.")]
+    CompactionGroupError(String),
+    #[error("Other error {0}.")]
     Other(String),
 }
 
@@ -119,6 +121,10 @@ impl HummockError {
 
     pub fn sst_id_tracker_error(error: impl ToString) -> HummockError {
         HummockErrorInner::SstIdTrackerError(error.to_string()).into()
+    }
+
+    pub fn compaction_group_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::CompactionGroupError(error.to_string()).into()
     }
 
     pub fn tiered_cache(error: impl ToString) -> HummockError {
