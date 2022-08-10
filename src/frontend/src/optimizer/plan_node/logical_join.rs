@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
     LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -885,17 +885,53 @@ impl ToStream for LogicalJoin {
         );
 
         if predicate.has_eq() {
-            let right = self
-                .right()
-                .to_stream_with_dist_required(&RequiredDist::hash_shard(
-                    &predicate.right_eq_indexes(),
-                ))?;
+            let mut left =
+                self.left()
+                    .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                        self.left().schema().len(),
+                        &predicate.left_eq_indexes(),
+                    ))?;
+            let mut right = self.right();
+            let left_dist = left.distribution();
+            match left_dist {
+                Distribution::HashShard(_) => {
+                    let l2r = predicate
+                        .r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len())
+                        .inverse();
+                    let right_dist = l2r.rewrite_required_distribution(
+                        &RequiredDist::PhysicalDist(left_dist.clone()),
+                    );
+                    right = right.to_stream_with_dist_required(&right_dist)?;
+                }
+                Distribution::UpstreamHashShard(_) => {
+                    right = right.to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                        self.right().schema().len(),
+                        &predicate.right_eq_indexes(),
+                    ))?;
+                    let right_dist = right.distribution();
+                    match right_dist {
+                        Distribution::HashShard(_) => {
+                            let r2l = predicate.r2l_eq_columns_mapping(
+                                self.left().schema().len(),
+                                right.schema().len(),
+                            );
+                            let left_dist = r2l.rewrite_required_distribution(
+                                &RequiredDist::PhysicalDist(right_dist.clone()),
+                            );
+                            left = left_dist.enforce_if_not_satisfies(left, &Order::any())?
+                        }
+                        Distribution::UpstreamHashShard(_) => {
+                            left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
+                                .enforce_if_not_satisfies(left, &Order::any())?;
+                            right = RequiredDist::hash_shard(&predicate.right_eq_indexes())
+                                .enforce_if_not_satisfies(right, &Order::any())?;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                _ => unreachable!(),
+            }
 
-            let left = self
-                .left()
-                .to_stream_with_dist_required(&RequiredDist::hash_shard(
-                    &predicate.left_eq_indexes(),
-                ))?;
             let logical_join = self.clone_with_left_right(left, right);
 
             // Convert to Hash Join for equal joins

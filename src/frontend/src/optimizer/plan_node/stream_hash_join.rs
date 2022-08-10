@@ -104,9 +104,6 @@ impl StreamHashJoin {
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
                 l2o_mapping.rewrite_provided_distribution(left)
             }
-            (Distribution::UpstreamHashShard(_), Distribution::UpstreamHashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
-            }
             (_, _) => unreachable!(
                 "suspicious distribution: left: {:?}, right: {:?}",
                 left, right
