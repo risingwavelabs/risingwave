@@ -152,35 +152,15 @@ async fn main() {
         .unwrap();
 }
 
-async fn run_slt_task(glob: &str, args: &Args, frontend_ip: &[String]) {
-    let files = glob::glob(glob).expect("failed to read glob pattern");
-    let mut db = Postgres::connect(&frontend_ip[0], "dev").await;
-    let mut tasks = vec![];
-    let mut idx = 0;
-
-    for file in files {
-        let file = file.unwrap();
-        let db_name = file
-            .file_name()
-            .expect("not a valid filename")
-            .to_str()
-            .expect("not a UTF-8 filename");
-        let db_name = db_name
-            .replace(' ', "_")
-            .replace('.', "_")
-            .replace('-', "_");
-        sqllogictest::AsyncDB::run(&mut db, &format!("CREATE DATABASE {};", db_name))
-            .await
-            .expect("create logical DB failed");
-        tasks.push((
-            Postgres::connect(&frontend_ip[idx % args.frontend_nodes], &db_name).await,
-            file.to_string_lossy().to_string(),
-        ));
-        idx += 1;
-    }
-    let tester = sqllogictest::ParallelRunner {};
+async fn run_slt_task(glob: &str, args: &Args, hosts: &[String]) {
+    let db = Postgres::connect(hosts[0].clone(), "dev".to_string()).await;
+    let mut tester = sqllogictest::ParallelRunner::new(db, hosts.to_vec());
+    let tasks = tester
+        .prepare_async(glob, Postgres::connect)
+        .await
+        .expect("prepare failed");
     tester
-        .run_with_db_file_pairs_async(tasks, args.jobs)
+        .run_parallel_async(tasks, args.jobs)
         .await
         .expect("test failed");
 }
@@ -191,11 +171,11 @@ struct Postgres {
 }
 
 impl Postgres {
-    async fn connect(host: &str, dbname: &str) -> Self {
+    async fn connect(host: String, dbname: String) -> Self {
         let (client, connection) = tokio_postgres::Config::new()
-            .host(host)
+            .host(&host)
             .port(4566)
-            .dbname(dbname)
+            .dbname(&dbname)
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
