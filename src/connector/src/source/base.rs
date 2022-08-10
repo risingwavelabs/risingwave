@@ -24,6 +24,7 @@ use prost::Message;
 use risingwave_common::error::ErrorCode;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -183,6 +184,26 @@ pub trait SplitMetaData: Sized {
 /// to source executor, `ConnectorState` is [`None`] and [`DummySplitReader`] is up instead of other
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
+
+/// Used for acquiring the generated data for [`spawn_data_generation`].
+pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
+
+/// Spawn a new **thread** to run the data generator, returns a channel receiver for acquiring the
+/// generated data. This is used for the [`DatagenSplitReader`] and [`NexmarkSplitReader`] in case
+/// that they are CPU intensive and may block the streaming actors.
+pub fn spawn_data_generation(
+    mut generator_next: impl FnMut() -> Result<Vec<SourceMessage>> + Send + 'static,
+) -> DataGenerationReceiver {
+    let (generation_tx, generation_rx) = mpsc::channel(4);
+    std::thread::spawn(move || loop {
+        let result = generator_next();
+        if generation_tx.blocking_send(result).is_err() {
+            tracing::warn!("failed to send next event to reader, exit");
+            break;
+        }
+    });
+    generation_rx
+}
 
 #[cfg(test)]
 mod tests {

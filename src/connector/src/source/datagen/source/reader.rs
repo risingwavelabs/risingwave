@@ -22,14 +22,16 @@ use super::generator::DatagenEventGenerator;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::{
-    Column, ConnectorState, DataType, SourceMessage, SplitId, SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation, Column, ConnectorState, DataGenerationReceiver, DataType, SourceMessage,
+    SplitId, SplitImpl, SplitMetaData, SplitReader,
 };
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct DatagenSplitReader {
-    pub generator: DatagenEventGenerator,
-    pub assigned_split: DatagenSplit,
+    generation_rx: DataGenerationReceiver,
+
+    assigned_split: DatagenSplit,
 }
 
 #[async_trait]
@@ -186,7 +188,7 @@ impl SplitReader for DatagenSplitReader {
             }
         }
 
-        let generator = DatagenEventGenerator::new(
+        let mut generator = DatagenEventGenerator::new(
             fields_map,
             rows_per_second,
             events_so_far,
@@ -195,14 +197,17 @@ impl SplitReader for DatagenSplitReader {
             split_index,
         )?;
 
+        // Spawn a thread for data generation since it's CPU intensive.
+        let generation_rx = spawn_data_generation(move || generator.next());
+
         Ok(DatagenSplitReader {
-            generator,
+            generation_rx,
             assigned_split,
         })
     }
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        self.generator.next().await
+        self.generation_rx.recv().await.transpose()
     }
 }
 

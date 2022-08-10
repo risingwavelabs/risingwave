@@ -16,19 +16,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use tokio::sync::mpsc;
 
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::EventType;
 use crate::source::nexmark::source::generator::NexmarkEventGenerator;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation, Column, ConnectorState, DataGenerationReceiver, SourceMessage, SplitId,
+    SplitImpl, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
-    generation_rx: mpsc::Receiver<Result<Vec<SourceMessage>>>,
+    generation_rx: DataGenerationReceiver,
 
     assigned_split: Option<NexmarkSplit>,
 }
@@ -103,17 +103,8 @@ impl SplitReader for NexmarkSplitReader {
             }
         }
 
-        // Spawn a thread for event generation since it's CPU intensive.
-        let (generation_tx, generation_rx) = mpsc::channel(1);
-        std::thread::Builder::new()
-            .name(format!("nexmark-{}", assigned_split.id()))
-            .spawn(move || loop {
-                let result = generator.next();
-                if generation_tx.blocking_send(result).is_err() {
-                    tracing::warn!("nexmark: failed to send next event to reader, exit");
-                    break;
-                }
-            })?;
+        // Spawn a thread for data generation since it's CPU intensive.
+        let generation_rx = spawn_data_generation(move || generator.next());
 
         Ok(Self {
             generation_rx,
