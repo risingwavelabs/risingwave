@@ -122,7 +122,7 @@ impl Compactor {
 
     /// Handles a compaction task and reports its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
+    pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
         use risingwave_common::catalog::TableOption;
 
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
@@ -277,7 +277,7 @@ impl Compactor {
 
         // After a compaction is done, mutate the compaction task.
         Self::compact_done(
-            compact_task.clone(),
+            &mut compact_task,
             context.clone(),
             output_ssts,
             compact_success,
@@ -497,7 +497,7 @@ impl Compactor {
 
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
     async fn compact_done(
-        mut compact_task: CompactTask,
+        compact_task: &mut CompactTask,
         context: Arc<CompactorContext>,
         output_ssts: Vec<CompactOutput>,
         task_ok: bool,
@@ -530,7 +530,7 @@ impl Compactor {
         let task_id = compact_task.task_id;
         if let Err(e) = context
             .hummock_meta_client
-            .report_compaction_task(compact_task)
+            .report_compaction_task(compact_task.clone())
             .await
         {
             tracing::warn!(
