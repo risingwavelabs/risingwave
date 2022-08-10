@@ -883,15 +883,18 @@ mod tests {
 
         {
             let mut pretty_lines = vec!["i I".to_string()];
-            for row_id in 0..(insert_values.len() / 2) {
-                let value = insert_values[row_id];
+            for (row_id, value) in insert_values
+                .iter()
+                .enumerate()
+                .take(insert_values.len() / 2)
+            {
                 pretty_lines.push(format!("+ {} {}", value, row_id));
                 if delete_values.contains(&value) {
                     pretty_lines.push(format!("- {} {}", value, row_id));
                     continue;
                 }
-                if value < min_value {
-                    min_value = value;
+                if *value < min_value {
+                    min_value = *value;
                 }
             }
 
@@ -923,15 +926,18 @@ mod tests {
 
         {
             let mut pretty_lines = vec!["i I".to_string()];
-            for row_id in (insert_values.len() / 2)..insert_values.len() {
-                let value = insert_values[row_id];
+            for (row_id, value) in insert_values
+                .iter()
+                .enumerate()
+                .skip(insert_values.len() / 2)
+            {
                 pretty_lines.push(format!("+ {} {}", value, row_id));
                 if delete_values.contains(&value) {
                     pretty_lines.push(format!("- {} {}", value, row_id));
                     continue;
                 }
-                if value < min_value {
-                    min_value = value;
+                if *value < min_value {
+                    min_value = *value;
                 }
             }
 
