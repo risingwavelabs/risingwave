@@ -265,6 +265,11 @@ impl IntervalUnit {
 
         res
     }
+
+    /// Checks if [`IntervalUnit`] is positive.
+    pub fn is_positive(&self) -> bool {
+        self > &Self::new(0, 0, 0)
+    }
 }
 
 #[expect(clippy::from_over_into)]
