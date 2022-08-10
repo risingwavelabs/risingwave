@@ -129,7 +129,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     async fn apply_chunk(
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
-        input_schema: &Schema,
+        _input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         epoch: u64,

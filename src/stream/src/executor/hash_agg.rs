@@ -72,7 +72,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     input_pk_indices: Vec<usize>,
 
     /// Schema from input
-    input_schema: Schema,
+    _input_schema: Schema,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
@@ -131,7 +131,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 pk_indices,
                 identity: format!("HashAggExecutor {:X}", executor_id),
                 input_pk_indices: input_info.pk_indices,
-                input_schema: input_info.schema,
+                _input_schema: input_info.schema,
                 agg_calls,
                 key_indices,
                 state_tables,
@@ -201,7 +201,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
-            ref input_schema,
+            ref _input_schema,
             ref schema,
             ref mut state_tables,
             ref state_table_col_mappings,
