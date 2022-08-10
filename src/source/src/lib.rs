@@ -30,6 +30,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
+#![feature(backtrace)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -53,6 +54,7 @@ pub mod connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table_v2;
+mod error;
 
 extern crate core;
 extern crate maplit;

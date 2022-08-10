@@ -30,6 +30,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::common::SourceChunkBuilder;
+use crate::error::SourceResult;
 use crate::monitor::SourceMetrics;
 use crate::{SourceColumnDesc, SourceParserImpl, StreamChunkWithState, StreamSourceReader};
 
@@ -91,7 +92,7 @@ impl InnerConnectorSourceReader {
         columns: Vec<SourceColumnDesc>,
         metrics: Arc<SourceMetrics>,
         context: SourceContext,
-    ) -> Result<Self> {
+    ) -> SourceResult<Self> {
         tracing::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
             prop,
@@ -113,8 +114,7 @@ impl InnerConnectorSourceReader {
                     .collect_vec(),
             ),
         )
-        .await
-        .to_rw_result()?;
+        .await?;
 
         Ok(InnerConnectorSourceReader {
             reader,
@@ -230,7 +230,7 @@ impl Drop for ConnectorSourceReader {
 }
 
 impl ConnectorSourceReader {
-    pub async fn add_split(&mut self, split: ConnectorState) -> Result<()> {
+    pub async fn add_split(&mut self, split: ConnectorState) -> SourceResult<()> {
         if let Some(append_splits) = split {
             for split in append_splits {
                 let split_id = split.id();
