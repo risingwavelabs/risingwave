@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -26,14 +25,15 @@ use super::{ObjectError, ObjectResult};
 use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 
 /// In-memory object storage, useful for testing.
+#[allow(clippy::type_complexity)]
 #[derive(Default, Clone)]
 pub struct InMemObjectStore {
-    objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
+    objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Vec<u8>)>>>,
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+    async fn upload(&self, path: &str, obj: Vec<u8>) -> ObjectResult<()> {
         fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
             "mem upload error"
         )));
@@ -56,18 +56,18 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Vec<u8>> {
         fail_point!("mem_read_err", |_| Err(ObjectError::internal(
             "mem read error"
         )));
         if let Some(loc) = block {
             self.get_object(path, |obj| find_block(obj, loc)).await?
         } else {
-            self.get_object(path, |obj| Ok(obj.clone())).await?
+            self.get_object(path, |obj| Ok(obj.to_vec())).await?
         }
     }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Vec<u8>>> {
         let futures = block_locs
             .iter()
             .map(|block_loc| self.read(path, Some(*block_loc)))
@@ -130,7 +130,7 @@ impl InMemObjectStore {
 
     async fn get_object<R, F>(&self, path: &str, f: F) -> ObjectResult<R>
     where
-        F: Fn(&Bytes) -> R,
+        F: Fn(&[u8]) -> R,
     {
         self.objects
             .lock()
@@ -138,28 +138,27 @@ impl InMemObjectStore {
             .get(path)
             .map(|(_, obj)| obj)
             .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
-            .map(f)
+            .map(|obj| f(obj))
     }
 }
 
-fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
+fn find_block(obj: &[u8], block: BlockLocation) -> ObjectResult<Vec<u8>> {
     if block.offset + block.size > obj.len() {
         Err(ObjectError::internal("bad block offset and size"))
     } else {
-        Ok(obj.slice(block.offset..(block.offset + block.size)))
+        Ok(obj[block.offset..(block.offset + block.size)].to_vec())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use itertools::enumerate;
 
     use super::*;
 
     #[tokio::test]
     async fn test_upload() {
-        let block = Bytes::from("123456");
+        let block = b"123456".to_vec();
 
         let s3 = InMemObjectStore::new();
         s3.upload("/abc", block).await.unwrap();
@@ -190,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_metadata() {
-        let block = Bytes::from("123456");
+        let block = b"123456".to_vec();
 
         let obj_store = InMemObjectStore::new();
         obj_store.upload("/abc", block).await.unwrap();
@@ -201,7 +200,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list() {
-        let payload = Bytes::from("123456");
+        let payload = b"123456".to_vec();
         let store = InMemObjectStore::new();
         assert!(store.list("").await.unwrap().is_empty());
 

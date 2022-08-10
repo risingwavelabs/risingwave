@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
@@ -162,17 +162,24 @@ impl SstableStore {
         &self,
         sst_id: HummockSstableId,
         meta: SstableMeta,
-        data: Bytes,
+        data: Vec<u8>,
         policy: CachePolicy,
     ) -> HummockResult<()> {
-        self.put_sst_data(sst_id, data.clone()).await?;
+        let meta_data = meta.encode_to_bytes();
+        // To avoid data buffer copy.
+        let sst = if let CachePolicy::Fill = policy {
+            Some(Sstable::new_with_data(sst_id, meta, &data)?)
+        } else {
+            None
+        };
+        self.put_sst_data(sst_id, data).await?;
         fail_point!("metadata_upload_err");
-        if let Err(e) = self.put_meta(sst_id, &meta).await {
+        if let Err(e) = self.put_meta(sst_id, meta_data).await {
             self.delete_sst_data(sst_id).await?;
             return Err(e);
         }
         if let CachePolicy::Fill = policy {
-            let sst = Sstable::new_with_data(sst_id, meta, data).unwrap();
+            let sst = sst.unwrap();
             let charge = sst.estimate_size();
             self.meta_cache
                 .insert(sst_id, sst_id, charge, Box::new(sst));
@@ -199,16 +206,15 @@ impl SstableStore {
         self.meta_cache.erase(sst_id, &sst_id);
     }
 
-    async fn put_meta(&self, sst_id: HummockSstableId, meta: &SstableMeta) -> HummockResult<()> {
+    async fn put_meta(&self, sst_id: HummockSstableId, meta: Vec<u8>) -> HummockResult<()> {
         let meta_path = self.get_sst_meta_path(sst_id);
-        let meta = Bytes::from(meta.encode_to_bytes());
         self.store
             .upload(&meta_path, meta)
             .await
             .map_err(HummockError::object_io_error)
     }
 
-    async fn put_sst_data(&self, sst_id: HummockSstableId, data: Bytes) -> HummockResult<()> {
+    async fn put_sst_data(&self, sst_id: HummockSstableId, data: Vec<u8>) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
         self.store
             .upload(&data_path, data)
@@ -228,9 +234,9 @@ impl SstableStore {
         &self,
         sst_id: HummockSstableId,
         block_idx: u64,
-        block_data: Bytes,
+        block_data: Vec<u8>,
     ) -> HummockResult<()> {
-        let block = Box::new(Block::decode(&block_data)?);
+        let block = Box::new(Block::decode(block_data)?);
         self.block_cache.insert(sst_id, block_idx, block);
         Ok(())
     }
@@ -275,7 +281,7 @@ impl SstableStore {
                     .read(&data_path, Some(block_loc))
                     .await
                     .map_err(HummockError::object_io_error)?;
-                let block = Block::decode(&block_data)?;
+                let block = Block::decode(block_data)?;
                 Ok(Box::new(block))
             }
         };
@@ -394,7 +400,7 @@ impl SstableStore {
                                 .read(&data_path, None)
                                 .await
                                 .map_err(HummockError::object_io_error)?;
-                            Sstable::new_with_data(sst_id, meta, block_data)?
+                            Sstable::new_with_data(sst_id, meta, &block_data)?
                         } else {
                             Sstable::new(sst_id, meta)
                         };

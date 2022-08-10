@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::ops::Range;
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 use risingwave_hummock_sdk::VersionedComparator;
 use {lz4, zstd};
 
@@ -39,19 +39,19 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn decode(buf: &[u8]) -> HummockResult<Self> {
+    pub fn decode(mut buf: Vec<u8>) -> HummockResult<Self> {
         // Verify checksum.
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
 
         // Decompress.
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
-        let compressed_data = &buf[..buf.len() - 9];
+        buf.truncate(buf.len() - 9);
         let buf = match compression {
-            CompressionAlgorithm::None => buf[..buf.len() - 9].to_vec(),
+            CompressionAlgorithm::None => buf,
             CompressionAlgorithm::Lz4 => {
-                let mut decoder = lz4::Decoder::new(compressed_data.reader())
-                    .map_err(HummockError::decode_error)?;
+                let mut decoder =
+                    lz4::Decoder::new(buf.reader()).map_err(HummockError::decode_error)?;
                 let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
                 decoder
                     .read_to_end(&mut decoded)
@@ -59,8 +59,8 @@ impl Block {
                 decoded
             }
             CompressionAlgorithm::Zstd => {
-                let mut decoder = zstd::Decoder::new(compressed_data.reader())
-                    .map_err(HummockError::decode_error)?;
+                let mut decoder =
+                    zstd::Decoder::new(buf.reader()).map_err(HummockError::decode_error)?;
                 let mut decoded = Vec::with_capacity(DEFAULT_BLOCK_SIZE);
                 decoder
                     .read_to_end(&mut decoded)
@@ -208,7 +208,7 @@ impl Default for BlockBuilderOptions {
 /// [`BlockBuilder`] encodes and appends block to a buffer.
 pub struct BlockBuilder {
     /// Write buffer.
-    buf: BytesMut,
+    buf: Vec<u8>,
     /// Entry interval between restart points.
     restart_count: usize,
     /// Restart points.
@@ -225,7 +225,7 @@ impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
             // add more space to avoid re-allocate space.
-            buf: BytesMut::with_capacity(options.capacity + 256),
+            buf: Vec::with_capacity(options.capacity + 256),
             restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
@@ -319,7 +319,7 @@ impl BlockBuilder {
             CompressionAlgorithm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
-                    .build(BytesMut::with_capacity(self.buf.len()).writer())
+                    .build(Vec::with_capacity(self.buf.len()).writer())
                     .map_err(HummockError::encode_error)
                     .unwrap();
                 encoder
@@ -332,7 +332,7 @@ impl BlockBuilder {
             }
             CompressionAlgorithm::Zstd => {
                 let mut encoder =
-                    zstd::Encoder::new(BytesMut::with_capacity(self.buf.len()).writer(), 4)
+                    zstd::Encoder::new(Vec::with_capacity(self.buf.len()).writer(), 4)
                         .map_err(HummockError::encode_error)
                         .unwrap();
                 encoder
@@ -361,7 +361,6 @@ impl BlockBuilder {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};
@@ -375,7 +374,7 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(&buf).unwrap());
+        let block = Box::new(Block::decode(buf).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
@@ -419,7 +418,7 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(&buf).unwrap());
+        let block = Box::new(Block::decode(buf).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
@@ -446,10 +445,10 @@ mod tests {
         assert!(!bi.is_valid());
     }
 
-    pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
-        let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+    pub fn full_key(user_key: &[u8], epoch: u64) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(user_key.len() + 8);
         buf.put_slice(user_key);
         buf.put_u64(!epoch);
-        buf.freeze()
+        buf
     }
 }

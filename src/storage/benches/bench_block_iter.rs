@@ -55,7 +55,8 @@ fn bench_block_iter(c: &mut Criterion) {
         &data,
         |b, data| {
             b.iter(|| {
-                let block = BlockHolder::from_owned_block(Box::new(Block::decode(data).unwrap()));
+                let block =
+                    BlockHolder::from_owned_block(Box::new(Block::decode(data.to_vec()).unwrap()));
                 block_iter_next(block)
             });
         },
@@ -72,13 +73,14 @@ fn bench_block_iter(c: &mut Criterion) {
         &data,
         |b, data| {
             b.iter(|| {
-                let block = BlockHolder::from_owned_block(Box::new(Block::decode(data).unwrap()));
+                let block =
+                    BlockHolder::from_owned_block(Box::new(Block::decode(data.to_vec()).unwrap()));
                 block_iter_prev(block)
             });
         },
     );
 
-    let block = BlockHolder::from_owned_block(Box::new(Block::decode(&data).unwrap()));
+    let block = BlockHolder::from_owned_block(Box::new(Block::decode(data).unwrap()));
     let mut iter = BlockIterator::new(block);
     iter.seek_to_first();
     for t in 1..=TABLES_PER_SSTABLE {
@@ -94,7 +96,7 @@ fn bench_block_iter(c: &mut Criterion) {
 criterion_group!(benches, bench_block_iter);
 criterion_main!(benches);
 
-fn build_block_data(t: u32, i: u64) -> Bytes {
+fn build_block_data(t: u32, i: u64) -> Vec<u8> {
     let options = BlockBuilderOptions {
         capacity: BLOCK_CAPACITY,
         compression_algorithm: CompressionAlgorithm::None,
@@ -106,7 +108,7 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
             builder.add(&key(tt, ii), &value(ii));
         }
     }
-    Bytes::from(builder.build().to_vec())
+    builder.build().to_vec()
 }
 
 fn key(t: u32, i: u64) -> Bytes {

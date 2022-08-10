@@ -268,7 +268,7 @@ mod tests {
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
         let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let sstable = Sstable::new_with_data(0, meta, data).unwrap();
+        let sstable = Sstable::new_with_data(0, meta, &data).unwrap();
         let handle = cache.insert(0, 0, 1, Box::new(sstable));
         inner_test_forward_iterator(sstable_store, handle).await;
     }

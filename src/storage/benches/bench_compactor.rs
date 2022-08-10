@@ -16,7 +16,6 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
@@ -60,7 +59,7 @@ pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
 
 const MAX_KEY_COUNT: usize = 128 * 1024;
 
-fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, SstableMeta) {
+fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Vec<u8>, SstableMeta) {
     let mut builder = SstableBuilder::new(
         sstable_id,
         SstableBuilderOptions {

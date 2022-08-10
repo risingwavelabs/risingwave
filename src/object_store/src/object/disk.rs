@@ -20,7 +20,6 @@ use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures::future::try_join_all;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
@@ -172,7 +171,7 @@ impl DiskObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+    async fn upload(&self, path: &str, obj: Vec<u8>) -> ObjectResult<()> {
         let mut file =
             utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
         file.write_all(&obj)
@@ -184,7 +183,7 @@ impl ObjectStore for DiskObjectStore {
         Ok(())
     }
 
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Vec<u8>> {
         match block_loc {
             Some(block_loc) => Ok(self.readv(path, &[block_loc]).await?.pop().unwrap()),
             None => {
@@ -202,14 +201,14 @@ impl ObjectStore for DiskObjectStore {
                                 e,
                             )
                         })?;
-                    Ok(Bytes::from(buf))
+                    Ok(buf)
                 })
                 .await
             }
         }
     }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Vec<u8>>> {
         let file_holder = self.get_read_file(path).await?;
         let metadata = utils::get_metadata(file_holder.clone()).await?;
         for block_loc in block_locs {
@@ -246,7 +245,7 @@ impl ObjectStore for DiskObjectStore {
                             e,
                         )
                     })?;
-                Ok(Bytes::from(buf))
+                Ok(buf)
             });
             ret.push(future)
         }
@@ -335,7 +334,6 @@ mod tests {
     use std::io::Read;
     use std::path::PathBuf;
 
-    use bytes::Bytes;
     use itertools::{enumerate, Itertools};
     use tempfile::TempDir;
 
@@ -365,10 +363,7 @@ mod tests {
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
+        store.upload("test.obj", payload.clone()).await.unwrap();
         let metadata = store.metadata("test.obj").await.unwrap();
         assert_eq!(payload.len(), metadata.total_size);
 
@@ -384,10 +379,7 @@ mod tests {
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
-        store
-            .upload("1/2/test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
+        store.upload("1/2/test.obj", payload.clone()).await.unwrap();
         let metadata = store.metadata("1/2/test.obj").await.unwrap();
         assert_eq!(payload.len(), metadata.total_size);
 
@@ -403,10 +395,7 @@ mod tests {
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
+        store.upload("test.obj", payload.clone()).await.unwrap();
         let metadata = store.metadata("test.obj").await.unwrap();
         assert_eq!(payload.len(), metadata.total_size);
         let read_data = store.read("test.obj", None).await.unwrap();
@@ -420,10 +409,7 @@ mod tests {
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
+        store.upload("test.obj", payload.clone()).await.unwrap();
         let metadata = store.metadata("test.obj").await.unwrap();
         assert_eq!(payload.len(), metadata.total_size);
         let read_data = store
@@ -446,10 +432,7 @@ mod tests {
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
+        store.upload("test.obj", payload.clone()).await.unwrap();
         let metadata = store.metadata("test.obj").await.unwrap();
         assert_eq!(payload.len(), metadata.total_size);
         let test_loc = vec![(0, 1000), (10000, 1000), (20000, 1000)];
@@ -479,10 +462,7 @@ mod tests {
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
+        store.upload("test.obj", payload.clone()).await.unwrap();
         let mut path = PathBuf::from(test_root_path);
         path.push("test.obj");
         assert!(path.exists());
@@ -507,10 +487,7 @@ mod tests {
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
-        store
-            .upload("test.obj", Bytes::from(payload.clone()))
-            .await
-            .unwrap();
+        store.upload("test.obj", payload.clone()).await.unwrap();
         assert_eq!(payload.len(), 500000);
         assert!(store
             .read(
@@ -557,10 +534,7 @@ mod tests {
         let store = DiskObjectStore::new(test_root_path);
         let payload = gen_test_payload();
         // path is not allowed to be started with '/'
-        assert!(store
-            .upload("/test.obj", Bytes::from(payload))
-            .await
-            .is_err());
+        assert!(store.upload("/test.obj", payload).await.is_err());
     }
 
     #[tokio::test]
@@ -576,10 +550,7 @@ mod tests {
         let paths = vec!["001/002/test.obj", "001/003/test.obj"];
         for (i, path) in enumerate(paths.clone()) {
             assert_eq!(store.list("").await.unwrap().len(), i);
-            store
-                .upload(path, Bytes::from(payload.clone()))
-                .await
-                .unwrap();
+            store.upload(path, payload.clone()).await.unwrap();
             assert_eq!(store.list("").await.unwrap().len(), i + 1);
         }
 

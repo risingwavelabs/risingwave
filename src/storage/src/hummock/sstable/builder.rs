@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 
@@ -76,7 +76,7 @@ pub struct SstableBuilder {
     /// Options.
     options: SstableBuilderOptions,
     /// Write buffer.
-    buf: BytesMut,
+    buf: Vec<u8>,
     /// Current block builder.
     block_builder: BlockBuilder,
     /// Block metadata vec.
@@ -95,7 +95,7 @@ pub struct SstableBuilder {
 impl SstableBuilder {
     pub fn new(sstable_id: u64, options: SstableBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.capacity + options.block_capacity),
+            buf: Vec::with_capacity(options.capacity + options.block_capacity),
             block_builder: BlockBuilder::new(BlockBuilderOptions {
                 capacity: options.block_capacity,
                 restart_interval: options.restart_interval,
@@ -156,7 +156,7 @@ impl SstableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
+    pub fn finish(mut self) -> (u64, Vec<u8>, SstableMeta, Vec<u32>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = if self.block_builder.is_empty() {
             self.last_full_key.clone()
@@ -187,7 +187,7 @@ impl SstableBuilder {
 
         (
             self.sstable_id,
-            self.buf.freeze(),
+            self.buf,
             meta,
             self.table_ids.into_iter().collect(),
         )

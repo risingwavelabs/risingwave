@@ -14,8 +14,6 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
-
 pub mod mem;
 pub use mem::*;
 
@@ -101,15 +99,15 @@ impl BlockLocation {
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
     /// Uploads the object to `ObjectStore`.
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
+    async fn upload(&self, path: &str, obj: Vec<u8>) -> ObjectResult<()>;
 
     /// If the `block_loc` is None, the whole object will be return.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Vec<u8>>;
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Vec<u8>>>;
 
     /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
@@ -197,15 +195,15 @@ macro_rules! object_store_impl_method_body {
 
 #[async_trait::async_trait]
 impl ObjectStore for ObjectStoreImpl {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+    async fn upload(&self, path: &str, obj: Vec<u8>) -> ObjectResult<()> {
         object_store_impl_method_body!(self, upload, path, obj)
     }
 
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Vec<u8>> {
         object_store_impl_method_body!(self, read, path, block_loc)
     }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Vec<u8>>> {
         object_store_impl_method_body!(self, readv, path, block_locs)
     }
 
@@ -236,7 +234,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         }
     }
 
-    pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+    pub async fn upload(&self, path: &str, obj: Vec<u8>) -> ObjectResult<()> {
         self.object_store_metrics
             .write_bytes
             .inc_by(obj.len() as u64);
@@ -256,7 +254,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         Ok(())
     }
 
-    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    pub async fn read(
+        &self,
+        path: &str,
+        block_loc: Option<BlockLocation>,
+    ) -> ObjectResult<Vec<u8>> {
         let _timer = self
             .object_store_metrics
             .operation_latency
@@ -288,7 +290,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         &self,
         path: &str,
         block_locs: &[BlockLocation],
-    ) -> ObjectResult<Vec<Bytes>> {
+    ) -> ObjectResult<Vec<Vec<u8>>> {
         let _timer = self
             .object_store_metrics
             .operation_latency

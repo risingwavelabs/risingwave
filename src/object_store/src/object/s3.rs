@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use aws_sdk_s3::{Client, Endpoint, Region};
+use bytes::Buf;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
 use super::{BlockLocation, ObjectError, ObjectMetadata};
-use crate::object::{Bytes, ObjectResult, ObjectStore};
+use crate::object::{ObjectResult, ObjectStore};
 
 /// Object store with S3 backend
 pub struct S3ObjectStore {
@@ -28,7 +29,7 @@ pub struct S3ObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+    async fn upload(&self, path: &str, obj: Vec<u8>) -> ObjectResult<()> {
         fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
             "s3 upload error"
         )));
@@ -43,7 +44,7 @@ impl ObjectStore for S3ObjectStore {
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Vec<u8>> {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
@@ -61,7 +62,9 @@ impl ObjectStore for S3ObjectStore {
         };
 
         let resp = req.send().await?;
-        let val = resp.body.collect().await?.into_bytes();
+        let mut body = resp.body.collect().await?;
+        let mut val = vec![0; body.remaining()];
+        body.copy_to_slice(&mut val);
 
         if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
             return Err(ObjectError::internal(format!(
@@ -75,7 +78,7 @@ impl ObjectStore for S3ObjectStore {
         Ok(val)
     }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Vec<u8>>> {
         let futures = block_locs
             .iter()
             .map(|block_loc| self.read(path, Some(*block_loc)))
