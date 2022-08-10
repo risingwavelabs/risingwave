@@ -59,11 +59,11 @@ impl TieredCacheKey for (HummockSstableId, u64) {
 
 impl TieredCacheValue for Box<Block> {
     fn len(&self) -> usize {
-        Block::len(self)
+        self.raw_data().len()
     }
 
     fn encoded_len(&self) -> usize {
-        self.len()
+        self.raw_data().len()
     }
 
     fn encode(&self, mut buf: &mut [u8]) {
