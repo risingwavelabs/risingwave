@@ -62,7 +62,7 @@ impl Planner {
             base_table
                 .table_indexes
                 .iter()
-                .map(|x| (x.name.clone(), Rc::new(x.table_desc())))
+                .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
         )
@@ -187,6 +187,15 @@ impl Planner {
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
             return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
         };
+
+        if !window_size.is_positive() || !window_slide.is_positive() {
+            return Err(ErrorCode::BindError(format!(
+                "window_size {} and window_slide {} must be positive",
+                window_size, window_slide
+            ))
+            .into());
+        }
+
         if window_size.exact_div(&window_slide).is_none() {
             return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
         }

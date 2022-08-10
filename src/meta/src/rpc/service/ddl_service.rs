@@ -294,8 +294,16 @@ where
         self.env.idle_manager().record_activity();
 
         let table_id = request.into_inner().table_id;
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
         // 1. Drop table in catalog. Ref count will be checked.
-        let version = self.catalog_manager.drop_table(table_id).await?;
+        let version = self
+            .catalog_manager
+            .drop_table(table_id, internal_tables)
+            .await?;
 
         // 2. drop mv in stream manager
         self.stream_manager
@@ -303,6 +311,66 @@ where
             .await?;
 
         Ok(Response::new(DropMaterializedViewResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn create_index(
+        &self,
+        request: Request<CreateIndexRequest>,
+    ) -> Result<Response<CreateIndexResponse>, Status> {
+        self.ddl_lock.read().await;
+        self.env.idle_manager().record_activity();
+
+        let req = request.into_inner();
+        let index = req.get_index().map_err(meta_error_to_tonic)?.clone();
+        let index_table = req.get_index_table().map_err(meta_error_to_tonic)?.clone();
+        let fragment_graph = req
+            .get_fragment_graph()
+            .map_err(meta_error_to_tonic)?
+            .clone();
+
+        let (index_id, version) = self
+            .create_relation(&mut Relation::Index(index, index_table), fragment_graph)
+            .await?;
+
+        Ok(Response::new(CreateIndexResponse {
+            status: None,
+            index_id,
+            version,
+        }))
+    }
+
+    async fn drop_index(
+        &self,
+        request: Request<DropIndexRequest>,
+    ) -> Result<Response<DropIndexResponse>, Status> {
+        self.ddl_lock.read().await;
+        use risingwave_common::catalog::TableId;
+
+        self.env.idle_manager().record_activity();
+
+        let index_id = request.into_inner().index_id;
+        let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&index_table_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
+
+        // 1. Drop index in catalog. Ref count will be checked.
+        let version = self
+            .catalog_manager
+            .drop_index(index_id, index_table_id, internal_tables)
+            .await?;
+
+        // 2. drop mv(index) in stream manager
+        self.stream_manager
+            .drop_materialized_view(&TableId::new(index_table_id))
+            .await?;
+
+        Ok(Response::new(DropIndexResponse {
             status: None,
             version,
         }))
@@ -390,9 +458,14 @@ where
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
+            .await? as u32;
         relation.set_id(id);
+
+        let mview_id = match relation {
+            Relation::Table(table) => table.id,
+            Relation::Index(_, table) => table.id,
+            _ => 0,
+        };
 
         // 1. Resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
@@ -416,19 +489,37 @@ where
             affiliated_source: None,
             ..Default::default()
         };
+
         let internal_tables = match self
             .create_relation_on_compute_node(relation, fragment_graph, id, &mut ctx)
             .await
         {
             Err(e) => {
+                let internal_table_ids = ctx
+                    .internal_table_id_map
+                    .keys()
+                    .cloned()
+                    .chain(std::iter::once(mview_id))
+                    .collect_vec();
+
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids, true)
+                    .await;
+
                 self.catalog_manager
                     .cancel_create_procedure(relation)
                     .await?;
                 return Err(e);
             }
             Ok(()) => {
-                if let Relation::Table(table) = relation {
-                    self.set_table_mapping(table)?;
+                match relation {
+                    Relation::Table(table) => {
+                        self.set_table_mapping(table)?;
+                    }
+                    Relation::Index(_, index_table) => {
+                        self.set_table_mapping(index_table)?;
+                    }
+                    Relation::Sink(_) => (),
                 }
                 self.get_internal_table(&ctx)?
             }
@@ -440,24 +531,36 @@ where
             match relation {
                 Relation::Table(_) => "materialized_view",
                 Relation::Sink(_) => "sink",
+                Relation::Index(..) => "index",
             },
             internal_tables.len(),
             ctx.internal_table_id_map.len()
         );
+
+        let internal_table_ids = ctx
+            .internal_table_id_map
+            .keys()
+            .cloned()
+            .chain(std::iter::once(mview_id))
+            .collect_vec();
 
         // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
             .finish_create_procedure(
                 match relation {
-                    Relation::Table(_) => Some(internal_tables),
-                    _ => None,
+                    Relation::Table(_) | Relation::Index(..) => Some(internal_tables),
+                    Relation::Sink(_) => None,
                 },
                 relation,
             )
-            .await?;
+            .await;
 
-        Ok((id, version))
+        self.stream_manager
+            .remove_processing_table(internal_table_ids, false)
+            .await;
+
+        Ok((id, version?))
     }
 
     async fn create_relation_on_compute_node(
@@ -471,7 +574,7 @@ where
 
         // Get relation_id and make fragment_graph immutable.
         let (relation_id, fragment_graph) = match relation {
-            Relation::Table(_) => {
+            Relation::Table(_) | Relation::Index(..) => {
                 // Fill in the correct mview id for stream node.
                 fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
                     let mut mview_count = 0;
@@ -537,7 +640,7 @@ where
 
         // Create on compute node.
         self.stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(relation, table_fragments, ctx)
             .await?;
         Ok(())
     }
@@ -624,6 +727,17 @@ where
             .await
         {
             Err(e) => {
+                let internal_table_ids = ctx
+                    .internal_table_id_map
+                    .keys()
+                    .cloned()
+                    .chain(std::iter::once(mview_id))
+                    .collect_vec();
+
+                self.stream_manager
+                    .remove_processing_table(internal_table_ids, true)
+                    .await;
+
                 self.catalog_manager
                     .cancel_create_materialized_source_procedure(&source, &mview)
                     .await?;
@@ -636,13 +750,23 @@ where
             }
         };
 
+        let internal_table_ids = ctx
+            .internal_table_id_map
+            .keys()
+            .cloned()
+            .chain(std::iter::once(mview_id))
+            .collect_vec();
+
         // Finally, update the catalog.
         let version = self
             .catalog_manager
             .finish_create_materialized_source_procedure(&source, &mview, internal_tables)
-            .await?;
+            .await;
 
-        Ok((source_id, mview_id, version))
+        self.stream_manager
+            .remove_processing_table(internal_table_ids, false)
+            .await;
+        Ok((source_id, mview_id, version?))
     }
 
     async fn drop_materialized_source_inner(

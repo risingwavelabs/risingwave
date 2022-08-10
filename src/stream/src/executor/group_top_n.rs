@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::types::DataType;
+use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
-use super::managed_state::top_n::{ManagedTopNStateNew, TopNStateRow};
+use super::managed_state::top_n::ManagedTopNStateNew;
+use super::top_n::{generate_internal_key, TopNCache};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
@@ -92,37 +93,12 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     /// which column we used to group the data.
     group_by: Vec<usize>,
 
+    /// group key -> cache for this group
+    caches: HashMap<Vec<Datum>, TopNCache>,
+
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
-}
-
-pub fn generate_internal_key(
-    order_pairs: &[OrderPair],
-    pk_indices: PkIndicesRef,
-    schema: &Schema,
-) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
-    let mut internal_key_indices = vec![];
-    let mut internal_order_types = vec![];
-    for order_pair in order_pairs {
-        internal_key_indices.push(order_pair.column_idx);
-        internal_order_types.push(order_pair.order_type);
-    }
-    for pk_index in pk_indices {
-        if !internal_key_indices.contains(pk_index) {
-            internal_key_indices.push(*pk_index);
-            internal_order_types.push(OrderType::Ascending);
-        }
-    }
-    let internal_data_types = internal_key_indices
-        .iter()
-        .map(|idx| schema.fields()[*idx].data_type())
-        .collect();
-    (
-        internal_key_indices,
-        internal_data_types,
-        internal_order_types,
-    )
 }
 
 impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
@@ -176,6 +152,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
             internal_key_order_types,
             key_indices,
             group_by,
+            caches: HashMap::new(),
         })
     }
 
@@ -212,55 +189,52 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
         let mut res_ops = Vec::with_capacity(self.limit.unwrap_or(1024));
         let mut res_rows = Vec::with_capacity(self.limit.unwrap_or(1024));
 
-        // Record all groups encountered in the input
-        let mut unique_group_keys = HashSet::new();
-        let datum_num_in_group_key = self.group_by.len();
-
-        // Iterate over all the input, identify which groups they cover.
         for (op, row_ref) in chunk.rows() {
+            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
+            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
-            let mut group_key = Vec::with_capacity(datum_num_in_group_key);
+            let mut group_key = Vec::with_capacity(self.group_by.len());
             for &col_id in &self.group_by {
                 group_key.push(row[col_id].clone());
             }
-            // The group is encountered for the first time in this input
-            if !unique_group_keys.contains(&group_key) {
-                // Because our state table is already set up to sort by the column value which is
-                // specified by `self.group_by` . Therefore, the first row of the current group
-                //  can be directly obtained by prefix scanning
-                let prefix_key = Row::new(group_key.clone());
-                let old_rows = self
-                    .managed_state
-                    .find_range(Some(&prefix_key), self.offset, self.limit, epoch)
-                    .await?;
-                // TODO: Don't delete all the previous data and then insert new data,
-                emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, old_rows);
-                unique_group_keys.insert(group_key);
-            }
 
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
-
+            // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state.insert(ordered_pk_row, row, epoch)?;
+                    self.managed_state
+                        .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
                 }
+
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(&ordered_pk_row, row, epoch)?;
+                    self.managed_state
+                        .delete(&ordered_pk_row, row.clone(), epoch)?;
                 }
             }
-        }
 
-        // Generate new messages based on the current state table
-        for group_keys in unique_group_keys {
-            let prefix_key = Row::new(group_keys);
-            let new_rows = self
-                .managed_state
-                .find_range(Some(&prefix_key), self.offset, self.limit, epoch)
+            // If 'self.caches' does not already have a cache for the current group, create a new
+            // cache for it and insert it into `self.caches`
+            self.caches
+                .entry(group_key.clone())
+                .or_insert_with(|| TopNCache::new(self.offset, self.limit.unwrap_or(1024)));
+
+            // update the corresponding rows in the group cache.
+            let pk_prefix = Row::new(group_key);
+            self.caches
+                .get_mut(&pk_prefix.0)
+                .unwrap()
+                .update(
+                    Some(&pk_prefix),
+                    &mut self.managed_state,
+                    op,
+                    ordered_pk_row,
+                    row,
+                    epoch,
+                    &mut res_ops,
+                    &mut res_rows,
+                )
                 .await?;
-            emit_multi_rows(&mut res_ops, &mut res_rows, Op::Insert, new_rows);
         }
-
+        // compare the those two ranges and emit the differantial result
         generate_output(res_rows, res_ops, &self.schema)
     }
 
@@ -281,20 +255,10 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
     }
 }
 
-fn emit_multi_rows(
-    res_ops: &mut Vec<Op>,
-    res_rows: &mut Vec<Row>,
-    op: Op,
-    rows: Vec<TopNStateRow>,
-) {
-    rows.into_iter().for_each(|topn_row| {
-        res_ops.push(op);
-        res_rows.push(topn_row.row);
-    })
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -406,7 +370,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_local_top_n_executor() {
+    async fn test_group_top_n_executor() {
         test_without_offset_and_with_limits().await;
         test_with_offset_and_with_limits().await;
         test_without_limits().await;
@@ -457,14 +421,10 @@ mod tests {
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
                 "  I I I
-                -  9 1 1
                 - 10 1 1
-                -  7 8 2
                 -  8 8 2
                 - 10 9 1
-                +  9 1 1
-                +  8 1 3
-                +  7 8 2",
+                +  8 1 3",
             ),
         );
 
@@ -544,9 +504,7 @@ mod tests {
             &StreamChunk::from_pretty(
                 "  I I I
                 - 10 1 1
-                -  8 1 3
-                -  8 8 2
-                +  8 1 3",
+                -  8 8 2",
             ),
         );
 
@@ -628,13 +586,7 @@ mod tests {
                 "  I I I
                 - 10 9 1
                 -  8 8 2
-                -  7 8 2
-                -  9 1 1
-                - 10 1 1
-                -  8 1 3
-                +  9 1 1
-                +  8 1 3
-                +  7 8 2",
+                - 10 1 1",
             ),
         );
 
@@ -719,11 +671,7 @@ mod tests {
                 "  I I I
                 - 10 9 1
                 -  8 8 2
-                -  7 8 2
-                -  9 1 1
-                - 10 1 1
-                +  9 1 1
-                +  7 8 2",
+                - 10 1 1",
             ),
         );
 

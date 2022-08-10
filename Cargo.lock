@@ -230,6 +230,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "async_stack_trace"
+version = "0.1.0"
+dependencies = [
+ "coarsetime",
+ "futures",
+ "futures-async-stream",
+ "indextree",
+ "itertools",
+ "madsim-tokio",
+ "pin-project",
+ "tracing",
+ "triomphe",
+ "workspace-hack",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1300,6 +1316,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "coarsetime"
+version = "0.1.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "454038500439e141804c655b4cd1bc6a70bcb95cd2bc9463af5661b6956f0e46"
+dependencies = [
+ "libc",
+ "once_cell",
+ "wasi 0.11.0+wasi-snapshot-preview1",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2291,8 +2319,7 @@ dependencies = [
 [[package]]
 name = "getrandom"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4eb1a864a501629691edf6c15a593b7a51eebaa1e8468e9ddc623de7c9b58ec6"
+source = "git+https://github.com/madsys-dev/getrandom.git?rev=cc95ee3#cc95ee36a2ae473edb01fcdcf34da3f2dcfc4b2f"
 dependencies = [
  "cfg-if",
  "libc",
@@ -2563,6 +2590,12 @@ dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
 ]
+
+[[package]]
+name = "indextree"
+version = "4.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42b4b46b3311ebd8e5cd44f6b03b36e0f48a70552cf6b036afcebc5626794066"
 
 [[package]]
 name = "indicatif"
@@ -2931,9 +2964,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.0-alpha.6"
+version = "0.2.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "788e26cc637e646d6d64dc20dd142443dc514a14d50173320b706300eed0d65b"
+checksum = "9c0040c3a47975f0edbfe6189c2aa2a7acf9513f6b1d80ca4163eb1e1d9fdcb8"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2958,9 +2991,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-macros"
-version = "0.2.0-alpha.6"
+version = "0.2.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b12574a9cb01ac917f8d1a6f57655d331e74e77149ff0b0e1d61c209ed80c505"
+checksum = "401f0f94e2ac9d2505f24236520414758f47bbf816162a40ad8b46c23e0a6738"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -2970,9 +3003,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.0-alpha.6"
+version = "0.2.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d685cf60b0b80e2dcef0d854f415cb9c312e308d11bd56f206aad0b694013679"
+checksum = "8807fcd8baf916a84c2eabc293a3867c509e4916322451d1377a1801ad64d69c"
 dependencies = [
  "futures-lite",
  "madsim",
@@ -2981,9 +3014,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio-postgres"
-version = "0.2.0-alpha.6"
+version = "0.2.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bf24be13bdb096dd7169ff9a49160816843972451c0c22e8361f5f408e32f9b"
+checksum = "074bb360b532ca6619223174d15a056964983b9de90d9b78b7e8b70bfb2f0415"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -3004,9 +3037,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.0-alpha.6"
+version = "0.2.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b053a574ca6cad08a6d833a2166c9e23020c90af01cfde1863801bcb523e12c"
+checksum = "88d6c88130fe4ba940f1f9c2f0d9ac00736b00c30485da85e9c16a08f14878a7"
 dependencies = [
  "async-stream",
  "futures",
@@ -3018,9 +3051,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.2.0-alpha.6"
+version = "0.2.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0951bc8d601e51ba87b3f3e047c8109171fd5c884fe7ef5c677bae37266a26e8"
+checksum = "8e6e82f6f84bbc5a1f6cf7d82b1ae50fa868fa072dcb69d2f3e620dc5a073f8d"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -4176,8 +4209,7 @@ dependencies = [
 [[package]]
 name = "quanta"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e31331286705f455e56cca62e0e717158474ff02b7936c1fa596d983f4ae27"
+source = "git+https://github.com/madsys-dev/quanta.git?rev=a819877#a819877978ef542a6e0c626e0220030fd7c3e717"
 dependencies = [
  "crossbeam-utils",
  "libc",
@@ -4635,6 +4667,7 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
+ "pin-project",
  "postgres-types",
  "procfs",
  "procinfo",
@@ -4666,6 +4699,7 @@ dependencies = [
  "hyper",
  "log",
  "madsim-tokio",
+ "madsim-tonic",
  "prometheus",
  "risingwave_common",
  "risingwave_pb",
@@ -4994,6 +5028,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_meta",
+ "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
@@ -5065,6 +5100,7 @@ name = "risingwave_object_store"
 version = "0.1.11"
 dependencies = [
  "async-trait",
+ "async_stack_trace",
  "aws-config 0.46.0",
  "aws-endpoint 0.46.0",
  "aws-sdk-s3 0.16.0",
@@ -5125,6 +5161,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
+ "async_stack_trace",
  "futures",
  "log",
  "madsim",
@@ -5295,6 +5332,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "async-trait",
+ "async_stack_trace",
  "auto_enums",
  "bitvec",
  "byteorder",
@@ -5339,6 +5377,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
+ "scopeguard",
  "serde",
  "smallvec",
  "spin 0.9.4",
@@ -5363,6 +5402,8 @@ dependencies = [
  "assert_matches",
  "async-stream",
  "async-trait",
+ "async_stack_trace",
+ "auto_enums",
  "byteorder",
  "bytes",
  "chrono",
@@ -5390,6 +5431,7 @@ dependencies = [
  "pin-project",
  "prometheus",
  "prost 0.11.0",
+ "rand 0.8.5",
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
@@ -6592,6 +6634,10 @@ name = "triomphe"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fe1b3800b35f9b936c28dc59dbda91b195371269396784d931fe2a5a2be3d2f"
+dependencies = [
+ "serde",
+ "stable_deref_trait",
+]
 
 [[package]]
 name = "try-lock"
@@ -7034,6 +7080,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "socket2",
+ "stable_deref_trait",
  "syn",
  "tokio",
  "tokio-stream",

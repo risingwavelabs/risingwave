@@ -49,7 +49,12 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
         &self,
         table_id: StateTableId,
     ) -> HummockResult<CompactionGroupId> {
-        loop {
+        // The loop executes at most twice.
+        // For the first time there may already be an inflight RPC when cache miss, whose response
+        // may not contain wanted cache entry. For the second time the new RPC must contain
+        // wanted cache entry, no matter the RPC is fired by this task or other. Otherwise,
+        // the caller is trying to get an inexistent cache entry, which indicates a bug.
+        for _ in 0..2 {
             // 1. Get from cache
             if let Some(id) = self.cache.read().get(&table_id) {
                 return Ok(id);
@@ -86,6 +91,10 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
                 }
             }
         }
+        Err(HummockError::compaction_group_error(format!(
+            "compaction group not found for table id {}",
+            table_id
+        )))
     }
 }
 

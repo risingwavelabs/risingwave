@@ -417,7 +417,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
-        stream_manager,
+        stream_manager.clone(),
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
@@ -454,6 +454,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         cluster_manager.clone(),
         user_manager,
         hummock_manager.clone(),
+        stream_manager.clone(),
     );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -469,6 +470,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger,
         notification_manager,
         compaction_scheduler,
+        &env.opts,
     )
     .await;
     sub_tasks.push((lease_handle, lease_shutdown));

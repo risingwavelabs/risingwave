@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use std::borrow::{Borrow, BorrowMut};
-use std::cmp;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::{DerefMut, RangeBounds};
+use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -34,6 +33,7 @@ use risingwave_hummock_sdk::{
     HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
     HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
@@ -55,6 +55,15 @@ use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransa
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
+
+mod context;
+mod gc;
+#[cfg(test)]
+mod tests;
+mod versioning;
+use versioning::*;
+mod compaction;
+use compaction::*;
 
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
@@ -81,33 +90,6 @@ pub struct HummockManager<S: MetaStore> {
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 
-#[derive(Default)]
-struct Compaction {
-    /// Compaction task that is already assigned to a compactor
-    compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
-    /// `CompactStatus` of each compaction group
-    compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
-    /// Available compaction task ids for use
-    next_task_ids: VecDeque<HummockCompactionTaskId>,
-}
-
-impl Compaction {
-    /// Gets a new compaction task id locally. If no id is available locally, fetch some ids via
-    /// `get_more_ids` first.
-    async fn get_next_task_id<F>(&mut self, get_more_ids: F) -> Result<HummockCompactionTaskId>
-    where
-        F: Future<Output = Result<Vec<HummockCompactionTaskId>>>,
-    {
-        if self.next_task_ids.is_empty() {
-            let new_ids = get_more_ids.await?;
-            self.next_task_ids.extend(new_ids);
-        }
-        self.next_task_ids
-            .pop_front()
-            .ok_or_else(|| Error::InternalError("cannot get compaction task id".to_string()))
-    }
-}
-
 /// Commit multiple `ValTransaction`s to state store and upon success update the local in-mem state
 /// by the way
 /// After called, the `ValTransaction` will be dropped.
@@ -132,6 +114,7 @@ macro_rules! commit_multi_var {
         }
     };
 }
+pub(crate) use commit_multi_var;
 
 /// Acquire read lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -147,6 +130,7 @@ macro_rules! read_lock {
         }
     };
 }
+pub(crate) use read_lock;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -162,6 +146,7 @@ macro_rules! write_lock {
         }
     };
 }
+pub(crate) use write_lock;
 
 macro_rules! start_measure_real_process_timer {
     ($hummock_mgr:expr) => {
@@ -172,73 +157,7 @@ macro_rules! start_measure_real_process_timer {
             .start_timer()
     };
 }
-
-#[derive(Default)]
-struct Versioning {
-    // Volatile states below
-
-    // Newest version
-    current_version: HummockVersion,
-    // These SSTs should be deleted from object store.
-    // Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
-    ssts_to_delete: BTreeMap<HummockSstableId, HummockVersionId>,
-    // These deltas should be deleted from meta store.
-    // A delta can be deleted if
-    // - It's version id <= checkpoint version id. Currently we only make checkpoint for version id
-    //   <= min_pinned_version_id.
-    // - AND It either contains no SST to delete, or all these SSTs has been deleted. See
-    //   `extend_ssts_to_delete_from_deltas`.
-    deltas_to_delete: Vec<HummockVersionId>,
-
-    // Persistent states below
-
-    // Mapping from id of each hummock version which succeeds checkpoint to its
-    // `HummockVersionDelta`
-    hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
-    pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
-    pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
-    checkpoint_version: HummockVersion,
-}
-
-impl Versioning {
-    pub fn min_pinned_version_id(&self) -> HummockVersionId {
-        let mut min_pinned_version_id = HummockVersionId::MAX;
-        for version_pin in self.pinned_versions.values() {
-            min_pinned_version_id = cmp::min(version_pin.min_pinned_id, min_pinned_version_id);
-        }
-        min_pinned_version_id
-    }
-
-    /// Extends `ssts_to_delete` according to given deltas.
-    /// Possibly extends `deltas_to_delete`.
-    pub fn extend_ssts_to_delete_from_deltas(
-        &mut self,
-        delta_range: impl RangeBounds<HummockVersionId>,
-    ) {
-        for (_, delta) in self.hummock_version_deltas.range(delta_range) {
-            let mut no_sst_to_delete = true;
-            if delta.trivial_move {
-                self.deltas_to_delete.push(delta.id);
-                continue;
-            }
-            for level_deltas in delta.level_deltas.values() {
-                for level_delta in &level_deltas.level_deltas {
-                    for sst_id in &level_delta.removed_table_ids {
-                        let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
-                        assert!(duplicate_insert.is_none());
-                        no_sst_to_delete = false;
-                    }
-                }
-            }
-            // If no_sst_to_delete, the delta is qualified for deletion now.
-            if no_sst_to_delete {
-                self.deltas_to_delete.push(delta.id);
-            }
-            // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
-            // deleted.
-        }
-    }
-}
+pub(crate) use start_measure_real_process_timer;
 
 impl<S> HummockManager<S>
 where
@@ -653,20 +572,11 @@ where
         let start_time = Instant::now();
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
-        let task_id = compaction
-            .get_next_task_id(async {
-                let batch_size = 10;
-                self.env
-                    .id_gen_manager()
-                    .generate_interval::<{ IdCategory::HummockCompactionTask }>(batch_size)
-                    .await
-                    .map(|id| {
-                        (id as HummockCompactionTaskId
-                            ..(id + batch_size) as HummockCompactionTaskId)
-                            .collect_vec()
-                    })
-                    .map_err(Error::from)
-            })
+        // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
+        let task_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
         let mut compact_status = VarTransaction::new(
             compaction
@@ -1138,81 +1048,8 @@ where
         Ok(SstIdRange::new(start_id, start_id + number as u64))
     }
 
-    /// Release resources pinned by these contexts, including:
-    /// - Version
-    /// - Snapshot
-    /// - Compaction task
-    #[named]
-    pub async fn release_contexts(
-        &self,
-        context_ids: impl AsRef<[HummockContextId]>,
-    ) -> Result<()> {
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let compaction = compaction_guard.deref_mut();
-        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
-        let mut compact_task_assignment =
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let versioning = versioning_guard.deref_mut();
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
-        let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning.pinned_snapshots);
-        for context_id in context_ids.as_ref() {
-            tracing::debug!("Release context {}", *context_id);
-            for assignment in compact_task_assignment.tree_ref().values() {
-                if assignment.context_id != *context_id {
-                    continue;
-                }
-                let task = assignment
-                    .compact_task
-                    .as_ref()
-                    .expect("compact_task shouldn't be None");
-                let mut compact_status = compact_statuses
-                    .get_mut(task.compaction_group_id)
-                    .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
-                compact_status.report_compact_task(
-                    assignment
-                        .compact_task
-                        .as_ref()
-                        .expect("compact_task shouldn't be None"),
-                );
-            }
-            let task_ids_to_remove = compact_task_assignment
-                .tree_ref()
-                .iter()
-                .filter_map(|(task_id, v)| {
-                    if v.context_id == *context_id {
-                        Some(*task_id)
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec();
-            for task_id in task_ids_to_remove {
-                compact_task_assignment.remove(task_id);
-            }
-            pinned_versions.remove(*context_id);
-            pinned_snapshots.remove(*context_id);
-        }
-        commit_multi_var!(
-            self,
-            None,
-            compact_statuses,
-            compact_task_assignment,
-            pinned_versions,
-            pinned_snapshots
-        )?;
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            drop(compaction_guard);
-            self.check_state_consistency().await;
-        }
-
-        Ok(())
-    }
-
     /// Tries to checkpoint at min_pinned_version_id
+    ///
     /// Returns the diff between new and old checkpoint id.
     #[named]
     pub async fn proceed_version_checkpoint(&self) -> Result<u64> {
@@ -1265,21 +1102,15 @@ where
              versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
                 let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
                 let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-                let current_version_copy = versioning_guard.current_version.clone();
                 let pinned_versions_copy = versioning_guard.pinned_versions.clone();
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
-                let ssts_to_delete_copy = versioning_guard.ssts_to_delete.clone();
-                let deltas_to_delete_copy = versioning_guard.deltas_to_delete.clone();
                 let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 (
                     compact_statuses_copy,
                     compact_task_assignment_copy,
-                    current_version_copy,
                     pinned_versions_copy,
                     pinned_snapshots_copy,
-                    ssts_to_delete_copy,
-                    deltas_to_delete_copy,
                     checkpoint_version_copy,
                     hummock_version_deltas_copy,
                 )
@@ -1296,45 +1127,6 @@ where
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
         );
-    }
-
-    /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
-    #[named]
-    async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
-        let active_context_ids = {
-            let compaction_guard = read_lock!(self, compaction).await;
-            let versioning_guard = read_lock!(self, versioning).await;
-            let _timer = start_measure_real_process_timer!(self);
-            let mut active_context_ids = HashSet::new();
-            active_context_ids.extend(
-                compaction_guard
-                    .compact_task_assignment
-                    .values()
-                    .map(|c| c.context_id),
-            );
-            active_context_ids.extend(versioning_guard.pinned_versions.keys());
-            active_context_ids.extend(versioning_guard.pinned_snapshots.keys());
-            active_context_ids
-        };
-
-        let mut invalid_context_ids = vec![];
-        for active_context_id in &active_context_ids {
-            if !self.check_context(*active_context_id).await {
-                invalid_context_ids.push(*active_context_id);
-            }
-        }
-
-        self.release_contexts(&invalid_context_ids).await?;
-
-        Ok(invalid_context_ids)
-    }
-
-    /// Checks whether `context_id` is valid.
-    pub async fn check_context(&self, context_id: HummockContextId) -> bool {
-        self.cluster_manager
-            .get_worker_by_id(context_id)
-            .await
-            .is_some()
     }
 
     /// Gets current version without pinning it.
@@ -1436,7 +1228,7 @@ where
         let send_task = async {
             tokio::time::timeout(Duration::from_secs(3), async {
                 compactor
-                    .send_task(Some(compact_task.clone()), None)
+                    .send_task(Task::CompactTask(compact_task.clone()))
                     .await
                     .is_ok()
             })
@@ -1491,62 +1283,5 @@ where
 
     pub fn compaction_group_manager_ref_for_test(&self) -> CompactionGroupManagerRef<S> {
         self.compaction_group_manager.clone()
-    }
-
-    /// Gets SSTs that is safe to be deleted from object store.
-    #[named]
-    pub async fn get_ssts_to_delete(&self) -> Vec<HummockSstableId> {
-        read_lock!(self, versioning)
-            .await
-            .ssts_to_delete
-            .keys()
-            .cloned()
-            .collect_vec()
-    }
-
-    /// Acknowledges SSTs have been deleted from object store.
-    ///
-    /// Possibly extends deltas_to_delete.
-    #[named]
-    pub async fn ack_deleted_ssts(&self, sst_ids: &[HummockSstableId]) -> Result<()> {
-        let mut deltas_to_delete = HashSet::new();
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        for sst_id in sst_ids {
-            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(sst_id) {
-                deltas_to_delete.insert(version_id);
-            }
-        }
-        let remain_deltas: HashSet<HummockVersionId> =
-            HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
-        deltas_to_delete.retain(|id| !remain_deltas.contains(id));
-        versioning_guard.deltas_to_delete.extend(deltas_to_delete);
-        Ok(())
-    }
-
-    /// Deletes at most `batch_size` deltas.
-    ///
-    /// Returns (number of deleted deltas, number of remain `deltas_to_delete`).
-    #[named]
-    pub async fn delete_version_deltas(&self, batch_size: usize) -> Result<(usize, usize)> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        if versioning_guard.deltas_to_delete.is_empty() {
-            return Ok((0, 0));
-        }
-        let versioning = versioning_guard.deref_mut();
-        let mut hummock_version_deltas =
-            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-        for delta_id in versioning.deltas_to_delete.iter().take(batch_size) {
-            hummock_version_deltas.remove(*delta_id);
-        }
-        commit_multi_var!(self, None, hummock_version_deltas)?;
-        let deleted = cmp::min(batch_size, versioning.deltas_to_delete.len());
-        versioning.deltas_to_delete.drain(..deleted);
-        let remain = versioning.deltas_to_delete.len();
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-        Ok((deleted, remain))
     }
 }

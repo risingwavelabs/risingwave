@@ -29,6 +29,8 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
+use crate::optimizer::PlanRef;
+
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -72,6 +74,14 @@ impl BuildFragmentGraphState {
     }
 }
 
+pub struct StreamFragmenterV2 {}
+
+impl StreamFragmenterV2 {
+    pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+        StreamFragmenter::build_graph(plan_node.to_stream_prost())
+    }
+}
+
 pub struct StreamFragmenter {}
 
 impl StreamFragmenter {
@@ -89,16 +99,14 @@ impl StreamFragmenter {
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
     /// fragments.
     fn rewrite_stream_node(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<StreamNode> {
         let insert_exchange_flag = Self::is_stateful_executor(&stream_node);
-        self.rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
+        Self::rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
     }
 
     fn rewrite_stream_node_inner(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
         insert_exchange_flag: bool,
@@ -110,7 +118,7 @@ impl StreamFragmenter {
             // add an exchange.
             let input = if Self::is_stateful_executor(&child_node) {
                 if insert_exchange_flag {
-                    let child_node = self.rewrite_stream_node_inner(state, child_node, true)?;
+                    let child_node = Self::rewrite_stream_node_inner(state, child_node, true)?;
 
                     let strategy = DispatchStrategy {
                         r#type: DispatcherType::NoShuffle.into(),
@@ -129,16 +137,16 @@ impl StreamFragmenter {
                         append_only,
                     }
                 } else {
-                    self.rewrite_stream_node_inner(state, child_node, true)?
+                    Self::rewrite_stream_node_inner(state, child_node, true)?
                 }
             } else {
                 match child_node.get_node_body()? {
                     // For exchanges, reset the flag.
                     NodeBody::Exchange(_) => {
-                        self.rewrite_stream_node_inner(state, child_node, false)?
+                        Self::rewrite_stream_node_inner(state, child_node, false)?
                     }
                     // Otherwise, recursively visit the children.
-                    _ => self.rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
+                    _ => Self::rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
                 }
             };
             inputs.push(input);
@@ -152,23 +160,21 @@ impl StreamFragmenter {
 
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<()> {
-        let stream_node = self.rewrite_stream_node(state, stream_node)?;
-        self.build_and_add_fragment(state, stream_node)?;
+        let stream_node = Self::rewrite_stream_node(state, stream_node)?;
+        Self::build_and_add_fragment(state, stream_node)?;
         Ok(())
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
     fn build_and_add_fragment(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<StreamFragment> {
         let mut fragment = state.new_stream_fragment();
-        let node = self.build_fragment(state, &mut fragment, stream_node)?;
+        let node = Self::build_fragment(state, &mut fragment, stream_node)?;
 
         assert!(fragment.node.is_none());
         fragment.node = Some(Box::new(node));
@@ -182,7 +188,6 @@ impl StreamFragmenter {
     /// tree, count how many table ids should be allocated in this fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
     fn build_fragment(
-        &self,
         state: &mut BuildFragmentGraphState,
         current_fragment: &mut StreamFragment,
         mut stream_node: StreamNode,
@@ -211,40 +216,19 @@ impl StreamFragmenter {
         Self::assign_local_table_id_to_stream_node(state, &mut stream_node);
 
         // handle join logic
-        match stream_node.node_body.as_mut().unwrap() {
-            // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-            // with only equal conditions
-            NodeBody::HashJoin(hash_join_node) => {
-                if hash_join_node.is_delta_join {
-                    if hash_join_node.get_join_type()? == JoinType::Inner
-                        && hash_join_node.condition.is_none()
-                    {
-                        return self.build_delta_join(state, current_fragment, stream_node);
-                    } else {
-                        panic!(
-                            "only inner join without non-equal condition is supported for delta joins"
-                        );
-                    }
-                }
+        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
+        {
+            if delta_index_join.get_join_type()? == JoinType::Inner
+                && delta_index_join.condition.is_none()
+            {
+                return Self::build_delta_join_without_arrange(
+                    state,
+                    current_fragment,
+                    stream_node,
+                );
+            } else {
+                panic!("only inner join without non-equal condition is supported for delta joins");
             }
-
-            NodeBody::DeltaIndexJoin(delta_index_join) => {
-                if delta_index_join.get_join_type()? == JoinType::Inner
-                    && delta_index_join.condition.is_none()
-                {
-                    return self.build_delta_join_without_arrange(
-                        state,
-                        current_fragment,
-                        stream_node,
-                    );
-                } else {
-                    panic!(
-                        "only inner join without non-equal condition is supported for delta joins"
-                    );
-                }
-            }
-
-            _ => {}
         }
 
         let inputs = std::mem::take(&mut stream_node.input);
@@ -264,7 +248,7 @@ impl StreamFragmenter {
 
                         assert_eq!(child_node.input.len(), 1);
                         let child_fragment =
-                            self.build_and_add_fragment(state, child_node.input.remove(0))?;
+                            Self::build_and_add_fragment(state, child_node.input.remove(0))?;
                         state.fragment_graph.add_edge(
                             child_fragment.fragment_id,
                             current_fragment.fragment_id,
@@ -284,7 +268,7 @@ impl StreamFragmenter {
                     }
 
                     // For other children, visit recursively.
-                    _ => self.build_fragment(state, current_fragment, child_node),
+                    _ => Self::build_fragment(state, current_fragment, child_node),
                 }
             })
             .try_collect()?;
@@ -295,8 +279,6 @@ impl StreamFragmenter {
     }
 
     pub fn build_graph(stream_node: StreamNode) -> StreamFragmentGraphProto {
-        let fragmenter = Self {};
-
         let BuildFragmentGraphState {
             fragment_graph,
             next_local_fragment_id: _,
@@ -305,9 +287,7 @@ impl StreamFragmenter {
             next_table_id,
         } = {
             let mut state = BuildFragmentGraphState::default();
-            fragmenter
-                .generate_fragment_graph(&mut state, stream_node)
-                .unwrap();
+            Self::generate_fragment_graph(&mut state, stream_node).unwrap();
             state
         };
 

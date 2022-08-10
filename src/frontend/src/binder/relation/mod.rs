@@ -16,13 +16,13 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{internal_error, ErrorCode, Result};
-use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME, RW_TABLE_FUNCTION_NAME};
+use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
+use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{Expr, TableFunction, TableFunctionType};
+use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
 
 mod join;
 mod subquery;
@@ -169,6 +169,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "user name")
     }
 
+    /// return the (`schema_name`, `index_name`)
+    pub fn resolve_index_name(name: ObjectName) -> Result<(String, String)> {
+        Self::resolve_double_name(name.0, "empty index name", DEFAULT_SCHEMA_NAME)
+    }
+
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_table_to_context(
         &mut self,
@@ -271,6 +276,40 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_relation_by_id(
+        &mut self,
+        table_id: TableId,
+        schema_name: String,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
+        let table_name =
+            self.catalog
+                .get_table_name_by_id(table_id, &self.db_name, &schema_name)?;
+        self.bind_table_or_source(&schema_name, &table_name, alias)
+    }
+
+    fn resolve_table_id(&self, args: Vec<FunctionArg>) -> Result<(String, TableId)> {
+        if args.is_empty() || args.len() > 2 {
+            return Err(ErrorCode::BindError(
+                "usage: rw_table(table_id[,schema_name])".to_string(),
+            )
+            .into());
+        }
+
+        let table_id: TableId = args[0]
+            .to_string()
+            .parse::<u32>()
+            .map_err(|err| {
+                RwError::from(ErrorCode::BindError(format!("invalid table id: {}", err)))
+            })?
+            .into();
+
+        let schema = args
+            .get(1)
+            .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
+        Ok((schema, table_id))
+    }
+
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
@@ -278,13 +317,16 @@ impl Binder {
                     self.bind_relation_by_name(name, alias)
                 } else {
                     let func_name = &name.0[0].value;
+                    if func_name.eq_ignore_ascii_case(RW_TABLE_FUNCTION_NAME) {
+                        let (schema, table_id) = self.resolve_table_id(args)?;
+                        return self.bind_relation_by_id(table_id, schema, alias);
+                    }
                     if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                        let args = args
+                        let args: Vec<ExprImpl> = args
                             .into_iter()
                             .map(|arg| self.bind_function_arg(arg))
                             .flatten_ok()
                             .try_collect()?;
-
                         let tf = TableFunction::new(table_function_type, args)?;
                         let columns = [(
                             false,
