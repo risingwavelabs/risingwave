@@ -691,12 +691,13 @@ where
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.broadcast_info_op(Operation::Delete, Info::Table(mview.to_owned()))
+                self.notify_frontend(Operation::Delete, Info::Table(mview.to_owned()))
                     .await;
 
                 let version = self
-                    .broadcast_info_op(Operation::Delete, Info::Source(source))
+                    .notify_frontend(Operation::Delete, Info::Source(source))
                     .await;
+
                 Ok(version)
             }
 

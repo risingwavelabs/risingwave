@@ -162,7 +162,7 @@ impl NotificationManager {
         let mut core_guard = self.core.lock().await;
         let senders = match worker_type {
             WorkerType::Frontend => &mut core_guard.frontend_senders,
-            WorkerType::ComputeNode => &mut core_guard.compactor_senders,
+            WorkerType::ComputeNode => &mut core_guard.compute_senders,
             WorkerType::Compactor => &mut core_guard.compactor_senders,
 
             _ => unreachable!(),
