@@ -180,11 +180,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 2 => self.gen_concat_ws(can_agg, inside_agg),
                 _ => unreachable!(),
             },
-            // _ => match self.rng.gen_bool(0.5) {
-                // true => self.gen_case(ret, can_agg, inside_agg),
-            _ => self.gen_case(ret, can_agg, inside_agg)
-                // false => self.gen_coalesce(ret, can_agg, inside_agg),
-            // },
+            _ => match self.rng.gen_bool(0.5) {
+                true => self.gen_case(ret, can_agg, inside_agg),
+                false => self.gen_coalesce(ret, can_agg, inside_agg),
+            },
         }
     }
 
@@ -198,9 +197,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    // fn gen_coalesce(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
-    //     todo!()
-    // }
+    fn gen_coalesce(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
+        let non_null = self.gen_expr(ret, can_agg, inside_agg);
+        let position = self.rng.gen_range(0..10);
+        let mut args = (0..10).map(|_| Expr::Value(Value::Null)).collect_vec();
+        args[position] = non_null;
+        Expr::Function(make_simple_func(
+            "concat",
+            &args,
+        ))
+    }
 
     fn gen_concat(&mut self, can_agg: bool, inside_agg: bool) -> Expr {
         Expr::Function(make_simple_func(
