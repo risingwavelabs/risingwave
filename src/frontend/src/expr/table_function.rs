@@ -152,7 +152,7 @@ impl TableFunction {
                     .into());
                 }
                 if let Some(flag) = args.get(2) {
-                    if let ExprImpl::Literal(lit) = flag && 
+                    if let ExprImpl::Literal(lit) = flag &&
                       let Some(ScalarImpl::Utf8(flag)) = lit.get_data() {
                         if flag != "g" {
                             return Err(ErrorCode::NotImplemented(
@@ -166,7 +166,7 @@ impl TableFunction {
                         return Err(ErrorCode::BindError(
                             "flag in regexp_matches should be a constant string".to_string(),
                         )
-                        .into())       
+                        .into())
                     };
                 }
                 Ok(TableFunction {
