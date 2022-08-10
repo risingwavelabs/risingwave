@@ -82,8 +82,8 @@ where
     B: SstableWriterBuilder,
 {
     async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
-        // TODO: streaming upload may take up less memory than the SST capacity, and it also
-        // depends on cache policy.
+        // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
+        // policy.
         let tracker = self
             .limiter
             .require_memory(

@@ -50,8 +50,11 @@ pub struct S3StreamingUploader {
     /// Join handles for part uploads.
     join_handles: Vec<JoinHandle<ObjectResult<()>>>,
     /// Parts that are already uploaded to S3.
+    // TODO: Perhaps switching to Vec<(PartIdm UploadPartOutput)> is faster.
     uploaded_parts: Arc<Mutex<BTreeMap<PartId, UploadPartOutput>>>,
     /// Buffer for bytes.
+    // TODO: We might want to remove uploaded parts if we want to trade
+    // robustness for memory usage.
     buf: Vec<Bytes>,
     /// Length of the data that have not been uploaded to S3.
     not_uploaded_len: usize,
@@ -121,6 +124,7 @@ impl S3StreamingUploader {
 
         // If any part fails to upload, abort the upload.
         let join_handles = self.join_handles.drain(..).collect_vec();
+
         for result in try_join_all(join_handles)
             .await
             .map_err(ObjectError::internal)?
@@ -141,7 +145,7 @@ impl S3StreamingUploader {
                 })
                 .collect_vec(),
         );
-        // If fail to complete the upload, abort the upload.
+
         self.client
             .complete_multipart_upload()
             .bucket(&self.bucket)
@@ -194,13 +198,22 @@ impl StreamingUploader for S3StreamingUploader {
 
     /// If the data in the buffer is smaller than `MIN_PART_SIZE`, abort multipart upload
     /// and use `PUT` to upload the data. Otherwise flush the remaining data of the buffer
-    /// to S3 as a new part.
+    /// to S3 as a new part. Fallback to `PUT` on failure.
     async fn finish(mut self) -> ObjectResult<()> {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
         if (self.part_begin == 0 && self.part_end == 0) || self.flush_and_complete().await.is_err()
         {
+            // If any part uploads are currently in progress, those part uploads might or might
+            // not succeed. As a result, it might be necessary to abort a given multipart upload
+            // multiple times in order to completely free all storage consumed by all parts.
+            //
+            // To verify that all parts have been removed, so you don't get charged for the
+            // part storage, you should call the ListParts action and ensure that the parts list is
+            // empty.
+            //
+            // Reference: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
             self.client
                 .abort_multipart_upload()
                 .bucket(&self.bucket)
@@ -208,7 +221,6 @@ impl StreamingUploader for S3StreamingUploader {
                 .upload_id(&self.upload_id)
                 .send()
                 .await?;
-            // As abort should happen very rarely, it's ok to recalculate the whole data length.
             let data_len = self.buf.iter().map(|b| b.len() as i64).sum();
             self.client
                 .put_object()
