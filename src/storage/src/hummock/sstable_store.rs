@@ -110,6 +110,12 @@ impl SstableStreamingUploader {
             .write_bytes(block)
             .map_err(HummockError::object_io_error)
     }
+
+    pub fn upload_size_footer(&mut self, size_footer: u32) -> HummockResult<()> {
+        self.object_uploader
+            .write_bytes(Bytes::from(size_footer.to_le_bytes().to_vec()))
+            .map_err(HummockError::object_io_error)
+    }
 }
 
 // TODO: Define policy based on use cases (read / compaction / ...).
@@ -219,13 +225,9 @@ impl SstableStore {
     /// Finish uploading by providing size footer and metadata.
     pub async fn finish_put_sst_stream(
         &self,
-        mut uploader: SstableStreamingUploader,
+        uploader: SstableStreamingUploader,
         meta: SstableMeta,
-        size_footer: u32,
     ) -> HummockResult<()> {
-        uploader
-            .object_uploader
-            .write_bytes(Bytes::from(size_footer.to_le_bytes().to_vec()))?;
         uploader.object_uploader.finish().await?;
         let sst_id = uploader.id;
         if let Err(e) = self.put_meta(sst_id, &meta).await {
@@ -592,8 +594,9 @@ mod tests {
         for block in blocks {
             uploader.upload_block(block).unwrap();
         }
+        uploader.upload_size_footer(size_footer).unwrap();
         sstable_store
-            .finish_put_sst_stream(uploader, meta.clone(), size_footer)
+            .finish_put_sst_stream(uploader, meta.clone())
             .await
             .unwrap();
 

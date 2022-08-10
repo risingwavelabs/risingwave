@@ -13,8 +13,11 @@
 // limitations under the License.
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_hummock_sdk::HummockSstableId;
 
-use crate::hummock::{HummockResult, SstableBuilderOptions};
+use crate::hummock::{
+    CachePolicy, HummockResult, SstableBuilderOptions, SstableStoreRef, SstableStreamingUploader,
+};
 
 /// A consumer of SST data.
 /// The data may be written to a stream, pushed to a vector, appended to a buffer, etc.
@@ -70,11 +73,48 @@ impl From<&SstableBuilderOptions> for InMemSstableWriter {
     }
 }
 
+/// Upload sst blocks to the streaming uploader of `SstableStore`.
+/// The upload might not be finished immediately on calling `finish`.
+/// Instead, it returns a sealed uploader which is ready to be passed back to `SstableStore` to
+/// finish the uploading.
+pub struct StreamingSstableWriter {
+    uploader: SstableStreamingUploader,
+    data_len: usize,
+}
+
+impl StreamingSstableWriter {
+    pub fn new(uploader: SstableStreamingUploader) -> StreamingSstableWriter {
+        Self {
+            uploader,
+            data_len: 0,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableWriter for StreamingSstableWriter {
+    type Output = SstableStreamingUploader;
+
+    fn write_block(&mut self, block: &[u8]) -> HummockResult<()> {
+        self.data_len += block.len();
+        self.uploader.upload_block(Bytes::from(block.to_vec()))
+    }
+
+    async fn finish(mut self, size_footer: u32) -> HummockResult<(usize, Self::Output)> {
+        self.uploader.upload_size_footer(size_footer)?;
+        Ok((self.data_len + 4, self.uploader))
+    }
+
+    fn data_len(&self) -> usize {
+        self.data_len
+    }
+}
+
 #[async_trait::async_trait]
 pub trait SstableWriterBuilder: Send + Sync {
     type Writer: SstableWriter;
 
-    async fn build(&self) -> HummockResult<Self::Writer>;
+    async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer>;
 }
 
 pub struct InMemWriterBuilder {
@@ -93,7 +133,34 @@ impl From<&SstableBuilderOptions> for InMemWriterBuilder {
 impl SstableWriterBuilder for InMemWriterBuilder {
     type Writer = InMemSstableWriter;
 
-    async fn build(&self) -> HummockResult<Self::Writer> {
+    async fn build(&self, _sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
         Ok(InMemSstableWriter::new(self.capacity))
+    }
+}
+
+pub struct StreamingWriterBuilder {
+    sstable_store: SstableStoreRef,
+    policy: CachePolicy,
+}
+
+impl StreamingWriterBuilder {
+    pub fn new(sstable_store: SstableStoreRef, policy: CachePolicy) -> StreamingWriterBuilder {
+        Self {
+            sstable_store,
+            policy,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableWriterBuilder for StreamingWriterBuilder {
+    type Writer = StreamingSstableWriter;
+
+    async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
+        let uploader = self
+            .sstable_store
+            .put_sst_stream(sst_id, self.policy)
+            .await?;
+        Ok(StreamingSstableWriter::new(uploader))
     }
 }

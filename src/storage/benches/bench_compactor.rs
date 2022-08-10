@@ -31,7 +31,7 @@ use risingwave_storage::hummock::iterator::{
     MultiSstIterator, UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::multi_builder::{
-    CapacitySplitTableBuilder, SstableBatchUploader, TableBuilderFactory,
+    BatchUploadSealer, CapacitySplitTableBuilder, TableBuilderFactory,
 };
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
@@ -67,14 +67,14 @@ fn sst_writer_builder_for_batch_upload(opt: &SstableBuilderOptions) -> InMemWrit
     InMemWriterBuilder::from(opt)
 }
 
-fn sst_writer_builder_and_consumer_for_batch_upload(
+fn sst_writer_builder_and_sealer_for_batch_upload(
     opt: &SstableBuilderOptions,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
-) -> (InMemWriterBuilder, SstableBatchUploader) {
+) -> (InMemWriterBuilder, BatchUploadSealer) {
     (
         sst_writer_builder_for_batch_upload(opt),
-        SstableBatchUploader::new(sstable_store, policy),
+        BatchUploadSealer::new(sstable_store, policy),
     )
 }
 
@@ -88,7 +88,7 @@ async fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, 
         estimate_bloom_filter_capacity: 1024 * 1024,
     };
     let sstable_writer = sst_writer_builder_for_batch_upload(&opt)
-        .build()
+        .build(sstable_id)
         .await
         .unwrap();
     let mut builder = SstableBuilder::new(sstable_id, sstable_writer, opt);
@@ -180,7 +180,7 @@ where
             self.limiter.require_memory(1).await.unwrap(),
             SstableBuilder::new(
                 table_id,
-                self.writer_builder.build().await.unwrap(),
+                self.writer_builder.build(table_id).await.unwrap(),
                 self.options.clone(),
             ),
         ))
@@ -197,8 +197,8 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
     };
-    let (writer_builder, builder_consumer) =
-        sst_writer_builder_and_consumer_for_batch_upload(&opt, sstable_store, CachePolicy::NotFill);
+    let (writer_builder, builder_sealer) =
+        sst_writer_builder_and_sealer_for_batch_upload(&opt, sstable_store, CachePolicy::NotFill);
     let mut builder = CapacitySplitTableBuilder::new(
         LocalTableBuilderFactory {
             global_table_id,
@@ -206,7 +206,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
             limiter: MemoryLimiter::new(100000),
             writer_builder,
         },
-        builder_consumer,
+        builder_sealer,
     );
 
     Compactor::compact_and_build_sst(

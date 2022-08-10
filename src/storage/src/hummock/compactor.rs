@@ -41,9 +41,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::multi_builder::{
-    CapacitySplitTableBuilder, SstableBatchUploader, SstableBuilderConsumer,
-};
+use super::multi_builder::{BatchUploadSealer, CapacitySplitTableBuilder, SstableBuilderSealer};
 use super::{
     CompressionAlgorithm, HummockResult, InMemWriterBuilder, SstableBuilderOptions,
     SstableWriterBuilder,
@@ -100,7 +98,7 @@ where
 
         let builder = SstableBuilder::new(
             table_id,
-            self.writer_builder.build().await?,
+            self.writer_builder.build(table_id).await?,
             self.options.clone(),
         );
         Ok((tracker, builder))
@@ -741,10 +739,10 @@ impl Compactor {
             remote_rpc_cost: get_id_time.clone(),
         };
 
-        let builder_consumer =
-            SstableBatchUploader::new(self.context.sstable_store.clone(), cache_policy);
+        let builder_sealer =
+            BatchUploadSealer::new(self.context.sstable_store.clone(), cache_policy);
         // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let mut builder = CapacitySplitTableBuilder::new(builder_factory, builder_consumer);
+        let mut builder = CapacitySplitTableBuilder::new(builder_factory, builder_sealer);
 
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -990,7 +988,7 @@ impl Compactor {
     where
         F: TableBuilderFactory<B>,
         B: SstableWriterBuilder,
-        C: SstableBuilderConsumer<B::Writer>,
+        C: SstableBuilderSealer<B::Writer>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

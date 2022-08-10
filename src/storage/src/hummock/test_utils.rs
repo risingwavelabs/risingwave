@@ -21,11 +21,7 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
-use super::multi_builder::SstableBatchUploader;
-use super::{
-    CompressionAlgorithm, InMemSstableWriter, InMemWriterBuilder, SstableMeta,
-    DEFAULT_RESTART_INTERVAL,
-};
+use super::{CompressionAlgorithm, InMemSstableWriter, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
@@ -104,19 +100,6 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
 
 pub fn default_sst_writer_from_opt(opt: &SstableBuilderOptions) -> InMemSstableWriter {
     InMemSstableWriter::from(opt)
-}
-
-/// The writer will generate an entire SST in memory and the consumer will upload it to object
-/// store.
-pub fn default_sst_writer_builder_and_consumer_from_opt(
-    opt: &SstableBuilderOptions,
-    sstable_store: SstableStoreRef,
-    policy: CachePolicy,
-) -> (InMemWriterBuilder, SstableBatchUploader) {
-    (
-        InMemWriterBuilder::from(opt),
-        SstableBatchUploader::new(sstable_store, policy),
-    )
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
