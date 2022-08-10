@@ -37,7 +37,7 @@ impl RowDeserialize for RowBasedDeserializer {
         &mut self,
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
-    ) -> Result<Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)>> {
+    ) -> Result<(risingwave_common::types::VirtualNode, Vec<u8>, Row)> {
         // todo: raw_key will be used in row-based pk dudup later.
         self.deserialize_inner(raw_key, value)
     }
@@ -48,7 +48,7 @@ impl RowBasedDeserializer {
         &mut self,
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+    ) -> Result<(VirtualNode, Vec<u8>, Row)> {
         let raw_key = raw_key.as_ref();
         if raw_key.len() < VIRTUAL_NODE_SIZE {
             // vnode + cell_id
@@ -67,7 +67,7 @@ impl RowBasedDeserializer {
         for col_idx in &self.column_mapping.output_index {
             output_row.push(origin_row.0[*col_idx].take());
         }
-        Ok(Some((vnode, key_bytes.to_vec(), Row(output_row))))
+        Ok((vnode, key_bytes.to_vec(), Row(output_row)))
     }
 }
 
@@ -135,8 +135,8 @@ mod tests {
 
         assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
         let row1 = de.deserialize(pk, value).unwrap();
-        assert_eq!(DEFAULT_VNODE, row1.clone().unwrap().0);
-        assert_eq!(row, row1.unwrap().2);
+        assert_eq!(DEFAULT_VNODE, row1.0);
+        assert_eq!(row, row1.2);
     }
 
     #[test]
@@ -199,7 +199,7 @@ mod tests {
 
         assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
         let deser_row = de.deserialize(pk, value).unwrap();
-        assert_eq!(DEFAULT_VNODE, deser_row.clone().unwrap().0);
-        assert_eq!(partial_row, deser_row.unwrap().2);
+        assert_eq!(DEFAULT_VNODE, deser_row.0);
+        assert_eq!(partial_row, deser_row.2);
     }
 }

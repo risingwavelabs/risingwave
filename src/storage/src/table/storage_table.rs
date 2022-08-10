@@ -406,8 +406,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         {
             let deserialize_res = deserializer
                 .deserialize(&serialized_pk, &value)
-                .map_err(err)?
-                .unwrap();
+                .map_err(err)?;
             Ok(Some(deserialize_res.2))
         } else {
             Ok(None)
@@ -826,13 +825,12 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            if let Some((_vnode, pk, row)) = self
+            let (_vnode, pk, row) = self
                 .row_deserializer
                 .deserialize(&key, &value)
-                .map_err(err)?
-            {
-                yield (pk, row)
-            }
+                .map_err(err)?;
+
+            yield (pk, row)
         }
     }
 }

@@ -85,7 +85,7 @@ pub trait RowDeserialize {
         &mut self,
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>>;
+    ) -> Result<(VirtualNode, Vec<u8>, Row)>;
 }
 
 /// `RowSerde` provides the ability to convert between Row and KV entry.
