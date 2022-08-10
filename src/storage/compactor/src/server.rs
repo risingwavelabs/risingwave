@@ -126,7 +126,7 @@ pub async fn compactor_serve(
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
-        memory_limiter: memory_limiter.clone(),
+        memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
     });
 
