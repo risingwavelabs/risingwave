@@ -16,7 +16,6 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
@@ -207,19 +206,9 @@ impl HummockStorage {
     }
 
     async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
-        match tokio::time::timeout(
-            Duration::from_secs(10),
-            self.compaction_group_client
-                .get_compaction_group_id(table_id.table_id),
-        )
-        .await
-        {
-            Err(_) => Err(HummockError::other(format!(
-                "get_compaction_group_id {} timeout",
-                table_id
-            ))),
-            Ok(resp) => resp,
-        }
+        self.compaction_group_client
+            .get_compaction_group_id(table_id.table_id)
+            .await
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
