@@ -311,9 +311,7 @@ impl LocalVersionManager {
         let sstable_id_manager_clone = self.sstable_id_manager.clone();
         tokio::spawn(async move {
             for cleaned_epoch in cleaned_epochs {
-                sstable_id_manager_clone
-                    .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
-                    .await;
+                sstable_id_manager_clone.remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
             }
         });
         {
@@ -945,8 +943,7 @@ impl LocalVersionManager {
                         for cleaned_epoch in cleaned_epochs {
                             local_version_manager
                                 .sstable_id_manager
-                                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch))
-                                .await;
+                                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
                         }
 
                         // Notify completion of the Clear event.
