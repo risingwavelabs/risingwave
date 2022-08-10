@@ -33,7 +33,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test"
-    command: "ci/scripts/e2e-test.sh -p dev"
+    command: "ci/scripts/cron-e2e-test.sh -p dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache

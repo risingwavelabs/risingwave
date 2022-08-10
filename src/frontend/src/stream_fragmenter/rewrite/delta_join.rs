@@ -32,7 +32,6 @@ use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 impl StreamFragmenter {
     /// All exchanges inside delta join is one-to-one exchange.
     fn build_exchange_for_delta_join(
-        &self,
         state: &mut BuildFragmentGraphState,
         upstream: &StreamNode,
     ) -> StreamNode {
@@ -57,7 +56,6 @@ impl StreamFragmenter {
     }
 
     fn build_lookup_for_delta_join(
-        &self,
         state: &mut BuildFragmentGraphState,
         (exchange_node_arrangement, exchange_node_stream): (&StreamNode, &StreamNode),
         (output_fields, output_pk_indices): (Vec<ProstField>, Vec<u32>),
@@ -78,7 +76,6 @@ impl StreamFragmenter {
     }
 
     fn build_delta_join_inner(
-        &self,
         state: &mut BuildFragmentGraphState,
         current_fragment: &mut StreamFragment,
         arrange_0_frag: StreamFragment,
@@ -94,10 +91,10 @@ impl StreamFragmenter {
 
         let arrange_0 = arrange_0_frag.node.as_ref().unwrap();
         let arrange_1 = arrange_1_frag.node.as_ref().unwrap();
-        let exchange_a0l0 = self.build_exchange_for_delta_join(state, arrange_0);
-        let exchange_a0l1 = self.build_exchange_for_delta_join(state, arrange_0);
-        let exchange_a1l0 = self.build_exchange_for_delta_join(state, arrange_1);
-        let exchange_a1l1 = self.build_exchange_for_delta_join(state, arrange_1);
+        let exchange_a0l0 = Self::build_exchange_for_delta_join(state, arrange_0);
+        let exchange_a0l1 = Self::build_exchange_for_delta_join(state, arrange_0);
+        let exchange_a1l0 = Self::build_exchange_for_delta_join(state, arrange_1);
+        let exchange_a1l1 = Self::build_exchange_for_delta_join(state, arrange_1);
 
         let i0_length = arrange_0.fields.len();
         let i1_length = arrange_1.fields.len();
@@ -113,7 +110,7 @@ impl StreamFragmenter {
                 .collect_vec()
         };
         // lookup left table by right stream
-        let lookup_0 = self.build_lookup_for_delta_join(
+        let lookup_0 = Self::build_lookup_for_delta_join(
             state,
             (&exchange_a1l0, &exchange_a0l0),
             (node.fields.clone(), node.pk_indices.clone()),
@@ -159,7 +156,7 @@ impl StreamFragmenter {
                 .collect_vec()
         };
         // lookup right table by left stream
-        let lookup_1 = self.build_lookup_for_delta_join(
+        let lookup_1 = Self::build_lookup_for_delta_join(
             state,
             (&exchange_a0l1, &exchange_a1l1),
             (node.fields.clone(), node.pk_indices.clone()),
@@ -195,8 +192,8 @@ impl StreamFragmenter {
             },
         );
 
-        let lookup_0_frag = self.build_and_add_fragment(state, lookup_0)?;
-        let lookup_1_frag = self.build_and_add_fragment(state, lookup_1)?;
+        let lookup_0_frag = Self::build_and_add_fragment(state, lookup_0)?;
+        let lookup_1_frag = Self::build_and_add_fragment(state, lookup_1)?;
 
         state.fragment_graph.add_edge(
             arrange_0_frag.fragment_id,
@@ -240,8 +237,8 @@ impl StreamFragmenter {
             },
         );
 
-        let exchange_l0m = self.build_exchange_for_delta_join(state, node);
-        let exchange_l1m = self.build_exchange_for_delta_join(state, node);
+        let exchange_l0m = Self::build_exchange_for_delta_join(state, node);
+        let exchange_l1m = Self::build_exchange_for_delta_join(state, node);
 
         let union = StreamNode {
             operator_id: state.gen_operator_id() as u64,
@@ -277,7 +274,6 @@ impl StreamFragmenter {
     }
 
     pub(in super::super) fn build_delta_join_without_arrange(
-        &self,
         state: &mut BuildFragmentGraphState,
         current_fragment: &mut StreamFragment,
         mut node: StreamNode,
@@ -308,10 +304,10 @@ impl StreamFragmenter {
         let arrange_0 = pass_through_exchange(arrange_0);
         let arrange_1 = pass_through_exchange(arrange_1);
 
-        let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
-        let arrange_1_frag = self.build_and_add_fragment(state, arrange_1)?;
+        let arrange_0_frag = Self::build_and_add_fragment(state, arrange_0)?;
+        let arrange_1_frag = Self::build_and_add_fragment(state, arrange_1)?;
 
-        let union = self.build_delta_join_inner(
+        let union = Self::build_delta_join_inner(
             state,
             current_fragment,
             arrange_0_frag,

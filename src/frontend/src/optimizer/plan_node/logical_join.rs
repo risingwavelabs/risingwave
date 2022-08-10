@@ -116,8 +116,8 @@ impl LogicalJoin {
         let pk_indices = Self::derive_pk(
             left.schema().len(),
             right.schema().len(),
-            left.pk_indices(),
-            right.pk_indices(),
+            left.logical_pk(),
+            right.logical_pk(),
             join_type,
             &output_indices,
         );
@@ -1039,13 +1039,13 @@ impl ToStream for LogicalJoin {
 
         // Add missing pk indices to the logical join
         let left_to_add = left
-            .pk_indices()
+            .logical_pk()
             .iter()
             .cloned()
             .filter(|i| l2i.try_map(*i) == None);
 
         let right_to_add = right
-            .pk_indices()
+            .logical_pk()
             .iter()
             .cloned()
             .filter(|i| r2i.try_map(*i) == None)

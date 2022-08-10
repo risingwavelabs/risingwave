@@ -12,51 +12,55 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+mod compaction_executor;
+mod compaction_filter;
+mod context;
+mod shared_buffer_compact;
+
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use dyn_clone::DynClone;
-use futures::future::try_join_all;
-use futures::{stream, FutureExt, StreamExt, TryFutureExt};
-use itertools::Itertools;
-use risingwave_common::config::constant::hummock::{
-    CompactionFilterFlag, TABLE_OPTION_DUMMY_RETAINTION_SECOND,
+pub use compaction_executor::CompactionExecutor;
+pub use compaction_filter::{
+    CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
+    TTLCompactionFilter,
 };
+pub use context::CompactorContext;
+use futures::future::try_join_all;
+use futures::{stream, FutureExt, StreamExt};
+use itertools::Itertools;
+use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
-use risingwave_hummock_sdk::key::{
-    extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
-};
+use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
+use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
+pub use shared_buffer_compact::compact;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{CompressionAlgorithm, HummockResult, Sstable, SstableBuilderOptions};
-use crate::hummock::compaction_executor::CompactionExecutor;
+use super::{CompressionAlgorithm, HummockResult, SstableBuilderOptions};
 use crate::hummock::iterator::{
     ConcatSstableIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
 };
 use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
-use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::{can_concat, MemoryLimiter, MemoryTracker};
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::hummock::{
+    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, DEFAULT_ENTRY_SIZE,
+};
+use crate::monitor::StateStoreMetrics;
 
 pub struct RemoteBuilderFactory {
     sstable_id_manager: SstableIdManagerRef,
@@ -70,7 +74,11 @@ impl TableBuilderFactory for RemoteBuilderFactory {
     async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
         let tracker = self
             .limiter
-            .require_memory(self.options.capacity as u64 + self.options.block_capacity as u64)
+            .require_memory(
+                (self.options.capacity
+                    + self.options.block_capacity
+                    + self.options.estimate_bloom_filter_capacity) as u64,
+            )
             .await
             .unwrap();
         let timer = Instant::now();
@@ -79,145 +87,6 @@ impl TableBuilderFactory for RemoteBuilderFactory {
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let builder = SstableBuilder::new(table_id, self.options.clone());
         Ok((tracker, builder))
-    }
-}
-
-/// A `CompactorContext` describes the context of a compactor.
-#[derive(Clone)]
-pub struct CompactorContext {
-    /// Storage configurations.
-    pub options: Arc<StorageConfig>,
-
-    /// The meta client.
-    pub hummock_meta_client: Arc<dyn HummockMetaClient>,
-
-    /// Sstable store that manages the sstables.
-    pub sstable_store: SstableStoreRef,
-
-    /// Statistics.
-    pub stats: Arc<StateStoreMetrics>,
-
-    /// True if it is a memory compaction (from shared buffer).
-    pub is_share_buffer_compact: bool,
-
-    pub compaction_executor: Option<Arc<CompactionExecutor>>,
-
-    pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-
-    pub memory_limiter: Arc<MemoryLimiter>,
-
-    pub sstable_id_manager: SstableIdManagerRef,
-}
-
-pub trait CompactionFilter: Send + DynClone {
-    fn should_delete(&mut self, _: &[u8]) -> bool {
-        false
-    }
-}
-
-dyn_clone::clone_trait_object!(CompactionFilter);
-
-#[derive(Clone)]
-pub struct DummyCompactionFilter;
-
-impl CompactionFilter for DummyCompactionFilter {}
-
-#[derive(Clone)]
-pub struct StateCleanUpCompactionFilter {
-    existing_table_ids: HashSet<u32>,
-    last_table: Option<(u32, bool)>,
-}
-
-impl StateCleanUpCompactionFilter {
-    fn new(table_id_set: HashSet<u32>) -> Self {
-        StateCleanUpCompactionFilter {
-            existing_table_ids: table_id_set,
-            last_table: None,
-        }
-    }
-}
-
-impl CompactionFilter for StateCleanUpCompactionFilter {
-    fn should_delete(&mut self, key: &[u8]) -> bool {
-        let table_id_option = get_table_id(key);
-        match table_id_option {
-            None => false,
-            Some(table_id) => {
-                if let Some((last_table_id, removed)) = self.last_table.as_ref() {
-                    if *last_table_id == table_id {
-                        return *removed;
-                    }
-                }
-                let removed = !self.existing_table_ids.contains(&table_id);
-                self.last_table = Some((table_id, removed));
-                removed
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct TTLCompactionFilter {
-    table_id_to_ttl: HashMap<u32, u32>,
-    expire_epoch: u64,
-    last_table_and_ttl: Option<(u32, u64)>,
-}
-
-impl CompactionFilter for TTLCompactionFilter {
-    fn should_delete(&mut self, key: &[u8]) -> bool {
-        pub use risingwave_common::util::epoch::Epoch;
-        let (table_id, epoch) = extract_table_id_and_epoch(key);
-        match table_id {
-            Some(table_id) => {
-                if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
-                    if *last_table_id == table_id {
-                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
-                        return Epoch(epoch) <= min_epoch;
-                    }
-                }
-                match self.table_id_to_ttl.get(&table_id) {
-                    Some(ttl_second_u32) => {
-                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETAINTION_SECOND);
-                        // default to zero.
-                        let ttl_mill = (*ttl_second_u32 * 1000) as u64;
-                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
-                        self.last_table_and_ttl = Some((table_id, ttl_mill));
-                        Epoch(epoch) <= min_epoch
-                    }
-                    None => false,
-                }
-            }
-            None => false,
-        }
-    }
-}
-
-impl TTLCompactionFilter {
-    fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
-        Self {
-            table_id_to_ttl,
-            expire_epoch: expire,
-            last_table_and_ttl: None,
-        }
-    }
-}
-
-#[derive(Default, Clone)]
-struct MultiCompactionFilter {
-    filter_vec: Vec<Box<dyn CompactionFilter>>,
-}
-
-impl CompactionFilter for MultiCompactionFilter {
-    fn should_delete(&mut self, key: &[u8]) -> bool {
-        self.filter_vec
-            .iter_mut()
-            .any(|filter| filter.should_delete(key))
-    }
-}
-
-impl MultiCompactionFilter {
-    fn register(&mut self, filter: Box<dyn CompactionFilter>) {
-        self.filter_vec.push(filter);
     }
 }
 
@@ -233,7 +102,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, Vec<u32>)>);
+pub type CompactOutput = (usize, Vec<SstableInfo>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -241,189 +110,6 @@ impl Compactor {
         Self {
             context,
             compact_task,
-        }
-    }
-
-    /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
-    pub async fn compact_shared_buffer_by_compaction_group(
-        context: Arc<CompactorContext>,
-        payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, Vec<u32>)>> {
-        let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
-        for uncommitted_list in payload {
-            let mut next_inner = HashSet::new();
-            for uncommitted in uncommitted_list {
-                let compaction_group_id = match &uncommitted {
-                    UncommittedData::Sst((compaction_group_id, _)) => *compaction_group_id,
-                    UncommittedData::Batch(batch) => batch.compaction_group_id(),
-                };
-                let group = grouped_payload
-                    .entry(compaction_group_id)
-                    .or_insert_with(std::vec::Vec::new);
-                if !next_inner.contains(&compaction_group_id) {
-                    group.push(vec![]);
-                    next_inner.insert(compaction_group_id);
-                }
-                group.last_mut().unwrap().push(uncommitted);
-            }
-        }
-
-        let mut futures = vec![];
-        for (id, group_payload) in grouped_payload {
-            let id_copy = id;
-            futures.push(
-                Compactor::compact_shared_buffer(context.clone(), group_payload).map_ok(
-                    move |results| {
-                        results
-                            .into_iter()
-                            .map(move |result| (id_copy, result.0, result.1))
-                            .collect_vec()
-                    },
-                ),
-            );
-        }
-        // Note that the output is reordered compared with input `payload`.
-        let result = try_join_all(futures)
-            .await?
-            .into_iter()
-            .flatten()
-            .collect_vec();
-        Ok(result)
-    }
-
-    /// For compaction from shared buffer to level 0, this is the only function gets called.
-    pub async fn compact_shared_buffer(
-        context: Arc<CompactorContext>,
-        payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, Vec<u32>)>> {
-        let mut start_user_keys = payload
-            .iter()
-            .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
-            .collect_vec();
-        start_user_keys.sort();
-        start_user_keys.dedup();
-        let mut splits = Vec::with_capacity(start_user_keys.len());
-        splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
-        let mut key_split_append = |key_before_last: &Bytes| {
-            splits.last_mut().unwrap().right = key_before_last.clone();
-            splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
-        };
-        if start_user_keys.len() > 1 {
-            let split_num = context.options.share_buffers_sync_parallelism as usize;
-            let buffer_per_split = start_user_keys.len() / split_num;
-            for i in 1..split_num {
-                key_split_append(
-                    &FullKey::from_user_key_slice(
-                        start_user_keys[i * buffer_per_split],
-                        Epoch::MAX,
-                    )
-                    .into_inner()
-                    .into(),
-                );
-            }
-        }
-
-        let existing_table_ids: Vec<u32> = payload
-            .iter()
-            .flat_map(|data_list| {
-                data_list
-                    .iter()
-                    .flat_map(|uncommitted_data| match uncommitted_data {
-                        UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
-
-                        UncommittedData::Batch(shared_buffer_write_batch) => {
-                            vec![shared_buffer_write_batch.table_id]
-                        }
-                    })
-            })
-            .dedup()
-            .collect();
-
-        assert!(!existing_table_ids.is_empty());
-
-        // Local memory compaction looks at all key ranges.
-        let compact_task = CompactTask {
-            input_ssts: vec![],
-            splits: splits.into_iter().map(|v| v.into()).collect_vec(),
-            watermark: u64::MAX,
-            sorted_output_ssts: vec![],
-            task_id: 0,
-            target_level: 0,
-            gc_delete_keys: false,
-            task_status: false,
-            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
-            existing_table_ids,
-            target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
-            compression_algorithm: 0,
-            compaction_filter_mask: 0,
-            table_options: HashMap::default(),
-            current_epoch_time: 0,
-            target_sub_level_id: 0,
-        };
-
-        let sstable_store = context.sstable_store.clone();
-        let stats = context.stats.clone();
-
-        let parallelism = compact_task.splits.len();
-        let mut compact_success = true;
-        let mut output_ssts = Vec::with_capacity(parallelism);
-        let mut compaction_futures = vec![];
-        let compactor = Compactor::new(context, compact_task.clone());
-
-        let mut local_stats = StoreLocalStatistic::default();
-        for (split_index, _) in compact_task.splits.iter().enumerate() {
-            let compactor = compactor.clone();
-            let iter = build_ordered_merge_iter::<ForwardIter>(
-                &payload,
-                sstable_store.clone(),
-                stats.clone(),
-                &mut local_stats,
-                Arc::new(SstableIteratorReadOptions::default()),
-            )
-            .await?;
-            let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
-
-            let split_task = async move { compactor.compact_key_range(split_index, iter).await };
-            let rx = Compactor::request_execution(compaction_executor, split_task)?;
-            compaction_futures.push(rx);
-        }
-        local_stats.report(stats.as_ref());
-
-        let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
-        let mut err = None;
-        while let Some(future_result) = buffered.next().await {
-            match future_result.unwrap() {
-                Ok((split_index, ssts)) => {
-                    output_ssts.push((split_index, ssts));
-                }
-                Err(e) => {
-                    compact_success = false;
-                    tracing::warn!("Shared Buffer Compaction failed with error: {:#?}", e);
-                    err = Some(e);
-                }
-            }
-        }
-
-        // Sort by split/key range index.
-        output_ssts.sort_by_key(|(split_index, _)| *split_index);
-
-        if compact_success {
-            let mut level0 = Vec::with_capacity(parallelism);
-
-            for (_, sst) in output_ssts {
-                for (table, _) in &sst {
-                    compactor
-                        .context
-                        .stats
-                        .write_build_l0_bytes
-                        .inc_by(table.meta.estimated_size as u64);
-                }
-                level0.extend(sst);
-            }
-
-            Ok(level0)
-        } else {
-            Err(err.unwrap())
         }
     }
 
@@ -535,7 +221,7 @@ impl Compactor {
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
-        context.stats.compact_parallelism.inc_by(parallelism as u64);
+        context.stats.compact_task_pending_num.inc();
         let mut compact_success = true;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
@@ -618,6 +304,7 @@ impl Compactor {
             cost_time,
             compact_task_to_string(&compactor.compact_task)
         );
+        compactor.context.stats.compact_task_pending_num.dec();
         for level in &compactor.compact_task.input_ssts {
             for table in &level.table_infos {
                 compactor.context.sstable_store.delete_cache(table.id);
@@ -634,17 +321,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, table_ids) in ssts {
-                let sst_info = SstableInfo {
-                    id: sst.id,
-                    key_range: Some(risingwave_pb::hummock::KeyRange {
-                        left: sst.meta.smallest_key.clone(),
-                        right: sst.meta.largest_key.clone(),
-                        inf: false,
-                    }),
-                    file_size: sst.meta.estimated_size as u64,
-                    table_ids,
-                };
+            for sst_info in ssts {
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
             }
@@ -709,6 +386,13 @@ impl Compactor {
             1 => CompressionAlgorithm::Lz4,
             _ => CompressionAlgorithm::Zstd,
         };
+        options.estimate_bloom_filter_capacity = self
+            .context
+            .filter_key_extractor_manager
+            .estimate_bloom_filter_size(options.capacity);
+        if options.estimate_bloom_filter_capacity == 0 {
+            options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
+        }
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.memory_limiter.clone(),
@@ -746,23 +430,24 @@ impl Compactor {
         let mut ssts = Vec::with_capacity(builder_len);
         let mut upload_join_handles = vec![];
         for SealedSstableBuilder {
-            id: table_id,
-            meta,
-            table_ids,
+            sst_info,
             upload_join_handle,
-            data_len,
+            bloom_filter_size,
         } in sealed_builders
         {
-            let sst = Sstable::new(table_id, meta);
-            let len = data_len;
-            ssts.push((sst, table_ids));
+            // bloomfilter occuppy per thousand keys
+            self.context
+                .filter_key_extractor_manager
+                .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
+            let sst_size = sst_info.file_size;
+            ssts.push(sst_info);
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
                 self.context
                     .stats
                     .shared_buffer_to_sstable_size
-                    .observe(len as _);
+                    .observe(sst_size as _);
             } else {
                 self.context.stats.compaction_upload_sst_counts.inc();
             }
