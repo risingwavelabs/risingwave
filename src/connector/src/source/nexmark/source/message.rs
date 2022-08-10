@@ -19,7 +19,7 @@ use crate::source::{SourceMessage, SplitId};
 
 #[derive(Clone, Debug)]
 pub struct NexmarkMessage {
-    pub shard_id: SplitId,
+    pub split_id: SplitId,
     pub sequence_number: String,
     pub payload: Bytes,
 }
@@ -29,15 +29,15 @@ impl From<NexmarkMessage> for SourceMessage {
         SourceMessage {
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
-            split_id: msg.shard_id,
+            split_id: msg.split_id,
         }
     }
 }
 
 impl NexmarkMessage {
-    pub fn new(shard_id: SplitId, offset: u64, event: Event) -> Self {
+    pub fn new(split_id: SplitId, offset: u64, event: Event) -> Self {
         NexmarkMessage {
-            shard_id,
+            split_id,
             sequence_number: offset.to_string(),
             payload: event.to_json().into(),
         }

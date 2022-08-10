@@ -136,11 +136,12 @@ impl InnerConnectorSourceReader {
     ) {
         let actor_id = self.context.actor_id.to_string();
         let source_id = self.context.source_id.to_string();
+        let id = match &self.split {
+            Some(splits) => splits[0].id(),
+            None => DEFAULT_SPLIT_ID.clone(),
+        };
+
         loop {
-            let id = match &self.split {
-                Some(splits) => splits[0].id(),
-                None => DEFAULT_SPLIT_ID.clone(),
-            };
             let chunk: anyhow::Result<Option<Vec<SourceMessage>>>;
             tokio::select! {
                 biased;
@@ -169,15 +170,16 @@ impl InnerConnectorSourceReader {
                     if msg.is_empty() {
                         continue;
                     }
+                    // Avoid occupying too much CPU time if the source is a data generator, like
+                    // DataGen or Nexmark.
+                    tokio::task::consume_budget().await;
+
                     self.metrics
                         .partition_input_count
                         .with_label_values(&[actor_id.as_str(), source_id.as_str(), &*id])
                         .inc_by(msg.len() as u64);
-                    output.send(Ok(msg)).await.ok();
 
-                    // Avoid occupying too much CPU time if the source is a data generator, like
-                    // DataGen and Nexmark.
-                    tokio::task::consume_budget().await;
+                    output.send(Ok(msg)).await.ok();
                 }
             }
         }
