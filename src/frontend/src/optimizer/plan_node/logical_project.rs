@@ -82,7 +82,7 @@ impl LogicalProject {
 
         let ctx = input.ctx();
         let schema = Self::derive_schema(&exprs, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
+        let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
             assert!(!expr.has_subquery());
@@ -415,7 +415,7 @@ impl ToStream for LogicalProject {
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.pk_indices();
+        let input_pk = input.logical_pk();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();

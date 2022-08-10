@@ -28,19 +28,19 @@ pub const KAFKA_CONNECTOR: &str = "kafka";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {
-    #[serde(rename = "kafka.brokers")]
+    #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
-    #[serde(rename = "kafka.topic")]
+    #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
-    #[serde(rename = "kafka.scan.startup.mode")]
+    #[serde(rename = "scan.startup.mode", alias = "kafka.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
 
-    #[serde(rename = "kafka.time.offset")]
+    #[serde(rename = "scan.startup.timestamp_millis", alias = "kafka.time.offset")]
     pub time_offset: Option<String>,
 
-    #[serde(rename = "kafka.consumer.group")]
+    #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
     pub consumer_group: Option<String>,
 }
 
