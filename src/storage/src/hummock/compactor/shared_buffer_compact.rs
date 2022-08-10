@@ -108,24 +108,6 @@ async fn compact_shared_buffer(
         }
     }
 
-    let existing_table_ids: Vec<u32> = payload
-        .iter()
-        .flat_map(|data_list| {
-            data_list
-                .iter()
-                .flat_map(|uncommitted_data| match uncommitted_data {
-                    UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
-
-                    UncommittedData::Batch(shared_buffer_write_batch) => {
-                        vec![shared_buffer_write_batch.table_id]
-                    }
-                })
-        })
-        .dedup()
-        .collect();
-
-    assert!(!existing_table_ids.is_empty());
-
     // Local memory compaction looks at all key ranges.
     let sstable_store = context.sstable_store.clone();
     let stats = context.stats.clone();
