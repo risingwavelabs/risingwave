@@ -34,7 +34,6 @@ pub use tiered_cache::*;
 pub mod sstable;
 pub use sstable::*;
 
-pub mod compaction_executor;
 pub mod compaction_group_client;
 pub mod compactor;
 pub mod conflict_detector;
