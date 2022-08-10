@@ -2678,6 +2678,11 @@ impl Parser {
                         schema: self.parse_from_and_identifier()?,
                     }));
                 }
+                Keyword::SINKS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Sink {
+                        schema: self.parse_from_and_identifier()?,
+                    }))
+                }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowObjects(ShowObject::Database));
                 }

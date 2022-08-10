@@ -113,7 +113,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        let choices = [0, 1, minute, hour, day, week, rand_secs];
+        // `0` is not generated due to:
+        // Tracking issue: <https://github.com/singularity-data/risingwave/issues/4504>
+        // It is tracked under refinements:
+        // <https://github.com/singularity-data/risingwave/issues/3896>
+        let choices = [1, minute, hour, day, week, rand_secs];
         let secs = choices.choose(&mut self.rng).unwrap();
 
         let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));

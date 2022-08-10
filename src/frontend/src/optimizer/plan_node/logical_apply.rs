@@ -23,6 +23,7 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -83,12 +84,19 @@ impl LogicalApply {
         let pk_indices = LogicalJoin::derive_pk(
             left.schema().len(),
             right.schema().len(),
-            left.pk_indices(),
-            right.pk_indices(),
+            left.logical_pk(),
+            right.logical_pk(),
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let (functional_dependency, pk_indices) = match pk_indices {
+            Some(pk_indices) => (
+                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
+                pk_indices,
+            ),
+            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,
             left,

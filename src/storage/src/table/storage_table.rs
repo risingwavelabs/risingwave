@@ -17,6 +17,7 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
 use bytes::BufMut;
 use futures::future::try_join_all;
@@ -34,17 +35,15 @@ use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::row_serde_util::serialize_pk_and_column_id;
 use crate::row_serde::{
-    serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde,
-    RowSerialize,
+    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -60,11 +59,6 @@ pub const READ_WRITE: AccessType = true;
 
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
-
-/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with cell-based
-/// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
-/// if the key of the column id does not exist, it will be Null in the relation
-pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
 
 /// [`RowBasedStorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format.
@@ -346,10 +340,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     pub(super) fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
-
-    pub(super) fn column_ids(&self) -> impl Iterator<Item = ColumnId> + '_ {
-        self.table_columns.iter().map(|t| t.column_id)
-    }
 }
 
 /// Get
@@ -406,82 +396,21 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
     /// Get a single row by point get
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        // TODO: use multi-get for storage get_row
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let mut deserializer = RS::create_deserializer(self.mapping.clone());
-        let sentinel_key = <RS as RowSerde>::Serializer::serialize_sentinel_cell(
-            &serialized_pk,
-            &SENTINEL_CELL_ID,
-        )
-        .map_err(err)?;
-
         let read_options = self.get_read_option(epoch);
-        match sentinel_key {
-            Some(sentinel_key) => {
-                if self
-                    .keyspace
-                    .get(&sentinel_key, read_options.clone())
-                    .await?
-                    .is_none()
-                {
-                    // if sentinel cell is none, this row doesn't exist
-                    return Ok(None);
-                };
-            }
-            // if sentinel cell does not exist, the encoding format is row-based.
-            None => {
-                if let Some(value) = self
-                    .keyspace
-                    .get(&serialized_pk, read_options.clone())
-                    .await?
-                {
-                    let deserialize_res = deserializer
-                        .deserialize(&serialized_pk, &value)
-                        .map_err(err)?;
-                    match deserialize_res {
-                        Some(deserialize_res) => return Ok(Some(deserialize_res.2)),
-                        None => return Ok(None),
-                    }
-                }
-            }
-        }
-
-        for column_id in self.column_ids() {
-            let key = serialize_pk_and_column_id(&serialized_pk, &column_id).map_err(err)?;
-            if let Some(value) = self.keyspace.get(&key, read_options.clone()).await? {
-                let deserialize_res = deserializer.deserialize(&key, &value).map_err(err)?;
-                assert!(deserialize_res.is_none());
-            }
-        }
-
-        let result = deserializer.take();
-        Ok(result.map(|(vnode, _pk, row)| {
-            self.check_vnode_is_set(vnode);
-            row
-        }))
-    }
-
-    /// Get a single row by range scan
-    pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        let serialized_pk = self.serialize_pk_with_vnode(pk);
-        let key_range = range_of_prefix(&serialized_pk);
-
-        let read_options = self.get_read_option(epoch);
-        let kv_pairs = self
+        if let Some(value) = self
             .keyspace
-            .scan_with_range(key_range, None, read_options)
-            .await?;
-
-        let mut deserializer = RS::create_deserializer(self.mapping.clone());
-        for (key, value) in kv_pairs {
-            deserializer.deserialize(&key, &value).map_err(err)?;
+            .get(&serialized_pk, read_options.clone())
+            .await?
+        {
+            let deserialize_res = deserializer
+                .deserialize(&serialized_pk, &value)
+                .map_err(err)?;
+            Ok(Some(deserialize_res.2))
+        } else {
+            Ok(None)
         }
-
-        let result = deserializer.take();
-        Ok(result.map(|(vnode, _pk, row)| {
-            self.check_vnode_is_set(vnode);
-            row
-        }))
     }
 
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
@@ -536,13 +465,12 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                     }
 
                     let vnode = self.compute_vnode_by_row(&row);
-                    let bytes = self
+                    let (key, value) = self
                         .row_serializer
                         .serialize(vnode, &pk, row)
                         .map_err(err)?;
-                    for (key, value) in bytes {
-                        local.put(key, StorageValue::new_default_put(value));
-                    }
+
+                    local.put(key, StorageValue::new_default_put(value));
                 }
                 RowOp::Delete(old_row) => {
                     if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
@@ -564,13 +492,9 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                     }
 
                     let vnode = self.compute_vnode_by_row(&old_row);
-                    let bytes = self
-                        .row_serializer
-                        .serialize(vnode, &pk, old_row)
-                        .map_err(err)?;
-                    for (key, _) in bytes {
-                        local.delete(key);
-                    }
+
+                    let key = [vnode.to_be_bytes().as_slice(), &pk].concat();
+                    local.delete(key);
                 }
                 RowOp::Update((old_row, new_row)) => {
                     if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
@@ -600,34 +524,12 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                     let vnode = self.compute_vnode_by_row(&new_row);
                     debug_assert_eq!(self.compute_vnode_by_row(&old_row), vnode);
 
-                    // TODO: Row-based encoding does not need to serializer old_row, while a little
-                    // overhead can be allowed here. Refactor this part after cell-based encoding is
-                    // removed.
-                    let delete_bytes = self
+                    let (key, value) = self
                         .row_serializer
-                        .serialize_for_update(vnode, &pk, old_row)
+                        .serialize(vnode, &pk, new_row)
                         .map_err(err)?;
-                    let insert_bytes = self
-                        .row_serializer
-                        .serialize_for_update(vnode, &pk, new_row)
-                        .map_err(err)?;
-                    for (delete, insert) in
-                        delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())
-                    {
-                        match (delete, insert) {
-                            (Some((delete_pk, _)), None) => {
-                                local.delete(delete_pk);
-                            }
-                            (None, Some((insert_pk, insert_row))) => {
-                                local.put(insert_pk, StorageValue::new_default_put(insert_row));
-                            }
-                            (None, None) => {}
-                            (Some((delete_pk, _)), Some((insert_pk, insert_row))) => {
-                                debug_assert_eq!(delete_pk, insert_pk);
-                                local.put(insert_pk, StorageValue::new_default_put(insert_row));
-                            }
-                        }
-                    }
+
+                    local.put(key, StorageValue::new_default_put(value));
                 }
             }
         }
@@ -917,18 +819,18 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(mut self) {
-        while let Some((key, value)) = self.iter.next().await? {
-            if let Some((_vnode, pk, row)) = self
+        while let Some((key, value)) = self
+            .iter
+            .next()
+            .stack_trace("storage_table_iter_next")
+            .await?
+        {
+            let (_vnode, pk, row) = self
                 .row_deserializer
                 .deserialize(&key, &value)
-                .map_err(err)?
-            {
-                yield (pk, row)
-            }
-        }
+                .map_err(err)?;
 
-        if let Some((_vnode, pk, row)) = self.row_deserializer.take() {
-            yield (pk, row);
+            yield (pk, row)
         }
     }
 }

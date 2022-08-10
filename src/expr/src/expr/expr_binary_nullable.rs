@@ -26,7 +26,7 @@ use crate::vector_op::cmp::{general_is_distinct_from, str_is_distinct_from};
 use crate::vector_op::conjunction::{and, or};
 
 macro_rules! gen_nullable_cmp_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),*) => {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),* $(,)?) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {

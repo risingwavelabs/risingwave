@@ -177,6 +177,10 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
+        self.sink_by_name.iter().map(|(_, v)| v)
+    }
+
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
         self.system_table_by_name.iter().map(|(_, v)| v)
     }
@@ -207,6 +211,10 @@ impl SchemaCatalog {
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
         self.system_table_by_name.get(table_name)
+    }
+
+    pub fn get_table_name_by_id(&self, table_id: TableId) -> Option<String> {
+        self.table_name_by_id.get(&table_id).cloned()
     }
 
     pub fn id(&self) -> SchemaId {

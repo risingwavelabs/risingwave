@@ -28,6 +28,8 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(generic_associated_types)]
 #![feature(let_else)]
+#![feature(generators)]
+#![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -73,6 +75,11 @@ pub struct ComputeNodeOpts {
     /// Enable reporting tracing information to jaeger
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
+
+    /// Path to file cache data directory.
+    /// Left empty to disable file cache.
+    #[clap(long, default_value = "")]
+    pub file_cache_dir: String,
 }
 
 use std::future::Future;

@@ -32,9 +32,10 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-use super::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
-use crate::cluster::WorkerId;
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use super::CreateMaterializedViewContext;
+use crate::manager::{
+    BuildGraphInfo, FragmentManagerRef, IdCategory, IdGeneratorManagerRef, WorkerId,
+};
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -485,6 +486,7 @@ impl StreamGraphBuilder {
 
         for builder in self.actor_builders.values() {
             let actor_id = builder.actor_id;
+            let fragment_id = builder.get_fragment_id();
             let mut actor = builder.build();
             let mut upstream_actors = builder
                 .upstreams
@@ -500,6 +502,7 @@ impl StreamGraphBuilder {
                 ctx,
                 actor.get_nodes()?,
                 actor_id,
+                fragment_id,
                 &mut upstream_actors,
                 &mut upstream_fragments,
             )?;
@@ -524,6 +527,7 @@ impl StreamGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
         stream_node: &StreamNode,
         actor_id: LocalActorId,
+        fragment_id: GlobalFragmentId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
     ) -> MetaResult<StreamNode> {
@@ -549,6 +553,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "HashJoinLeft",
                             );
@@ -560,6 +565,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "HashJoinRight",
                             );
@@ -585,6 +591,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "ArrangeNode",
                             );
@@ -601,6 +608,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "HashAgg",
                             );
@@ -635,6 +643,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "GlobalSimpleAgg",
                             );
@@ -649,6 +658,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "DynamicFilterLeft",
                             );
@@ -660,6 +670,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "DynamicFilterRight",
                             );
@@ -697,6 +708,7 @@ impl StreamGraphBuilder {
                                 ctx,
                                 input,
                                 actor_id,
+                                fragment_id,
                                 upstream_actor_id,
                                 upstream_fragment_id,
                             )?;

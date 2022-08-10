@@ -26,9 +26,8 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::cluster::ClusterManagerRef;
+use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 
 #[derive(Clone)]
 pub struct DashboardService<S: MetaStore> {

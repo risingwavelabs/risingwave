@@ -15,8 +15,6 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
-
 use crate::hummock::compactor::CompactOutput;
 use crate::hummock::{HummockError, HummockResult};
 
@@ -44,7 +42,7 @@ impl CompactionExecutor {
                 let runtime = builder.enable_all().build().unwrap();
                 runtime.block_on(async {
                     while let Some(request) = rx.recv().await {
-                        tokio::spawn(DEBUG_CONTEXT.scope(DebugContext::Compaction, request));
+                        tokio::spawn(request);
                     }
                 });
             }),
@@ -58,7 +56,7 @@ impl CompactionExecutor {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Some(request) = rx.recv().await {
-                tokio::spawn(DEBUG_CONTEXT.scope(DebugContext::Compaction, request));
+                tokio::spawn(request);
             }
         });
         Self { requests: tx }
