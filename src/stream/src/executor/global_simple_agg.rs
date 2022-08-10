@@ -304,7 +304,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::*;
@@ -312,6 +311,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
     use crate::executor::test_utils::*;
     use crate::executor::*;
 
@@ -384,7 +384,7 @@ mod tests {
             },
         ];
 
-        let simple_agg = test_utils::global_simple_agg::new_boxed_simple_agg_executor(
+        let simple_agg = new_boxed_simple_agg_executor(
             keyspace.clone(),
             Box::new(source),
             agg_calls,

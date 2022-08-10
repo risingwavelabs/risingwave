@@ -473,8 +473,8 @@ mod tests {
     use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
-    use crate::executor::test_utils::global_simple_agg::generate_state_table;
+    use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::test_utils::agg_executor::create_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 
@@ -519,25 +519,21 @@ mod tests {
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
-        let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables: Vec<_> = keyspace_gen
+        let (state_tables, state_table_col_mappings) = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
-                generate_state_table(
+                create_state_table(
                     ks.0.clone(),
                     ks.1,
                     agg_call,
                     &key_indices,
                     &pk_indices,
-                    &agg_schema,
                     input.as_ref(),
                 )
             })
-            .collect();
-        // TODO(yuchao): We are not using col_mappings in agg calls generated in unittest,
-        // so it's ok to fake it. Later we should generate real column mapping for state tables.
-        let state_table_col_mappings = (0..state_tables.len()).map(|_| vec![]).collect();
+            .unzip();
+
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
