@@ -519,7 +519,7 @@ where
         &self,
         fragments: &Vec<TableFragments>,
         migrate_map: &HashMap<ParallelUnitId, ParallelUnit>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<bool> {
         let core = &mut self.core.lock().await.database;
         let mut transaction = Transaction::default();
         let mut tables = Vec::new();
@@ -553,7 +553,7 @@ where
                 .await;
             core.add_table(table);
         }
-        Ok(())
+        Ok(true)
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
