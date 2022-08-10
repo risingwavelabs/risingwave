@@ -26,7 +26,7 @@ use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
 use super::record_table_vnode_mappings;
-use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
+use crate::manager::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -284,8 +284,7 @@ mod test {
     use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
 
     use super::*;
-    use crate::cluster::ClusterManager;
-    use crate::manager::MetaSrvEnv;
+    use crate::manager::{ClusterManager, MetaSrvEnv};
 
     #[tokio::test]
     async fn test_schedule() -> MetaResult<()> {

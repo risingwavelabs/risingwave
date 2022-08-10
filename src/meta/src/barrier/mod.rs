@@ -48,13 +48,13 @@ use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
-use crate::cluster::{ClusterManagerRef, WorkerId, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, WorkerId, META_NODE_ID,
+};
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 use crate::MetaResult;
 
 mod command;

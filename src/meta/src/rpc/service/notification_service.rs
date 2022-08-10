@@ -23,19 +23,19 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerKey,
+};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef};
+use crate::stream::GlobalStreamManagerRef;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
-    user_manager: UserInfoManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
@@ -49,7 +49,6 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
-        user_manager: UserInfoManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
@@ -58,7 +57,6 @@ where
             env,
             catalog_manager,
             cluster_manager,
-            user_manager,
             hummock_manager,
             stream_manager,
             fragment_manager,
@@ -86,17 +84,11 @@ where
 
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
         let (databases, schemas, mut tables, sources, sinks, indexes) =
-            catalog_guard.get_catalog().await?;
+            catalog_guard.database.get_catalog().await?;
+        let users = catalog_guard.user.list_users();
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
-
-        let user_guard = self.user_manager.get_user_core_guard().await;
-        let users = user_guard
-            .get_user_info()
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
 
         let hummock_version = Some(self.hummock_manager.get_current_version().await);
 

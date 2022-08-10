@@ -25,8 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::WorkerId;
-use crate::manager::SourceId;
+use crate::manager::{SourceId, WorkerId};
 use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.
@@ -47,8 +46,8 @@ pub struct TableFragments {
     /// The status of actors
     pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
 
-    /// Internal TableIds from all Fragment
-    internal_table_to_fragment_map: HashMap<u32, FragmentId>,
+    /// Internal TableIds from all Fragments, included the table_id itself.
+    table_to_fragment_map: HashMap<u32, FragmentId>,
 }
 
 impl MetadataModel for TableFragments {
@@ -78,7 +77,7 @@ impl MetadataModel for TableFragments {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
-            internal_table_to_fragment_map,
+            table_to_fragment_map: internal_table_to_fragment_map,
         }
     }
 
@@ -98,7 +97,7 @@ impl TableFragments {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
-            internal_table_to_fragment_map,
+            table_to_fragment_map: internal_table_to_fragment_map,
         }
     }
 
@@ -420,8 +419,8 @@ impl TableFragments {
             .collect_vec()
     }
 
-    pub fn get_internal_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
-        self.internal_table_to_fragment_map
+    pub fn get_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
+        self.table_to_fragment_map
             .get(&table_id)
             .map(|f| self.fragments[f].vnode_mapping.clone().unwrap())
     }

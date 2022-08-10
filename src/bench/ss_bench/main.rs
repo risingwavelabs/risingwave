@@ -26,7 +26,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::monitor::Print;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
+use risingwave_storage::hummock::compactor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};

@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use num_traits::Float;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
@@ -35,27 +34,10 @@ fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
     if !format {
         match d {
             ScalarRefImpl::Bool(b) => if b { "t" } else { "f" }.into(),
-            ScalarRefImpl::Float32(v) => pg_float_format(v).into(),
-            ScalarRefImpl::Float64(v) => pg_float_format(v).into(),
             _ => d.to_string().into(),
         }
     } else {
         d.binary_serialize()
-    }
-}
-
-fn pg_float_format<T: Float + ToString>(v: T) -> String {
-    if v.is_infinite() {
-        if v.is_sign_positive() {
-            "Infinity"
-        } else {
-            "-Infinity"
-        }
-        .to_string()
-    } else if v.is_nan() {
-        "NaN".to_string()
-    } else {
-        v.to_string()
     }
 }
 

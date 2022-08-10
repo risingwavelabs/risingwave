@@ -23,10 +23,10 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
-use crate::cluster::META_NODE_ID;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
+use crate::manager::META_NODE_ID;
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;

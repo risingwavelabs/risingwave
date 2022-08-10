@@ -27,11 +27,11 @@ use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
 
-use crate::cluster::WorkerId;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::HummockManagerRef;
+use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::storage::MemStore;
 

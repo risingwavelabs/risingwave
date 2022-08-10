@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -26,14 +27,15 @@ use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::ClusterManagerRef;
 use crate::error::meta_error_to_tonic;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, Relation, SourceId, TableId};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, Relation,
+    SourceId, TableId,
+};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
-    SourceManagerRef,
+    ActorGraphBuilder, CreateMaterializedViewContext, GlobalStreamManagerRef, SourceManagerRef,
 };
 use crate::MetaResult;
 
@@ -435,9 +437,13 @@ where
     S: MetaStore,
 {
     async fn notify_table_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
-        for table_id in table_fragment.internal_table_ids() {
+        for table_id in table_fragment
+            .internal_table_ids()
+            .into_iter()
+            .chain(std::iter::once(table_fragment.table_id().table_id))
+        {
             let mapping = table_fragment
-                .get_internal_table_hash_mapping(table_id)
+                .get_table_hash_mapping(table_id)
                 .expect("no data distribution found");
             self.env
                 .notification_manager()
@@ -459,6 +465,12 @@ where
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
         relation.set_id(id);
+
+        let mview_id = match relation {
+            Relation::Table(table) => table.id,
+            Relation::Index(_, table) => table.id,
+            _ => 0,
+        };
 
         // 1. Resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
@@ -487,7 +499,13 @@ where
             .await;
         if let Err(err) = res {
             self.stream_manager
-                .remove_processing_table(ctx.internal_table_ids())
+                .remove_processing_table(
+                    ctx.internal_table_ids()
+                        .into_iter()
+                        .chain(std::iter::once(mview_id))
+                        .collect_vec(),
+                    true,
+                )
                 .await;
 
             self.catalog_manager
@@ -519,7 +537,13 @@ where
             .await;
 
         self.stream_manager
-            .remove_processing_table(ctx.internal_table_ids())
+            .remove_processing_table(
+                ctx.internal_table_ids()
+                    .into_iter()
+                    .chain(std::iter::once(mview_id))
+                    .collect_vec(),
+                false,
+            )
             .await;
 
         Ok((id, version?))
@@ -596,7 +620,7 @@ where
 
         // Create on compute node.
         self.stream_manager
-            .create_materialized_view(&mut table_fragments, ctx)
+            .create_materialized_view(relation, &mut table_fragments, ctx)
             .await?;
         Ok(table_fragments)
     }
@@ -684,7 +708,13 @@ where
 
         if let Err(err) = res {
             self.stream_manager
-                .remove_processing_table(ctx.internal_table_ids())
+                .remove_processing_table(
+                    ctx.internal_table_ids()
+                        .into_iter()
+                        .chain(std::iter::once(mview_id))
+                        .collect_vec(),
+                    true,
+                )
                 .await;
 
             self.catalog_manager
@@ -706,7 +736,13 @@ where
             .await;
 
         self.stream_manager
-            .remove_processing_table(ctx.internal_table_ids())
+            .remove_processing_table(
+                ctx.internal_table_ids()
+                    .into_iter()
+                    .chain(std::iter::once(mview_id))
+                    .collect_vec(),
+                false,
+            )
             .await;
         Ok((source_id, mview_id, version?))
     }

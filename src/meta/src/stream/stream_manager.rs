@@ -35,12 +35,14 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{DatabaseId, MetaSrvEnv, NotificationManagerRef, SchemaId};
+use crate::manager::{
+    ClusterManagerRef, DatabaseId, FragmentManagerRef, MetaSrvEnv, NotificationManagerRef,
+    Relation, SchemaId, WorkerId,
+};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
+use crate::stream::{fetch_source_fragments, Scheduler, SourceManagerRef};
 use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -321,6 +323,7 @@ where
     /// then upstream.)
     pub async fn create_materialized_view(
         &self,
+        relation: &Relation,
         table_fragments: &mut TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
@@ -329,6 +332,7 @@ where
             dependent_table_ids,
             table_properties,
             internal_table_id_map,
+            affiliated_source,
             ..
         }: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
@@ -605,7 +609,6 @@ where
         let registered_table_ids = compaction_group_manager_ref
             .register_table_fragments(table_fragments, table_properties)
             .await?;
-        let compaction_group_manager_ref = self.compaction_group_manager.clone();
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
@@ -617,15 +620,45 @@ where
             let mut processing_table_guard = self.processing_table.lock().await;
             // Success Register to compaction group, we can push catalog to CN / Compactor
             for (table_id, table_catalog) in internal_table_id_map {
-                let table_catalog = table_catalog.to_owned().unwrap_or_default();
+                let table_catalog = match table_catalog.to_owned() {
+                    Some(table) => table,
+
+                    None => Table {
+                        id: *table_id,
+                        ..Default::default()
+                    },
+                };
+
                 processing_table_guard.insert(*table_id, table_catalog.clone());
-
-                self.notification_manager
-                    .notify_compute(Operation::Add, Info::Table(table_catalog.clone()))
+                self.notify_state_ful_node(Operation::Add, Info::Table(table_catalog.clone()))
                     .await;
+            }
 
-                self.notification_manager
-                    .notify_compactor(Operation::Add, Info::Table(table_catalog))
+            match relation {
+                Relation::Table(mview) => {
+                    processing_table_guard.insert(mview.id, mview.clone());
+                    self.notify_state_ful_node(Operation::Add, Info::Table(mview.clone()))
+                        .await;
+                }
+
+                Relation::Index(_, mview) => {
+                    processing_table_guard.insert(mview.id, mview.clone());
+                    self.notify_state_ful_node(Operation::Add, Info::Table(mview.clone()))
+                        .await;
+                }
+
+                _ => {}
+            }
+
+            if let Some(source) = affiliated_source {
+                processing_table_guard.insert(
+                    source.id,
+                    Table {
+                        id: source.id,
+                        ..Default::default()
+                    },
+                );
+                self.notify_state_ful_node(Operation::Add, Info::Source(source.clone()))
                     .await;
             }
         }
@@ -735,23 +768,15 @@ where
         }
 
         // Remove internal_tables push to CN and Compactor
-        self.remove_processing_table(table_fragments.internal_table_ids())
-            .await;
-        for table_id in table_fragments.internal_table_ids() {
-            let delete_table = Table {
-                id: table_id,
-                ..Default::default()
-            };
-
-            self.notification_manager
-                .notify_compute(Operation::Delete, Info::Table(delete_table.clone()))
-                .await;
-
-            self.notification_manager
-                .notify_compactor(Operation::Delete, Info::Table(delete_table))
-                .await;
-        }
-
+        self.remove_processing_table(
+            table_fragments
+                .internal_table_ids()
+                .into_iter()
+                .chain(std::iter::once((*table_id).into()))
+                .collect(),
+            false,
+        )
+        .await;
         Ok(table_fragments)
     }
 
@@ -759,15 +784,36 @@ where
         self.processing_table.try_lock().unwrap().clone()
     }
 
-    pub async fn remove_processing_table(&self, table_ids: Vec<u32>) {
+    pub async fn remove_processing_table(&self, table_ids: Vec<u32>, notify: bool) {
         let mut processing_table_guard = self.processing_table.lock().await;
         for table_id in table_ids {
             processing_table_guard.remove(&table_id);
+
+            if notify {
+                self.notify_state_ful_node(
+                    Operation::Delete,
+                    Info::Table(Table {
+                        id: table_id,
+                        ..Default::default()
+                    }),
+                )
+                .await;
+            }
         }
     }
 
     pub async fn get_processing_table_guard(&self) -> MutexGuard<'_, HashMap<u32, Table>> {
         self.processing_table.lock().await
+    }
+
+    async fn notify_state_ful_node(&self, operation: Operation, info: Info) {
+        self.notification_manager
+            .notify_compute(operation, info.clone())
+            .await;
+
+        self.notification_manager
+            .notify_compactor(operation, info)
+            .await;
     }
 }
 #[cfg(test)]
@@ -798,15 +844,14 @@ mod tests {
 
     use super::*;
     use crate::barrier::GlobalBarrierManager;
-    use crate::cluster::ClusterManager;
     use crate::error::meta_error_to_tonic;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
-    use crate::manager::{CatalogManager, MetaSrvEnv};
+    use crate::manager::{CatalogManager, ClusterManager, FragmentManager, MetaSrvEnv, Relation};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
-    use crate::stream::{FragmentManager, SourceManager};
+    use crate::stream::SourceManager;
     use crate::MetaOpts;
 
     struct FakeFragmentState {
@@ -1084,7 +1129,11 @@ mod tests {
 
         services
             .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(
+                &Relation::Table(Table::default()),
+                &mut table_fragments,
+                &mut ctx,
+            )
             .await?;
 
         for actor in actors {
@@ -1159,9 +1208,12 @@ mod tests {
 
         services
             .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(
+                &Relation::Table(Table::default()),
+                &mut table_fragments,
+                &mut ctx,
+            )
             .await?;
-        println!("table fragments: {:?}", table_fragments);
 
         for actor in actors {
             let mut scheduled_actor = services
@@ -1257,7 +1309,11 @@ mod tests {
 
         services
             .global_stream_manager
-            .create_materialized_view(&mut table_fragments, &mut ctx)
+            .create_materialized_view(
+                &Relation::Table(Table::default()),
+                &mut table_fragments,
+                &mut ctx,
+            )
             .await
             .unwrap();
 

@@ -13,17 +13,17 @@
 // limitations under the License.
 
 mod catalog;
+mod cluster;
 mod env;
 mod id;
 mod idle;
 mod notification;
 mod relation;
-mod user;
 
 pub use catalog::*;
+pub use cluster::*;
 pub use env::*;
 pub use id::*;
 pub use idle::*;
 pub use notification::*;
 pub use relation::*;
-pub use user::*;
