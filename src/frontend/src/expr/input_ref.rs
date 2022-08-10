@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::agg_call::Arg as ProstAggCallArg;
 use risingwave_pb::expr::InputRefExpr;
@@ -28,49 +29,53 @@ pub struct InputRef {
 }
 
 #[derive(Clone, Copy)]
-pub struct InputRefDisplay(pub usize);
-
-#[derive(Clone, Copy)]
-pub struct AliasDisplay<'a>(Option<&'a str>);
-
-pub fn as_alias_display(x: &Option<impl AsRef<str>>) -> AliasDisplay<'_> {
-    AliasDisplay(x.as_ref().map(|x| x.as_ref()))
-}
+pub struct RawInputRefDisplay(pub usize);
 
 pub fn input_ref_to_column_indices(input_refs: &[InputRef]) -> Vec<usize> {
     input_refs.iter().map(|x| x.index()).collect_vec()
 }
 
-impl fmt::Display for InputRefDisplay {
+impl fmt::Display for RawInputRefDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (self as &dyn fmt::Debug).fmt(f)
+    }
+}
+
+impl fmt::Debug for RawInputRefDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${}", self.0)
     }
 }
 
-impl fmt::Debug for InputRefDisplay {
+#[derive(Clone, Copy)]
+pub struct InputRefDisplay<'a> {
+    pub input_ref: &'a InputRef,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Display for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${}", self.0)
+        (self as &dyn fmt::Debug).fmt(f)
+    }
+}
+
+impl fmt::Debug for InputRefDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.input_schema
+                .fields
+                .get(self.input_ref.index)
+                .unwrap()
+                .name
+        )
     }
 }
 
 impl fmt::Display for InputRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", InputRefDisplay(self.index))
-    }
-}
-
-impl<'a> fmt::Debug for AliasDisplay<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            Some(x) => write!(f, "{}", x),
-            None => write!(f, " "),
-        }
-    }
-}
-
-impl<'a> fmt::Display for AliasDisplay<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{:?}", RawInputRefDisplay(self.index))
     }
 }
 
@@ -82,7 +87,7 @@ impl fmt::Debug for InputRef {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
-            write!(f, "{}", InputRefDisplay(self.index))
+            write!(f, "{}", RawInputRefDisplay(self.index))
         }
     }
 }

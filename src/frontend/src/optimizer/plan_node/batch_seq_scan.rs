@@ -18,6 +18,7 @@ use std::ops::Bound;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
@@ -25,43 +26,50 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, Order};
-use crate::utils::{is_full_range, ScanRange};
+use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
 pub struct BatchSeqScan {
     pub base: PlanBase,
     logical: LogicalScan,
-    scan_range: ScanRange,
+    scan_ranges: Vec<ScanRange>,
 }
 
 impl BatchSeqScan {
-    pub fn new_inner(logical: LogicalScan, dist: Distribution, scan_range: ScanRange) -> Self {
+    pub fn new_inner(
+        logical: LogicalScan,
+        dist: Distribution,
+        scan_ranges: Vec<ScanRange>,
+    ) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
 
         {
             // validate scan_range
-            let scan_pk_prefix_len = scan_range.eq_conds.len();
-            let order_len = logical.table_desc().order_column_indices().len();
-            assert!(
-                scan_pk_prefix_len < order_len
-                    || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
-                "invalid scan_range",
-            );
+            scan_ranges.iter().for_each(|scan_range| {
+                assert!(!scan_range.is_full_table_scan());
+                let scan_pk_prefix_len = scan_range.eq_conds.len();
+                let order_len = logical.table_desc().order_column_indices().len();
+                assert!(
+                    scan_pk_prefix_len < order_len
+                        || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
+                    "invalid scan_range",
+                );
+            })
         }
 
         Self {
             base,
             logical,
-            scan_range,
+            scan_ranges,
         }
     }
 
-    pub fn new(logical: LogicalScan, scan_range: ScanRange) -> Self {
-        Self::new_inner(logical, Distribution::Single, scan_range)
+    pub fn new(logical: LogicalScan, scan_ranges: Vec<ScanRange>) -> Self {
+        // Use `Single` by default, will be updated later with `clone_with_dist`.
+        Self::new_inner(logical, Distribution::Single, scan_ranges)
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -70,12 +78,21 @@ impl BatchSeqScan {
             if self.logical.is_sys_table() {
                 Distribution::Single
             } else {
-                match self.logical.distribution_key() {
-                    Some(dist_key) => Distribution::HashShard(dist_key),
-                    None => Distribution::SomeShard,
-                }
+                // FIXME: Should be `Single` if no distribution key.
+                // Currently the task will be scheduled to frontend under local mode, which is
+                // unimplemented yet. Enable this when it's done.
+
+                // For other batch operators, `HashShard` is a simple hashing, i.e.,
+                // `target_shard = hash(dist_key) % shard_num`
+                //
+                // But MV is actually sharded by consistent hashing, i.e.,
+                // `target_shard = vnode_mapping.map(hash(dist_key) % vnode_num)`
+                //
+                // They are incompatible, so we just specify its distribution as `SomeShard`
+                // to force an exchange is inserted.
+                Distribution::SomeShard
             },
-            self.scan_range.clone(),
+            self.scan_ranges.clone(),
         )
     }
 
@@ -85,8 +102,8 @@ impl BatchSeqScan {
         &self.logical
     }
 
-    pub fn scan_range(&self) -> &ScanRange {
-        &self.scan_range
+    pub fn scan_ranges(&self) -> &[ScanRange] {
+        &self.scan_ranges
     }
 }
 
@@ -121,36 +138,54 @@ impl fmt::Display for BatchSeqScan {
             }
         }
 
-        if self.scan_range.is_full_table_scan() {
-            write!(
-                f,
-                "BatchScan {{ table: {}, columns: [{}] }}",
-                self.logical.table_name(),
-                self.logical.column_names().join(", ")
-            )
-        } else {
-            let order_names = self.logical.order_names();
-            #[expect(clippy::disallowed_methods)]
-            let mut range_str = self
-                .scan_range
-                .eq_conds
-                .iter()
-                .zip(order_names.iter())
-                .map(|(v, name)| format!("{} = {:?}", name, v))
-                .collect_vec();
-            if !is_full_range(&self.scan_range.range) {
-                let i = self.scan_range.eq_conds.len();
-                range_str.push(range_to_string(&order_names[i], &self.scan_range.range))
-            }
+        let verbose = self.base.ctx.is_explain_verbose();
 
+        write!(
+            f,
+            "BatchScan {{ table: {}, columns: [{}]",
+            self.logical.table_name(),
+            match verbose {
+                true => self.logical.column_names_with_table_prefix(),
+                false => self.logical.column_names(),
+            }
+            .join(", "),
+        )?;
+
+        if !self.scan_ranges.is_empty() {
+            let order_names = match verbose {
+                true => self.logical.order_names_with_table_prefix(),
+                false => self.logical.order_names(),
+            };
+            let mut range_strs = vec![];
+            for scan_range in &self.scan_ranges {
+                #[expect(clippy::disallowed_methods)]
+                let mut range_str = scan_range
+                    .eq_conds
+                    .iter()
+                    .zip(order_names.iter())
+                    .map(|(v, name)| format!("{} = {:?}", name, v))
+                    .collect_vec();
+                if !is_full_range(&scan_range.range) {
+                    let i = scan_range.eq_conds.len();
+                    range_str.push(range_to_string(&order_names[i], &scan_range.range))
+                }
+                range_strs.push(range_str.join(", "));
+            }
+            write!(f, ", scan_ranges: [{}]", range_strs.join(" OR "))?;
+        }
+
+        if verbose {
             write!(
                 f,
-                "BatchScan {{ table: {}, columns: [{}], scan_range: [{}] }}",
-                self.logical.table_name(),
-                self.logical.column_names().join(", "),
-                range_str.join(", ")
-            )
+                ", distribution: {}",
+                &DistributionDisplay {
+                    distribution: self.distribution(),
+                    input_schema: &self.base.schema,
+                }
+            )?;
         }
+
+        write!(f, " }}")
     }
 }
 
@@ -183,7 +218,7 @@ impl ToBatchProst for BatchSeqScan {
                     .iter()
                     .map(ColumnId::get_id)
                     .collect(),
-                scan_range: Some(self.scan_range.to_protobuf()),
+                scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
             })

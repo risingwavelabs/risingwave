@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -25,9 +25,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::WorkerId;
-use crate::manager::SourceId;
-use crate::model::MetadataModel;
+use crate::manager::{SourceId, WorkerId};
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
@@ -45,7 +44,7 @@ pub struct TableFragments {
     pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
 
     /// The status of actors
-    actor_status: BTreeMap<ActorId, ActorStatus>,
+    pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
 
     /// Internal TableIds from all Fragment
     internal_table_ids: Vec<u32>,
@@ -77,7 +76,7 @@ impl MetadataModel for TableFragments {
         }
     }
 
-    fn key(&self) -> Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.table_id.table_id())
     }
 }
@@ -166,6 +165,14 @@ impl TableFragments {
         false
     }
 
+    pub fn fetch_parallel_unit_by_actor(&self, actor_id: &ActorId) -> Option<ParallelUnit> {
+        if let Some(status) = self.actor_status.get(actor_id) {
+            status.parallel_unit.clone()
+        } else {
+            None
+        }
+    }
+
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
@@ -218,8 +225,8 @@ impl TableFragments {
         table_ids
     }
 
-    /// Returns states of actors group by node id.
-    pub fn node_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    /// Returns states of actors group by worker id.
+    pub fn worker_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
@@ -230,8 +237,8 @@ impl TableFragments {
         map
     }
 
-    /// Returns actor locations group by node id.
-    pub fn node_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
+    /// Returns actor locations group by worker id.
+    pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
@@ -240,8 +247,22 @@ impl TableFragments {
         map
     }
 
-    /// Returns the status of actors group by node id.
-    pub fn node_actors(&self, include_inactive: bool) -> BTreeMap<WorkerId, Vec<StreamActor>> {
+    pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
+        for fragment in self.fragments.values_mut() {
+            if fragment.vnode_mapping.is_some() {
+                if let Some(ref mut mapping) = fragment.vnode_mapping {
+                    mapping.data.iter_mut().for_each(|id| {
+                        if migrate_map.contains_key(id) {
+                            *id = migrate_map.get(id).unwrap().id;
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    /// Returns the status of actors group by worker id.
+    pub fn worker_actors(&self, include_inactive: bool) -> BTreeMap<WorkerId, Vec<StreamActor>> {
         let mut actors = BTreeMap::default();
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {

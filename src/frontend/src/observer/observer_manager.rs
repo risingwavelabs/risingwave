@@ -48,6 +48,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             | Info::Schema(_)
             | Info::Table(_)
             | Info::Source(_)
+            | Info::Index(_)
             | Info::Sink(_) => {
                 self.handle_catalog_notification(resp);
             }
@@ -90,6 +91,9 @@ impl ObserverNodeImpl for FrontendObserverNode {
                 }
                 for user in snapshot.users {
                     user_guard.create_user(user)
+                }
+                for index in snapshot.index {
+                    catalog_guard.create_index(&index)
                 }
                 self.worker_node_manager.refresh_worker_node(snapshot.nodes);
             }
@@ -146,12 +150,27 @@ impl FrontendObserverNode {
                 Operation::Delete => {
                     catalog_guard.drop_table(table.database_id, table.schema_id, table.id.into())
                 }
+                Operation::Update => catalog_guard.update_table(table),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Source(source) => match resp.operation() {
                 Operation::Add => catalog_guard.create_source(source.clone()),
                 Operation::Delete => {
                     catalog_guard.drop_source(source.database_id, source.schema_id, source.id)
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::Sink(sink) => match resp.operation() {
+                Operation::Add => catalog_guard.create_sink(sink.clone()),
+                Operation::Delete => {
+                    catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::Index(index) => match resp.operation() {
+                Operation::Add => catalog_guard.create_index(index),
+                Operation::Delete => {
+                    catalog_guard.drop_index(index.database_id, index.schema_id, index.id.into())
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -176,7 +195,7 @@ impl FrontendObserverNode {
         match info {
             Info::User(user) => match resp.operation() {
                 Operation::Add => user_guard.create_user(user.clone()),
-                Operation::Delete => user_guard.drop_user(&user.name),
+                Operation::Delete => user_guard.drop_user(user.id),
                 Operation::Update => user_guard.update_user(user.clone()),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

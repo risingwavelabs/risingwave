@@ -27,6 +27,7 @@ use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
+use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput, TaskOutputId};
 
 /// `BatchManager` is responsible for managing all batch tasks.
@@ -54,10 +55,11 @@ impl BatchManager {
         let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
-
-        task.clone().async_execute().await?;
-        if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
-            e.insert(task);
+        // Here the task id insert into self.tasks is put in front of `.async_execute`, cuz when
+        // send `TaskStatus::Running` in `.async_execute`, the query runner may schedule next stage,
+        // it's possible do not found parent task id in theory.
+        let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
+            e.insert(task.clone());
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -65,7 +67,9 @@ impl BatchManager {
                 task_id,
             ))
             .into())
-        }
+        };
+        task.clone().async_execute().await?;
+        ret
     }
 
     pub fn get_data(
@@ -103,12 +107,14 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &ProstTaskId) -> Result<()> {
+    pub fn abort_task(&self, sid: &ProstTaskId) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().get(&sid) {
             Some(task) => task.abort_task(),
-            None => Err(TaskNotFound.into()),
-        }
+            None => {
+                warn!("Task id not found for abort task")
+            }
+        };
     }
 
     pub fn remove_task(
@@ -164,6 +170,14 @@ impl BatchManager {
             .ok_or(TaskNotFound)?
             .get_error())
     }
+
+    /// Return the receivers for streaming RPC.
+    pub fn get_task_receiver(
+        &self,
+        task_id: &TaskId,
+    ) -> tokio::sync::mpsc::Receiver<TaskInfoResponseResult> {
+        self.tasks.lock().get(task_id).unwrap().state_receiver()
+    }
 }
 
 impl Default for BatchManager {
@@ -178,11 +192,12 @@ mod tests {
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::batch_plan::table_function_node::Type;
     use risingwave_pb::batch_plan::{
         ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
         TaskOutputId as ProstTaskOutputId, ValuesNode,
     };
+    use risingwave_pb::expr::table_function::Type;
+    use risingwave_pb::expr::TableFunction;
     use tonic::Code;
 
     use crate::task::{BatchManager, ComputeNodeContext, TaskId};
@@ -260,15 +275,17 @@ mod tests {
                 children: vec![],
                 identity: "".to_string(),
                 node_body: Some(NodeBody::TableFunction(TableFunctionNode {
-                    function_type: Type::Generate as i32,
-                    args: vec![
-                        make_i32_literal(1),
-                        make_i32_literal(i32::MAX),
-                        make_i32_literal(1),
-                    ],
-                    // This is a bit hacky as we want to make sure the task lasts long enough
-                    // for us to abort it.
-                    return_type: Some(DataType::Int32.to_protobuf()),
+                    table_function: Some(TableFunction {
+                        function_type: Type::Generate as i32,
+                        args: vec![
+                            make_i32_literal(1),
+                            make_i32_literal(i32::MAX),
+                            make_i32_literal(1),
+                        ],
+                        // This is a bit hacky as we want to make sure the task lasts long enough
+                        // for us to abort it.
+                        return_type: Some(DataType::Int32.to_protobuf()),
+                    }),
                 })),
             }),
             exchange_info: Some(ExchangeInfo {
@@ -286,7 +303,7 @@ mod tests {
             .fire_task(&task_id, plan.clone(), 0, context.clone())
             .await
             .unwrap();
-        manager.abort_task(&task_id).unwrap();
+        manager.abort_task(&task_id);
         let task_id = TaskId::from(&task_id);
         let res = manager.wait_until_task_aborted(&task_id).await;
         assert_eq!(res, Ok(()));

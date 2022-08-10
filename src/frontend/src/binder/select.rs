@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -49,18 +49,32 @@ impl BoundSelect {
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
-            .any(|expr| expr.has_correlated_input_ref())
+            .any(|expr| expr.has_correlated_input_ref_by_depth())
+            || match self.from.as_ref() {
+                Some(relation) => relation.is_correlated(),
+                None => false,
+            }
     }
 
-    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
         let mut correlated_indices = vec![];
         self.select_items
-            .iter()
-            .chain(self.group_by.iter())
-            .chain(self.where_clause.iter())
+            .iter_mut()
+            .chain(self.group_by.iter_mut())
+            .chain(self.where_clause.iter_mut())
             .for_each(|expr| {
-                correlated_indices.extend(expr.collect_correlated_indices());
+                correlated_indices
+                    .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
             });
+
+        if let Some(relation) = self.from.as_mut() {
+            correlated_indices
+                .extend(relation.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
+        }
+
         correlated_indices
     }
 }
@@ -69,6 +83,9 @@ impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
         // Bind FROM clause.
         let from = self.bind_vec_table_with_joins(select.from)?;
+
+        // Bind SELECT clause.
+        let (select_items, aliases) = self.bind_select_list(select.projection)?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
@@ -90,9 +107,6 @@ impl Binder {
         // Bind HAVING clause.
         let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
         Self::require_bool_clause(&having, "HAVING")?;
-
-        // Bind SELECT clause.
-        let (select_items, aliases) = self.bind_project(select.projection)?;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
@@ -116,7 +130,7 @@ impl Binder {
         })
     }
 
-    pub fn bind_project(
+    pub fn bind_select_list(
         &mut self,
         select_items: Vec<SelectItem>,
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
@@ -127,15 +141,15 @@ impl Binder {
                 SelectItem::UnnamedExpr(expr) => {
                     let (select_expr, alias) = match &expr.clone() {
                         Expr::Identifier(ident) => {
-                            (self.bind_expr(expr)?, Some(ident.value.clone()))
+                            (self.bind_expr(expr)?, Some(ident.real_value()))
                         }
                         Expr::CompoundIdentifier(idents) => (
                             self.bind_expr(expr)?,
-                            idents.last().map(|ident| ident.value.clone()),
+                            idents.last().map(|ident| ident.real_value()),
                         ),
                         Expr::FieldIdentifier(field_expr, idents) => (
                             self.bind_single_field_column(*field_expr.clone(), idents)?,
-                            idents.last().map(|ident| ident.value.clone()),
+                            idents.last().map(|ident| ident.real_value()),
                         ),
                         _ => (self.bind_expr(expr)?, None),
                     };
@@ -143,19 +157,22 @@ impl Binder {
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    check_valid_column_name(&alias.value)?;
+                    check_valid_column_name(&alias.real_value())?;
 
                     let expr = self.bind_expr(expr)?;
                     select_list.push(expr);
-                    aliases.push(Some(alias.value));
+                    aliases.push(Some(alias.real_value()));
                 }
                 SelectItem::QualifiedWildcard(obj_name) => {
-                    let table_name = &obj_name.0.last().unwrap().value;
+                    let table_name = &obj_name.0.last().unwrap().real_value();
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
                     })?;
-                    let (exprs, names) =
-                        Self::iter_bound_columns(self.context.columns[*begin..*end].iter());
+                    let (exprs, names) = Self::iter_bound_columns(
+                        self.context.columns[*begin..*end]
+                            .iter()
+                            .filter(|c| !c.is_hidden),
+                    );
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -165,11 +182,39 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
-                    let (exprs, names) = Self::iter_bound_columns(
-                        self.context.columns[..].iter().filter(|c| !c.is_hidden),
-                    );
+                    if self.context.range_of.is_empty() {
+                        return Err(ErrorCode::BindError(
+                            "SELECT * with no tables specified is not valid".into(),
+                        )
+                        .into());
+                    }
+                    // Bind the column groups
+                    // In psql, the USING and NATURAL columns come before the rest of the columns in
+                    // a SELECT * statement
+                    let (exprs, names) = self.iter_column_groups();
                     select_list.extend(exprs);
                     aliases.extend(names);
+
+                    // Bind columns that are not in groups
+                    let (exprs, names) =
+                        Self::iter_bound_columns(self.context.columns[..].iter().filter(|c| {
+                            !c.is_hidden
+                                && !self
+                                    .context
+                                    .column_group_context
+                                    .mapping
+                                    .contains_key(&c.index)
+                        }));
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+
+                    // TODO: we will need to be able to handle wildcard expressions bound to aliases
+                    // in the future. We'd then need a `NaturalGroupContext`
+                    // bound to each alias to correctly disambiguate column
+                    // references
+                    //
+                    // We may need to refactor `NaturalGroupContext` to become span aware in that
+                    // case.
                 }
             }
         }
@@ -185,6 +230,41 @@ impl Binder {
                     InputRef::new(c.index, c.field.data_type.clone()).into(),
                     Some(c.field.name.clone()),
                 )
+            })
+            .unzip()
+    }
+
+    pub fn iter_column_groups(&self) -> (Vec<ExprImpl>, Vec<Option<String>>) {
+        self.context
+            .column_group_context
+            .groups
+            .values()
+            .rev() // ensure that the outermost col group gets put first in the list
+            .map(|g| {
+                if let Some(col) = &g.non_nullable_column {
+                    let c = &self.context.columns[*col];
+                    (
+                        InputRef::new(c.index, c.field.data_type.clone()).into(),
+                        Some(c.field.name.clone()),
+                    )
+                } else {
+                    let mut input_idxes = g.indices.iter().collect::<Vec<_>>();
+                    input_idxes.sort();
+                    let inputs = input_idxes
+                        .into_iter()
+                        .map(|index| {
+                            let column = &self.context.columns[*index];
+                            InputRef::new(column.index, column.field.data_type.clone()).into()
+                        })
+                        .collect::<Vec<_>>();
+                    let c = &self.context.columns[*g.indices.iter().next().unwrap()];
+                    (
+                        FunctionCall::new(ExprType::Coalesce, inputs)
+                            .expect("Failure binding COALESCE function call")
+                            .into(),
+                        Some(c.field.name.clone()),
+                    )
+                }
             })
             .unzip()
     }

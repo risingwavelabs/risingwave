@@ -14,14 +14,17 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ConditionDisplay;
 
 /// `BatchNestedLoopJoin` implements [`super::LogicalJoin`] by checking the join condition
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
@@ -52,11 +55,25 @@ impl BatchNestedLoopJoin {
 
 impl fmt::Display for BatchNestedLoopJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "BatchNestedLoopJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
-            self.logical.join_type(),
-            self.logical.on(),
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct("BatchNestedLoopJoin");
+        builder.field("type", &format_args!("{:?}", self.logical.join_type()));
+
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "predicate",
+            &format_args!(
+                "{}",
+                ConditionDisplay {
+                    condition: self.logical.on(),
+                    input_schema: &concat_schema
+                }
+            ),
+        );
+
+        if verbose {
             if self
                 .logical
                 .output_indices()
@@ -64,11 +81,22 @@ impl fmt::Display for BatchNestedLoopJoin {
                 .copied()
                 .eq(0..self.logical.internal_column_num())
             {
-                "all".to_string()
+                builder.field("output", &format_args!("all"));
             } else {
-                format!("{:?}", self.logical.output_indices())
+                builder.field(
+                    "output",
+                    &format_args!(
+                        "{:?}",
+                        &IndicesDisplay {
+                            indices: self.logical.output_indices(),
+                            input_schema: &concat_schema,
+                        }
+                    ),
+                );
             }
-        )
+        }
+
+        builder.finish()
     }
 }
 

@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
+use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -80,13 +81,15 @@ pub struct TableCatalog {
     pub appendonly: bool,
 
     /// Owner of the table.
-    pub owner: String,
+    pub owner: u32,
 
     /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
     /// table.
     pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     pub properties: HashMap<String, String>,
+
+    pub read_pattern_prefix_column: u32,
 }
 
 impl TableCatalog {
@@ -113,6 +116,10 @@ impl TableCatalog {
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
+        use risingwave_common::catalog::TableOption;
+
+        let table_options = TableOption::build_table_option(&self.properties);
+
         TableDesc {
             table_id: self.id,
             order_key: self
@@ -125,6 +132,9 @@ impl TableCatalog {
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
             vnode_mapping: self.vnode_mapping.clone(),
+            retention_seconds: table_options
+                .retention_seconds
+                .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
         }
     }
 
@@ -158,9 +168,10 @@ impl TableCatalog {
                 .map(|k| *k as i32)
                 .collect_vec(),
             appendonly: self.appendonly,
-            owner: self.owner.clone(),
+            owner: self.owner,
             mapping: None,
-            properties: HashMap::default(),
+            properties: self.properties.clone(),
+            read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
     }
 }
@@ -216,6 +227,7 @@ impl From<ProstTable> for TableCatalog {
             owner: tb.owner,
             vnode_mapping: Some(vnode_mapping),
             properties: tb.properties,
+            read_pattern_prefix_column: tb.read_pattern_prefix_column,
         }
     }
 }
@@ -231,6 +243,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::compress::compress_data;
@@ -294,13 +307,17 @@ mod tests {
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
             appendonly: false,
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             mapping: Some(ParallelUnitMapping {
                 table_id: 0,
                 original_indices,
                 data,
             }),
-            properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
+            properties: HashMap::from([(
+                String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                String::from("300"),
+            )]),
+            read_pattern_prefix_column: 0,
         }
         .into();
 
@@ -348,9 +365,13 @@ mod tests {
                 }],
                 distribution_key: vec![],
                 appendonly: false,
-                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+                owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 vnode_mapping: Some(mapping),
-                properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
+                properties: HashMap::from([(
+                    String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+                    String::from("300")
+                )]),
+                read_pattern_prefix_column: 0,
             }
         );
     }

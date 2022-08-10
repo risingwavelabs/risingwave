@@ -14,14 +14,13 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
-use crate::binder::FunctionType;
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, TableFunction};
 use crate::optimizer::plan_node::BatchTableFunction;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
@@ -29,68 +28,23 @@ use crate::utils::Condition;
 #[derive(Debug, Clone)]
 pub struct LogicalTableFunction {
     pub base: PlanBase,
-    pub(super) args: Vec<ExprImpl>,
-    pub series_type: FunctionType,
-    pub data_type: DataType,
+    pub table_function: TableFunction,
 }
 
 impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
-    pub fn new(
-        args: Vec<ExprImpl>,
-        schema: Schema,
-        series_type: FunctionType,
-        data_type: DataType,
-        ctx: OptimizerContextRef,
-    ) -> Self {
-        let base = PlanBase::new_logical(ctx, schema, vec![]);
-
+    pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
+        let schema = Schema {
+            fields: vec![Field::with_name(
+                table_function.return_type(),
+                table_function.function_type.name(),
+            )],
+        };
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self {
             base,
-            args,
-            series_type,
-            data_type,
-        }
-    }
-
-    /// Create a [`LogicalTableFunction`] node. Used by planner.
-    pub fn create_generate_series(
-        start: ExprImpl,
-        stop: ExprImpl,
-        step: ExprImpl,
-        schema: Schema,
-        ctx: OptimizerContextRef,
-    ) -> PlanRef {
-        // No additional checks after binder.
-        let data_type = start.return_type();
-        Self::new(
-            vec![start, stop, step],
-            schema,
-            FunctionType::Generate,
-            data_type,
-            ctx,
-        )
-        .into()
-    }
-
-    pub fn create_unnest(args: Vec<ExprImpl>, schema: Schema, ctx: OptimizerContextRef) -> PlanRef {
-        // No additional checks after binder.
-        let data_type = args[0].return_type();
-        Self::new(args, schema, FunctionType::Unnest, data_type, ctx).into()
-    }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        match self.series_type {
-            FunctionType::Generate => {
-                write!(
-                    f,
-                    "{} {{ start: {:?} stop: {:?} step: {:?} }}",
-                    name, self.args[0], self.args[1], self.args[2],
-                )
-            }
-            FunctionType::Unnest => {
-                write!(f, "{} {{ {:?} }}", name, self.args,)
-            }
+            table_function,
         }
     }
 }
@@ -99,7 +53,7 @@ impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
 impl fmt::Display for LogicalTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalTableFunction")
+        write!(f, "LogicalTableFunction {{ {:?} }}", self.table_function)
     }
 }
 

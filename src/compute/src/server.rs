@@ -19,20 +19,22 @@ use std::time::Duration;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::config::{ComputeNodeConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
-use risingwave_storage::hummock::compactor::Compactor;
+use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
+use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -42,6 +44,7 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::compute_observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
@@ -64,7 +67,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: ComputeNodeOpts,
-) -> (JoinHandle<()>, Sender<()>) {
+) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts);
     info!(
@@ -77,15 +80,16 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(&client_addr, WorkerType::ComputeNode)
+        .register(
+            WorkerType::ComputeNode,
+            &client_addr,
+            config.streaming.worker_node_parallelism,
+        )
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-    )];
+    let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
     monitor_process(&registry).unwrap();
@@ -103,17 +107,43 @@ pub async fn compute_node_serve(
         meta_client.clone(),
         hummock_metrics.clone(),
     ));
+
+    let mut join_handle_vec = vec![];
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
+    // todo use ObserverManager
+    let observer_manager = ObserverManager::new(
+        meta_client.clone(),
+        client_addr.clone(),
+        Box::new(compute_observer_node),
+        WorkerType::Compactor,
+    )
+    .await;
+
+    let observer_join_handle = observer_manager.start().await.unwrap();
+    join_handle_vec.push(observer_join_handle);
+
     let state_store = StateStoreImpl::new(
         &opts.state_store,
+        &opts.file_cache_dir,
         storage_config.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
+        filter_key_extractor_manager.clone(),
     )
     .await
     .unwrap();
+
+    let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
-        if opts.state_store.starts_with("hummock+memory")
+        extra_info_sources.push(storage.sstable_id_manager());
+        let memory_limiter = Arc::new(MemoryLimiter::new(
+            storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
+        ));
+        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
+        // compactor along with compute node.
+        if opts.state_store == "hummock+memory"
             || opts.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
@@ -125,11 +155,20 @@ pub async fn compute_node_serve(
                 storage.sstable_store(),
                 state_store_metrics.clone(),
                 Some(Arc::new(CompactionExecutor::new(Some(1)))),
+                filter_key_extractor_manager.clone(),
+                memory_limiter.clone(),
+                storage.sstable_id_manager(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.sstable_store(), &registry).unwrap();
+        monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
     }
+
+    sub_tasks.push(MetaClient::start_heartbeat_loop(
+        meta_client.clone(),
+        Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+        extra_info_sources,
+    ));
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
@@ -139,7 +178,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
     ));
-    let source_mgr = Arc::new(MemSourceManager::new(worker_id, source_metrics));
+    let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
@@ -163,6 +202,15 @@ pub async fn compute_node_serve(
         state_store,
     );
 
+    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
+    // if this is not the case, we can use the following command to get it printed into the logs
+    // periodically.
+    //
+    // Comment out the following line to enable.
+    // TODO: may optionally enable based on the features
+    #[cfg(any())]
+    stream_mgr.clone().spawn_print_trace();
+
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
@@ -172,6 +220,7 @@ pub async fn compute_node_serve(
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
@@ -194,6 +243,7 @@ pub async fn compute_node_serve(
             .await
             .unwrap();
     });
+    join_handle_vec.push(join_handle);
 
     // Boot metrics service.
     if opts.metrics_level > 0 {
@@ -206,5 +256,5 @@ pub async fn compute_node_serve(
     // All set, let the meta service know we're ready.
     meta_client.activate(&client_addr).await.unwrap();
 
-    (join_handle, shutdown_send)
+    (join_handle_vec, shutdown_send)
 }

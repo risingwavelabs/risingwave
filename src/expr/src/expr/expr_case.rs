@@ -15,9 +15,12 @@
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
+use risingwave_common::{bail, ensure};
+use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{BoxedExpression, Expression};
-use crate::Result;
+use crate::expr::{build_from_prost, BoxedExpression, Expression};
+use crate::{ExprError, Result};
 
 #[derive(Debug)]
 pub struct WhenClause {
@@ -126,15 +129,92 @@ impl Expression for CaseExpression {
     }
 }
 
+impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
+    type Error = ExprError;
+
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        ensure!(prost.get_expr_type().unwrap() == Type::Case);
+
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
+            bail!("Expected RexNode::FuncCall");
+        };
+        let children = &func_call_node.children;
+        // children: (when, then)+, (else_clause)?
+        let len = children.len();
+        let else_clause = if len % 2 == 1 {
+            let else_clause = build_from_prost(&children[len - 1])?;
+            if else_clause.return_type() != ret_type {
+                bail!("Type mismatched between else and case.");
+            }
+            Some(else_clause)
+        } else {
+            None
+        };
+        let mut when_clauses = vec![];
+        for i in 0..len / 2 {
+            let when_index = i * 2;
+            let then_index = i * 2 + 1;
+            let when_expr = build_from_prost(&children[when_index])?;
+            let then_expr = build_from_prost(&children[then_index])?;
+            if when_expr.return_type() != DataType::Boolean {
+                bail!("Type mismatched between when clause and condition");
+            }
+            if then_expr.return_type() != ret_type {
+                bail!("Type mismatched between then clause and case");
+            }
+            let when_clause = WhenClause::new(when_expr, then_expr);
+            when_clauses.push(when_clause);
+        }
+        Ok(CaseExpression::new(ret_type, when_clauses, else_clause))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::Scalar;
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::expr::FunctionCall;
 
     use super::*;
     use crate::expr::expr_binary_nonnull::new_binary_expr;
     use crate::expr::{InputRefExpression, LiteralExpression};
+
+    #[test]
+    fn test_case_expr() {
+        let call = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Boolean as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: None,
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: None,
+                },
+            ],
+        };
+        let p = ExprNode {
+            expr_type: Type::Case as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(call)),
+        };
+        assert!(CaseExpression::try_from(&p).is_ok());
+    }
 
     fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {

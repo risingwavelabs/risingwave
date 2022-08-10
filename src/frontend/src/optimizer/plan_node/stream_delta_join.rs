@@ -14,14 +14,15 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::plan_node::EqJoinPredicate;
+use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
@@ -58,7 +59,7 @@ impl StreamDeltaJoin {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.to_vec(),
+            logical.base.logical_pk.to_vec(),
             dist,
             append_only,
         );
@@ -78,11 +79,25 @@ impl StreamDeltaJoin {
 
 impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "StreamDeltaJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
-            self.logical.join_type(),
-            self.eq_join_predicate(),
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct("StreamDeltaJoin");
+        builder.field("type", &format_args!("{:?}", self.logical.join_type()));
+
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "predicate",
+            &format_args!(
+                "{}",
+                EqJoinPredicateDisplay {
+                    eq_join_predicate: self.eq_join_predicate(),
+                    input_schema: &concat_schema
+                }
+            ),
+        );
+
+        if verbose {
             if self
                 .logical
                 .output_indices()
@@ -90,11 +105,22 @@ impl fmt::Display for StreamDeltaJoin {
                 .copied()
                 .eq(0..self.logical.internal_column_num())
             {
-                "all".to_string()
+                builder.field("output", &format_args!("all"));
             } else {
-                format!("{:?}", self.logical.output_indices())
+                builder.field(
+                    "output",
+                    &format_args!(
+                        "{:?}",
+                        &IndicesDisplay {
+                            indices: self.logical.output_indices(),
+                            input_schema: &concat_schema,
+                        }
+                    ),
+                );
             }
-        )
+        }
+
+        builder.finish()
     }
 }
 

@@ -37,7 +37,7 @@ impl StreamTopN {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.input().pk_indices().to_vec(),
+            logical.input().logical_pk().to_vec(),
             dist,
             false,
         );
@@ -47,17 +47,11 @@ impl StreamTopN {
 
 impl fmt::Display for StreamTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyTopN")
+        if self.input().append_only() {
+            self.logical.fmt_with_name(f, "StreamAppendOnlyTopN")
         } else {
-            f.debug_struct("StreamTopN")
-        };
-
-        builder
-            .field("order", &format_args!("{}", self.logical.topn_order()))
-            .field("limit", &format_args!("{}", self.logical.limit()))
-            .field("offset", &format_args!("{}", self.logical.offset()))
-            .finish()
+            self.logical.fmt_with_name(f, "StreamTopN")
+        }
     }
 }
 

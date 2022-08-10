@@ -17,8 +17,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, StructField,
-    TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Function, ObjectName, Query,
+    StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -41,7 +41,20 @@ impl Binder {
             }
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
-            Expr::Identifier(ident) => self.bind_column(&[ident]),
+            Expr::Identifier(ident) => {
+                if ["session_user", "current_schema"]
+                    .iter()
+                    .any(|e| ident.real_value().as_str() == *e)
+                {
+                    // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
+                    // will be rewritten to `SELECT current_schema();`.
+                    // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
+                    // allow `session_user()` while we do.
+                    self.bind_function(Function::no_arg(ObjectName(vec![ident])))
+                } else {
+                    self.bind_column(&[ident])
+                }
+            }
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
                 self.bind_single_field_column(*field_expr, &idents)
@@ -379,7 +392,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     data_type: bind_data_type(&f.data_type)?,
                     // Literals don't have `column_id`.
                     column_id: ColumnId::new(0),
-                    name: f.name.value.clone(),
+                    name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
                 })
@@ -391,7 +404,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     Ok(ColumnDesc {
         data_type: bind_data_type(&column_def.data_type)?,
         column_id: ColumnId::new(0),
-        name: column_def.name.value.clone(),
+        name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
     })
@@ -406,7 +419,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar(_) | AstDataType::String => DataType::Varchar,
+        AstDataType::Varchar | AstDataType::String => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
@@ -429,6 +442,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?
                 .into(),
         },
+        AstDataType::Text => {
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported data type: {:?}", data_type),
+                2535.into(),
+            )
+            .into())
+        }
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("unsupported data type: {:?}", data_type),

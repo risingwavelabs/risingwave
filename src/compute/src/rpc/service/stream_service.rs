@@ -161,13 +161,14 @@ impl StreamService for StreamServiceImpl {
             request_id: req.request_id,
             status: None,
             create_mview_progress: collect_result.create_mview_progress,
-            sycned_sstables: synced_sstables
+            synced_sstables: synced_sstables
                 .into_iter()
                 .map(|(compaction_group_id, sst)| GroupedSstableInfo {
                     compaction_group_id,
                     sst: Some(sst),
                 })
                 .collect_vec(),
+            worker_id: self.env.worker_id(),
         }))
     }
 
@@ -216,6 +217,22 @@ impl StreamService for StreamServiceImpl {
         tracing::debug!(id = %id, "drop source");
 
         Ok(Response::new(DropSourceResponse { status: None }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn actor_trace(
+        &self,
+        request: Request<ActorTraceRequest>,
+    ) -> Result<Response<ActorTraceResponse>, Status> {
+        let _req = request.into_inner();
+
+        let actor_traces = self.mgr.get_actor_traces();
+        let actor_traces = actor_traces
+            .into_iter()
+            .map(|(k, v)| (k, v.to_string()))
+            .collect();
+
+        Ok(Response::new(ActorTraceResponse { actor_traces }))
     }
 }
 

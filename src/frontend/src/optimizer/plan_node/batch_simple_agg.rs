@@ -50,9 +50,7 @@ impl BatchSimpleAgg {
 
 impl fmt::Display for BatchSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("BatchSimpleAgg")
-            .field("aggs", &self.agg_calls())
-            .finish()
+        self.logical.fmt_with_name(f, "BatchSimpleAgg")
     }
 }
 
@@ -75,7 +73,8 @@ impl ToDistributedBatch for BatchSimpleAgg {
 
         // TODO: distinct agg cannot use 2-phase agg yet.
         if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
-            && self.logical.agg_calls().iter().any(|call| !call.distinct)
+            && self.logical.agg_calls().iter().all(|call| !call.distinct)
+            && !self.logical.is_agg_result_affected_by_order()
         {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();

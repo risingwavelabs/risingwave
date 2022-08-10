@@ -12,21 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
 #[cfg(test)]
-use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
+use risingwave_common::catalog::{
+    DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
@@ -35,7 +38,7 @@ use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -44,6 +47,7 @@ use tokio::task::JoinHandle;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
+use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
@@ -52,10 +56,10 @@ use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
-use crate::test_utils::MockUserInfoWriter;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
+use crate::user::UserId;
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -64,6 +68,18 @@ pub struct OptimizerContext {
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
+
+    /// it indicates whether the explain mode is verbose for explain statement
+    pub explain_verbose: AtomicBool,
+
+    /// it indicates whether the explain mode is trace for explain statement
+    pub explain_trace: AtomicBool,
+    /// Store the trace of optimizer
+    pub optimizer_trace: Arc<Mutex<Vec<String>>>,
+    /// Store correlated id
+    pub next_correlated_id: AtomicU32,
+    /// Store handle_with_properties for internal table
+    pub with_properties: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +108,31 @@ impl OptimizerContextRef {
         let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         PlanNodeId(next_id)
     }
+
+    pub fn next_correlated_id(&self) -> CorrelatedId {
+        self.inner
+            .next_correlated_id
+            .fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn is_explain_verbose(&self) -> bool {
+        self.inner.explain_verbose.load(Ordering::Acquire)
+    }
+
+    pub fn is_explain_trace(&self) -> bool {
+        self.inner.explain_trace.load(Ordering::Acquire)
+    }
+
+    pub fn trace(&self, str: String) {
+        let mut guard = self.inner.optimizer_trace.lock().unwrap();
+        guard.push(str);
+        guard.push("\n".to_string());
+    }
+
+    pub fn take_trace(&self) -> Vec<String> {
+        let mut guard = self.inner.optimizer_trace.lock().unwrap();
+        guard.drain(..).collect()
+    }
 }
 
 impl OptimizerContext {
@@ -100,16 +141,27 @@ impl OptimizerContext {
             session_ctx,
             next_id: AtomicI32::new(0),
             sql,
+            explain_verbose: AtomicBool::new(false),
+            explain_trace: AtomicBool::new(false),
+            optimizer_trace: Arc::new(Mutex::new(vec![])),
+            next_correlated_id: AtomicU32::new(1),
+            with_properties: HashMap::new(),
         }
     }
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
+    #[expect(clippy::unused_async)]
     pub async fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
             sql: Arc::from(""),
+            explain_verbose: AtomicBool::new(false),
+            explain_trace: AtomicBool::new(false),
+            optimizer_trace: Arc::new(Mutex::new(vec![])),
+            next_correlated_id: AtomicU32::new(1),
+            with_properties: HashMap::new(),
         }
         .into()
     }
@@ -159,7 +211,7 @@ impl FrontendEnv {
     }
 
     pub fn mock() -> Self {
-        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient};
+        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
@@ -205,12 +257,13 @@ impl FrontendEnv {
             .unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
-            .register(&frontend_address, WorkerType::Frontend)
+            .register(WorkerType::Frontend, &frontend_address, 0)
             .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            vec![],
         );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
@@ -279,6 +332,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn catalog_writer(&self) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -289,6 +343,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -298,6 +353,7 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
         &*self.worker_node_manager
     }
@@ -306,6 +362,7 @@ impl FrontendEnv {
         self.worker_node_manager.clone()
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
     }
@@ -330,13 +387,15 @@ impl FrontendEnv {
 pub struct AuthContext {
     pub database: String,
     pub user_name: String,
+    pub user_id: UserId,
 }
 
 impl AuthContext {
-    pub fn new(database: String, user_name: String) -> Self {
+    pub fn new(database: String, user_name: String, user_id: UserId) -> Self {
         Self {
             database,
             user_name,
+            user_id,
         }
     }
 }
@@ -370,7 +429,8 @@ impl SessionImpl {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPPER_USER.to_string(),
+                DEFAULT_SUPER_USER.to_string(),
+                DEFAULT_SUPER_USER_ID,
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
@@ -393,6 +453,10 @@ impl SessionImpl {
         &self.auth_context.user_name
     }
 
+    pub fn user_id(&self) -> UserId {
+        self.auth_context.user_id
+    }
+
     pub fn config(&self) -> RwLockReadGuard<ConfigMap> {
         self.config_map.read()
     }
@@ -404,8 +468,8 @@ impl SessionImpl {
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,
-    observer_join_handle: JoinHandle<()>,
-    heartbeat_join_handle: JoinHandle<()>,
+    _observer_join_handle: JoinHandle<()>,
+    _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: Sender<()>,
 }
 
@@ -464,6 +528,7 @@ impl SessionManager for SessionManagerImpl {
                 Arc::new(AuthContext::new(
                     database.to_string(),
                     user_name.to_string(),
+                    user.id,
                 )),
                 user_authenticator,
             )
@@ -483,16 +548,10 @@ impl SessionManagerImpl {
             FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
-            observer_join_handle: join_handle,
-            heartbeat_join_handle,
+            _observer_join_handle: join_handle,
+            _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
         })
-    }
-
-    /// Used in unit test. Called before `LocalMeta::stop`.
-    pub fn terminate(&self) {
-        self.observer_join_handle.abort();
-        self.heartbeat_join_handle.abort();
     }
 }
 
@@ -501,6 +560,11 @@ impl Session for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
+
+        // format: indicate the query PgReponse format (Only meaningful for SELECT queries).
+        // false: TEXT
+        // true: BINARY
+        format: bool,
     ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
@@ -519,7 +583,7 @@ impl Session for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql).await.map_err(|e| {
+        let rsp = handle(self, stmt, sql, format).await.map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
@@ -545,10 +609,49 @@ impl Session for SessionImpl {
             )));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = infer(self, stmt, sql).map_err(|e| {
-            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
-            e
-        })?;
+        // This part refers from src/frontend/handler/ so the Vec<PgFieldDescripyor> is same as
+        // result of run_statement().
+        let rsp = match stmt {
+            Statement::Query(_) => infer(self, stmt, sql).map_err(|e| {
+                tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+                e
+            })?,
+            Statement::ShowObjects(show_object) => match show_object {
+                ShowObject::Columns { table: _ } => {
+                    vec![
+                        PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    ]
+                }
+                _ => {
+                    vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)]
+                }
+            },
+            Statement::ShowVariable { variable } => {
+                let name = &variable[0].value.to_lowercase();
+                if name.eq_ignore_ascii_case("ALL") {
+                    vec![
+                        PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
+                        PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+                    ]
+                } else {
+                    vec![PgFieldDescriptor::new(
+                        name.to_ascii_lowercase(),
+                        TypeOid::Varchar,
+                    )]
+                }
+            }
+            Statement::Describe { name: _ } => {
+                vec![
+                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                ]
+            }
+            _ => {
+                panic!("infer_return_type only support query statement");
+            }
+        };
         Ok(rsp)
     }
 
@@ -563,10 +666,7 @@ fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<Pg
     let session = context.session_ctx.clone();
 
     let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
+        let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
 

@@ -14,6 +14,7 @@
 
 //! Build executor from protobuf.
 
+mod agg_call;
 mod batch_query;
 mod chain;
 mod dynamic_filter;
@@ -29,10 +30,11 @@ mod lookup_union;
 mod merge;
 mod mview;
 mod project;
+mod project_set;
 mod sink;
 mod source;
+mod top_n;
 mod top_n_appendonly;
-mod top_n_new;
 mod union;
 
 // import for submodules
@@ -58,10 +60,11 @@ use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
 use self::project::*;
+use self::project_set::*;
 use self::sink::*;
 use self::source::*;
+use self::top_n::*;
 use self::top_n_appendonly::*;
-use self::top_n_new::*;
 use self::union::*;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -84,12 +87,7 @@ macro_rules! build_executor {
                     <$data_type>::new_boxed_executor($source, $node, $store, $stream)
                 },
             )*
-            _ => Err(RwError::from(
-                ErrorCode::InternalError(format!(
-                    "unsupported node: {:?}",
-                    $node.get_node_body().unwrap()
-                )),
-            )),
+            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
         }
     }
 }
@@ -127,5 +125,6 @@ pub fn create_executor(
         NodeBody::LookupUnion => LookupUnionExecutorBuilder,
         NodeBody::Expand => ExpandExecutorBuilder,
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
+        NodeBody::ProjectSet => ProjectSetExecutorBuilder,
     }
 }

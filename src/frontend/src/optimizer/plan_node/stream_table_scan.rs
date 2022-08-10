@@ -22,7 +22,8 @@ use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
 use crate::catalog::ColumnId;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::property::{Distribution, DistributionDisplay};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -39,12 +40,23 @@ impl StreamTableScan {
         let ctx = logical.base.ctx.clone();
 
         let batch_plan_id = ctx.next_plan_node_id();
+
+        let distribution = {
+            let distribution_key = logical
+                .distribution_key()
+                .expect("distribution key of stream chain must exist in output columns");
+            if distribution_key.is_empty() {
+                Distribution::Single
+            } else {
+                // Follows upstream distribution from TableCatalog
+                Distribution::HashShard(distribution_key)
+            }
+        };
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.clone(),
-            // follows upstream distribution from TableCatalog
-            Distribution::HashShard(logical.distribution_key().unwrap()),
+            logical.base.logical_pk.clone(),
+            distribution,
             logical.table_desc().appendonly,
         );
         Self {
@@ -62,8 +74,17 @@ impl StreamTableScan {
         &self.logical
     }
 
-    pub fn to_index_scan(&self, index_name: &str, index: &Rc<TableDesc>) -> StreamIndexScan {
-        StreamIndexScan::new(self.logical.to_index_scan(index_name, index))
+    pub fn to_index_scan(
+        &self,
+        index_name: &str,
+        index_table_desc: Rc<TableDesc>,
+        primary_to_secondary_mapping: &[usize],
+    ) -> StreamIndexScan {
+        StreamIndexScan::new(self.logical.to_index_scan(
+            index_name,
+            index_table_desc,
+            primary_to_secondary_mapping,
+        ))
     }
 }
 
@@ -71,15 +92,41 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamTableScan");
+
         builder
             .field("table", &format_args!("{}", self.logical.table_name()))
             .field(
                 "columns",
-                &format_args!("[{}]", self.logical.column_names().join(", ")),
-            )
-            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
-            .finish()
+                &format_args!(
+                    "[{}]",
+                    match verbose {
+                        false => self.logical.column_names(),
+                        true => self.logical.column_names_with_table_prefix(),
+                    }
+                    .join(", ")
+                ),
+            );
+
+        if verbose {
+            builder.field(
+                "pk",
+                &IndicesDisplay {
+                    indices: self.logical_pk(),
+                    input_schema: &self.base.schema,
+                },
+            );
+            builder.field(
+                "distribution",
+                &DistributionDisplay {
+                    distribution: self.distribution(),
+                    input_schema: &self.base.schema,
+                },
+            );
+        }
+
+        builder.finish()
     }
 }
 
@@ -90,7 +137,7 @@ impl ToStreamProst for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
@@ -104,7 +151,7 @@ impl StreamTableScan {
                 .collect(),
         };
 
-        let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
+        let pk_indices = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -116,12 +163,8 @@ impl StreamTableScan {
                 },
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
-                    operator_id: if auto_fields {
-                        self.batch_plan_id.0 as u64
-                    } else {
-                        0
-                    },
-                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
@@ -143,25 +186,18 @@ impl StreamTableScan {
                         name: x.name.clone(),
                     })
                     .collect(),
-                // The column idxs need to be forwarded to the downstream
-                column_ids: self
+                // The column indices need to be forwarded to the downstream
+                upstream_column_indices: self
                     .logical
-                    .column_descs()
+                    .output_column_indices()
                     .iter()
-                    .map(|x| x.column_id.get_id())
+                    .map(|&i| i as _)
                     .collect(),
+                is_singleton: *self.distribution() == Distribution::Single,
             })),
             pk_indices,
-            operator_id: if auto_fields {
-                self.base.id.0 as u64
-            } else {
-                0
-            },
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
+            operator_id: self.base.id.0 as u64,
+            identity: format!("{}", self),
             append_only: self.append_only(),
         }
     }

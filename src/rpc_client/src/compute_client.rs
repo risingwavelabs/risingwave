@@ -12,21 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
+use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    CreateTaskRequest, CreateTaskResponse, ExecuteRequest, GetDataRequest, GetDataResponse,
-    GetStreamRequest, GetStreamResponse,
+    CreateTaskRequest, ExecuteRequest, GetDataRequest, GetDataResponse, GetStreamRequest,
+    GetStreamResponse, TaskInfoResponse,
 };
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
 use crate::error::Result;
+use crate::{RpcClient, RpcClientPool};
 
 #[derive(Clone)]
 pub struct ComputeClient {
@@ -38,16 +41,21 @@ pub struct ComputeClient {
 impl ComputeClient {
     pub async fn new(addr: HostAddr) -> Result<Self> {
         let channel = Endpoint::from_shared(format!("http://{}", &addr))?
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await?;
+        Ok(Self::with_channel(addr, channel))
+    }
+
+    pub fn with_channel(addr: HostAddr, channel: Channel) -> Self {
         let exchange_client = ExchangeServiceClient::new(channel.clone());
         let task_client = TaskServiceClient::new(channel);
-        Ok(Self {
+        Self {
             exchange_client,
             task_client,
             addr,
-        })
+        }
     }
 
     pub async fn get_data(&self, output_id: TaskOutputId) -> Result<Streaming<GetDataResponse>> {
@@ -89,46 +97,20 @@ impl ComputeClient {
             .into_inner())
     }
 
-    // TODO: Remove this
-    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode, epoch: u64) -> Result<()> {
-        let plan = PlanFragment {
-            root: Some(plan),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                ..Default::default()
-            }),
-        };
-        let _ = self
-            .create_task_inner(CreateTaskRequest {
-                task_id: Some(task_id),
-                plan: Some(plan),
-                epoch,
-            })
-            .await?;
-        Ok(())
-    }
-
-    pub async fn create_task2(
+    pub async fn create_task(
         &self,
         task_id: TaskId,
         plan: PlanFragment,
         epoch: u64,
-    ) -> Result<()> {
-        let _ = self
-            .create_task_inner(CreateTaskRequest {
+    ) -> Result<Streaming<TaskInfoResponse>> {
+        Ok(self
+            .task_client
+            .to_owned()
+            .create_task(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
                 epoch,
             })
-            .await?;
-        Ok(())
-    }
-
-    async fn create_task_inner(&self, req: CreateTaskRequest) -> Result<CreateTaskResponse> {
-        Ok(self
-            .task_client
-            .to_owned()
-            .create_task(req)
             .await?
             .into_inner())
     }
@@ -137,3 +119,13 @@ impl ComputeClient {
         Ok(self.task_client.to_owned().execute(req).await?.into_inner())
     }
 }
+
+#[async_trait]
+impl RpcClient for ComputeClient {
+    async fn new_client(host_addr: HostAddr) -> Result<Self> {
+        Self::new(host_addr).await
+    }
+}
+
+pub type ComputeClientPool = RpcClientPool<ComputeClient>;
+pub type ComputeClientPoolRef = Arc<ComputeClientPool>;

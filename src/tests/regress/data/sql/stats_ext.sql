@@ -1020,7 +1020,7 @@ SELECT * FROM check_estimated_rows('SELECT * FROM mcv_lists WHERE a < ALL (ARRAY
 SELECT * FROM check_estimated_rows('SELECT * FROM mcv_lists WHERE a < ALL (ARRAY[4, 5]) AND b IN (''1'', ''2'', NULL, ''3'') AND c > ANY (ARRAY[1, 2, NULL, 3])');
 
 -- check change of unrelated column type does not reset the MCV statistics
-ALTER TABLE mcv_lists ALTER COLUMN d TYPE VARCHAR(64);
+ALTER TABLE mcv_lists ALTER COLUMN d TYPE VARCHAR;
 
 SELECT d.stxdmcv IS NOT NULL
   FROM pg_statistic_ext s, pg_statistic_ext_data d

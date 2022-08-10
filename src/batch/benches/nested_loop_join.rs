@@ -38,8 +38,8 @@ fn create_nested_loop_join_executor(
     right_chunk_size: usize,
     right_chunk_num: usize,
 ) -> BoxedExecutor {
-    let left_input = gen_data(left_chunk_size, left_chunk_num);
-    let right_input = gen_data(right_chunk_size, right_chunk_num);
+    let left_input = gen_data(left_chunk_size, left_chunk_num, &[DataType::Int64]);
+    let right_input = gen_data(right_chunk_size, right_chunk_num, &[DataType::Int64]);
 
     let mut left_child = Box::new(MockExecutor::new(field_n::<1>(DataType::Int64)));
     left_input.into_iter().for_each(|c| left_child.add(c));
@@ -161,6 +161,7 @@ fn bench_nested_loop_join(c: &mut Criterion) {
         JoinType::RightOuter,
         JoinType::RightSemi,
         JoinType::RightAnti,
+        JoinType::FullOuter,
     ] {
         for chunk_size in &[32, 128, 512, 1024] {
             c.bench_with_input(

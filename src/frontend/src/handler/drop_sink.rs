@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::privilege::check_super_user;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -31,14 +33,25 @@ pub async fn handle_drop_sink(
 
     check_source(catalog_reader, session.clone(), &schema_name, &sink_name)?;
 
-    let sink_id = catalog_reader.read_guard().get_sink_id_by_name(
-        session.database(),
-        &schema_name,
-        &sink_name,
-    )?;
+    let sink = catalog_reader
+        .read_guard()
+        .get_sink_by_name(session.database(), &schema_name, &sink_name)?
+        .clone();
+
+    let schema_owner = catalog_reader
+        .read_guard()
+        .get_schema_by_name(session.database(), &schema_name)
+        .unwrap()
+        .owner();
+    if sink.owner != session.user_id()
+        && session.user_id() != schema_owner
+        && !check_super_user(&session)
+    {
+        return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+    }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_sink(sink_id).await?;
+    catalog_writer.drop_sink(sink.id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }
@@ -53,7 +66,7 @@ mod tests {
     async fn test_drop_sink_handler() {
         let sql_create_table = "create table t (v1 smallint);";
         let sql_create_mv = "create materialized view mv as select v1 from t;";
-        let sql_create_sink = "create sink snk from mv with('sink' = 'mysql')";
+        let sql_create_sink = "create sink snk from mv with( connector = 'mysql')";
         let sql_drop_sink = "drop sink snk;";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql_create_table).await.unwrap();

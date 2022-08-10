@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use prost::Message;
-use risingwave_hummock_sdk::{HummockContextId, HummockVersionId};
+use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::HummockPinnedVersion;
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for hummock pinned version
 /// `cf(hummock_pinned_version)`: `HummockContextId` -> `HummockPinnedVersion`
@@ -43,28 +43,7 @@ impl MetadataModel for HummockPinnedVersion {
         prost
     }
 
-    fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.context_id)
-    }
-}
-
-pub trait HummockPinnedVersionExt {
-    fn pin_version(&mut self, version_id: HummockVersionId);
-    fn unpin_version(&mut self, version_id: HummockVersionId);
-}
-
-impl HummockPinnedVersionExt for HummockPinnedVersion {
-    fn pin_version(&mut self, version_id: HummockVersionId) {
-        let found = self.version_id.iter().position(|&v| v == version_id);
-        if found.is_none() {
-            self.version_id.push(version_id);
-        }
-    }
-
-    fn unpin_version(&mut self, pinned_version_id: HummockVersionId) {
-        let found = self.version_id.iter().position(|&v| v == pinned_version_id);
-        if let Some(pos) = found {
-            self.version_id.remove(pos);
-        }
     }
 }

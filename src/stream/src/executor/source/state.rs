@@ -14,15 +14,16 @@
 
 use std::fmt::Debug;
 
-use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_connector::{SplitImpl, SplitMetaData};
+use risingwave_common::bail;
+use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::WriteOptions;
+use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::error::StreamExecutorResult;
+use crate::executor::error::StreamExecutorError;
+use crate::executor::StreamExecutorResult;
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -55,13 +56,13 @@ impl<S: StateStore> SourceStateHandler<S> {
     /// and needs to be invoked by the ``SourceReader`` to call it,
     /// and will return the error when the dependent ``StateStore`` handles the error.
     /// The caller should ensure that the passed parameters are not empty.
-    pub async fn take_snapshot<SS>(&self, states: Vec<SS>, epoch: u64) -> Result<()>
+    pub async fn take_snapshot<SS>(&self, states: Vec<SS>, epoch: u64) -> StreamExecutorResult<()>
     where
         SS: SplitMetaData,
     {
         if states.is_empty() {
             // TODO should be a clear Error Code
-            Err(anyhow!("states require not null"))
+            bail!("states require not null");
         } else {
             let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
@@ -74,17 +75,14 @@ impl<S: StateStore> SourceStateHandler<S> {
                 local_batch.put(state.id(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
-            let ingest_rs = write_batch.ingest().await;
-            match ingest_rs {
-                Err(e) => {
-                    error!(
-                        "SourceStateHandler take_snapshot() batch.ingest Error,cause by {:?}",
-                        e
-                    );
-                    Err(anyhow!(e))
-                }
-                _ => Ok(()),
-            }
+            write_batch.ingest().await.inspect_err(|e| {
+                error!(
+                    "SourceStateHandler take_snapshot() batch.ingest Error,cause by {:?}",
+                    e
+                );
+            })?;
+
+            Ok(())
         }
     }
 
@@ -98,7 +96,14 @@ impl<S: StateStore> SourceStateHandler<S> {
         epoch: u64,
     ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
-            .get(state_identifier, epoch)
+            .get(
+                state_identifier,
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.keyspace.table_id()),
+                    retention_seconds: None,
+                },
+            )
             .await
             .map_err(Into::into)
     }
@@ -109,11 +114,16 @@ impl<S: StateStore> SourceStateHandler<S> {
         epoch: u64,
     ) -> StreamExecutorResult<Option<SplitImpl>> {
         // let connector_type = stream_source_split.get_type();
-        match self.restore_states(stream_source_split.id(), epoch).await {
-            Ok(Some(s)) => Ok(Some(SplitImpl::restore_from_bytes(&s)?)),
-            Ok(None) => Ok(None),
-            Err(e) => Err(e),
-        }
+        let s = self.restore_states(stream_source_split.id(), epoch).await?;
+
+        let split = match s {
+            Some(s) => {
+                Some(SplitImpl::restore_from_bytes(&s)?)
+            }
+            None => None,
+        };
+
+        Ok(split)
     }
 }
 
@@ -122,9 +132,12 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::ReadOptions;
     use serde::{Deserialize, Serialize};
 
     use super::*;
+
+    const TEST_TABLE_ID: u32 = 1;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct TestSourceState {
@@ -147,13 +160,13 @@ mod tests {
             Bytes::from(serde_json::to_string(self).unwrap())
         }
 
-        fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
-            serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+        fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+            serde_json::from_slice(bytes).map_err(|e| anyhow::anyhow!(e))
         }
     }
 
     #[test]
-    fn test_state_encode() -> Result<()> {
+    fn test_state_encode() -> anyhow::Result<()> {
         let offset = 100_i64;
         let partition = String::from("p0");
         let state_instance = TestSourceState::new(partition.clone(), offset);
@@ -171,7 +184,7 @@ mod tests {
 
     fn new_test_keyspace() -> Keyspace<MemoryStateStore> {
         let test_mem_state_store = MemoryStateStore::new();
-        Keyspace::table_root(test_mem_state_store, &TableId::from(1))
+        Keyspace::table_root(test_mem_state_store, &TableId::from(TEST_TABLE_ID))
     }
 
     fn test_state_store_vec() -> Vec<TestSourceState> {
@@ -184,13 +197,13 @@ mod tests {
     async fn take_snapshot_and_get_states(
         state_handler: SourceStateHandler<MemoryStateStore>,
         current_epoch: u64,
-    ) -> (Vec<TestSourceState>, Result<()>) {
+    ) -> (Vec<TestSourceState>, anyhow::Result<()>) {
         let states = test_state_store_vec();
         println!("Vec<TestSourceStat>={:?}", states.clone());
         let rs = state_handler
             .take_snapshot(states.clone(), current_epoch)
             .await;
-        (states, rs)
+        (states, rs.map_err(Into::into))
     }
 
     #[tokio::test]
@@ -198,9 +211,17 @@ mod tests {
         let current_epoch = 1000;
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
         let _rs = take_snapshot_and_get_states(state_store_handler.clone(), current_epoch).await;
+
         let stored_states = state_store_handler
             .keyspace
-            .scan(None, current_epoch)
+            .scan(
+                None,
+                ReadOptions {
+                    epoch: current_epoch,
+                    table_id: Some(state_store_handler.keyspace.table_id()),
+                    retention_seconds: None,
+                },
+            )
             .await
             .unwrap();
         assert_ne!(0, stored_states.len());

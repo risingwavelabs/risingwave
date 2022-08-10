@@ -8,22 +8,78 @@ statement ok
 create table t2 (x int, y int)
 
 statement ok
-insert into t1 values (1, 1), (2, 2)
+create table t3(x int, y int)
 
 statement ok
-insert into t2 values (1, 2), (2, 2)
+insert into t1 values (1, 1), (2, 2), (1, null), (null, 2), (2, null), (null, 1), (null, null)
+
+statement ok
+insert into t2 values (1, 2), (2, 2), (1, null), (null, 2), (2, null), (null, 1), (null, null)
+
+statement ok
+insert into t3 values (1, 2), (2, 2), (1, null), (null, 2), (2, null), (null, 1), (null, null)
 
 query III
-select * from t1 where exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y)
+select * from t1 where exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y) order by t1.x, t1.y
 ----
 1 1
 
 query III
-select * from t1 where not exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y)
+select * from t1 where not exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y) order by t1.x, t1.y
 ----
+1 NULL
+2 2
+2 NULL
+NULL 1
+NULL 2
+NULL NULL
+
+query III
+select * from t1 where t1.y in (select t1.y from t2 where t1.x = t2.x) order by t1.x, t1.y
+----
+1 1
 2 2
 
+query III
+select * from t1 where exists(select x from t2 where t1.x = t2.x and t2.y in (select t3.y from t3 where t1.x = t3.x)) order by t1.x, t1.y
+----
+1 1
+1 NULL
+2 2
+2 NULL
 
+query III
+select * from t1 where exists(select t2.x from t2 join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y) order by t1.x, t1.y
+----
+2 2
+NULL 2
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t3;
+
+
+statement ok
+create table t1 (x int, y int)
+
+statement ok
+create table t2 (x int)
+
+statement ok
+insert into t1 values (1, 1), (1, 2)
+
+statement ok
+insert into t2 values (1), (1)
+
+query III
+select *  from t1 where y in (select sum(t2.x) from t2 group by t1.y);
+----
+1 2
 
 statement ok
 drop table t1;

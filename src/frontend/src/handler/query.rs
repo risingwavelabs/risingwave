@@ -13,37 +13,41 @@
 // limitations under the License.
 
 use futures_async_stream::for_await;
-use log::debug;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
-use tracing::info;
+use tracing::debug;
 
 use crate::binder::{Binder, BoundStatement};
-use crate::handler::util::{to_pg_field, to_pg_rows};
+use crate::handler::util::{force_local_mode, to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{
     BatchPlanFragmenter, ExecutionContext, ExecutionContextRef, LocalQueryExecution,
 };
 use crate::session::OptimizerContext;
 
-pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
+pub async fn handle_query(
+    context: OptimizerContext,
+    stmt: Statement,
+    format: bool,
+) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
     let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
+        let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
 
-    let query_mode = session.config().get_query_mode();
-
+    let query_mode = if force_local_mode(&bound) {
+        debug!("force query mode to local");
+        QueryMode::Local
+    } else {
+        session.config().get_query_mode()
+    };
     debug!("query_mode:{:?}", query_mode);
 
     let (data_stream, pg_descs) = match query_mode {
@@ -54,7 +58,7 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
     let mut rows = vec![];
     #[for_await]
     for chunk in data_stream {
-        rows.extend(to_pg_rows(chunk?));
+        rows.extend(to_pg_rows(chunk?, format));
     }
 
     let rows_count = match stmt_type {
@@ -129,11 +133,6 @@ fn local_execute(
             .collect::<Vec<PgFieldDescriptor>>();
 
         let plan = root.gen_batch_local_plan()?;
-
-        info!(
-            "Generated local execution plan: {:?}",
-            plan.explain_to_string()?
-        );
 
         let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
         let query = plan_fragmenter.split(plan)?;

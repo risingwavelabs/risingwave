@@ -18,13 +18,12 @@ use std::fmt::Debug;
 use std::ops::Sub;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
 use risingwave_common::types::{
     CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF64,
 };
 
-use super::cast::date_to_timestamp;
 use crate::{ExprError, Result};
 
 #[inline(always)]
@@ -68,10 +67,16 @@ pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: TryInto<T3> + Debug,
     T2: TryInto<T3> + Debug,
-    T3: CheckedDiv,
+    T3: CheckedDiv + Zero,
 {
     general_atm(l, r, |a, b| {
-        a.checked_div(&b).ok_or(ExprError::NumericOutOfRange)
+        a.checked_div(&b).ok_or_else(|| {
+            if b.is_zero() {
+                ExprError::DivisionByZero
+            } else {
+                ExprError::NumericOutOfRange
+            }
+        })
     })
 }
 
@@ -151,7 +156,7 @@ pub fn interval_date_add<T1, T2, T3>(
     l: IntervalUnit,
     r: NaiveDateWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
-    interval_timestamp_add::<T1, T2, T3>(l, date_to_timestamp(r)?)
+    interval_timestamp_add::<T1, T2, T3>(l, r.into())
 }
 
 #[inline(always)]

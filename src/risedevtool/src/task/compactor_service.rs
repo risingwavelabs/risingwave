@@ -20,7 +20,10 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_storage_backend, CompactorConfig, ExecuteContext, Task};
+use crate::{
+    add_meta_node, add_storage_backend, CompactorConfig, ExecuteContext, HummockInMemoryStrategy,
+    Task,
+};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -55,7 +58,13 @@ impl CompactorService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        add_storage_backend(&config.id, provide_minio, provide_aws_s3, false, cmd)?;
+        add_storage_backend(
+            &config.id,
+            provide_minio,
+            provide_aws_s3,
+            HummockInMemoryStrategy::Shared,
+            cmd,
+        )?;
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
@@ -74,6 +83,12 @@ impl Task for CompactorService {
         let mut cmd = self.compactor()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
+            cmd.env(
+                "RW_PROFILE_PATH",
+                Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
+            );
+        }
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;

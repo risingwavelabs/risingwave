@@ -18,15 +18,16 @@ message TaskId {
 
 message TaskInfo {
   enum TaskStatus {
-    NOT_FOUND = 0;
-    PENDING = 1;
-    RUNNING = 2;
-    FAILING = 3;
-    CANCELLING = 4;
-    FINISHED = 5;
-    FAILED = 6;
-    ABORTED = 7;
-    ABORTING = 8;
+    UNSPECIFIED = 0;
+    NOT_FOUND = 1;
+    PENDING = 2;
+    RUNNING = 3;
+    FAILING = 4;
+    CANCELLING = 5;
+    FINISHED = 6;
+    FAILED = 7;
+    ABORTED = 8;
+    ABORTING = 9;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
@@ -38,10 +39,6 @@ message CreateTaskRequest {
   uint64 epoch = 3;
 }
 
-message CreateTaskResponse {
-  common.Status status = 1;
-}
-
 message AbortTaskRequest {
   batch_plan.TaskId task_id = 1;
 }
@@ -50,19 +47,11 @@ message AbortTaskResponse {
   common.Status status = 1;
 }
 
-message RemoveTaskRequest {
-  batch_plan.TaskId task_id = 1;
-}
-
-message RemoveTaskResponse {
-  common.Status status = 1;
-}
-
 message GetTaskInfoRequest {
   batch_plan.TaskId task_id = 1;
 }
 
-message GetTaskInfoResponse {
+message TaskInfoResponse {
   common.Status status = 1;
   TaskInfo task_info = 2;
 }
@@ -86,10 +75,9 @@ message ExecuteRequest {
 }
 
 service TaskService {
-  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
-  rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
+  rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
+  // Abort an already-died (self execution-failure, previous aborted, completed) task will still succeed.
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
-  rpc RemoveTask(RemoveTaskRequest) returns (RemoveTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }
 

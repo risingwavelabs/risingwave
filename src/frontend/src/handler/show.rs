@@ -49,10 +49,10 @@ pub fn get_columns_from_table(
         .collect())
 }
 
-fn schema_or_default(schema: &Option<Ident>) -> &str {
+fn schema_or_default(schema: &Option<Ident>) -> String {
     schema
         .as_ref()
-        .map_or_else(|| DEFAULT_SCHEMA_NAME, |s| &s.value)
+        .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
 pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<PgResponse> {
@@ -62,7 +62,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
     let names = match command {
         // If not include schema name, use default schema name
         ShowObject::Table { schema } => catalog_reader
-            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_table()
             .map(|t| t.name.clone())
             .collect(),
@@ -70,21 +70,25 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
         ShowObject::MaterializedView { schema } => catalog_reader
-            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_mv()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Source { schema } => catalog_reader
-            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::MaterializedSource { schema } => catalog_reader
-            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_materialized_source()
             .map(|t| t.name.clone())
             .collect(),
-        ShowObject::Sink { schema: _ } => todo!(),
+        ShowObject::Sink { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_sink()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Columns { table } => {
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
@@ -104,7 +108,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 
     let rows = names
         .into_iter()
-        .map(|n| Row::new(vec![Some(n)]))
+        .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
     Ok(PgResponse::new(
@@ -128,12 +132,12 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let sql = r#"CREATE SOURCE t1
-        WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+        WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
         ROW FORMAT JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
         let sql = r#"CREATE MATERIALIZED SOURCE t2
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
@@ -142,15 +146,15 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                "Row([Some(\"t1\")])".to_string(),
-                "Row([Some(\"t2\")])".to_string()
+                "Row([Some(b\"t1\")])".to_string(),
+                "Row([Some(b\"t2\")])".to_string()
             ]
         );
 
         let rows = frontend
             .query_formatted_result("SHOW MATERIALIZED SOURCES")
             .await;
-        assert_eq!(rows, vec!["Row([Some(\"t2\")])".to_string()]);
+        assert_eq!(rows, vec!["Row([Some(b\"t2\")])".to_string()]);
     }
 
     #[tokio::test]
@@ -158,7 +162,7 @@ mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );
@@ -172,8 +176,8 @@ mod tests {
             .iter()
             .map(|row| {
                 (
-                    row.index(0).as_ref().unwrap().as_str(),
-                    row.index(1).as_ref().unwrap().as_str(),
+                    std::str::from_utf8(row.index(0).as_ref().unwrap()).unwrap(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap(),
                 )
             })
             .collect::<HashMap<&str, &str>>();

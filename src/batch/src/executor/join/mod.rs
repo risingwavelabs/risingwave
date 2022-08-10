@@ -14,10 +14,8 @@
 
 mod chunked_data;
 pub mod hash_join;
-mod hash_join_state;
 pub mod lookup_join;
 pub mod nested_loop_join;
-pub mod row_level_iter;
 mod sort_merge_join;
 
 use std::sync::Arc;
@@ -71,6 +69,7 @@ impl JoinType {
             JoinTypeProst::RightSemi => JoinType::RightSemi,
             JoinTypeProst::RightAnti => JoinType::RightAnti,
             JoinTypeProst::FullOuter => JoinType::FullOuter,
+            JoinTypeProst::Unspecified => unreachable!(),
         }
     }
 

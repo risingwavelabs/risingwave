@@ -57,6 +57,12 @@ impl FeStartupMessage {
         }?;
         let mut map = HashMap::new();
         let config: Vec<&str> = config.split('\0').collect();
+        if config.len() % 2 == 1 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Invalid input config: odd number of config pairs",
+            ));
+        }
         config.chunks(2).for_each(|chunk| {
             map.insert(chunk[0].to_string(), chunk[1].to_string());
         });
@@ -72,7 +78,12 @@ pub struct FeQueryMessage {
 #[derive(Debug)]
 pub struct FeBindMessage {
     pub format_codes: Vec<i16>,
-    pub result_format_codes: Vec<i16>,
+
+    // result_format_code:
+    //  false: text
+    //  true: binary
+    pub result_format_code: bool,
+
     pub params: Vec<Bytes>,
     pub portal_name: Bytes,
     pub statement_name: Bytes,
@@ -87,7 +98,7 @@ pub struct FeExecuteMessage {
 #[derive(Debug)]
 pub struct FeParseMessage {
     pub statement_name: Bytes,
-    pub query_string: Bytes,
+    pub sql_bytes: Bytes,
     pub type_ids: Vec<i32>,
 }
 
@@ -100,21 +111,21 @@ pub struct FePasswordMessage {
 pub struct FeDescribeMessage {
     // 'S' to describe a prepared statement; or 'P' to describe a portal.
     pub kind: u8,
-    pub query_name: Bytes,
+    pub name: Bytes,
 }
 
 #[derive(Debug)]
 pub struct FeCloseMessage {
     pub kind: u8,
-    pub query_name: Bytes,
+    pub name: Bytes,
 }
 
 impl FeDescribeMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let kind = buf.get_u8();
-        let query_name = read_null_terminated(&mut buf)?;
+        let name = read_null_terminated(&mut buf)?;
 
-        Ok(FeMessage::Describe(FeDescribeMessage { query_name, kind }))
+        Ok(FeMessage::Describe(FeDescribeMessage { name, kind }))
     }
 }
 
@@ -152,12 +163,20 @@ impl FeBindMessage {
             .collect();
         // Read ResultFormatCode
         let len = buf.get_i16();
-        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
+        assert!(len==0||len==1,"Only support default format(len==0) or uniform format(len==1), can't support mix format now.");
+
+        let result_format_code = if len == 0 {
+            // default format:text
+            false
+        } else {
+            buf.get_i16() == 1
+        };
 
         Ok(FeMessage::Bind(FeBindMessage {
             format_codes,
             params,
-            result_format_codes,
+            result_format_code,
             portal_name,
             statement_name,
         }))
@@ -179,14 +198,14 @@ impl FeExecuteMessage {
 impl FeParseMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let statement_name = read_null_terminated(&mut buf)?;
-        let query_string = read_null_terminated(&mut buf)?;
+        let sql_bytes = read_null_terminated(&mut buf)?;
         let nparams = buf.get_i16();
 
         let type_ids: Vec<i32> = (0..nparams).map(|_| buf.get_i32()).collect();
 
         Ok(FeMessage::Parse(FeParseMessage {
             statement_name,
-            query_string,
+            sql_bytes,
             type_ids,
         }))
     }
@@ -220,8 +239,8 @@ impl FeQueryMessage {
 impl FeCloseMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let kind = buf.get_u8();
-        let query_name = read_null_terminated(&mut buf)?;
-        Ok(FeMessage::Close(FeCloseMessage { kind, query_name }))
+        let name = read_null_terminated(&mut buf)?;
+        Ok(FeMessage::Close(FeCloseMessage { kind, name }))
     }
 }
 
@@ -465,7 +484,7 @@ impl<'a> BeMessage<'a> {
                     for val_opt in vals.values() {
                         if let Some(val) = val_opt {
                             buf.put_u32(val.len() as u32);
-                            buf.put_slice(val.as_bytes());
+                            buf.put_slice(val);
                         } else {
                             buf.put_i32(-1);
                         }
@@ -474,6 +493,7 @@ impl<'a> BeMessage<'a> {
                 })
                 .unwrap();
             }
+
             // RowDescription
             // +-----+-----------+--------------+-------+-----+-------+
             // | 'T' | int32 len | int16 colNum | field | ... | field |
@@ -651,8 +671,8 @@ mod tests {
 
     use crate::pg_message::FeQueryMessage;
 
-    #[tokio::test]
-    async fn test_get_sql() {
+    #[test]
+    fn test_get_sql() {
         let fe = FeQueryMessage {
             sql_bytes: Bytes::from(vec![255, 255, 255, 255, 255, 255, 0]),
         };

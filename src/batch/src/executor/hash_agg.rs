@@ -207,7 +207,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 // TODO: currently not a vectorized implementation
                 states
                     .iter_mut()
-                    .for_each(|state| state.update_with_row(&chunk, row_id).unwrap());
+                    .for_each(|state| state.update_single(&chunk, row_id).unwrap());
             }
         }
 
@@ -310,6 +310,8 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
+            filter: None,
         };
 
         let agg_prost = HashAggNode {
@@ -375,6 +377,8 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
+            filter: None,
         };
 
         let agg_prost = HashAggNode {

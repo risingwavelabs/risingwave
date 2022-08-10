@@ -26,7 +26,7 @@ use async_trait::async_trait;
 pub use column::*;
 pub use internal_table::*;
 pub use physical_table::*;
-pub use schema::{test_utils as schema_test_utils, Field, Schema};
+pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
 use crate::array::Row;
 pub use crate::config::constant::hummock;
@@ -36,11 +36,14 @@ pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
-pub const DEFAULT_SUPPER_USER: &str = "root";
+pub const DEFAULT_SUPER_USER: &str = "root";
+pub const DEFAULT_SUPER_USER_ID: u32 = 1;
 // This is for compatibility with customized utils for PostgreSQL.
-pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
+pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
+pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
-pub const RESERVED_PG_CATALOG_TABLE_ID: i32 = 1000;
+pub const NON_RESERVED_USER_ID: i32 = 11;
+pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
 
 /// The local system catalog reader in the frontend node.
 #[async_trait]
@@ -51,12 +54,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
 pub type CatalogVersion = u64;
-
-pub enum CatalogId {
-    DatabaseId(DatabaseId),
-    SchemaId(SchemaId),
-    TableId(TableId),
-}
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
@@ -131,25 +128,28 @@ impl fmt::Display for TableId {
 // directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
-    pub ttl: Option<u32>, // second
+    pub retention_seconds: Option<u32>, // second
 }
 
 impl From<&risingwave_pb::hummock::TableOption> for TableOption {
     fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
-        let ttl = if table_option.ttl == hummock::TABLE_OPTION_DUMMY_TTL {
-            None
-        } else {
-            Some(table_option.ttl)
-        };
+        let retention_seconds =
+            if table_option.retention_seconds == hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND {
+                None
+            } else {
+                Some(table_option.retention_seconds)
+            };
 
-        Self { ttl }
+        Self { retention_seconds }
     }
 }
 
 impl From<&TableOption> for risingwave_pb::hummock::TableOption {
     fn from(table_option: &TableOption) -> Self {
         Self {
-            ttl: table_option.ttl.unwrap_or(hummock::TABLE_OPTION_DUMMY_TTL),
+            retention_seconds: table_option
+                .retention_seconds
+                .unwrap_or(hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND),
         }
     }
 }
@@ -158,24 +158,59 @@ impl TableOption {
     pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
         // now we only support ttl for TableOption
         let mut result = TableOption::default();
-        match table_properties.get(hummock::PROPERTIES_TTL_KEY) {
-            Some(ttl_string) => {
-                match ttl_string.trim().parse::<u32>() {
-                    Ok(ttl_u32) => result.ttl = Some(ttl_u32),
-                    Err(e) => {
-                        tracing::info!(
-                            "build_table_option parse option ttl_string {} fail {}",
-                            ttl_string,
-                            e
-                        );
-                        result.ttl = None;
-                    }
-                };
-            }
-
-            None => {}
+        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_RETAINTION_SECOND_KEY) {
+            match ttl_string.trim().parse::<u32>() {
+                Ok(retention_seconds_u32) => result.retention_seconds = Some(retention_seconds_u32),
+                Err(e) => {
+                    tracing::info!(
+                        "build_table_option parse option ttl_string {} fail {}",
+                        ttl_string,
+                        e
+                    );
+                    result.retention_seconds = None;
+                }
+            };
         }
 
         result
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+pub struct IndexId {
+    pub index_id: u32,
+}
+
+impl IndexId {
+    pub const fn new(index_id: u32) -> Self {
+        IndexId { index_id }
+    }
+
+    /// Sometimes the id field is filled later, we use this value for better debugging.
+    pub const fn placeholder() -> Self {
+        IndexId {
+            index_id: u32::MAX - 1,
+        }
+    }
+
+    pub fn index_id(&self) -> u32 {
+        self.index_id
+    }
+}
+
+impl From<u32> for IndexId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+impl From<IndexId> for u32 {
+    fn from(id: IndexId) -> Self {
+        id.index_id
+    }
+}
+
+impl fmt::Display for IndexId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.index_id,)
     }
 }

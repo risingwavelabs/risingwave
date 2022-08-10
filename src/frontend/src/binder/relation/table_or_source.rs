@@ -22,14 +22,15 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, TableId};
+use crate::catalog::{CatalogError, IndexCatalog, TableId};
+use crate::user::UserId;
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
-    pub table_indexes: Vec<Arc<TableCatalog>>,
+    pub table_indexes: Vec<Arc<IndexCatalog>>,
 }
 
 /// `BoundTableSource` is used by DML statement on table source like insert, update.
@@ -39,6 +40,7 @@ pub struct BoundTableSource {
     pub source_id: TableId, // TODO: refactor to source id
     pub columns: Vec<ColumnDesc>,
     pub append_only: bool,
+    pub owner: UserId,
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +62,7 @@ impl From<&SourceCatalog> for BoundSource {
 }
 
 impl Binder {
-    pub(super) fn bind_table_or_source(
+    pub fn bind_table_or_source(
         &mut self,
         schema_name: &str,
         table_name: &str,
@@ -123,7 +125,7 @@ impl Binder {
             }
         };
 
-        self.bind_context(
+        self.bind_table_to_context(
             columns
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
@@ -137,13 +139,13 @@ impl Binder {
         &mut self,
         schema_name: &str,
         table_id: TableId,
-    ) -> Result<Vec<Arc<TableCatalog>>> {
+    ) -> Result<Vec<Arc<IndexCatalog>>> {
         Ok(self
             .catalog
             .get_schema_by_name(&self.db_name, schema_name)?
             .iter_index()
-            .filter(|x| x.is_index_on == Some(table_id))
-            .map(|table| table.clone().into())
+            .filter(|index| index.primary_table.id == table_id)
+            .map(|index| index.clone().into())
             .collect())
     }
 
@@ -163,7 +165,7 @@ impl Binder {
 
         let columns = table_catalog.columns.clone();
 
-        self.bind_context(
+        self.bind_table_to_context(
             columns
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
@@ -195,6 +197,8 @@ impl Binder {
             .map(|c| c.column_desc.clone())
             .collect();
 
+        let owner = source.owner;
+
         // Note(bugen): do not bind context here.
 
         Ok(BoundTableSource {
@@ -202,6 +206,7 @@ impl Binder {
             source_id,
             columns,
             append_only,
+            owner,
         })
     }
 }

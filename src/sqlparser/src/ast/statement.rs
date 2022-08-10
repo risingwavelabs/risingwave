@@ -85,7 +85,8 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json, // Keyword::JSON
+    Json,         // Keyword::JSON
+    DebeziumJson, // Keyword::DEBEZIUM_JSON
 }
 
 impl ParseTo for SourceSchema {
@@ -95,6 +96,8 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::PROTOBUF]) {
             impl_parse_to!(protobuf_schema: ProtobufSchema, p);
             SourceSchema::Protobuf(protobuf_schema)
+        } else if p.parse_keywords(&[Keyword::DEBEZIUM_JSON]) {
+            SourceSchema::DebeziumJson
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF after ROW FORMAT".to_string(),
@@ -109,6 +112,7 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
         }
     }
 }
@@ -343,93 +347,112 @@ impl<T> From<AstOption<T>> for Option<T> {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateUserStatement {
     pub user_name: ObjectName,
-    pub with_options: CreateUserWithOptions,
+    pub with_options: UserOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CreateUserOption {
+pub struct AlterUserStatement {
+    pub user_name: ObjectName,
+    pub mode: AlterUserMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AlterUserMode {
+    Options(UserOptions),
+    Rename(ObjectName),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum UserOption {
     SuperUser,
     NoSuperUser,
     CreateDB,
     NoCreateDB,
+    CreateUser,
+    NoCreateUser,
     Login,
     NoLogin,
     EncryptedPassword(AstString),
     Password(Option<AstString>),
 }
 
-impl fmt::Display for CreateUserOption {
+impl fmt::Display for UserOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CreateUserOption::SuperUser => write!(f, "SUPERUSER"),
-            CreateUserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
-            CreateUserOption::CreateDB => write!(f, "CREATEDB"),
-            CreateUserOption::NoCreateDB => write!(f, "NOCREATEDB"),
-            CreateUserOption::Login => write!(f, "LOGIN"),
-            CreateUserOption::NoLogin => write!(f, "NOLOGIN"),
-            CreateUserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
-            CreateUserOption::Password(None) => write!(f, "PASSWORD NULL"),
-            CreateUserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+            UserOption::SuperUser => write!(f, "SUPERUSER"),
+            UserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
+            UserOption::CreateDB => write!(f, "CREATEDB"),
+            UserOption::NoCreateDB => write!(f, "NOCREATEDB"),
+            UserOption::CreateUser => write!(f, "CREATEUSER"),
+            UserOption::NoCreateUser => write!(f, "NOCREATEUSER"),
+            UserOption::Login => write!(f, "LOGIN"),
+            UserOption::NoLogin => write!(f, "NOLOGIN"),
+            UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
+            UserOption::Password(None) => write!(f, "PASSWORD NULL"),
+            UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CreateUserWithOptions(pub Vec<CreateUserOption>);
+pub struct UserOptions(pub Vec<UserOption>);
 
-impl ParseTo for CreateUserWithOptions {
+impl ParseTo for UserOptions {
     fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
         let mut options = vec![];
-        if parser.parse_keyword(Keyword::WITH) {
-            loop {
-                let token = parser.peek_token();
-                if token == Token::EOF || token == Token::SemiColon {
-                    break;
-                }
+        let _ = parser.parse_keyword(Keyword::WITH);
+        loop {
+            let token = parser.peek_token();
+            if token == Token::EOF || token == Token::SemiColon {
+                break;
+            }
 
-                if let Token::Word(ref w) = token {
-                    parser.next_token();
-                    let option = match w.keyword {
-                        Keyword::SUPERUSER => CreateUserOption::SuperUser,
-                        Keyword::NOSUPERUSER => CreateUserOption::NoSuperUser,
-                        Keyword::CREATEDB => CreateUserOption::CreateDB,
-                        Keyword::NOCREATEDB => CreateUserOption::NoCreateDB,
-                        Keyword::LOGIN => CreateUserOption::Login,
-                        Keyword::NOLOGIN => CreateUserOption::NoLogin,
-                        Keyword::PASSWORD => {
-                            if parser.parse_keyword(Keyword::NULL) {
-                                CreateUserOption::Password(None)
-                            } else {
-                                CreateUserOption::Password(Some(AstString::parse_to(parser)?))
-                            }
+            if let Token::Word(ref w) = token {
+                parser.next_token();
+                let option = match w.keyword {
+                    Keyword::SUPERUSER => UserOption::SuperUser,
+                    Keyword::NOSUPERUSER => UserOption::NoSuperUser,
+                    Keyword::CREATEDB => UserOption::CreateDB,
+                    Keyword::NOCREATEDB => UserOption::NoCreateDB,
+                    Keyword::CREATEUSER => UserOption::CreateUser,
+                    Keyword::NOCREATEUSER => UserOption::NoCreateUser,
+                    Keyword::LOGIN => UserOption::Login,
+                    Keyword::NOLOGIN => UserOption::NoLogin,
+                    Keyword::PASSWORD => {
+                        if parser.parse_keyword(Keyword::NULL) {
+                            UserOption::Password(None)
+                        } else {
+                            UserOption::Password(Some(AstString::parse_to(parser)?))
                         }
-                        Keyword::ENCRYPTED => {
-                            parser.expect_keyword(Keyword::PASSWORD)?;
-                            CreateUserOption::EncryptedPassword(AstString::parse_to(parser)?)
-                        }
-                        _ => parser.expected(
-                            "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
-                            | NOLOGIN | ENCRYPTED | PASSWORD | NULL",
-                            token,
-                        )?,
-                    };
-                    options.push(option);
-                } else {
-                    parser.expected(
-                        "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
-                        | ENCRYPTED | PASSWORD | NULL",
+                    }
+                    Keyword::ENCRYPTED => {
+                        parser.expect_keyword(Keyword::PASSWORD)?;
+                        UserOption::EncryptedPassword(AstString::parse_to(parser)?)
+                    }
+                    _ => parser.expected(
+                        "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
+                            | NOLOGIN | CREATEUSER | NOCREATEUSER | ENCRYPTED | PASSWORD | NULL",
                         token,
-                    )?
-                }
+                    )?,
+                };
+                options.push(option);
+            } else {
+                parser.expected(
+                    "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN | NOLOGIN \
+                        | CREATEUSER | NOCREATEUSER | ENCRYPTED| PASSWORD | NULL",
+                    token,
+                )?
             }
         }
         Ok(Self(options))
     }
 }
 
-impl fmt::Display for CreateUserWithOptions {
+impl fmt::Display for UserOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.0.is_empty() {
             write!(f, "WITH {}", display_separated(self.0.as_slice(), " "))
@@ -442,7 +465,7 @@ impl fmt::Display for CreateUserWithOptions {
 impl ParseTo for CreateUserStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(user_name: ObjectName, p);
-        impl_parse_to!(with_options: CreateUserWithOptions, p);
+        impl_parse_to!(with_options: UserOptions, p);
 
         Ok(CreateUserStatement {
             user_name,
@@ -457,6 +480,50 @@ impl fmt::Display for CreateUserStatement {
         impl_fmt_display!(user_name, v, self);
         impl_fmt_display!(with_options, v, self);
         v.iter().join(" ").fmt(f)
+    }
+}
+
+impl fmt::Display for AlterUserMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterUserMode::Options(options) => {
+                write!(f, "{}", options)
+            }
+            AlterUserMode::Rename(new_name) => {
+                write!(f, "RENAME TO {}", new_name)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterUserStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(user_name, v, self);
+        impl_fmt_display!(mode, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+impl ParseTo for AlterUserStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(user_name: ObjectName, p);
+        impl_parse_to!(mode: AlterUserMode, p);
+
+        Ok(AlterUserStatement { user_name, mode })
+    }
+}
+
+impl ParseTo for AlterUserMode {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        if p.parse_keyword(Keyword::RENAME) {
+            p.expect_keyword(Keyword::TO)?;
+            impl_parse_to!(new_name: ObjectName, p);
+            Ok(AlterUserMode::Rename(new_name))
+        } else {
+            impl_parse_to!(with_options: UserOptions, p);
+            Ok(AlterUserMode::Options(with_options))
+        }
     }
 }
 

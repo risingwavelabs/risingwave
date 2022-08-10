@@ -16,14 +16,16 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 
 use super::{
     gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
     ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{FieldOrder, Order, OrderDisplay, RequiredDist};
+use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -40,8 +42,9 @@ impl LogicalTopN {
     pub fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices().to_vec();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let pk_indices = input.logical_pk().to_vec();
+        let functional_dependency = input.functional_dependency().clone();
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalTopN {
             base,
             input,
@@ -72,6 +75,26 @@ impl LogicalTopN {
     /// be non-null because it's a critical information for Top-N operators to work
     pub fn topn_order(&self) -> &Order {
         &self.order
+    }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        let input = self.input();
+        let input_schema = input.schema();
+        builder.field(
+            "order",
+            &format!(
+                "{}",
+                OrderDisplay {
+                    order: self.topn_order(),
+                    input_schema
+                }
+            ),
+        );
+        builder
+            .field("limit", &format_args!("{}", self.limit()))
+            .field("offset", &format_args!("{}", self.offset()))
+            .finish()
     }
 }
 
@@ -106,11 +129,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
 impl_plan_tree_node_for_unary! {LogicalTopN}
 impl fmt::Display for LogicalTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalTopN {{ order: {}, limit: {}, offset: {} }}",
-            &self.order, &self.limit, &self.offset,
-        )
+        self.fmt_with_name(f, "LogicalTopN")
     }
 }
 
@@ -152,10 +171,14 @@ impl ColPrunable for LogicalTopN {
         if input_required_cols == required_cols {
             top_n
         } else {
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
             let src_size = top_n.schema().len();
             LogicalProject::with_mapping(
                 top_n,
-                ColIndexMapping::with_remaining_columns(required_cols, src_size),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
             .into()
         }
@@ -192,6 +215,12 @@ impl ToStream for LogicalTopN {
         let input = self
             .input()
             .to_stream_with_dist_required(&RequiredDist::single())?;
+
+        if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
+            return Err(RwError::from(InternalError(
+                "Doesn't support OFFSET without LIMIT".to_string(),
+            )));
+        }
         Ok(StreamTopN::new(self.clone_with_input(input)).into())
     }
 

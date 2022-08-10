@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::HummockStorage;
@@ -59,7 +60,17 @@ impl HummockServiceOpts {
                 url
             }
             Err(_) => {
-                bail!("env variable `RW_HUMMOCK_URL` not found, please do one of the following:\n* use `./risedev ctl` to start risectl.\n* `source .risingwave/config/risectl-env` or `source ~/risingwave-deploy/risectl-env` before running risectl.\n* manually set `RW_HUMMOCK_URL` in env variable.\nPlease also remember to add `use: minio` to risedev config.");
+                const MESSAGE: &str = "env variable `RW_HUMMOCK_URL` not found.
+
+For `./risedev d` use cases, please do the following:
+* use `./risedev d for-ctl` to start the cluster.
+* use `./risedev ctl` to use risectl.
+
+For `./risedev apply-compose-deploy` users,
+* `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
+
+risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+                bail!(MESSAGE);
             }
         };
         Ok(Self {
@@ -75,8 +86,11 @@ impl HummockServiceOpts {
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>, Metrics)> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
-        let (heartbeat_handle, heartbeat_shutdown_sender) =
-            MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
+        let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
+            meta_client.clone(),
+            Duration::from_millis(1000),
+            vec![],
+        );
         self.heartbeat_handle = Some(heartbeat_handle);
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
@@ -94,8 +108,10 @@ impl HummockServiceOpts {
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
         };
 
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
+            "",
             Arc::new(config),
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
@@ -103,6 +119,7 @@ impl HummockServiceOpts {
             )),
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
+            filter_key_extractor_manager.clone(),
         )
         .await?;
 

@@ -68,6 +68,10 @@ impl IntervalUnit {
         self.ms
     }
 
+    pub fn get_ms_of_day(&self) -> u64 {
+        self.ms.rem_euclid(DAY_MS) as u64
+    }
+
     pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
         // TODO: remove IntervalType later.
         match ty {
@@ -88,7 +92,7 @@ impl IntervalUnit {
                 let ms = i64::from_be_bytes(bytes);
                 Ok(IntervalUnit::from_millis(ms))
             }
-            Invalid => {
+            Unspecified => {
                 // Invalid means the interval is from the new frontend.
                 // TODO: make this default path later.
                 let mut cursor = Cursor::new(bytes);
@@ -261,6 +265,11 @@ impl IntervalUnit {
 
         res
     }
+
+    /// Checks if [`IntervalUnit`] is positive.
+    pub fn is_positive(&self) -> bool {
+        self > &Self::new(0, 0, 0)
+    }
 }
 
 #[expect(clippy::from_over_into)]
@@ -280,6 +289,18 @@ impl From<&'_ IntervalUnitProto> for IntervalUnit {
             months: p.months,
             days: p.days,
             ms: p.ms,
+        }
+    }
+}
+
+impl From<NaiveTimeWrapper> for IntervalUnit {
+    fn from(time: NaiveTimeWrapper) -> Self {
+        let mut ms: i64 = (time.0.num_seconds_from_midnight() * 1000) as i64;
+        ms += (time.0.nanosecond() / 1_000_000) as i64;
+        Self {
+            months: 0,
+            days: 0,
+            ms,
         }
     }
 }

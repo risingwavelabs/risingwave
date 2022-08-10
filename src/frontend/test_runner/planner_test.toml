@@ -6,12 +6,6 @@ script = '''
 #!/bin/bash
 set -e
 cargo run --bin planner-test-apply
-cd src/frontend/test_runner/tests/testdata/
-
-for f in *.apply.yaml
-do
-  yq -N -I4 -i '.. style=""' "$f"
-done
 '''
 
 [tasks.apply-planner-test]

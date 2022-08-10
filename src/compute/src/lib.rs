@@ -25,13 +25,17 @@
 #![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(generic_associated_types)]
+#![feature(let_else)]
+#![feature(generators)]
+#![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
 extern crate log;
 
+pub mod compute_observer;
 pub mod rpc;
 pub mod server;
 
@@ -71,6 +75,11 @@ pub struct ComputeNodeOpts {
     /// Enable reporting tracing information to jaeger
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
+
+    /// Path to file cache data directory.
+    /// Left empty to disable file cache.
+    #[clap(long, default_value = "")]
+    pub file_cache_dir: String,
 }
 
 use std::future::Future;
@@ -96,8 +105,11 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .unwrap();
         tracing::info!("Client address is {}", client_address);
 
-        let (join_handle, _shutdown_send) =
+        let (join_handle_vec, _shutdown_send) =
             compute_node_serve(listen_address, client_address, opts).await;
-        join_handle.await.unwrap();
+
+        for join_handle in join_handle_vec {
+            join_handle.await.unwrap();
+        }
     })
 }

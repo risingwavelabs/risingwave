@@ -156,7 +156,7 @@ fn main() -> Result<()> {
                 }
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::FrontendV2(c) => {
+            ServiceConfig::Frontend(c) => {
                 if opts.deploy {
                     let arg = format!("--frontend {} --frontend-port {}", c.address, c.port);
                     writeln!(
@@ -222,6 +222,7 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
+            ServiceConfig::Redis(_) => return Err(anyhow!("not supported")),
         };
         compose.container_name = service.id().to_string();
         if opts.deploy {

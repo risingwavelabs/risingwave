@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use futures::StreamExt;
+use async_stack_trace::StackTrace;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::HashSet;
 use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -146,12 +147,13 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
-    // WARNING: Please do not call this until we implement it.
+    // WARNING: Please do not call this until we implement it.、
+    #[expect(dead_code)]
     fn is_dirty(&self) -> bool {
         unimplemented!()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -189,7 +191,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Epoch
     epoch: u64,
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Logical Operator Info
     op_info: String,
 
@@ -383,11 +385,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        state_table_l: StateTable<S>,
-        state_table_r: StateTable<S>,
+        mut state_table_l: RowBasedStateTable<S>,
+        mut state_table_r: RowBasedStateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        // TODO: enable sanity check for hash join executor <https://github.com/singularity-data/risingwave/issues/3887>
+        state_table_l.disable_sanity_check();
+        state_table_r.disable_sanity_check();
+
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
@@ -505,8 +511,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             self.actor_id,
             self.metrics.clone(),
         );
-        #[for_await]
-        for msg in aligned_stream {
+
+        pin_mut!(aligned_stream);
+        while let Some(msg) = aligned_stream
+            .next()
+            .stack_trace("hash_join_barrier_align")
+            .await
+        {
             match msg? {
                 AlignedMessage::Left(chunk) => {
                     #[for_await]
@@ -785,7 +796,10 @@ mod tests {
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
-    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
+    ) -> (
+        RowBasedStateTable<MemoryStateStore>,
+        RowBasedStateTable<MemoryStateStore>,
+    ) {
         let mem_state = MemoryStateStore::new();
 
         // The last column is for degree.
@@ -794,14 +808,14 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table_l = StateTable::new_without_distribution(
+        let state_table_l = RowBasedStateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(0),
             column_descs.clone(),
             order_types.to_vec(),
             pk_indices.to_vec(),
         );
-        let state_table_r = StateTable::new_without_distribution(
+        let state_table_r = RowBasedStateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             column_descs,

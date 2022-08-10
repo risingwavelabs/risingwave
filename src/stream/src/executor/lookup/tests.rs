@@ -17,14 +17,16 @@ use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_storage::encoding::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
 use risingwave_storage::store::ReadOptions;
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
@@ -38,14 +40,14 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
         ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(1),
+            column_id: ColumnId::new(0),
             name: "rowid_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
         },
         ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(2),
+            column_id: ColumnId::new(1),
             name: "join_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
@@ -205,6 +207,24 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
+fn build_state_table_helper<S: StateStore>(
+    s: S,
+    table_id: TableId,
+    columns: Vec<ColumnDesc>,
+    order_types: Vec<OrderPair>,
+    pk_indices: Vec<usize>,
+) -> RowBasedStorageTable<S, READ_ONLY> {
+    RowBasedStorageTable::new_partial(
+        s,
+        table_id,
+        columns.clone(),
+        columns.iter().map(|col| col.column_id).collect(),
+        order_types.iter().map(|pair| pair.order_type).collect_vec(),
+        pk_indices,
+        Distribution::fallback(),
+        TableOption::default(),
+    )
+}
 #[tokio::test]
 async fn test_lookup_this_epoch() {
     // TODO: memory state store doesn't support read epoch yet, so it is possible that this test
@@ -216,8 +236,6 @@ async fn test_lookup_this_epoch() {
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
-        arrangement_store: store.clone(),
-        arrangement_table_id: table_id,
         arrangement_col_descs: arrangement_col_descs(),
         arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
@@ -231,7 +249,13 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
-        vnode_bitmap: None,
+        storage_table: build_state_table_helper(
+            store.clone(),
+            table_id,
+            arrangement_col_descs(),
+            arrangement_col_arrange_rules(),
+            vec![1, 0],
+        ),
     }));
     let mut lookup_executor = lookup_executor.execute();
 
@@ -244,12 +268,13 @@ async fn test_lookup_this_epoch() {
 
     for (k, v) in store
         .scan::<_, Vec<u8>>(
+            None,
             ..,
             None,
             ReadOptions {
                 epoch: u64::MAX,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -298,8 +323,6 @@ async fn test_lookup_last_epoch() {
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
-        arrangement_store: store.clone(),
-        arrangement_table_id: table_id,
         arrangement_col_descs: arrangement_col_descs(),
         arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
@@ -313,7 +336,13 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
-        vnode_bitmap: None,
+        storage_table: build_state_table_helper(
+            store.clone(),
+            table_id,
+            arrangement_col_descs(),
+            arrangement_col_arrange_rules(),
+            vec![1, 0],
+        ),
     }));
     let mut lookup_executor = lookup_executor.execute();
 

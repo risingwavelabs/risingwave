@@ -18,16 +18,19 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
 use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
+use super::privilege::check_privileges;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::StreamFragmenterV2;
 
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
@@ -37,11 +40,21 @@ pub(crate) fn make_prost_source(
     let (schema_name, name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
 
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+    let (database_id, schema_id) = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+
+        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        check_privileges(
+            session,
+            &vec![ObjectCheckItem::new(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            )],
+        )?;
+
+        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?
+    };
 
     Ok(ProstSource {
         id: 0,
@@ -49,7 +62,7 @@ pub(crate) fn make_prost_source(
         database_id,
         name,
         info: Some(source_info),
-        owner: session.user_name().to_string(),
+        owner: session.user_id(),
     })
 }
 
@@ -95,6 +108,14 @@ pub async fn handle_create_source(
             columns: bind_sql_columns(stmt.columns)?,
             pk_column_ids: vec![0],
         },
+        SourceSchema::DebeziumJson => StreamSourceInfo {
+            properties: with_properties.clone(),
+            row_format: RowFormatType::DebeziumJson as i32,
+            row_schema_location: "".to_string(),
+            row_id_index: 0,
+            columns: bind_sql_columns(stmt.columns)?,
+            pk_column_ids: vec![0],
+        },
     };
 
     let session = context.session_ctx.clone();
@@ -102,14 +123,9 @@ pub async fn handle_create_source(
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
         let (graph, table) = {
-            let (plan, table) = gen_materialized_source_plan(
-                context.into(),
-                source.clone(),
-                session.user_name().to_string(),
-                with_properties.clone(),
-            )?;
-            let plan = plan.to_stream_prost();
-            let graph = StreamFragmenter::build_graph(plan);
+            let (plan, table) =
+                gen_materialized_source_plan(context.into(), source.clone(), session.user_id())?;
+            let graph = StreamFragmenterV2::build_graph(plan);
 
             (graph, table)
         };
@@ -138,7 +154,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );

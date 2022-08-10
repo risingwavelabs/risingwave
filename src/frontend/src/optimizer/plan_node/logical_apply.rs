@@ -14,14 +14,17 @@
 //
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, ToBatch, ToStream,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
@@ -33,6 +36,9 @@ pub struct LogicalApply {
     on: Condition,
     join_type: JoinType,
 
+    /// Id of the Apply operator.
+    /// So correlated_input_ref can refer the Apply operator exactly by correlated_id.
+    correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,
 }
@@ -41,8 +47,21 @@ impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "LogicalApply {{ type: {:?}, on: {} }}",
-            &self.join_type, &self.on
+            "LogicalApply {{ type: {:?}, on: {}, correlated_id: {} }}",
+            &self.join_type,
+            {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    ConditionDisplay {
+                        condition: &self.on,
+                        input_schema: &concat_schema
+                    }
+                )
+            },
+            self.correlated_id
         )
     }
 }
@@ -53,6 +72,7 @@ impl LogicalApply {
         right: PlanRef,
         join_type: JoinType,
         on: Condition,
+        correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
     ) -> Self {
         let ctx = left.ctx();
@@ -64,18 +84,26 @@ impl LogicalApply {
         let pk_indices = LogicalJoin::derive_pk(
             left.schema().len(),
             right.schema().len(),
-            left.pk_indices(),
-            right.pk_indices(),
+            left.logical_pk(),
+            right.logical_pk(),
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let (functional_dependency, pk_indices) = match pk_indices {
+            Some(pk_indices) => (
+                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
+                pk_indices,
+            ),
+            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,
             left,
             right,
             on,
             join_type,
+            correlated_id,
             correlated_indices,
         }
     }
@@ -85,9 +113,18 @@ impl LogicalApply {
         right: PlanRef,
         join_type: JoinType,
         on: Condition,
+        correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
     ) -> PlanRef {
-        Self::new(left, right, join_type, on, correlated_indices).into()
+        Self::new(
+            left,
+            right,
+            join_type,
+            on,
+            correlated_id,
+            correlated_indices,
+        )
+        .into()
     }
 
     /// Get the join type of the logical apply.
@@ -95,14 +132,97 @@ impl LogicalApply {
         self.join_type
     }
 
-    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
+    pub fn decompose(
+        self,
+    ) -> (
+        PlanRef,
+        PlanRef,
+        Condition,
+        JoinType,
+        CorrelatedId,
+        Vec<usize>,
+    ) {
         (
             self.left,
             self.right,
             self.on,
             self.join_type,
+            self.correlated_id,
             self.correlated_indices,
         )
+    }
+
+    pub fn correlated_id(&self) -> CorrelatedId {
+        self.correlated_id
+    }
+
+    pub fn correlated_indices(&self) -> Vec<usize> {
+        self.correlated_indices.to_owned()
+    }
+
+    /// Translate Apply.
+    ///
+    /// Used to convert other kinds of Apply to cross Apply.
+    pub fn translate_apply(self, new_apply_left: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
+        let (apply_left, apply_right, on, apply_type, correlated_id, correlated_indices) =
+            self.decompose();
+        let apply_left_len = apply_left.schema().len();
+        let correlated_indices_len = correlated_indices.len();
+
+        let new_apply = LogicalApply::create(
+            new_apply_left,
+            apply_right,
+            JoinType::Inner,
+            Condition::true_cond(),
+            correlated_id,
+            correlated_indices,
+        );
+
+        let on = Self::rewrite_on(on, correlated_indices_len, apply_left_len).and(Condition {
+            conjunctions: eq_predicates,
+        });
+        let new_join = LogicalJoin::new(apply_left, new_apply, apply_type, on);
+
+        if new_join.join_type() != JoinType::LeftSemi {
+            // `new_join`'s schema is different from original apply's schema, so `LogicalProject` is
+            // used to ensure they are the same.
+            let mut exprs: Vec<ExprImpl> = vec![];
+            new_join
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .for_each(|(index, data_type)| {
+                    if index < apply_left_len || index >= apply_left_len + correlated_indices_len {
+                        exprs.push(InputRef::new(index, data_type).into());
+                    }
+                });
+            LogicalProject::create(new_join.into(), exprs)
+        } else {
+            new_join.into()
+        }
+    }
+
+    fn rewrite_on(on: Condition, offset: usize, apply_left_len: usize) -> Condition {
+        struct Rewriter {
+            offset: usize,
+            apply_left_len: usize,
+        }
+        impl ExprRewriter for Rewriter {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                let index = input_ref.index();
+                if index >= self.apply_left_len {
+                    InputRef::new(index + self.offset, input_ref.return_type()).into()
+                } else {
+                    input_ref.into()
+                }
+            }
+        }
+        let mut rewriter = Rewriter {
+            offset,
+            apply_left_len,
+        };
+        on.rewrite_expr(&mut rewriter)
     }
 }
 
@@ -121,6 +241,7 @@ impl PlanTreeNodeBinary for LogicalApply {
             right,
             self.join_type,
             self.on.clone(),
+            self.correlated_id,
             self.correlated_indices.clone(),
         )
     }

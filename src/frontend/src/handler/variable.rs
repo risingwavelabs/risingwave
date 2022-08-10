@@ -28,7 +28,10 @@ pub(super) fn handle_set(
     let string_val = to_string(&value[0]);
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
-    context.session_ctx.set_config(&name.value, &string_val)?;
+    // We remark that the name of session parameter is always case-insensitive.
+    context
+        .session_ctx
+        .set_config(&name.value.to_lowercase(), &string_val)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
@@ -40,11 +43,12 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
             ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
         );
     }
-    let name = &variable[0].value;
+    // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
+    let name = &variable[0].value.to_lowercase();
     if name.eq_ignore_ascii_case("ALL") {
         return handle_show_all(&context);
     }
-    let row = Row::new(vec![Some(config_reader.get(name)?)]);
+    let row = Row::new(vec![Some(config_reader.get(name)?.into())]);
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
@@ -67,9 +71,9 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
         .iter()
         .map(|info| {
             Row::new(vec![
-                Some(info.name.to_string()),
-                Some(info.setting.to_string()),
-                Some(info.description.to_string()),
+                Some(info.name.clone().into()),
+                Some(info.setting.clone().into()),
+                Some(info.description.clone().into()),
             ])
         })
         .collect();
@@ -79,9 +83,9 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
         all_variables.len() as i32,
         rows,
         vec![
-            PgFieldDescriptor::new("name".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("setting".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("description".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
         ],
         true,
     ))

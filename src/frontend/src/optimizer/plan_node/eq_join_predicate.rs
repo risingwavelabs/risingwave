@@ -14,8 +14,10 @@
 
 use std::fmt;
 
-use crate::expr::{ExprType, FunctionCall, InputRef};
-use crate::utils::{ColIndexMapping, Condition};
+use risingwave_common::catalog::Schema;
+
+use crate::expr::{ExprType, FunctionCall, InputRef, InputRefDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// The join predicate used in optimizer
 #[derive(Debug, Clone)]
@@ -74,8 +76,8 @@ impl EqJoinPredicate {
     /// ```
     /// And the `create functions` should return `JoinPredicate`
     /// ```sql
-    ///   other_conds = Vec[input_ref(1) = input_ref(1), input_ref(1) > input_ref(3)],
-    ///   keys= Vec[(1,1)]
+    ///   other_conds = Vec[input_ref(0) = input_ref(1), input_ref(1) > input_ref(3)],
+    ///   keys= Vec[(0,2)]
     /// ```
     pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: Condition) -> Self {
         let (eq_keys, other_cond) = on_clause.split_eq_keys(left_cols_num, right_cols_num);
@@ -120,6 +122,11 @@ impl EqJoinPredicate {
         &self.other_cond
     }
 
+    /// Get a mutable reference to the join predicate's other cond.
+    pub fn other_cond_mut(&mut self) -> &mut Condition {
+        &mut self.other_cond
+    }
+
     /// Get a reference to the join predicate's eq keys.
     pub fn eq_keys(&self) -> &[(InputRef, InputRef)] {
         self.eq_keys.as_ref()
@@ -155,5 +162,69 @@ impl EqJoinPredicate {
             map[right.index - left_cols_num] = Some(left.index);
         }
         ColIndexMapping::new(map)
+    }
+}
+
+pub struct EqJoinPredicateDisplay<'a> {
+    pub eq_join_predicate: &'a EqJoinPredicate,
+    pub input_schema: &'a Schema,
+}
+
+impl EqJoinPredicateDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        let that = self.eq_join_predicate;
+        let mut eq_keys = that.eq_keys().iter();
+        if let Some((k1, k2)) = eq_keys.next() {
+            write!(
+                f,
+                "{} = {}",
+                InputRefDisplay {
+                    input_ref: k1,
+                    input_schema: self.input_schema
+                },
+                InputRefDisplay {
+                    input_ref: k2,
+                    input_schema: self.input_schema
+                }
+            )?;
+        }
+        for (k1, k2) in eq_keys {
+            write!(
+                f,
+                " AND {} = {}",
+                InputRefDisplay {
+                    input_ref: k1,
+                    input_schema: self.input_schema
+                },
+                InputRefDisplay {
+                    input_ref: k2,
+                    input_schema: self.input_schema
+                }
+            )?;
+        }
+        if !that.other_cond.always_true() {
+            write!(
+                f,
+                " AND {}",
+                ConditionDisplay {
+                    condition: &that.other_cond,
+                    input_schema: self.input_schema
+                }
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for EqJoinPredicateDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Debug for EqJoinPredicateDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        self.fmt(f)
     }
 }

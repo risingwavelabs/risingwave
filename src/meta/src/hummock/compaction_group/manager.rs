@@ -26,7 +26,7 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
 use crate::manager::{MetaSrvEnv, SourceId};
-use crate::model::{MetadataModel, TableFragments, ValTransaction, VarTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 
 pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
@@ -251,7 +251,7 @@ impl CompactionGroupManagerInner {
             self.compaction_groups = loaded_compaction_groups;
         } else {
             let compaction_groups = &mut self.compaction_groups;
-            let mut new_compaction_groups = VarTransaction::new(compaction_groups);
+            let mut new_compaction_groups = BTreeMapTransaction::new(compaction_groups);
             let static_compaction_groups = vec![
                 CompactionGroup::new(StaticCompactionGroupId::StateDefault.into(), config.clone()),
                 CompactionGroup::new(
@@ -284,10 +284,10 @@ impl CompactionGroupManagerInner {
         pairs: &[(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
-        let mut compaction_groups = VarTransaction::new(&mut self.compaction_groups);
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs {
-            let compaction_group = compaction_groups
-                .get_mut(compaction_group_id)
+            let mut compaction_group = compaction_groups
+                .get_mut(*compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(*compaction_group_id))?;
             compaction_group.member_table_ids.insert(*table_id);
             compaction_group
@@ -311,15 +311,15 @@ impl CompactionGroupManagerInner {
         table_ids: &[StateTableId],
         meta_store: &S,
     ) -> Result<()> {
-        let mut compaction_groups = VarTransaction::new(&mut self.compaction_groups);
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for table_id in table_ids {
             let compaction_group_id = self
                 .index
                 .get(table_id)
                 .cloned()
                 .ok_or(Error::InvalidCompactionGroupMember(*table_id))?;
-            let compaction_group = compaction_groups
-                .get_mut(&compaction_group_id)
+            let mut compaction_group = compaction_groups
+                .get_mut(compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_table_ids.remove(table_id);
             compaction_group.table_id_to_options.remove(table_id);
@@ -373,6 +373,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
     use crate::hummock::compaction_group::manager::{
@@ -406,7 +407,10 @@ mod tests {
         assert!(inner.read().await.index.is_empty());
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
         let table_option = TableOption::build_table_option(&table_properties);
 
         // Test register
@@ -471,7 +475,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
                 .unwrap();
-            assert_eq!(300, table_option.ttl.unwrap());
+            assert_eq!(300, table_option.retention_seconds.unwrap());
         }
 
         {
@@ -481,7 +485,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
             assert!(table_option_default.is_ok());
-            assert_eq!(None, table_option_default.unwrap().ttl);
+            assert_eq!(None, table_option_default.unwrap().retention_seconds);
         }
     }
 
@@ -507,7 +511,10 @@ mod tests {
                 .sum::<usize>()
         };
         assert_eq!(registered_number().await, 0);
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
 
         compaction_group_manager
             .register_table_fragments(&table_fragment_1, &table_properties)

@@ -20,12 +20,9 @@ use std::io::Error as IoError;
 use std::sync::Arc;
 
 use memcomparable::Error as MemComparableError;
-use prost::Message;
-use risingwave_pb::common::Status;
 use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tonic::metadata::{MetadataMap, MetadataValue};
 use tonic::Code;
 
 use crate::array::ArrayError;
@@ -72,7 +69,7 @@ impl Display for TrackingIssue {
                 "Tracking issue: https://github.com/singularity-data/risingwave/issues/{}",
                 id
             ),
-            None => write!(f, "No tracking issue"),
+            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md"),
         }
     }
 }
@@ -147,6 +144,9 @@ pub enum ErrorCode {
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
 
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+
     /// This error occurs when the meta node receives heartbeat from a previous removed worker
     /// node. Currently we don't support re-register, and the worker node need a full restart.
     #[error("Unknown worker")]
@@ -184,36 +184,17 @@ pub struct RwError {
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
-        match *err.inner {
+        match &*err.inner {
             ErrorCode::OK => tonic::Status::ok(err.to_string()),
-            _ => {
-                let bytes = {
-                    let status = err.to_status();
-                    let mut bytes = Vec::<u8>::with_capacity(status.encoded_len());
-                    status.encode(&mut bytes).expect("Failed to encode status.");
-                    bytes
-                };
-                let mut header = MetadataMap::new();
-                header.insert_bin(RW_ERROR_GRPC_HEADER, MetadataValue::from_bytes(&bytes));
-                tonic::Status::with_metadata(Code::Internal, err.to_string(), header)
-            }
+            ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
+            ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
+            ErrorCode::InternalError(e) => tonic::Status::internal(e),
+            _ => tonic::Status::internal(err.to_string()),
         }
     }
 }
 
 impl RwError {
-    /// Converting to risingwave's status.
-    ///
-    /// We can't use grpc/tonic's library directly because we need to customized error code and
-    /// information.
-    fn to_status(&self) -> Status {
-        // TODO: We need better error reporting for stacktrace.
-        Status {
-            code: self.inner.get_code() as i32,
-            message: self.to_string(),
-        }
-    }
-
     pub fn inner(&self) -> &ErrorCode {
         &self.inner
     }
@@ -234,12 +215,6 @@ impl From<JoinError> for RwError {
             inner: Arc::new(ErrorCode::InternalError(join_error.to_string())),
             backtrace: Arc::new(Backtrace::capture()),
         }
-    }
-}
-
-impl From<prost::DecodeError> for RwError {
-    fn from(prost_error: prost::DecodeError) -> Self {
-        ErrorCode::ProstError(prost_error).into()
     }
 }
 
@@ -309,45 +284,6 @@ impl PartialEq for RwError {
     }
 }
 
-impl ErrorCode {
-    fn get_code(&self) -> u32 {
-        match self {
-            ErrorCode::OK => 0,
-            ErrorCode::InternalError(_) => 1,
-            ErrorCode::MemoryError { .. } => 2,
-            ErrorCode::StreamError(_) => 3,
-            ErrorCode::NotImplemented(..) => 4,
-            ErrorCode::IoError(_) => 5,
-            ErrorCode::StorageError(_) => 6,
-            ErrorCode::ParseError(_) => 7,
-            ErrorCode::NumericValueOutOfRange => 8,
-            ErrorCode::ProtocolError(_) => 9,
-            ErrorCode::TaskNotFound => 10,
-            ErrorCode::ProstError(_) => 11,
-            ErrorCode::ItemNotFound(_) => 13,
-            ErrorCode::InvalidInputSyntax(_) => 14,
-            ErrorCode::MemComparableError(_) => 15,
-            ErrorCode::ValueEncodingError(_) => 16,
-            ErrorCode::InvalidConfigValue { .. } => 17,
-            ErrorCode::MetaError(_) => 18,
-            ErrorCode::CatalogError(..) => 21,
-            ErrorCode::Eof => 22,
-            ErrorCode::BindError(_) => 23,
-            ErrorCode::UnknownWorker => 24,
-            ErrorCode::ConnectorError(_) => 25,
-            ErrorCode::InvalidParameterValue(_) => 26,
-            ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
-            ErrorCode::ExprError(_) => 28,
-            ErrorCode::ArrayError(_) => 29,
-            ErrorCode::SchedulerError(_) => 30,
-            ErrorCode::SinkError(_) => 31,
-            ErrorCode::RpcError(_) => 32,
-            ErrorCode::BatchError(_) => 33,
-            ErrorCode::UnknownError(_) => 101,
-        }
-    }
-}
-
 impl PartialEq for ErrorCode {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -375,7 +311,13 @@ impl From<ProstFieldNotFound> for RwError {
 
 impl From<tonic::Status> for RwError {
     fn from(err: tonic::Status) -> Self {
-        ErrorCode::RpcError(err.into()).into()
+        match err.code() {
+            Code::InvalidArgument => {
+                ErrorCode::InvalidParameterValue(err.message().to_string()).into()
+            }
+            Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
+            _ => ErrorCode::InternalError(err.message().to_string()).into(),
+        }
     }
 }
 

@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
@@ -55,6 +55,41 @@ impl fmt::Display for Order {
     }
 }
 
+pub struct OrderDisplay<'a> {
+    pub order: &'a Order,
+    pub input_schema: &'a Schema,
+}
+
+impl OrderDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.order;
+        f.write_str("[")?;
+        for (i, field_order) in that.field_order.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            FieldOrderDisplay {
+                field_order,
+                input_schema: self.input_schema,
+            }
+            .fmt(f)?;
+        }
+        f.write_str("]")
+    }
+}
+
+impl fmt::Display for OrderDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Debug for OrderDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub struct FieldOrder {
     pub index: usize,
@@ -64,6 +99,29 @@ pub struct FieldOrder {
 impl std::fmt::Debug for FieldOrder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${} {}", self.index, self.direct)
+    }
+}
+
+pub struct FieldOrderDisplay<'a> {
+    pub field_order: &'a FieldOrder,
+    pub input_schema: &'a Schema,
+}
+
+impl FieldOrderDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.field_order;
+        write!(
+            f,
+            "{} {}",
+            FieldDisplay(self.input_schema.fields.get(that.index).unwrap()),
+            that.direct
+        )
+    }
+}
+
+impl fmt::Debug for FieldOrderDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
     }
 }
 
@@ -112,7 +170,7 @@ impl fmt::Display for FieldOrder {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy, Hash)]
 pub enum Direction {
     Asc,
     Desc,
@@ -141,7 +199,7 @@ impl fmt::Display for Direction {
 }
 
 impl Direction {
-    pub fn to_protobuf(&self) -> ProstOrderType {
+    pub fn to_protobuf(self) -> ProstOrderType {
         match self {
             Self::Asc => ProstOrderType::Ascending,
             Self::Desc => ProstOrderType::Descending,
@@ -153,12 +211,12 @@ impl Direction {
         match order_type {
             ProstOrderType::Ascending => Self::Asc,
             ProstOrderType::Descending => Self::Desc,
-            ProstOrderType::Invalid => unreachable!(),
+            ProstOrderType::OrderUnspecified => unreachable!(),
         }
     }
 
     // TODO: unify them
-    pub fn to_order(&self) -> OrderType {
+    pub fn to_order(self) -> OrderType {
         match self {
             Self::Asc => OrderType::Ascending,
             Self::Desc => OrderType::Descending,

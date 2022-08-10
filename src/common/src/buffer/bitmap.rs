@@ -40,7 +40,6 @@ use itertools::Itertools;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer as ProstBuffer;
 
-use crate::array::error::ArrayError;
 use crate::array::ArrayResult;
 use crate::util::bit_util;
 
@@ -185,7 +184,6 @@ impl Bitmap {
         }
     }
 
-    #[cfg(test)]
     pub fn from_bytes(buf: Bytes) -> Self {
         let num_bits = buf.len() << 3;
         Self::from_bytes_with_num_bits(buf, num_bits)
@@ -193,13 +191,7 @@ impl Bitmap {
 
     /// Return the next set bit index on or after `bit_idx`.
     pub fn next_set_bit(&self, bit_idx: usize) -> Option<usize> {
-        for idx in bit_idx..self.len() {
-            // Since `self.len()` guards the range, we can safely call unsafe function here.
-            if unsafe { self.is_set_unchecked(idx) } {
-                return Some(idx);
-            }
-        }
-        None
+        (bit_idx..self.len()).find(|&idx| unsafe { self.is_set_unchecked(idx) })
     }
 
     pub fn num_high_bits(&self) -> usize {
@@ -336,15 +328,13 @@ impl Bitmap {
     }
 }
 
-impl TryFrom<&ProstBuffer> for Bitmap {
-    type Error = ArrayError;
-
-    fn try_from(buf: &ProstBuffer) -> ArrayResult<Bitmap> {
+impl From<&ProstBuffer> for Bitmap {
+    fn from(buf: &ProstBuffer) -> Self {
         let last_byte_num_bits = u8::from_be_bytes(buf.body[..1].try_into().unwrap());
         let bits = Bytes::copy_from_slice(&buf.body[1..]); // TODO: avoid this allocation
         let num_bits = (bits.len() << 3) - ((8 - last_byte_num_bits) % 8) as usize;
 
-        Ok(Self::from_bytes_with_num_bits(bits, num_bits))
+        Self::from_bytes_with_num_bits(bits, num_bits)
     }
 }
 

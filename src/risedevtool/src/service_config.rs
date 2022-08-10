@@ -27,6 +27,7 @@ pub struct ComputeNodeConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
@@ -155,6 +156,10 @@ pub struct PrometheusConfig {
     pub port: u16,
     pub listen_address: String,
 
+    pub remote_write: bool,
+    pub remote_write_region: String,
+    pub remote_write_url: String,
+
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -241,6 +246,20 @@ pub struct RedPandaConfig {
     pub internal_port: u16,
     pub outside_port: u16,
     pub address: String,
+    pub cpus: usize,
+    pub memory: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct RedisConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
 }
 
 /// All service configuration
@@ -248,7 +267,7 @@ pub struct RedPandaConfig {
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
-    FrontendV2(FrontendConfig),
+    Frontend(FrontendConfig),
     Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
@@ -257,6 +276,7 @@ pub enum ServiceConfig {
     Jaeger(JaegerConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
+    Redis(RedisConfig),
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
 }
@@ -266,7 +286,7 @@ impl ServiceConfig {
         match self {
             Self::ComputeNode(c) => &c.id,
             Self::MetaNode(c) => &c.id,
-            Self::FrontendV2(c) => &c.id,
+            Self::Frontend(c) => &c.id,
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,
@@ -276,6 +296,7 @@ impl ServiceConfig {
             Self::AwsS3(c) => &c.id,
             Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,
+            Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
         }
     }

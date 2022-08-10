@@ -20,6 +20,7 @@ pub mod mem;
 pub use mem::*;
 
 pub mod s3;
+use async_stack_trace::StackTrace;
 pub use s3::*;
 
 mod disk;
@@ -76,7 +77,12 @@ pub struct BlockLocation {
     pub size: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct ObjectMetadata {
+    // Full path
+    pub key: String,
+    // Seconds since unix epoch.
+    pub last_modified: f64,
     pub total_size: usize,
 }
 
@@ -117,6 +123,8 @@ pub trait ObjectStore: Send + Sync {
     {
         MonitoredObjectStore::new(self, metrics)
     }
+
+    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
 }
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
@@ -208,6 +216,10 @@ impl ObjectStore for ObjectStoreImpl {
     async fn delete(&self, path: &str) -> ObjectResult<()> {
         object_store_impl_method_body!(self, delete, path)
     }
+
+    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        object_store_impl_method_body!(self, list, prefix)
+    }
 }
 
 pub struct MonitoredObjectStore<OS: ObjectStore> {
@@ -237,7 +249,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_size
             .with_label_values(&["upload"])
             .observe(obj.len() as f64);
-        self.inner.upload(path, obj).await?;
+        self.inner
+            .upload(path, obj)
+            .stack_trace("object_store_upload")
+            .await?;
         Ok(())
     }
 
@@ -247,7 +262,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["read"])
             .start_timer();
-        let ret = self.inner.read(path, block_loc).await?;
+
+        let ret = self
+            .inner
+            .read(path, block_loc)
+            .stack_trace("object_store_read")
+            .await
+            .map_err(|err| {
+                ObjectError::internal(format!(
+                    "read {:?} in block {:?} failed, error: {:?}",
+                    path, block_loc, err
+                ))
+            })?;
         self.object_store_metrics
             .read_bytes
             .inc_by(ret.len() as u64);
@@ -268,7 +294,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["readv"])
             .start_timer();
-        let ret = self.inner.readv(path, block_locs).await?;
+        let ret = self
+            .inner
+            .readv(path, block_locs)
+            .stack_trace("object_store_readv")
+            .await?;
         self.object_store_metrics
             .read_bytes
             .inc_by(ret.iter().map(|block| block.len()).sum::<usize>() as u64);
@@ -281,7 +311,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["metadata"])
             .start_timer();
-        self.inner.metadata(path).await
+        self.inner
+            .metadata(path)
+            .stack_trace("object_store_metadata")
+            .await
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -290,7 +323,22 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["delete"])
             .start_timer();
-        self.inner.delete(path).await
+        self.inner
+            .delete(path)
+            .stack_trace("object_store_delete")
+            .await
+    }
+
+    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["list"])
+            .start_timer();
+        self.inner
+            .list(prefix)
+            .stack_trace("object_store_list")
+            .await
     }
 }
 
@@ -310,13 +358,17 @@ pub async fn parse_remote_object_store(
         disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
             DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
         ),
-        memory if memory.starts_with("memory") => {
+        "memory" => {
             tracing::warn!("You're using Hummock in-memory remote object store. This should never be used in benchmarks and production environment.");
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
+        "memory-shared" => {
+            tracing::warn!("You're using Hummock shared in-memory remote object store. This should never be used in benchmarks and production environment.");
+            ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
+        }
         other => {
             unimplemented!(
-                "{} hummock remote object store only supports s3, minio, disk, and memory for now.",
+                "{} hummock remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
                 other
             )
         }
@@ -340,13 +392,13 @@ pub async fn parse_local_object_store(
                 .to_owned();
             ObjectStoreImpl::Disk(DiskObjectStore::new(path.as_str()).monitored(metrics))
         }
-        memory if memory.starts_with("memory") => {
+        "memory" => {
             tracing::warn!("You're using Hummock in-memory local object store. This should never be used in benchmarks and production environment.");
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         other => {
             unimplemented!(
-                "{} Hummock only supports s3, minio, disk, and  memory for now.",
+                "{} Hummock only supports s3, minio, disk, and memory for now.",
                 other
             )
         }

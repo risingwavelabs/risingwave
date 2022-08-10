@@ -118,6 +118,16 @@ impl Ident {
             quote_style: Some(quote),
         }
     }
+
+    /// Value after considering quote style
+    /// In certain places, double quotes can force case-sensitive, but not always
+    /// e.g. session variables.
+    pub fn real_value(&self) -> String {
+        match self.quote_style {
+            Some('"') => self.value.clone(),
+            _ => self.value.to_lowercase(),
+        }
+    }
 }
 
 impl From<&str> for Ident {
@@ -151,6 +161,16 @@ impl fmt::Display for Ident {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectName(pub Vec<Ident>);
 
+impl ObjectName {
+    pub fn real_value(&self) -> String {
+        self.0
+            .iter()
+            .map(|ident| ident.real_value())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
 impl fmt::Display for ObjectName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", display_separated(&self.0, "."))
@@ -160,6 +180,12 @@ impl fmt::Display for ObjectName {
 impl ParseTo for ObjectName {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         p.parse_object_name()
+    }
+}
+
+impl From<Vec<Ident>> for ObjectName {
+    fn from(value: Vec<Ident>) -> Self {
+        Self(value)
     }
 }
 
@@ -221,12 +247,12 @@ pub enum Expr {
     },
     /// Unary operation e.g. `NOT foo`
     UnaryOp { op: UnaryOperator, expr: Box<Expr> },
-    /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR(123))`
+    /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
     Cast {
         expr: Box<Expr>,
         data_type: DataType,
     },
-    /// TRY_CAST an expression to a different data type e.g. `TRY_CAST(foo AS VARCHAR(123))`
+    /// TRY_CAST an expression to a different data type e.g. `TRY_CAST(foo AS VARCHAR)`
     //  this differs from CAST in the choice of how to implement invalid conversions
     TryCast {
         expr: Box<Expr>,
@@ -792,6 +818,7 @@ pub enum Statement {
         name: ObjectName,
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
+        include: Vec<Ident>,
         unique: bool,
         if_not_exists: bool,
     },
@@ -906,11 +933,15 @@ pub enum Statement {
         analyze: bool,
         // Display additional information regarding the plan.
         verbose: bool,
+        // Trace plan transformation of the optimizer step by step
+        trace: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
     /// CREATE USER
     CreateUser(CreateUserStatement),
+    /// ALTER USER
+    AlterUser(AlterUserStatement),
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -927,6 +958,7 @@ impl fmt::Display for Statement {
                 describe_alias,
                 verbose,
                 analyze,
+                trace,
                 statement,
             } => {
                 if *describe_alias {
@@ -941,6 +973,10 @@ impl fmt::Display for Statement {
 
                 if *verbose {
                     write!(f, "VERBOSE ")?;
+                }
+
+                if *trace {
+                    write!(f, "TRACE ")?;
                 }
 
                 write!(f, "{}", statement)
@@ -1117,16 +1153,22 @@ impl fmt::Display for Statement {
                 name,
                 table_name,
                 columns,
+                include,
                 unique,
                 if_not_exists,
             } => write!(
                 f,
-                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}({columns})",
+                "CREATE {unique}INDEX {if_not_exists}{name} ON {table_name}({columns}){include}",
                 unique = if *unique { "UNIQUE " } else { "" },
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
-                columns = display_separated(columns, ",")
+                columns = display_separated(columns, ","),
+                include = if include.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(" INCLUDE({})", display_separated(include, ","))
+                }
             ),
             Statement::CreateSource {
                 is_materialized,
@@ -1295,6 +1337,9 @@ impl fmt::Display for Statement {
             }
             Statement::CreateUser(statement) => {
                 write!(f, "CREATE USER {}", statement)
+            }
+            Statement::AlterUser(statement) => {
+                write!(f, "ALTER USER {}", statement)
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -1561,9 +1606,22 @@ pub struct Function {
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
-    // string_agg and array_agg both support ORDER BY
+    // aggregate functions may contain order_by_clause
     pub order_by: Vec<OrderByExpr>,
     pub filter: Option<Box<Expr>>,
+}
+
+impl Function {
+    pub fn no_arg(name: ObjectName) -> Self {
+        Self {
+            name,
+            args: vec![],
+            over: None,
+            distinct: false,
+            order_by: vec![],
+            filter: None,
+        }
+    }
 }
 
 impl fmt::Display for Function {
@@ -1658,7 +1716,7 @@ impl ParseTo for ObjectType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
-    pub name: Ident,
+    pub name: ObjectName,
     pub value: Value,
 }
 

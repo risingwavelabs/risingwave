@@ -90,7 +90,8 @@ message BarrierCompleteResponse {
     uint64 compaction_group_id = 1;
     hummock.SstableInfo sst = 2;
   }
-  repeated GroupedSstableInfo sycned_sstables = 4;
+  repeated GroupedSstableInfo synced_sstables = 4;
+  uint32 worker_id = 5;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
@@ -122,6 +123,12 @@ message SyncSourcesResponse {
   common.Status status = 1;
 }
 
+message ActorTraceRequest {}
+
+message ActorTraceResponse {
+  map<uint32, string> actor_traces = 1;
+}
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
@@ -133,6 +140,7 @@ service StreamService {
   rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
+  rpc ActorTrace(ActorTraceRequest) returns (ActorTraceResponse);
 }
 
 // TODO: Lifecycle management for actors.

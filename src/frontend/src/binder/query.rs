@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::ExprImpl;
+use crate::expr::{CorrelatedId, ExprImpl};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
@@ -50,12 +50,16 @@ impl BoundQuery {
             || self
                 .extra_order_exprs
                 .iter()
-                .any(|e| e.has_correlated_input_ref())
+                .any(|e| e.has_correlated_input_ref_by_depth())
     }
 
-    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
-        self.body.collect_correlated_indices()
+        self.body
+            .collect_correlated_indices_by_depth_and_assign_id(correlated_id)
     }
 }
 
@@ -69,7 +73,7 @@ impl Binder {
     pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         self.push_context();
         let result = self.bind_query_inner(query);
-        self.pop_context();
+        self.pop_context()?;
         result
     }
 
@@ -130,7 +134,7 @@ impl Binder {
             Some(false) => Direction::Desc,
         };
         let index = match order_by_expr.expr {
-            Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.value) => match *index != usize::MAX {
+            Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
                 false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.value)).into()),
             }
@@ -158,7 +162,7 @@ impl Binder {
         } else {
             for cte_table in with.cte_tables {
                 let Cte { alias, query, .. } = cte_table;
-                let table_name = alias.name.value.clone();
+                let table_name = alias.name.real_value();
                 let bound_query = self.bind_query(query)?;
                 self.cte_to_relation
                     .insert(table_name, (bound_query, alias));

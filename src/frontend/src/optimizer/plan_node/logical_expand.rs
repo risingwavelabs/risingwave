@@ -15,7 +15,8 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, FieldDisplay, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
@@ -23,7 +24,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::risingwave_common::error::Result;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalExpand`] expand one row multiple times according to `column_subsets`.
@@ -45,12 +46,23 @@ impl LogicalExpand {
             assert!(*key < input_schema_len);
         }
         // The last column should be the flag.
-        let mut pk_indices = input.pk_indices().to_vec();
+        let mut pk_indices = input.logical_pk().to_vec();
         pk_indices.push(input_schema_len);
 
         let schema = Self::derive_schema(input.schema());
         let ctx = input.ctx();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let flag_index = schema.len() - 1; // assume that `flag` is the last column
+        let functional_dependency = {
+            let input_fd = input.functional_dependency().clone().into_dependencies();
+            let mut current_fd = FunctionalDependencySet::new(schema.len());
+            for mut fd in input_fd {
+                fd.grow(schema.len());
+                fd.set_from(flag_index, true);
+                current_fd.add_functional_dependency(fd);
+            }
+            current_fd
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalExpand {
             base,
             column_subsets,
@@ -71,6 +83,27 @@ impl LogicalExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.column_subsets
     }
+
+    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay>> {
+        self.column_subsets()
+            .iter()
+            .map(|subset| {
+                subset
+                    .iter()
+                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
+                    .collect_vec()
+            })
+            .collect_vec()
+    }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        write!(
+            f,
+            "{} {{ column_subsets: {:?} }}",
+            name,
+            self.column_subsets_display()
+        )
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
@@ -88,12 +121,17 @@ impl PlanTreeNodeUnary for LogicalExpand {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let mut column_subsets = self.column_subsets.clone();
-        for key in column_subsets.iter_mut().flat_map(|r| r.iter_mut()) {
-            *key = input_col_change.map(*key);
-        }
+        let column_subsets = self
+            .column_subsets
+            .iter()
+            .map(|subset| {
+                subset
+                    .iter()
+                    .filter_map(|i| input_col_change.try_map(*i))
+                    .collect_vec()
+            })
+            .collect_vec();
         let (mut map, new_input_col_num) = input_col_change.into_parts();
-        assert_eq!(new_input_col_num, input.schema().len());
         map.push(Some(new_input_col_num));
 
         (Self::new(input, column_subsets), ColIndexMapping::new(map))
@@ -104,31 +142,13 @@ impl_plan_tree_node_for_unary! {LogicalExpand}
 
 impl fmt::Display for LogicalExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LogicalExpand {{ column_subsets: {:?} }}",
-            self.column_subsets
-        )
+        self.fmt_with_name(f, "LogicalExpand")
     }
 }
 
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let pos_of_flag = self.input.schema().len();
-        {
-            let mut sorted_indices = required_cols.to_owned();
-            sorted_indices.sort();
-            sorted_indices.dedup();
-
-            let mut expaneded_cols = self.column_subsets.iter().flatten().cloned().collect_vec();
-            expaneded_cols.sort();
-            expaneded_cols.dedup();
-            expaneded_cols.push(pos_of_flag);
-
-            // expaned columns and `flag` are what required.
-            assert_eq!(sorted_indices, expaneded_cols);
-        }
-
         let input_required_cols = required_cols
             .iter()
             .copied()
@@ -188,6 +208,7 @@ impl ToStream for LogicalExpand {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -254,5 +275,31 @@ mod tests {
             Field::with_name(DataType::Int32, "v2"),
         ];
         assert_eq!(expected_schema, values.base.schema.fields().to_owned());
+    }
+
+    #[tokio::test]
+    async fn fd_derivation_expand() {
+        // input: [v1, v2, v3]
+        // FD: v1 --> { v2, v3 }
+        // output: [v1, v2, v3, flag],
+        // FD: { v1, flag } --> { v2, v3 }
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ];
+        let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        values
+            .base
+            .functional_dependency
+            .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
+
+        let column_subsets = vec![vec![0, 1], vec![2]];
+        let expand = LogicalExpand::create(values.into(), column_subsets);
+        let fd = expand.functional_dependency().as_dependencies();
+        assert_eq!(fd.len(), 1);
+        assert_eq!(fd[0].from().ones().collect_vec(), &[0, 3]);
+        assert_eq!(fd[0].to().ones().collect_vec(), &[1, 2]);
     }
 }

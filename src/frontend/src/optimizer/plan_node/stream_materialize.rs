@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -25,9 +26,13 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
+
+/// The first column id to allocate for a new materialized view.
+///
+/// Note: not starting from 0 helps us to debug misusing of the column id and the index.
+const COLUMN_ID_BASE: i32 = 1000;
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -43,7 +48,7 @@ impl StreamMaterialize {
         let ctx = input.ctx();
 
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices();
+        let pk_indices = input.logical_pk();
 
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
@@ -83,7 +88,7 @@ impl StreamMaterialize {
                     ))
                 } else {
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.pk_indices())
+                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
                 }
             }
         };
@@ -91,11 +96,11 @@ impl StreamMaterialize {
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
-        let pk_indices = &base.pk_indices;
+        let pk_indices = &base.logical_pk;
 
-        let mut col_names = HashMap::new();
+        let mut col_names = HashSet::new();
         for name in &out_names {
-            if col_names.try_insert(name.clone(), 0).is_err() {
+            if !col_names.insert(name.clone()) {
                 return Err(
                     InternalError(format!("column {} specified more than once", name)).into(),
                 );
@@ -108,20 +113,24 @@ impl StreamMaterialize {
             .enumerate()
             .map(|(i, field)| {
                 let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(field, i as i32),
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        field,
+                        i as i32 + COLUMN_ID_BASE,
+                    ),
                     is_hidden: !user_cols.contains(i),
                 };
                 c.column_desc.name = if !c.is_hidden {
                     out_name_iter.next().unwrap()
                 } else {
-                    match col_names.try_insert(field.name.clone(), 0) {
-                        Ok(_) => field.name.clone(),
-                        Err(mut err) => {
-                            let cnt = err.entry.get_mut();
-                            *cnt += 1;
-                            field.name.clone() + "#" + &cnt.to_string()
-                        }
+                    let mut name = field.name.clone();
+                    let mut count = 0;
+
+                    while !col_names.insert(name.clone()) {
+                        count += 1;
+                        name = field.name.clone() + "#" + &count.to_string();
                     }
+
+                    name
                 };
                 c
             })
@@ -147,6 +156,15 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
+        let ctx = input.ctx();
+        let properties: HashMap<_, _> = ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -157,9 +175,10 @@ impl StreamMaterialize {
             is_index_on,
             distribution_key: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
-            properties: HashMap::default(),
+            properties,
+            read_pattern_prefix_column: 0,
         };
 
         Ok(Self { base, input, table })
@@ -173,13 +192,6 @@ impl StreamMaterialize {
 
     pub fn name(&self) -> &str {
         self.table.name()
-    }
-
-    /// XXX(st1page): this function is used for potential DDL demand in future, and please try your
-    /// best not convert `ColumnId` to `usize(col_index`)
-    #[expect(dead_code)]
-    fn col_id_to_idx(&self, id: ColumnId) -> usize {
-        id.get_id() as usize
     }
 }
 
@@ -225,7 +237,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
         assert_eq!(new.plan_base().schema, self.plan_base().schema);
-        assert_eq!(new.plan_base().pk_indices, self.plan_base().pk_indices);
+        assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
         new
     }
 }

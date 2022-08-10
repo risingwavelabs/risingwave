@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 
+use bytes::Bytes;
 use itertools::Itertools;
-use num_traits::Float;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
@@ -25,38 +25,29 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{SqlOption, Value};
 
+use crate::binder::{BoundSetExpr, BoundStatement};
+
 /// Format scalars according to postgres convention.
-fn pg_value_format(d: ScalarRefImpl) -> String {
-    match d {
-        ScalarRefImpl::Bool(b) => if b { "t" } else { "f" }.to_string(),
-        ScalarRefImpl::Float32(v) => pg_float_format(v),
-        ScalarRefImpl::Float64(v) => pg_float_format(v),
-        _ => d.to_string(),
-    }
-}
-
-fn pg_float_format<T: Float + ToString>(v: T) -> String {
-    if v.is_infinite() {
-        if v.is_sign_positive() {
-            "Infinity"
-        } else {
-            "-Infinity"
+fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
+    // format == false means TEXT format
+    // format == true means BINARY format
+    if !format {
+        match d {
+            ScalarRefImpl::Bool(b) => if b { "t" } else { "f" }.into(),
+            _ => d.to_string().into(),
         }
-        .to_string()
-    } else if v.is_nan() {
-        "NaN".to_string()
     } else {
-        v.to_string()
+        d.binary_serialize()
     }
 }
 
-pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
+pub fn to_pg_rows(chunk: DataChunk, format: bool) -> Vec<Row> {
     chunk
         .rows()
         .map(|r| {
             Row::new(
                 r.values()
-                    .map(|data| data.map(pg_value_format))
+                    .map(|data| data.map(|data| pg_value_format(data, format)))
                     .collect_vec(),
             )
         })
@@ -76,7 +67,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
                     } else {
                         format!("{:?}", &c.data_type)
                     };
-                    Row::new(vec![Some(c.name), Some(type_name)])
+                    Row::new(vec![Some(c.name.into()), Some(type_name.into())])
                 })
                 .collect_vec()
         })
@@ -115,15 +106,27 @@ pub fn handle_with_properties(
     options
         .into_iter()
         .map(|x| match x.value {
-            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
-            Value::Number(n, _) => Ok((x.name.value, n)),
-            Value::Boolean(b) => Ok((x.name.value, b.to_string())),
+            Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
+            Value::Number(n, _) => Ok((x.name.real_value(), n)),
+            Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
             _ => Err(RwError::from(ProtocolError(format!(
                 "{} with properties only support single quoted string value",
                 ctx
             )))),
         })
         .collect()
+}
+
+/// Check whether need to force query mode to local.
+pub fn force_local_mode(bound: &BoundStatement) -> bool {
+    if let BoundStatement::Query(query) = bound {
+        if let BoundSetExpr::Select(select) = &query.body
+            && let Some(relation) = &select.from
+            && relation.contains_sys_table() {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -152,22 +155,22 @@ mod tests {
              3 7 7.01 vvv
              4 . .    .  ",
         );
-        let rows = to_pg_rows(chunk);
-        let expected = vec![
+        let rows = to_pg_rows(chunk, false);
+        let expected: Vec<Vec<Option<Bytes>>> = vec![
             vec![
-                Some("1".to_string()),
-                Some("6".to_string()),
-                Some("6.01".to_string()),
-                Some("aaa".to_string()),
+                Some("1".into()),
+                Some("6".into()),
+                Some("6.01".into()),
+                Some("aaa".into()),
             ],
-            vec![Some("2".to_string()), None, None, None],
+            vec![Some("2".into()), None, None, None],
             vec![
-                Some("3".to_string()),
-                Some("7".to_string()),
-                Some("7.01".to_string()),
-                Some("vvv".to_string()),
+                Some("3".into()),
+                Some("7".into()),
+                Some("7.01".into()),
+                Some("vvv".into()),
             ],
-            vec![Some("4".to_string()), None, None, None],
+            vec![Some("4".into()), None, None, None],
         ];
         let vec = rows
             .into_iter()
@@ -182,14 +185,14 @@ mod tests {
         use ScalarRefImpl as S;
 
         let f = pg_value_format;
-        assert_eq!(&f(S::Float32(1_f32.into())), "1");
-        assert_eq!(&f(S::Float32(f32::NAN.into())), "NaN");
-        assert_eq!(&f(S::Float64(f64::NAN.into())), "NaN");
-        assert_eq!(&f(S::Float32(f32::INFINITY.into())), "Infinity");
-        assert_eq!(&f(S::Float32(f32::NEG_INFINITY.into())), "-Infinity");
-        assert_eq!(&f(S::Float64(f64::INFINITY.into())), "Infinity");
-        assert_eq!(&f(S::Float64(f64::NEG_INFINITY.into())), "-Infinity");
-        assert_eq!(&f(S::Bool(true)), "t");
-        assert_eq!(&f(S::Bool(false)), "f");
+        assert_eq!(&f(S::Float32(1_f32.into()), false), "1");
+        assert_eq!(&f(S::Float32(f32::NAN.into()), false), "NaN");
+        assert_eq!(&f(S::Float64(f64::NAN.into()), false), "NaN");
+        assert_eq!(&f(S::Float32(f32::INFINITY.into()), false), "Infinity");
+        assert_eq!(&f(S::Float32(f32::NEG_INFINITY.into()), false), "-Infinity");
+        assert_eq!(&f(S::Float64(f64::INFINITY.into()), false), "Infinity");
+        assert_eq!(&f(S::Float64(f64::NEG_INFINITY.into()), false), "-Infinity");
+        assert_eq!(&f(S::Bool(true), false), "t");
+        assert_eq!(&f(S::Bool(false), false), "f");
     }
 }

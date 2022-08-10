@@ -51,11 +51,7 @@ impl BatchExpand {
 
 impl fmt::Display for BatchExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchExpand {{ column_subsets: {:?} }}",
-            self.column_subsets()
-        )
+        self.logical.fmt_with_name(f, "BatchExpand")
     }
 }
 

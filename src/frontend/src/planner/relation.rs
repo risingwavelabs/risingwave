@@ -15,15 +15,14 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableFunction,
-    BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWindowTableFunction, Relation,
+    WindowTableFunctionKind,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::{
     LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSource,
     LogicalTableFunction, PlanRef,
@@ -31,19 +30,16 @@ use crate::optimizer::plan_node::{
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
+    pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
             Relation::BaseTable(t) => self.plan_base_table(*t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
-            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
+            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(gs) => match gs.func_type {
-                FunctionType::Generate => self.plan_generate_series_function(*gs),
-                FunctionType::Unnest => self.plan_unnest_function(*gs),
-            },
+            Relation::TableFunction(tf) => self.plan_table_function(*tf),
         }
     }
 
@@ -66,7 +62,7 @@ impl Planner {
             base_table
                 .table_indexes
                 .iter()
-                .map(|x| (x.name.clone(), Rc::new(x.table_desc())))
+                .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
         )
@@ -104,41 +100,8 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_generate_series_function(
-        &mut self,
-        table_function: BoundTableFunction,
-    ) -> Result<PlanRef> {
-        let schema = Schema::new(vec![Field::with_name(
-            table_function.data_type,
-            "generate_series",
-        )]);
-
-        let mut args = table_function.args.into_iter();
-
-        let Some((start,stop,step)) = args.next_tuple() else {
-            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
-        };
-
-        Ok(LogicalTableFunction::create_generate_series(
-            start,
-            stop,
-            step,
-            schema,
-            self.ctx(),
-        ))
-    }
-
-    pub(super) fn plan_unnest_function(
-        &mut self,
-        table_function: BoundTableFunction,
-    ) -> Result<PlanRef> {
-        let schema = Schema::new(vec![Field::with_name(table_function.data_type, "unnest")]);
-
-        Ok(LogicalTableFunction::create_unnest(
-            table_function.args,
-            schema,
-            self.ctx(),
-        ))
+    pub(super) fn plan_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
+        Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
     }
 
     fn plan_tumble_window(
@@ -149,17 +112,39 @@ impl Planner {
     ) -> Result<PlanRef> {
         let mut args = args.into_iter();
 
-        let cols = match &input {
-            Relation::Source(s) => s.catalog.columns.to_vec(),
-            Relation::BaseTable(t) => t.table_catalog.columns().to_vec(),
-            _ => return Err(ErrorCode::BindError("the ".to_string()).into()),
+        let col_data_types: Vec<_> = match &input {
+            Relation::Source(s) => s
+                .catalog
+                .columns
+                .iter()
+                .map(|col| col.data_type().clone())
+                .collect(),
+            Relation::BaseTable(t) => t
+                .table_catalog
+                .columns
+                .iter()
+                .map(|col| col.data_type().clone())
+                .collect(),
+            Relation::Subquery(q) => q
+                .query
+                .schema()
+                .fields
+                .iter()
+                .map(|f| f.data_type())
+                .collect(),
+            r => {
+                return Err(ErrorCode::BindError(format!(
+                    "Invalid input relation to tumble: {r:?}"
+                ))
+                .into())
+            }
         };
 
         match (args.next(), args.next()) {
             (Some(window_size @ ExprImpl::Literal(_)), None) => {
-                let mut exprs = Vec::with_capacity(cols.len() + 2);
-                for (idx, col) in cols.iter().enumerate() {
-                    exprs.push(InputRef::new(idx, col.data_type().clone()).into());
+                let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
+                for (idx, col_dt) in col_data_types.iter().enumerate() {
+                    exprs.push(InputRef::new(idx, col_dt.clone()).into());
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
@@ -202,6 +187,18 @@ impl Planner {
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
             return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
         };
+
+        if !window_size.is_positive() || !window_slide.is_positive() {
+            return Err(ErrorCode::BindError(format!(
+                "window_size {} and window_slide {} must be positive",
+                window_size, window_slide
+            ))
+            .into());
+        }
+
+        if window_size.exact_div(&window_slide).is_none() {
+            return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
+        }
         Ok(LogicalHopWindow::create(
             input,
             time_col,

@@ -28,7 +28,7 @@ pub struct DatabaseCatalog {
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
-    owner: String,
+    owner: u32,
 }
 
 impl DatabaseCatalog {
@@ -64,8 +64,17 @@ impl DatabaseCatalog {
             .collect_vec()
     }
 
+    pub fn iter_schemas(&self) -> impl Iterator<Item = &SchemaCatalog> {
+        self.schema_by_name.values()
+    }
+
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
         self.schema_by_name.get(name)
+    }
+
+    pub fn get_schema_by_id(&self, schema_id: &SchemaId) -> Option<&SchemaCatalog> {
+        self.schema_by_name
+            .get(self.schema_name_by_id.get(schema_id)?)
     }
 
     pub fn get_schema_mut(&mut self, schema_id: SchemaId) -> Option<&mut SchemaCatalog> {
@@ -81,8 +90,8 @@ impl DatabaseCatalog {
         self.id
     }
 
-    pub fn owner(&self) -> String {
-        self.owner.clone()
+    pub fn owner(&self) -> u32 {
+        self.owner
     }
 }
 impl From<&ProstDatabase> for DatabaseCatalog {
@@ -92,7 +101,7 @@ impl From<&ProstDatabase> for DatabaseCatalog {
             name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
-            owner: db.owner.clone(),
+            owner: db.owner,
         }
     }
 }

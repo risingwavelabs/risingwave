@@ -42,7 +42,12 @@
 //!             └─────────────┘     x└────────────┘
 //!                                 x
 //!                                 x
+use std::fmt;
+use std::fmt::Debug;
+
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
     Distribution as DistributionProst, DistributionMode, HashInfo,
@@ -96,10 +101,16 @@ impl Distribution {
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
-                Distribution::HashShard(key) => Some(DistributionProst::HashInfo(HashInfo {
-                    output_count,
-                    key: key.iter().map(|num| *num as u32).collect(),
-                })),
+                Distribution::HashShard(key) => {
+                    assert!(
+                        !key.is_empty(),
+                        "hash key should not be empty, use `Single` instead"
+                    );
+                    Some(DistributionProst::HashInfo(HashInfo {
+                        output_count,
+                        key: key.iter().map(|num| *num as u32).collect(),
+                    }))
+                }
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,
                 Distribution::Broadcast => None,
@@ -136,6 +147,67 @@ impl Distribution {
             }
             Distribution::HashShard(dists) => dists,
         }
+    }
+}
+
+impl fmt::Display for Distribution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        match self {
+            Self::Single => f.write_str("Single")?,
+            Self::SomeShard => f.write_str("SomeShard")?,
+            Self::Broadcast => f.write_str("Broadcast")?,
+            Self::HashShard(vec) => {
+                for key in vec {
+                    std::fmt::Debug::fmt(&key, f)?;
+                }
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+pub struct DistributionDisplay<'a> {
+    pub distribution: &'a Distribution,
+    pub input_schema: &'a Schema,
+}
+
+impl DistributionDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.distribution;
+        match that {
+            Distribution::Single => f.write_str("Single"),
+            Distribution::SomeShard => f.write_str("SomeShard"),
+            Distribution::Broadcast => f.write_str("Broadcast"),
+            Distribution::HashShard(vec) => {
+                f.write_str("HashShard(")?;
+                for key in vec.iter().copied().with_position() {
+                    std::fmt::Debug::fmt(
+                        &FieldDisplay(self.input_schema.fields.get(key.into_inner()).unwrap()),
+                        f,
+                    )?;
+                    match key {
+                        itertools::Position::First(_) | itertools::Position::Middle(_) => {
+                            f.write_str(", ")?;
+                        }
+                        _ => {}
+                    }
+                }
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+impl fmt::Debug for DistributionDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Display for DistributionDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
     }
 }
 

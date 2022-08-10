@@ -228,7 +228,7 @@ impl ListArray {
             array.values.is_empty(),
             "Must have no buffer in a list array"
         );
-        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+        let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let cardinality = bitmap.len();
         let array_data = array.get_list_array_data()?.to_owned();
         let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;
@@ -349,6 +349,20 @@ pub enum ListRef<'a> {
 }
 
 impl<'a> ListRef<'a> {
+    pub fn flatten(&self) -> Vec<DatumRef<'a>> {
+        self.values_ref()
+            .into_iter()
+            .flat_map(|datum_ref| {
+                if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                    list_ref.flatten()
+                } else {
+                    vec![datum_ref]
+                }
+                .into_iter()
+            })
+            .collect()
+    }
+
     pub fn values_ref(&self) -> Vec<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
@@ -373,6 +387,26 @@ impl<'a> ListRef<'a> {
                 } else {
                     Ok(None)
                 }
+            }
+        }
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        match self {
+            ListRef::ValueRef { val } => val.to_protobuf_owned(),
+            ListRef::Indexed { arr, idx } => {
+                let value = ProstListValue {
+                    fields: (arr.offsets[*idx]..arr.offsets[*idx + 1])
+                        .map(|o| {
+                            let datum_ref = arr.value.value_at(o);
+                            match datum_ref {
+                                None => vec![],
+                                Some(s) => s.into_scalar_impl().to_protobuf(),
+                            }
+                        })
+                        .collect_vec(),
+                };
+                value.encode_to_vec()
             }
         }
     }
@@ -704,5 +738,36 @@ mod tests {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
         assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+    }
+
+    #[test]
+    fn test_to_protobuf_owned() {
+        use crate::array::*;
+        let arr = ListArray::from_slices(
+            &[true, true],
+            vec![
+                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
+                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
+            ],
+            DataType::Int32,
+        )
+        .unwrap();
+        let list_ref = arr.value_at(0).unwrap();
+        let output = list_ref.to_protobuf_owned();
+        let expect = ListValue::new(vec![
+            Some(1i32.to_scalar_value()),
+            Some(2i32.to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
+
+        let list_ref = arr.value_at(1).unwrap();
+        let output = list_ref.to_protobuf_owned();
+        let expect = ListValue::new(vec![
+            Some(3i32.to_scalar_value()),
+            Some(4i32.to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
     }
 }

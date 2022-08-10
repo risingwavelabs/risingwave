@@ -29,6 +29,8 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
+use crate::optimizer::PlanRef;
+
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -72,21 +74,39 @@ impl BuildFragmentGraphState {
     }
 }
 
+pub struct StreamFragmenterV2 {}
+
+impl StreamFragmenterV2 {
+    pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+        StreamFragmenter::build_graph(plan_node.to_stream_prost())
+    }
+}
+
 pub struct StreamFragmenter {}
 
 impl StreamFragmenter {
+    fn is_stateful_executor(stream_node: &StreamNode) -> bool {
+        matches!(
+            stream_node.get_node_body().unwrap(),
+            NodeBody::HashAgg(_)
+                | NodeBody::HashJoin(_)
+                | NodeBody::DeltaIndexJoin(_)
+                | NodeBody::Chain(_)
+                | NodeBody::DynamicFilter(_)
+        )
+    }
+
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
     /// fragments.
     fn rewrite_stream_node(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<StreamNode> {
-        self.rewrite_stream_node_inner(state, stream_node, false)
+        let insert_exchange_flag = Self::is_stateful_executor(&stream_node);
+        Self::rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
     }
 
     fn rewrite_stream_node_inner(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
         insert_exchange_flag: bool,
@@ -94,44 +114,40 @@ impl StreamFragmenter {
         let mut inputs = vec![];
 
         for child_node in stream_node.input {
-            let input = match child_node.get_node_body()? {
-                // For stateful operators, set `exchange_flag = true`. If it's already true, force
-                // add an exchange.
-                NodeBody::HashAgg(_)
-                | NodeBody::HashJoin(_)
-                | NodeBody::DeltaIndexJoin(_)
-                | NodeBody::Chain(_)
-                | NodeBody::DynamicFilter(_) => {
-                    if insert_exchange_flag {
-                        let child_node =
-                            self.rewrite_stream_node_inner(state, child_node, false)?;
+            // For stateful operators, set `exchange_flag = true`. If it's already true, force
+            // add an exchange.
+            let input = if Self::is_stateful_executor(&child_node) {
+                if insert_exchange_flag {
+                    let child_node = Self::rewrite_stream_node_inner(state, child_node, true)?;
 
-                        let strategy = DispatchStrategy {
-                            r#type: DispatcherType::NoShuffle.into(),
-                            column_indices: vec![],
-                        };
-                        let append_only = child_node.append_only;
-                        StreamNode {
-                            pk_indices: child_node.pk_indices.clone(),
-                            fields: child_node.fields.clone(),
-                            node_body: Some(NodeBody::Exchange(ExchangeNode {
-                                strategy: Some(strategy.clone()),
-                            })),
-                            operator_id: state.gen_operator_id() as u64,
-                            input: vec![child_node],
-                            identity: "Exchange (NoShuffle)".to_string(),
-                            append_only,
-                        }
-                    } else {
-                        self.rewrite_stream_node_inner(state, child_node, true)?
+                    let strategy = DispatchStrategy {
+                        r#type: DispatcherType::NoShuffle.into(),
+                        column_indices: vec![], // TODO: use distribution key
+                    };
+                    let append_only = child_node.append_only;
+                    StreamNode {
+                        pk_indices: child_node.pk_indices.clone(),
+                        fields: child_node.fields.clone(),
+                        node_body: Some(NodeBody::Exchange(ExchangeNode {
+                            strategy: Some(strategy.clone()),
+                        })),
+                        operator_id: state.gen_operator_id() as u64,
+                        input: vec![child_node],
+                        identity: "Exchange (NoShuffle)".to_string(),
+                        append_only,
                     }
+                } else {
+                    Self::rewrite_stream_node_inner(state, child_node, true)?
                 }
-                // For exchanges, reset the flag.
-                NodeBody::Exchange(_) => {
-                    self.rewrite_stream_node_inner(state, child_node, false)?
+            } else {
+                match child_node.get_node_body()? {
+                    // For exchanges, reset the flag.
+                    NodeBody::Exchange(_) => {
+                        Self::rewrite_stream_node_inner(state, child_node, false)?
+                    }
+                    // Otherwise, recursively visit the children.
+                    _ => Self::rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
                 }
-                // Otherwise, recursively visit the children.
-                _ => self.rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
             };
             inputs.push(input);
         }
@@ -144,23 +160,21 @@ impl StreamFragmenter {
 
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<()> {
-        let stream_node = self.rewrite_stream_node(state, stream_node)?;
-        self.build_and_add_fragment(state, stream_node)?;
+        let stream_node = Self::rewrite_stream_node(state, stream_node)?;
+        Self::build_and_add_fragment(state, stream_node)?;
         Ok(())
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
     fn build_and_add_fragment(
-        &self,
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<StreamFragment> {
         let mut fragment = state.new_stream_fragment();
-        let node = self.build_fragment(state, &mut fragment, stream_node)?;
+        let node = Self::build_fragment(state, &mut fragment, stream_node)?;
 
         assert!(fragment.node.is_none());
         fragment.node = Some(Box::new(node));
@@ -174,7 +188,6 @@ impl StreamFragmenter {
     /// tree, count how many table ids should be allocated in this fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
     fn build_fragment(
-        &self,
         state: &mut BuildFragmentGraphState,
         current_fragment: &mut StreamFragment,
         mut stream_node: StreamNode,
@@ -188,11 +201,13 @@ impl StreamFragmenter {
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
-            NodeBody::Chain(ref node) => {
+            // FIXME: workaround for single-fragment mview on singleton upstream mview.
+            NodeBody::Chain(node) => {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
                     .insert(TableId::new(node.table_id));
+                current_fragment.is_singleton = node.is_singleton;
             }
 
             _ => {}
@@ -201,40 +216,19 @@ impl StreamFragmenter {
         Self::assign_local_table_id_to_stream_node(state, &mut stream_node);
 
         // handle join logic
-        match stream_node.node_body.as_mut().unwrap() {
-            // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
-            // with only equal conditions
-            NodeBody::HashJoin(hash_join_node) => {
-                if hash_join_node.is_delta_join {
-                    if hash_join_node.get_join_type()? == JoinType::Inner
-                        && hash_join_node.condition.is_none()
-                    {
-                        return self.build_delta_join(state, current_fragment, stream_node);
-                    } else {
-                        panic!(
-                        "only inner join without non-equal condition is supported for delta joins"
-                    );
-                    }
-                }
+        if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap()
+        {
+            if delta_index_join.get_join_type()? == JoinType::Inner
+                && delta_index_join.condition.is_none()
+            {
+                return Self::build_delta_join_without_arrange(
+                    state,
+                    current_fragment,
+                    stream_node,
+                );
+            } else {
+                panic!("only inner join without non-equal condition is supported for delta joins");
             }
-
-            NodeBody::DeltaIndexJoin(delta_index_join) => {
-                if delta_index_join.get_join_type()? == JoinType::Inner
-                    && delta_index_join.condition.is_none()
-                {
-                    return self.build_delta_join_without_arrange(
-                        state,
-                        current_fragment,
-                        stream_node,
-                    );
-                } else {
-                    panic!(
-                        "only inner join without non-equal condition is supported for delta joins"
-                    );
-                }
-            }
-
-            _ => {}
         }
 
         let inputs = std::mem::take(&mut stream_node.input);
@@ -245,8 +239,7 @@ impl StreamFragmenter {
                 match child_node.get_node_body()? {
                     NodeBody::Exchange(_) if child_node.input.is_empty() => {
                         // When exchange node is generated when doing rewrites, it could be having
-                        // zero input. In this case, we won't recursively
-                        // visit its children.
+                        // zero input. In this case, we won't recursively visit its children.
                         Ok(child_node)
                     }
                     // Exchange node indicates a new child fragment.
@@ -255,7 +248,7 @@ impl StreamFragmenter {
 
                         assert_eq!(child_node.input.len(), 1);
                         let child_fragment =
-                            self.build_and_add_fragment(state, child_node.input.remove(0))?;
+                            Self::build_and_add_fragment(state, child_node.input.remove(0))?;
                         state.fragment_graph.add_edge(
                             child_fragment.fragment_id,
                             current_fragment.fragment_id,
@@ -275,7 +268,7 @@ impl StreamFragmenter {
                     }
 
                     // For other children, visit recursively.
-                    _ => self.build_fragment(state, current_fragment, child_node),
+                    _ => Self::build_fragment(state, current_fragment, child_node),
                 }
             })
             .try_collect()?;
@@ -286,8 +279,6 @@ impl StreamFragmenter {
     }
 
     pub fn build_graph(stream_node: StreamNode) -> StreamFragmentGraphProto {
-        let fragmenter = Self {};
-
         let BuildFragmentGraphState {
             fragment_graph,
             next_local_fragment_id: _,
@@ -296,9 +287,7 @@ impl StreamFragmenter {
             next_table_id,
         } = {
             let mut state = BuildFragmentGraphState::default();
-            fragmenter
-                .generate_fragment_graph(&mut state, stream_node)
-                .unwrap();
+            Self::generate_fragment_graph(&mut state, stream_node).unwrap();
             state
         };
 
@@ -346,13 +335,11 @@ impl StreamFragmenter {
 
             NodeBody::TopN(top_n_node) => {
                 top_n_node.table_id_l = state.gen_table_id();
-                top_n_node.table_id_m = state.gen_table_id();
                 top_n_node.table_id_h = state.gen_table_id();
             }
 
             NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
                 append_only_top_n_node.table_id_l = state.gen_table_id();
-                append_only_top_n_node.table_id_m = state.gen_table_id();
                 append_only_top_n_node.table_id_h = state.gen_table_id();
             }
 
@@ -397,6 +384,8 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
+            filter: None,
         }
     }
 
@@ -550,7 +539,7 @@ mod tests {
             StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
 
             if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
-                expect_table_id += 3;
+                expect_table_id += 2;
                 assert_eq!(expect_table_id, top_n_node.table_id_h);
             }
         }
@@ -568,7 +557,7 @@ mod tests {
             if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
                 stream_node.node_body.as_ref().unwrap()
             {
-                expect_table_id += 3;
+                expect_table_id += 2;
                 assert_eq!(expect_table_id, append_only_top_n_node.table_id_h);
             }
         }

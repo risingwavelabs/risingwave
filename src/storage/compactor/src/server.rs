@@ -20,19 +20,22 @@ use std::time::Duration;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
+use risingwave_storage::hummock::compactor::CompactionExecutor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::SstableStore;
+use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::CompactorServiceImpl;
 use crate::{CompactorConfig, CompactorOpts};
 
@@ -41,7 +44,7 @@ pub async fn compactor_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: CompactorOpts,
-) -> (JoinHandle<()>, Sender<()>) {
+) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
     let mut config = {
         if opts.config_path.is_empty() {
             CompactorConfig::default()
@@ -55,7 +58,7 @@ pub async fn compactor_serve(
     // Register to the cluster.
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
     let worker_id = meta_client
-        .register(&client_addr, WorkerType::Compactor)
+        .register(WorkerType::Compactor, &client_addr, 0)
         .await
         .unwrap();
     tracing::info!("Assigned compactor id {}", worker_id);
@@ -71,8 +74,10 @@ pub async fn compactor_serve(
         hummock_metrics.clone(),
     ));
 
-    // TODO: remove it after we can configure compactor independently.
-    config.storage.meta_cache_capacity_mb = config.storage.block_cache_capacity_mb;
+    // use half of limit because any memory which would hold in meta-cache will be allocate by
+    // limited at first.
+    // TODO: replace meta-cache with memory limiter.
+    config.storage.meta_cache_capacity_mb = config.storage.compactor_memory_limit_mb / 2;
 
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
@@ -91,12 +96,33 @@ pub async fn compactor_serve(
         storage_config.block_cache_capacity_mb * (1 << 20),
         storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
-    monitor_cache(sstable_store.clone(), &registry).unwrap();
+
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    let compactor_observer_node = CompactorObserverNode::new(filter_key_extractor_manager.clone());
+    // todo use ObserverManager
+    let observer_manager = ObserverManager::new(
+        meta_client.clone(),
+        client_addr.clone(),
+        Box::new(compactor_observer_node),
+        WorkerType::Compactor,
+    )
+    .await;
+
+    let observer_join_handle = observer_manager.start().await.unwrap();
+    let memory_limiter = Arc::new(MemoryLimiter::new(
+        (storage_config.compactor_memory_limit_mb as u64) << 20,
+    ));
+    monitor_cache(sstable_store.clone(), memory_limiter.clone(), &registry).unwrap();
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        storage_config.sstable_id_remote_fetch_number,
+    ));
 
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
+            vec![sstable_id_manager.clone()],
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             storage_config,
@@ -104,6 +130,9 @@ pub async fn compactor_serve(
             sstable_store,
             state_store_stats,
             Some(Arc::new(CompactionExecutor::new(None))),
+            filter_key_extractor_manager.clone(),
+            memory_limiter,
+            sstable_id_manager,
         ),
     ];
 
@@ -139,5 +168,5 @@ pub async fn compactor_serve(
         );
     }
 
-    (join_handle, shutdown_send)
+    (join_handle, observer_join_handle, shutdown_send)
 }

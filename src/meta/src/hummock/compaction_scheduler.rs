@@ -19,11 +19,14 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
+use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
+use crate::manager::META_NODE_ID;
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
@@ -47,14 +50,14 @@ impl CompactionRequestChannel {
     /// Enqueues only if the target is not yet in queue.
     pub fn try_send(&self, compaction_group: CompactionGroupId) -> bool {
         let mut guard = self.scheduled.lock();
-        if guard.get(&compaction_group).is_some() {
+        if guard.contains(&compaction_group) {
             return false;
         }
-        if self.request_tx.send(compaction_group).is_ok() {
-            guard.insert(compaction_group);
-            return true;
+        if self.request_tx.send(compaction_group).is_err() {
+            return false;
         }
-        false
+        guard.insert(compaction_group);
+        true
     }
 
     fn unschedule(&self, compaction_group: CompactionGroupId) {
@@ -124,7 +127,7 @@ where
             .get_compact_task(compaction_group)
             .await;
         request_channel.unschedule(compaction_group);
-        let compact_task = match compact_task {
+        let mut compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
@@ -139,6 +142,21 @@ where
             "Picked compaction task. {}",
             compact_task_to_string(&compact_task)
         );
+        // TODO: merge this two operation in one lock guard because the target sub-level may be
+        // removed by the other thread.
+        if CompactStatus::is_trivial_move_task(&compact_task) {
+            compact_task.task_status = true;
+            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            tracing::info!(
+                "trivial move task: \n{}",
+                compact_task_to_string(&compact_task)
+            );
+            return self
+                .hummock_manager
+                .report_compact_task_impl(META_NODE_ID, &compact_task, true)
+                .await
+                .is_ok();
+        }
 
         // 2. Assign the compaction task to a compactor.
         'send_task: loop {
@@ -157,7 +175,7 @@ where
             let send_task = async {
                 tokio::time::timeout(Duration::from_secs(5), async {
                     compactor
-                        .send_task(Some(compact_task.clone()), None)
+                        .send_task(Task::CompactTask(compact_task.clone()))
                         .await
                         .is_ok()
                 })

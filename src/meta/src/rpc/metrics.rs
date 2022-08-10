@@ -12,27 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
-use hyper::{Body, Request, Response};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Encoder, Histogram, HistogramVec, IntGauge, IntGaugeVec,
-    Registry, TextEncoder,
+    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, IntGaugeVec, Registry,
 };
-use tower::make::Shared;
-use tower::ServiceBuilder;
-use tower_http::add_extension::AddExtensionLayer;
 
 pub struct MetaMetrics {
     registry: Registry,
 
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
-    /// latency of each barrier
+    /// The duration from barrier injection to commit
+    /// It is the sum of inflight-latency , sync-latency and wait-commit-latency
     pub barrier_latency: Histogram,
+    /// The duration from barrier complete to commit
+    pub barrier_wait_commit_latency: Histogram,
 
     /// latency between each barrier send
     pub barrier_send_latency: Histogram,
@@ -60,6 +57,8 @@ pub struct MetaMetrics {
 
     /// Latency for hummock manager to really process a request after acquire the lock
     pub hummock_manager_real_process_time: HistogramVec,
+
+    pub time_after_last_observation: AtomicU64,
 }
 
 impl MetaMetrics {
@@ -79,6 +78,14 @@ impl MetaMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "meta_barrier_wait_commit_duration_seconds",
+            "barrier_wait_commit_latency",
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+        );
+        let barrier_wait_commit_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
@@ -161,6 +168,7 @@ impl MetaMetrics {
 
             grpc_latency,
             barrier_latency,
+            barrier_wait_commit_latency,
             barrier_send_latency,
             all_barrier_nums,
             in_flight_barrier_nums,
@@ -173,45 +181,12 @@ impl MetaMetrics {
             version_size,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
+            time_after_last_observation: AtomicU64::new(0),
         }
-    }
-
-    pub fn boot_metrics_service(self: &Arc<Self>, listen_addr: SocketAddr) {
-        let meta_metrics = self.clone();
-        tokio::spawn(async move {
-            tracing::info!(
-                "Prometheus listener for Prometheus is set up on http://{}",
-                listen_addr
-            );
-
-            let service = ServiceBuilder::new()
-                .layer(AddExtensionLayer::new(meta_metrics))
-                .service_fn(Self::metrics_service);
-
-            let serve_future = hyper::Server::bind(&listen_addr).serve(Shared::new(service));
-
-            if let Err(err) = serve_future.await {
-                eprintln!("server error: {}", err);
-            }
-        });
     }
 
     pub fn registry(&self) -> &Registry {
         &self.registry
-    }
-
-    async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        let meta_metrics = req.extensions().get::<Arc<MetaMetrics>>().unwrap();
-        let encoder = TextEncoder::new();
-        let mut buffer = vec![];
-        let mf = meta_metrics.registry.gather();
-        encoder.encode(&mf, &mut buffer).unwrap();
-        let response = Response::builder()
-            .header(hyper::header::CONTENT_TYPE, encoder.format_type())
-            .body(Body::from(buffer))
-            .unwrap();
-
-        Ok(response)
     }
 }
 impl Default for MetaMetrics {

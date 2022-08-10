@@ -67,6 +67,20 @@ impl Field {
     }
 }
 
+pub struct FieldDisplay<'a>(pub &'a Field);
+
+impl std::fmt::Debug for FieldDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.name)
+    }
+}
+
+impl std::fmt::Display for FieldDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.name)
+    }
+}
+
 /// `schema_unnamed` builds a `Schema` with the given types, but without names.
 #[macro_export]
 macro_rules! schema_unnamed {
@@ -175,6 +189,15 @@ impl Field {
 
     pub fn data_type(&self) -> DataType {
         self.data_type.clone()
+    }
+
+    pub fn from_with_table_name_prefix(desc: &ColumnDesc, table_name: &str) -> Self {
+        Self {
+            data_type: desc.data_type.clone(),
+            name: format!("{}.{}", table_name, desc.name),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
+            type_name: desc.type_name.clone(),
+        }
     }
 }
 

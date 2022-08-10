@@ -10,9 +10,12 @@ import "plan_common.proto";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {
-  plan_common.CellBasedTableDesc table_desc = 1;
+  plan_common.StorageTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
-  ScanRange scan_range = 3;
+  // All the ranges need to be read. i.e., they are OR'ed.
+  //
+  // Empty `scan_ranges` means full table scan.
+  repeated ScanRange scan_ranges = 3;
   // The partition to read for scan tasks.
   //
   // Will be filled by the scheduler.
@@ -26,7 +29,7 @@ message SysRowSeqScanNode {
 
 // The range to scan, which specifies a consecutive range of the PK
 // and can represent: (Suppose there are N columns in the PK)
-// - full table scan: `eq_conds` is empty, and `lower_bound` & `upper_bound` are `None`
+// - full table scan: Should not occur. Use an empty `Vec<ScanRange>` instead.
 // - index range scan: `eq_conds` includes i (between 0 and N-1, inclusive) values,
 //     and `lower_bound` & `upper_bound` is the range for the (i+1)th column
 // - index point get: `eq_conds` includes N values, and `lower_bound` & `upper_bound` are `None`
@@ -58,11 +61,6 @@ message ProjectNode {
 
 message FilterNode {
   expr.ExprNode search_condition = 1;
-}
-
-message FilterScanNode {
-  uint32 table_id = 1;
-  repeated int32 column_ids = 2;
 }
 
 message InsertNode {
@@ -120,6 +118,10 @@ message ExpandNode {
   repeated Subset column_subsets = 1;
 }
 
+message ProjectSetNode {
+  repeated expr.ProjectSetSelectItem select_list = 1;
+}
+
 message SortAggNode {
   repeated expr.ExprNode group_key = 1;
   repeated expr.AggCall agg_calls = 2;
@@ -149,14 +151,7 @@ message HopWindowNode {
 }
 
 message TableFunctionNode {
-  enum Type {
-    GENERATE = 0;
-    UNNEST = 1;
-  }
-  Type function_type = 1;
-  repeated expr.ExprNode args = 2;
-  // The element type of the return set.
-  data.DataType return_type = 3;
+  expr.TableFunction table_function = 1;
 }
 
 // Task is a running instance of Stage.
@@ -201,10 +196,12 @@ message MergeSortExchangeNode {
 message LookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
-  repeated int32 build_side_key = 3;
-  plan_common.CellBasedTableDesc probe_side_table_desc = 4;
-  repeated uint32 output_indices = 5;
-  repeated ExchangeSource sources = 6;
+  repeated uint32 build_side_key = 3;
+  plan_common.StorageTableDesc probe_side_table_desc = 4;
+  repeated uint32 probe_side_vnode_mapping = 5;
+  repeated int32 probe_side_column_ids = 6;
+  repeated uint32 output_indices = 7;
+  repeated common.WorkerNode worker_nodes = 8;
 }
 
 message PlanNode {
@@ -232,6 +229,7 @@ message PlanNode {
     SysRowSeqScanNode sys_row_seq_scan = 27;
     ExpandNode expand = 28;
     LookupJoinNode lookup_join = 29;
+    ProjectSetNode project_set = 30;
   }
   string identity = 24;
 }
@@ -243,9 +241,10 @@ message PlanNode {
 message ExchangeInfo {
   enum DistributionMode {
     // No partitioning at all, used for root segment which aggregates query results
-    SINGLE = 0;
-    BROADCAST = 1;
-    HASH = 2;
+    UNSPECIFIED = 0;
+    SINGLE = 1;
+    BROADCAST = 2;
+    HASH = 3;
   }
   message BroadcastInfo {
     uint32 count = 1;

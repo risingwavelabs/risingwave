@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
+pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
+
 /// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
 /// separately.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -95,8 +97,8 @@ pub struct StreamingConfig {
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
-    #[serde(default = "default::unsafe_worker_node_parallel_degree")]
-    pub unsafe_worker_node_parallel_degree: usize,
+    #[serde(default = "default::worker_node_parallelism")]
+    pub worker_node_parallelism: usize,
 }
 
 impl Default for StreamingConfig {
@@ -109,7 +111,7 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    /// Target size of the SSTable.
+    /// Target size of the Sstable.
     #[serde(default = "default::sst_size_mb")]
     pub sstable_size_mb: u32,
 
@@ -167,9 +169,39 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
+
+    /// Capacity of sstable meta cache.
+    #[serde(default = "default::compactor_memory_limit_mb")]
+    pub compactor_memory_limit_mb: usize,
+
+    /// Number of SST ids fetched from meta per RPC
+    #[serde(default = "default::sstable_id_remote_fetch_number")]
+    pub sstable_id_remote_fetch_number: u32,
+
+    #[serde(default)]
+    pub file_cache: FileCacheConfig,
 }
 
 impl Default for StorageConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileCacheConfig {
+    #[serde(default = "default::file_cache_capacity")]
+    pub capacity: usize,
+
+    #[serde(default = "default::file_cache_total_buffer_capacity")]
+    pub total_buffer_capacity: usize,
+
+    #[serde(default = "default::file_cache_cache_file_fallocate_unit")]
+    pub cache_file_fallocate_unit: usize,
+}
+
+impl Default for FileCacheConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -211,6 +243,7 @@ mod default {
         1000
     }
 
+    #[expect(dead_code)]
     pub fn chunk_size() -> u32 {
         1024
     }
@@ -235,6 +268,7 @@ mod default {
         4
     }
 
+    #[expect(dead_code)]
     pub fn shared_buffer_threshold() -> u32 {
         // 192MB
         201326592
@@ -284,8 +318,31 @@ mod default {
         8
     }
 
-    pub fn unsafe_worker_node_parallel_degree() -> usize {
-        4
+    pub fn worker_node_parallelism() -> usize {
+        std::thread::available_parallelism().unwrap().get()
+    }
+
+    pub fn compactor_memory_limit_mb() -> usize {
+        512
+    }
+
+    pub fn sstable_id_remote_fetch_number() -> u32 {
+        10
+    }
+
+    pub fn file_cache_capacity() -> usize {
+        // 1 GiB
+        1024 * 1024 * 1024
+    }
+
+    pub fn file_cache_total_buffer_capacity() -> usize {
+        // 128 MiB
+        128 * 1024 * 1024
+    }
+
+    pub fn file_cache_cache_file_fallocate_unit() -> usize {
+        // 96 MiB
+        96 * 1024 * 1024
     }
 }
 
@@ -308,7 +365,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_TTL: u32 = 0;
-        pub const PROPERTIES_TTL_KEY: &str = "ttl";
+        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

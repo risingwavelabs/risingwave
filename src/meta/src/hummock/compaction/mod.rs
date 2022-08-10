@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-
 pub mod compaction_config;
 mod level_selector;
 mod manual_compaction_picker;
@@ -21,15 +19,21 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
+pub use tier_compaction_picker::TierCompactionPicker;
+mod base_level_compaction_picker;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+pub use base_level_compaction_picker::LevelCompactionPicker;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, KeyRange, Level};
+use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::{
+    CompactTask, CompactionConfig, HummockVersion, InputLevel, KeyRange, LevelType,
+};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
@@ -73,19 +77,24 @@ impl Clone for CompactStatus {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SearchResult {
-    select_level: Level,
-    target_level: Level,
-    split_ranges: Vec<KeyRange>,
-    compression_algorithm: String,
-    target_file_size: u64,
+pub struct CompactionInput {
+    pub input_levels: Vec<InputLevel>,
+    pub target_level: usize,
+    pub target_sub_level_id: u64,
+}
+
+pub struct CompactionTask {
+    pub input: CompactionInput,
+    pub compression_algorithm: String,
+    pub target_file_size: u64,
+    pub splits: Vec<KeyRange>,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
     match compaction_mode {
         CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
         CompactionMode::ConsistentHash => Arc::new(HashStrategy::default()),
+        CompactionMode::Unspecified => unreachable!(),
     }
 }
 
@@ -109,7 +118,7 @@ impl CompactStatus {
 
     pub fn get_compact_task(
         &mut self,
-        levels: &[Level],
+        levels: &Levels,
         task_id: HummockCompactionTaskId,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: Option<ManualCompactionOption>,
@@ -124,13 +133,13 @@ impl CompactStatus {
             self.pick_compaction(levels, task_id)?
         };
 
-        let select_level_id = ret.select_level.level_idx;
-        let target_level_id = ret.target_level.level_idx;
+        let select_level_id = ret.input.input_levels[0].level_idx;
+        let target_level_id = ret.input.target_level;
 
-        let splits = if ret.split_ranges.is_empty() {
+        let splits = if ret.splits.is_empty() {
             vec![KeyRange::inf()]
         } else {
-            ret.split_ranges
+            ret.splits
         };
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {
@@ -140,16 +149,15 @@ impl CompactStatus {
         };
 
         let compact_task = CompactTask {
-            input_ssts: vec![ret.select_level, ret.target_level],
+            input_ssts: ret.input.input_levels,
             splits,
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,
-            target_level: target_level_id,
+            target_level: target_level_id as u32,
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
-            gc_delete_keys: target_level_id as usize == self.level_handlers.len() - 1
-                && select_level_id > 0,
+            gc_delete_keys: target_level_id == self.level_handlers.len() - 1 && select_level_id > 0,
             task_status: false,
             compaction_group_id,
             existing_table_ids: vec![],
@@ -158,25 +166,49 @@ impl CompactStatus {
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
             current_epoch_time: 0,
+            target_sub_level_id: ret.input.target_sub_level_id,
         };
         Some(compact_task)
     }
 
+    pub fn is_trivial_move_task(task: &CompactTask) -> bool {
+        if task.input_ssts.len() != 2
+            || task.input_ssts[0].level_type != LevelType::Nonoverlapping as i32
+        {
+            return false;
+        }
+
+        // it may be a manual compaction task
+        if task.input_ssts[0].level_idx == task.input_ssts[1].level_idx
+            && task.input_ssts[0].level_idx > 0
+        {
+            return false;
+        }
+
+        if task.input_ssts[1].level_idx == task.target_level
+            && task.input_ssts[1].table_infos.is_empty()
+        {
+            return true;
+        }
+
+        false
+    }
+
     fn pick_compaction(
         &mut self,
-        levels: &[Level],
+        levels: &Levels,
         task_id: HummockCompactionTaskId,
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         self.compaction_selector
             .pick_compaction(task_id, levels, &mut self.level_handlers)
     }
 
     fn manual_pick_compaction(
         &mut self,
-        levels: &[Level],
+        levels: &Levels,
         task_id: HummockCompactionTaskId,
         manual_compaction_option: ManualCompactionOption,
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         // manual_compaction no need to select level
         // level determined by option
         self.compaction_selector.manual_pick_compaction(
@@ -215,23 +247,22 @@ impl CompactStatus {
         let mut new_version = based_hummock_version;
         new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
         let mut removed_table: HashSet<u64> = HashSet::default();
+        let mut removed_levels = vec![];
         for input_level in &compact_task.input_ssts {
             for table in &input_level.table_infos {
                 removed_table.insert(table.id);
             }
+            removed_levels.push(input_level.level_idx);
         }
-        let new_version_levels =
-            new_version.get_compaction_group_levels_mut(compact_task.compaction_group_id);
 
-        HummockVersion::apply_compact_ssts(
-            new_version_levels,
-            &compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.level_idx)
-                .collect_vec(),
+        removed_levels.sort();
+        removed_levels.dedup();
+        new_version.apply_compact_ssts(
+            compact_task.compaction_group_id,
+            &removed_levels,
             &removed_table,
             compact_task.target_level,
+            compact_task.target_sub_level_id,
             compact_task.sorted_output_ssts.clone(),
         );
 
@@ -249,6 +280,7 @@ impl CompactStatus {
 
 #[derive(Clone, Debug)]
 pub struct ManualCompactionOption {
+    pub sst_ids: Vec<u64>,
     pub key_range: KeyRange,
     pub internal_table_id: HashSet<u32>,
     pub level: usize,
@@ -257,6 +289,7 @@ pub struct ManualCompactionOption {
 impl Default for ManualCompactionOption {
     fn default() -> Self {
         Self {
+            sst_ids: vec![],
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
@@ -271,7 +304,7 @@ impl Default for ManualCompactionOption {
 pub trait CompactionPicker {
     fn pick_compaction(
         &self,
-        levels: &[Level],
+        levels: &Levels,
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult>;
+    ) -> Option<CompactionInput>;
 }

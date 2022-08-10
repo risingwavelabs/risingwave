@@ -22,6 +22,7 @@ use risingwave_common::array::{DataChunk, StreamChunk, Vis};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node;
 
 use super::error::StreamExecutorError;
@@ -89,11 +90,12 @@ impl HopWindowExecutor {
         let units = window_size
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
-            .ok_or_else(|| {
-                StreamExecutorError::invalid_argument(format!(
+            .ok_or_else(|| ExprError::InvalidParam {
+                name: "window",
+                reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                ))
+                ),
             })?
             .get();
 
@@ -107,12 +109,16 @@ impl HopWindowExecutor {
         // The first window_start of hop window should be:
         // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
         // Let's pre calculate (`window_size` - `window_slide`).
-        let window_size_sub_slide = window_size.checked_sub(&window_slide).ok_or_else(|| {
-            StreamExecutorError::invalid_argument(format!(
-                "window_size {} cannot be subtracted by window_slide {}",
-                window_size, window_slide
-            ))
-        })?;
+        let window_size_sub_slide =
+            window_size
+                .checked_sub(&window_slide)
+                .ok_or_else(|| ExprError::InvalidParam {
+                    name: "window",
+                    reason: format!(
+                        "window_size {} cannot be subtracted by window_slide {}",
+                        window_size, window_slide
+                    ),
+                })?;
         let window_size_sub_slide_expr = LiteralExpression::new(
             DataType::Interval,
             Some(ScalarImpl::Interval(window_size_sub_slide)),
@@ -133,23 +139,31 @@ impl HopWindowExecutor {
         let mut window_start_exprs = Vec::with_capacity(units);
         let mut window_end_exprs = Vec::with_capacity(units);
         for i in 0..units {
-            let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
-                StreamExecutorError::invalid_argument(format!(
-                    "window_slide {} cannot be multiplied by {}",
-                    window_slide, i
-                ))
-            })?;
+            let window_start_offset =
+                window_slide
+                    .checked_mul_int(i)
+                    .ok_or_else(|| ExprError::InvalidParam {
+                        name: "window",
+                        reason: format!(
+                            "window_slide {} cannot be multiplied by {}",
+                            window_slide, i
+                        ),
+                    })?;
             let window_start_offset_expr = LiteralExpression::new(
                 DataType::Interval,
                 Some(ScalarImpl::Interval(window_start_offset)),
             )
             .boxed();
-            let window_end_offset = window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                StreamExecutorError::invalid_argument(format!(
-                    "window_slide {} cannot be multiplied by {}",
-                    window_slide, i
-                ))
-            })?;
+            let window_end_offset =
+                window_slide
+                    .checked_mul_int(i + units)
+                    .ok_or_else(|| ExprError::InvalidParam {
+                        name: "window",
+                        reason: format!(
+                            "window_slide {} cannot be multiplied by {}",
+                            window_slide, i
+                        ),
+                    })?;
             let window_end_offset_expr = LiteralExpression::new(
                 DataType::Interval,
                 Some(ScalarImpl::Interval(window_end_offset)),

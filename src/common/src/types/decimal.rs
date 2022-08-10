@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
@@ -541,9 +541,23 @@ impl FromStr for Decimal {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "nan" | "NaN" | "NAN" => Ok(Decimal::NaN),
-            "inf" | "INF" | "+inf" | "+INF" => Ok(Decimal::PositiveINF),
-            "-inf" | "-INF" => Ok(Decimal::NegativeINF),
+            "inf" | "INF" | "+inf" | "+INF" | "+Inf" => Ok(Decimal::PositiveINF),
+            "-inf" | "-INF" | "-Inf" => Ok(Decimal::NegativeINF),
             s => RustDecimal::from_str(s).map(Decimal::Normalized),
+        }
+    }
+}
+
+impl Zero for Decimal {
+    fn zero() -> Self {
+        Self::Normalized(RustDecimal::zero())
+    }
+
+    fn is_zero(&self) -> bool {
+        if let Self::Normalized(d) = self {
+            d.is_zero()
+        } else {
+            false
         }
     }
 }
@@ -602,8 +616,39 @@ mod tests {
     #[test]
     fn basic_test() {
         assert_eq!(Decimal::from_str("nan").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("NaN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("NAN").unwrap(), Decimal::NaN,);
+
         assert_eq!(Decimal::from_str("inf").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("INF").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("+inf").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("+INF").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("+Inf").unwrap(), Decimal::PositiveINF,);
+
         assert_eq!(Decimal::from_str("-inf").unwrap(), Decimal::NegativeINF,);
+        assert_eq!(Decimal::from_str("-INF").unwrap(), Decimal::NegativeINF,);
+        assert_eq!(Decimal::from_str("-Inf").unwrap(), Decimal::NegativeINF,);
+
+        assert!(Decimal::from_str("nAn").is_err());
+        assert!(Decimal::from_str("nAN").is_err());
+        assert!(Decimal::from_str("Nan").is_err());
+        assert!(Decimal::from_str("NAn").is_err());
+
+        assert!(Decimal::from_str("iNF").is_err());
+        assert!(Decimal::from_str("inF").is_err());
+        assert!(Decimal::from_str("InF").is_err());
+        assert!(Decimal::from_str("INf").is_err());
+
+        assert!(Decimal::from_str("+iNF").is_err());
+        assert!(Decimal::from_str("+inF").is_err());
+        assert!(Decimal::from_str("+InF").is_err());
+        assert!(Decimal::from_str("+INf").is_err());
+
+        assert!(Decimal::from_str("-iNF").is_err());
+        assert!(Decimal::from_str("-inF").is_err());
+        assert!(Decimal::from_str("-InF").is_err());
+        assert!(Decimal::from_str("-INf").is_err());
+
         assert_eq!(
             Decimal::from_f32(10.0).unwrap() / Decimal::PositiveINF,
             Decimal::from_f32(0.0).unwrap(),

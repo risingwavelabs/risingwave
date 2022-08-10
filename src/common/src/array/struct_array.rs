@@ -231,7 +231,7 @@ impl StructArray {
             array.values.is_empty(),
             "Must have no buffer in a struct array"
         );
-        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+        let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let cardinality = bitmap.len();
         let array_data = array.get_struct_array_data()?;
         let children = array_data
@@ -364,6 +364,28 @@ impl<'a> StructRef<'a> {
                 arr.children.iter().map(|a| a.value_at(*idx)).collect()
             }
             StructRef::ValueRef { val } => val.fields.iter().map(to_datum_ref).collect(),
+        }
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        match self {
+            StructRef::ValueRef { val } => val.to_protobuf_owned(),
+            StructRef::Indexed { arr, idx } => {
+                let value = ProstStructValue {
+                    fields: arr
+                        .children
+                        .iter()
+                        .map(|a| {
+                            let datum_ref = a.value_at(*idx);
+                            match datum_ref {
+                                None => vec![],
+                                Some(s) => s.into_scalar_impl().to_protobuf(),
+                            }
+                        })
+                        .collect_vec(),
+                };
+                value.encode_to_vec()
+            }
         }
     }
 }
@@ -547,5 +569,27 @@ mod tests {
             StructValue::new(vec![Some(1.into()), None]),
             StructValue::new(vec![Some(1.into()), None]),
         );
+    }
+
+    #[test]
+    fn test_to_protobuf_owned() {
+        use crate::array::*;
+        let arr = StructArray::from_slices(
+            &[true],
+            vec![
+                array! { I32Array, [Some(1)] }.into(),
+                array! { F32Array, [Some(2.0)] }.into(),
+            ],
+            vec![DataType::Int32, DataType::Float32],
+        )
+        .unwrap();
+        let struct_ref = arr.value_at(0).unwrap();
+        let output = struct_ref.to_protobuf_owned();
+        let expect = StructValue::new(vec![
+            Some(1i32.to_scalar_value()),
+            Some(OrderedF32::from(2.0f32).to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
     }
 }

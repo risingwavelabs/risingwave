@@ -21,8 +21,8 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;
 
-use super::{DEFAULT_END, DEFAULT_MAX, DEFAULT_MIN, DEFAULT_START};
 use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
+use crate::types::{Datum, OrderedF32, OrderedF64, Scalar};
 
 trait NumericType
 where
@@ -37,21 +37,12 @@ where
         + serde::Serialize
         + SampleUniform,
 {
-    const DEFAULT_MIN: Self;
-    const DEFAULT_MAX: Self;
-    const DEFAULT_START: Self;
-    const DEFAULT_END: Self;
 }
 
 macro_rules! impl_numeric_type {
     ($({ $random_variant_name:ident, $sequence_variant_name:ident,$field_type:ty }),*) => {
         $(
-            impl NumericType for $field_type {
-                const DEFAULT_MIN: $field_type = DEFAULT_MIN as $field_type;
-                const DEFAULT_MAX: $field_type = DEFAULT_MAX as $field_type;
-                const DEFAULT_START: $field_type = DEFAULT_START as $field_type;
-                const DEFAULT_END: $field_type = DEFAULT_END as $field_type;
-            }
+            impl NumericType for $field_type {}
         )*
     };
 }
@@ -73,15 +64,15 @@ pub struct NumericFieldSequenceConcrete<T> {
 
 impl<T> NumericFieldRandomGenerator for NumericFieldRandomConcrete<T>
 where
-    T: NumericType,
+    T: NumericType + Scalar,
     <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     fn new(min_option: Option<String>, max_option: Option<String>, seed: u64) -> Result<Self>
     where
         Self: Sized,
     {
-        let mut min = T::DEFAULT_MIN;
-        let mut max = T::DEFAULT_MAX;
+        let mut min = T::zero();
+        let mut max = T::from(i16::MAX).unwrap();
 
         if let Some(min_option) = min_option {
             min = min_option.parse::<T>()?;
@@ -89,7 +80,6 @@ where
         if let Some(max_option) = max_option {
             max = max_option.parse::<T>()?;
         }
-
         assert!(min < max);
 
         Ok(Self { min, max, seed })
@@ -100,10 +90,16 @@ where
         let result = rng.gen_range(self.min..=self.max);
         json!(result)
     }
+
+    fn generate_datum(&mut self, offset: u64) -> Datum {
+        let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
+        let result = rng.gen_range(self.min..=self.max);
+        Some(result.to_scalar_value())
+    }
 }
 impl<T> NumericFieldSequenceGenerator for NumericFieldSequenceConcrete<T>
 where
-    T: NumericType,
+    T: NumericType + Scalar,
     <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
 {
     fn new(
@@ -115,8 +111,8 @@ where
     where
         Self: Sized,
     {
-        let mut start = T::DEFAULT_START;
-        let mut end = T::DEFAULT_END;
+        let mut start = T::zero();
+        let mut end = T::from(i16::MAX).unwrap();
 
         if let Some(star_optiont) = star_option {
             start = star_optiont.parse::<T>()?;
@@ -146,6 +142,17 @@ where
         self.cur += T::one();
         json!(partition_result)
     }
+
+    fn generate_datum(&mut self) -> Datum {
+        let partition_result =
+            self.start + T::from(self.offset).unwrap() + T::from(self.step).unwrap() * self.cur;
+        self.cur += T::one();
+        if partition_result > self.end {
+            None
+        } else {
+            Some(partition_result.to_scalar_value())
+        }
+    }
 }
 
 #[macro_export]
@@ -155,8 +162,8 @@ macro_rules! for_all_fields_variants {
             { I16RandomField,I16SequenceField,i16 },
             { I32RandomField,I32SequenceField,i32 },
             { I64RandomField,I64SequenceField,i64 },
-            { F32RandomField,F32SequenceField,f32 },
-            { F64RandomField,F64SequenceField,f64 }
+            { F32RandomField,F32SequenceField,OrderedF32 },
+            { F64RandomField,F64SequenceField,OrderedF64 }
         }
     };
 }
@@ -201,6 +208,94 @@ mod tests {
             assert!(res.is_number());
             let res = res.as_i64().unwrap();
             assert!((5..=10).contains(&res));
+        }
+
+        // test overflow
+        let mut i64_field = I64RandomField::new(None, None, 114).unwrap();
+        for i in 0..100 {
+            let res = i64_field.generate(i as u64);
+            assert!(res.is_number());
+            let res = res.as_i64().unwrap();
+            assert!(res >= 0);
+        }
+    }
+    #[test]
+    fn test_sequence_datum_generator() {
+        let mut f32_field =
+            F32SequenceField::new(Some("5.0".to_string()), Some("10.0".to_string()), 0, 1).unwrap();
+
+        for i in 5..=10 {
+            assert_eq!(
+                f32_field.generate_datum(),
+                Some(OrderedF32::from(i as f32).to_scalar_value())
+            );
+        }
+    }
+    #[test]
+    fn test_random_datum_generator() {
+        let mut i32_field =
+            I32RandomField::new(Some("-5".to_string()), Some("5".to_string()), 123).unwrap();
+        let (lower, upper) = ((-5).to_scalar_value(), 5.to_scalar_value());
+        for i in 0..100 {
+            let res = i32_field.generate_datum(i as u64);
+            assert!(res.is_some());
+            let res = res.unwrap();
+            assert!(lower <= res && res <= upper);
+        }
+    }
+
+    #[test]
+    fn test_sequence_field_generator_float() {
+        let mut f64_field =
+            F64SequenceField::new(Some("0".to_string()), Some("10".to_string()), 0, 1).unwrap();
+        for i in 0..=10 {
+            assert_eq!(f64_field.generate(), json!(i as f64));
+        }
+
+        let mut f32_field =
+            F32SequenceField::new(Some("-5".to_string()), Some("5".to_string()), 0, 1).unwrap();
+        for i in -5..=5 {
+            assert_eq!(f32_field.generate(), json!(i as f32));
+        }
+    }
+
+    #[test]
+    fn test_random_field_generator_float() {
+        let mut f64_field =
+            F64RandomField::new(Some("5".to_string()), Some("10".to_string()), 114).unwrap();
+        for i in 0..100 {
+            let res = f64_field.generate(i as u64);
+            assert!(res.is_number());
+            let res = res.as_f64().unwrap();
+            assert!((5. ..10.).contains(&res));
+        }
+
+        // test overflow
+        let mut f64_field = F64RandomField::new(None, None, 114).unwrap();
+        for i in 0..100 {
+            let res = f64_field.generate(i as u64);
+            assert!(res.is_number());
+            let res = res.as_f64().unwrap();
+            assert!(res >= 0.);
+        }
+
+        let mut f32_field =
+            F32RandomField::new(Some("5".to_string()), Some("10".to_string()), 114).unwrap();
+        for i in 0..100 {
+            let res = f32_field.generate(i as u64);
+            assert!(res.is_number());
+            // it seems there is no `as_f32`...
+            let res = res.as_f64().unwrap();
+            assert!((5. ..10.).contains(&res));
+        }
+
+        // test overflow
+        let mut f32_field = F32RandomField::new(None, None, 114).unwrap();
+        for i in 0..100 {
+            let res = f32_field.generate(i as u64);
+            assert!(res.is_number());
+            let res = res.as_f64().unwrap();
+            assert!(res >= 0.);
         }
     }
 }

@@ -134,7 +134,6 @@ impl ColumnDesc {
         }
     }
 
-    #[cfg(test)]
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
         Self {
             data_type,
@@ -145,7 +144,6 @@ impl ColumnDesc {
         }
     }
 
-    #[cfg(test)]
     pub fn new_struct(
         name: &str,
         column_id: i32,

@@ -16,12 +16,13 @@ use std::ops::Bound::*;
 use std::ops::{Bound, RangeBounds};
 use std::{ptr, u64};
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, BytesMut};
 
 use super::version_cmp::VersionedComparator;
 
 pub type Epoch = u64;
 const EPOCH_LEN: usize = std::mem::size_of::<Epoch>();
+pub const TABLE_PREFIX_LEN: usize = 5;
 
 /// Converts user key to full key by appending `u64::MAX - epoch` to the user key.
 ///
@@ -208,6 +209,13 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
     };
 
     (start, end)
+}
+
+pub fn table_prefix(table_id: u32) -> Vec<u8> {
+    let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
+    buf.put_u8(b't');
+    buf.put_u32(table_id);
+    buf.to_vec()
 }
 
 /// [`FullKey`] can be created on either a `Vec<u8>` or a `&[u8]`.

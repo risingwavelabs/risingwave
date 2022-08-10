@@ -15,20 +15,21 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, TableId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{CatalogVersion, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
 
 use super::source_catalog::SourceCatalog;
 use super::{CatalogError, SinkId, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{pg_catalog, DatabaseId, SchemaId};
+use crate::catalog::{pg_catalog, DatabaseId, IndexCatalog, SchemaId};
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
 /// is protected by a `RwLock`. only [`crate::observer::observer_manager::FrontendObserverNode`]
@@ -104,6 +105,14 @@ impl Catalog {
             .create_table(proto);
     }
 
+    pub fn create_index(&mut self, proto: &ProstIndex) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_index(proto);
+    }
+
     pub fn create_source(&mut self, proto: ProstSource) {
         self.get_database_mut(proto.database_id)
             .unwrap()
@@ -137,6 +146,14 @@ impl Catalog {
             .drop_table(tb_id);
     }
 
+    pub fn update_table(&mut self, proto: &ProstTable) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_table(proto);
+    }
+
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
         self.get_database_mut(db_id)
             .unwrap()
@@ -153,7 +170,25 @@ impl Catalog {
             .drop_sink(sink_id);
     }
 
+    pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_index(index_id);
+    }
+
     pub fn get_database_by_name(&self, db_name: &str) -> Result<&DatabaseCatalog> {
+        self.database_by_name
+            .get(db_name)
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
+    }
+
+    pub fn get_database_by_id(&self, db_id: &DatabaseId) -> Result<&DatabaseCatalog> {
+        let db_name = self
+            .db_name_by_id
+            .get(db_id)
+            .ok_or_else(|| CatalogError::NotFound("db_id", db_id.to_string()))?;
         self.database_by_name
             .get(db_name)
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
@@ -167,6 +202,10 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
     }
 
+    pub fn iter_schemas(&self, db_name: &str) -> Result<impl Iterator<Item = &SchemaCatalog>> {
+        Ok(self.get_database_by_name(db_name)?.iter_schemas())
+    }
+
     pub fn get_all_database_names(&self) -> Vec<String> {
         self.database_by_name.keys().cloned().collect_vec()
     }
@@ -175,6 +214,28 @@ impl Catalog {
         self.get_database_by_name(db_name)?
             .get_schema_by_name(schema_name)
             .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
+    }
+
+    pub fn get_table_name_by_id(
+        &self,
+        table_id: TableId,
+        db_name: &str,
+        schema_name: &str,
+    ) -> Result<String> {
+        self.get_schema_by_name(db_name, schema_name)
+            .unwrap()
+            .get_table_name_by_id(table_id)
+            .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()).into())
+    }
+
+    pub fn get_schema_by_id(
+        &self,
+        db_id: &DatabaseId,
+        schema_id: &SchemaId,
+    ) -> Result<&SchemaCatalog> {
+        self.get_database_by_id(db_id)?
+            .get_schema_by_id(schema_id)
+            .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()).into())
     }
 
     pub fn get_table_by_name(
@@ -186,6 +247,17 @@ impl Catalog {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
+    }
+
+    pub fn get_table_by_id(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        table_id: &TableId,
+    ) -> Result<&TableCatalog> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_table_by_id(table_id)
+            .ok_or_else(|| CatalogError::NotFound("table_id", table_id.to_string()).into())
     }
 
     pub fn get_sys_table_by_name(
@@ -210,15 +282,26 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
     }
 
-    pub fn get_sink_id_by_name(
+    pub fn get_sink_by_name(
         &self,
         db_name: &str,
         schema_name: &str,
         sink_name: &str,
-    ) -> Result<u32> {
+    ) -> Result<&SinkCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
-            .get_sink_id_by_name(sink_name)
+            .get_sink_by_name(sink_name)
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()).into())
+    }
+
+    pub fn get_index_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        index_name: &str,
+    ) -> Result<&IndexCatalog> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_index_by_name(index_name)
+            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()).into())
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.
@@ -241,6 +324,7 @@ impl Catalog {
                 risingwave_pb::stream_plan::source_node::SourceType::Source => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
+                risingwave_pb::stream_plan::source_node::SourceType::Unspecified => unreachable!(),
             }
         } else if let Some(_table) = schema.get_table_by_name(relation_name) {
             Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())

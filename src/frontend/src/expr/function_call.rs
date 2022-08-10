@@ -14,11 +14,12 @@
 
 use itertools::Itertools;
 use num_integer::Integer as _;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{align_types, cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::expr::ExprType;
+use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -158,7 +159,15 @@ impl FunctionCall {
             ExprType::RegexpMatch => Ok(DataType::List {
                 datatype: Box::new(DataType::Varchar),
             }),
-
+            ExprType::Vnode => {
+                if inputs.is_empty() {
+                    return Err(ErrorCode::BindError(
+                        "Function `Vnode` takes at least 1 arguments (0 given)".to_string(),
+                    )
+                    .into());
+                }
+                Ok(DataType::Int16)
+            }
             _ => {
                 // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
                 // interface has been enhanced to support mutating (casting) inputs as well.
@@ -240,6 +249,10 @@ impl FunctionCall {
     pub fn inputs(&self) -> &[ExprImpl] {
         self.inputs.as_ref()
     }
+
+    pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
+        self.inputs.as_mut()
+    }
 }
 
 impl Expr for FunctionCall {
@@ -258,4 +271,106 @@ impl Expr for FunctionCall {
             })),
         }
     }
+}
+
+pub struct FunctionCallDisplay<'a> {
+    pub function_call: &'a FunctionCall,
+    pub input_schema: &'a Schema,
+}
+
+impl std::fmt::Debug for FunctionCallDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let that = self.function_call;
+        match &that.func_type {
+            ExprType::Cast => {
+                assert_eq!(that.inputs.len(), 1);
+                ExprDisplay {
+                    expr: &that.inputs[0],
+                    input_schema: self.input_schema,
+                }
+                .fmt(f)?;
+                write!(f, "::{:?}", that.return_type)
+            }
+            ExprType::Add => explain_verbose_binary_op(f, "+", &that.inputs, self.input_schema),
+            ExprType::Subtract => {
+                explain_verbose_binary_op(f, "-", &that.inputs, self.input_schema)
+            }
+            ExprType::Multiply => {
+                explain_verbose_binary_op(f, "*", &that.inputs, self.input_schema)
+            }
+            ExprType::Divide => explain_verbose_binary_op(f, "/", &that.inputs, self.input_schema),
+            ExprType::Modulus => explain_verbose_binary_op(f, "%", &that.inputs, self.input_schema),
+            ExprType::Equal => explain_verbose_binary_op(f, "=", &that.inputs, self.input_schema),
+            ExprType::NotEqual => {
+                explain_verbose_binary_op(f, "<>", &that.inputs, self.input_schema)
+            }
+            ExprType::LessThan => {
+                explain_verbose_binary_op(f, "<", &that.inputs, self.input_schema)
+            }
+            ExprType::LessThanOrEqual => {
+                explain_verbose_binary_op(f, "<=", &that.inputs, self.input_schema)
+            }
+            ExprType::GreaterThan => {
+                explain_verbose_binary_op(f, ">", &that.inputs, self.input_schema)
+            }
+            ExprType::GreaterThanOrEqual => {
+                explain_verbose_binary_op(f, ">=", &that.inputs, self.input_schema)
+            }
+            ExprType::And => explain_verbose_binary_op(f, "AND", &that.inputs, self.input_schema),
+            ExprType::Or => explain_verbose_binary_op(f, "OR", &that.inputs, self.input_schema),
+            ExprType::BitwiseShiftLeft => {
+                explain_verbose_binary_op(f, "<<", &that.inputs, self.input_schema)
+            }
+            ExprType::BitwiseShiftRight => {
+                explain_verbose_binary_op(f, ">>", &that.inputs, self.input_schema)
+            }
+            ExprType::BitwiseAnd => {
+                explain_verbose_binary_op(f, "&", &that.inputs, self.input_schema)
+            }
+            ExprType::BitwiseOr => {
+                explain_verbose_binary_op(f, "|", &that.inputs, self.input_schema)
+            }
+            ExprType::BitwiseXor => {
+                explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
+            }
+            _ => {
+                let func_name = format!("{:?}", that.func_type);
+                let mut builder = f.debug_tuple(&func_name);
+                that.inputs.iter().for_each(|child| {
+                    builder.field(&ExprDisplay {
+                        expr: child,
+                        input_schema: self.input_schema,
+                    });
+                });
+                builder.finish()
+            }
+        }
+    }
+}
+
+fn explain_verbose_binary_op(
+    f: &mut std::fmt::Formatter<'_>,
+    op: &str,
+    inputs: &[ExprImpl],
+    input_schema: &Schema,
+) -> std::fmt::Result {
+    use std::fmt::Debug;
+
+    assert_eq!(inputs.len(), 2);
+
+    write!(f, "(")?;
+    ExprDisplay {
+        expr: &inputs[0],
+        input_schema,
+    }
+    .fmt(f)?;
+    write!(f, " {} ", op)?;
+    ExprDisplay {
+        expr: &inputs[1],
+        input_schema,
+    }
+    .fmt(f)?;
+    write!(f, ")")?;
+
+    Ok(())
 }

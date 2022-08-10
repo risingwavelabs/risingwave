@@ -17,17 +17,34 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
+use risingwave_expr::expr::AggKind;
+use risingwave_frontend::expr::{
+    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, DataTypeName, ExprType,
+    FuncSign,
+};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
 };
 
+use crate::utils::data_type_name_to_ast_data_type;
 use crate::SqlGenerator;
 
 lazy_static::lazy_static! {
     static ref FUNC_TABLE: HashMap<DataTypeName, Vec<FuncSign>> = {
         init_op_table()
+    };
+}
+
+lazy_static::lazy_static! {
+    static ref AGG_FUNC_TABLE: HashMap<DataTypeName, Vec<AggFuncSig>> = {
+        init_agg_table()
+    };
+}
+
+lazy_static::lazy_static! {
+    static ref CAST_TABLE: HashMap<DataTypeName, Vec<CastSig>> = {
+        init_cast_table()
     };
 }
 
@@ -37,30 +54,79 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     funcs
 }
 
+fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
+    let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSig>>::new();
+    agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
+    funcs
+}
+
+/// Build a cast map from return types to viable cast-signatures.
+/// TODO: Generate implicit casts.
+/// NOTE: We avoid cast from varchar to other datatypes apart from itself.
+/// This is because arbitrary strings may not be able to cast,
+/// creating large number of invalid queries.
+fn init_cast_table() -> HashMap<DataTypeName, Vec<CastSig>> {
+    let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
+    cast_sigs()
+        .filter(|cast| cast.context == CastContext::Explicit)
+        .filter(|cast| {
+            cast.from_type != DataTypeName::Varchar || cast.to_type == DataTypeName::Varchar
+        })
+        .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
+    casts
+}
+
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
+    /// In generating expression, there are two execution modes:
+    /// 1) Can have Aggregate expressions (`can_agg` = true)
+    ///    We can have aggregate of all bound columns (those present in GROUP BY and otherwise).
+    ///    Not all GROUP BY columns need to be aggregated.
+    /// 2) Can't have Aggregate expressions (`can_agg` = false)
+    ///    Only columns present in GROUP BY can be selected.
+    ///
+    /// `inside_agg` indicates if we are calling `gen_expr` inside an aggregate.
+    pub(crate) fn gen_expr(&mut self, typ: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
                 true => self.gen_simple_scalar(typ),
-                false => self.gen_col(typ),
+                false => self.gen_col(typ, inside_agg),
             };
         }
-        match self.rng.gen_range(0..=99) {
-            0..=99 => self.gen_func(typ),
+
+        if !can_agg {
+            assert!(!inside_agg);
+        }
+
+        let range = if can_agg & !inside_agg { 99 } else { 90 };
+
+        match self.rng.gen_range(0..=range) {
+            0..=80 => self.gen_func(typ, can_agg, inside_agg),
+            81..=90 => self.gen_cast(typ, can_agg, inside_agg),
+            91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
             _ => unreachable!(),
         }
     }
 
-    fn gen_col(&mut self, typ: DataTypeName) -> Expr {
-        if self.bound_relations.is_empty() {
-            return self.gen_simple_scalar(typ);
-        }
-        let rel = self.bound_relations.choose(&mut self.rng).unwrap();
-        let matched_cols = rel
-            .columns
+    fn gen_col(&mut self, typ: DataTypeName, inside_agg: bool) -> Expr {
+        let columns = if inside_agg {
+            if self.bound_relations.is_empty() {
+                return self.gen_simple_scalar(typ);
+            }
+            self.bound_relations
+                .choose(self.rng)
+                .unwrap()
+                .get_qualified_columns()
+        } else {
+            if self.bound_columns.is_empty() {
+                return self.gen_simple_scalar(typ);
+            }
+            self.bound_columns.clone()
+        };
+
+        let matched_cols = columns
             .iter()
             .filter(|col| col.data_type == typ)
             .collect::<Vec<_>>();
@@ -68,17 +134,42 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new(format!("{}.{}", rel.name, col_def.name)))
+            Expr::Identifier(Ident::new(&col_def.name))
         }
     }
 
-    fn gen_func(&mut self, ret: DataTypeName) -> Expr {
+    fn gen_cast(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
+        self.gen_cast_inner(ret, can_agg, inside_agg)
+            .unwrap_or_else(|| self.gen_simple_scalar(ret))
+    }
+
+    /// Generate casts from a cast map.
+    fn gen_cast_inner(
+        &mut self,
+        ret: DataTypeName,
+        can_agg: bool,
+        inside_agg: bool,
+    ) -> Option<Expr> {
+        let casts = CAST_TABLE.get(&ret)?;
+        let cast_sig = casts.choose(&mut self.rng).unwrap();
+        let expr = self
+            .gen_expr(cast_sig.from_type, can_agg, inside_agg)
+            .into();
+        let data_type = data_type_name_to_ast_data_type(cast_sig.to_type)?;
+        Some(Expr::Cast { expr, data_type })
+    }
+
+    fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         let funcs = match FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
-        let exprs: Vec<Expr> = func.inputs_type.iter().map(|t| self.gen_expr(*t)).collect();
+        let exprs: Vec<Expr> = func
+            .inputs_type
+            .iter()
+            .map(|t| self.gen_expr(*t, can_agg, inside_agg))
+            .collect();
         let expr = if exprs.len() == 1 {
             make_unary_op(func.func, &exprs[0])
         } else if exprs.len() == 2 {
@@ -88,6 +179,55 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
+    }
+
+    fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
+        // TODO: workaround for <https://github.com/singularity-data/risingwave/issues/4508>
+        if ret == DataTypeName::Interval {
+            return self.gen_simple_scalar(ret);
+        }
+        let funcs = match AGG_FUNC_TABLE.get(&ret) {
+            None => return self.gen_simple_scalar(ret),
+            Some(funcs) => funcs,
+        };
+        let func = funcs.choose(&mut self.rng).unwrap();
+
+        // Common sense that the aggregation is allowed in the overall expression
+        let can_agg = true;
+        // show then the expression inside this function is in aggregate function
+        let inside_agg = true;
+        let expr: Vec<Expr> = func
+            .inputs_type
+            .iter()
+            .map(|t| self.gen_expr(*t, can_agg, inside_agg))
+            .collect();
+        assert!(expr.len() == 1);
+
+        let distinct = self.flip_coin() && self.is_distinct_allowed;
+        self.make_agg_expr(func.func.clone(), expr[0].clone(), distinct)
+    }
+
+    fn make_agg_expr(&mut self, func: AggKind, expr: Expr, distinct: bool) -> Expr {
+        use AggKind as A;
+
+        match func {
+            A::Sum => Expr::Function(make_agg_func("sum", &[expr], distinct)),
+            A::Min => Expr::Function(make_agg_func("min", &[expr], distinct)),
+            A::Max => Expr::Function(make_agg_func("max", &[expr], distinct)),
+            A::Count => Expr::Function(make_agg_func("count", &[expr], distinct)),
+            A::Avg => Expr::Function(make_agg_func("avg", &[expr], distinct)),
+            // TODO: Tracked by: <https://github.com/singularity-data/risingwave/issues/3115>
+            // A::StringAgg => Expr::Function(make_agg_func("string_agg", &[expr], distinct)),
+            A::StringAgg => self.gen_simple_scalar(DataTypeName::Varchar),
+            A::SingleValue => Expr::Function(make_agg_func("single_value", &[expr], false)),
+            A::ApproxCountDistinct => {
+                if distinct {
+                    self.gen_simple_scalar(DataTypeName::Int64)
+                } else {
+                    Expr::Function(make_agg_func("approx_count_distinct", &[expr], false))
+                }
+            }
+        }
     }
 }
 
@@ -116,17 +256,17 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotTrue => Some(Expr::IsNotTrue(Box::new(exprs[0].clone()))),
         E::IsFalse => Some(Expr::IsFalse(Box::new(exprs[0].clone()))),
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
-        E::Position => Some(Expr::Function(make_func("position", &exprs))),
-        E::RoundDigit => Some(Expr::Function(make_func("round", &exprs))),
-        E::Repeat => Some(Expr::Function(make_func("repeat", &exprs))),
-        E::CharLength => Some(Expr::Function(make_func("char_length", &exprs))),
-        E::Substr => Some(Expr::Function(make_func("substr", &exprs))),
-        E::Length => Some(Expr::Function(make_func("length", &exprs))),
-        E::Upper => Some(Expr::Function(make_func("upper", &exprs))),
-        E::Lower => Some(Expr::Function(make_func("lower", &exprs))),
-        E::Replace => Some(Expr::Function(make_func("replace", &exprs))),
-        E::Md5 => Some(Expr::Function(make_func("md5", &exprs))),
-        E::ToChar => Some(Expr::Function(make_func("to_char", &exprs))),
+        E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
+        E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
+        E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
+        E::CharLength => Some(Expr::Function(make_simple_func("char_length", &exprs))),
+        E::Substr => Some(Expr::Function(make_simple_func("substr", &exprs))),
+        E::Length => Some(Expr::Function(make_simple_func("length", &exprs))),
+        E::Upper => Some(Expr::Function(make_simple_func("upper", &exprs))),
+        E::Lower => Some(Expr::Function(make_simple_func("lower", &exprs))),
+        E::Replace => Some(Expr::Function(make_simple_func("replace", &exprs))),
+        E::Md5 => Some(Expr::Function(make_simple_func("md5", &exprs))),
+        E::ToChar => Some(Expr::Function(make_simple_func("to_char", &exprs))),
         E::Overlay => Some(make_overlay(exprs)),
         _ => None,
     }
@@ -170,11 +310,35 @@ fn make_overlay(exprs: Vec<Expr>) -> Expr {
     }
 }
 
-fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
+/// Generates simple functions such as `length`, `round`, `to_char`. These operate on datums instead
+/// of columns / rows.
+fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
         .collect();
+
+    Function {
+        name: ObjectName(vec![Ident::new(func_name)]),
+        args,
+        over: None,
+        distinct: false,
+        order_by: vec![],
+        filter: None,
+    }
+}
+
+/// This is the function that generate aggregate function.
+/// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
+/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/singularity-data/risingwave/issues/3933>
+fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
+    let args = exprs
+        .iter()
+        .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
+        .collect();
+
+    // Distinct Aggregate shall be workaround until the following issue is resolved
+    // https://github.com/singularity-data/risingwave/issues/4220
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
@@ -221,7 +385,7 @@ pub(crate) fn sql_null() -> Expr {
 }
 
 pub fn print_function_table() -> String {
-    func_sigs()
+    let func_str = func_sigs()
         .map(|sign| {
             format!(
                 "{:?}({}) -> {:?}",
@@ -233,5 +397,43 @@ pub fn print_function_table() -> String {
                 sign.ret_type,
             )
         })
-        .join("\n")
+        .join("\n");
+
+    let agg_func_str = agg_func_sigs()
+        .map(|sign| {
+            format!(
+                "{:?}({}) -> {:?}",
+                sign.func,
+                sign.inputs_type
+                    .iter()
+                    .map(|arg| format!("{:?}", arg))
+                    .join(", "),
+                sign.ret_type,
+            )
+        })
+        .join("\n");
+
+    let cast_str = cast_sigs()
+        .map(|sig| {
+            format!(
+                "{:?} CAST {:?} -> {:?}",
+                sig.context, sig.to_type, sig.from_type,
+            )
+        })
+        .sorted()
+        .join("\n");
+
+    format!(
+        "
+==== FUNCTION SIGNATURES
+{}
+
+==== AGGREGATE FUNCTION SIGNATURES
+{}
+
+==== CAST SIGNATURES
+{}
+",
+        func_str, agg_func_str, cast_str
+    )
 }

@@ -12,28 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName, SqlOption};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use super::create_source::make_prost_source;
-use super::util::handle_with_properties;
-use crate::binder::expr::{bind_data_type, bind_struct_field};
+use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::StreamFragmenterV2;
 
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
@@ -45,8 +43,32 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         column_descs.push(row_id_column_desc());
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
-            check_valid_column_name(&column.name.value)?;
-            let field_descs = if let AstDataType::Struct(fields) = &column.data_type {
+            // Destruct to make sure all fields are properly handled rather than ignored.
+            // Do NOT use `..` to ignore fields you do not want to deal with.
+            // Reject them with a clear NotImplemented error.
+            let ColumnDef {
+                name,
+                data_type,
+                collation,
+                options,
+            } = column;
+            if let Some(collation) = collation {
+                return Err(ErrorCode::NotImplemented(
+                    format!("collation \"{}\"", collation),
+                    None.into(),
+                )
+                .into());
+            }
+            if !options.is_empty() {
+                let s = options.iter().map(ToString::to_string).join(" ");
+                return Err(ErrorCode::NotImplemented(
+                    format!("column constraints \"{}\"", s),
+                    None.into(),
+                )
+                .into());
+            }
+            check_valid_column_name(&name.real_value())?;
+            let field_descs = if let AstDataType::Struct(fields) = &data_type {
                 fields
                     .iter()
                     .map(bind_struct_field)
@@ -55,9 +77,9 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
                 vec![]
             };
             column_descs.push(ColumnDesc {
-                data_type: bind_data_type(&column.data_type)?,
+                data_type: bind_data_type(&data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
-                name: column.name.value,
+                name: name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
             });
@@ -81,22 +103,16 @@ pub(crate) fn gen_create_table_plan(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
-    properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
             columns: bind_sql_columns(columns)?,
-            properties: properties.clone(),
+            properties: context.inner().with_properties.clone(),
         }),
     )?;
-    let (plan, table) = gen_materialized_source_plan(
-        context,
-        source.clone(),
-        session.user_name().to_string(),
-        properties,
-    )?;
+    let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;
     Ok((plan, source, table))
 }
 
@@ -105,8 +121,7 @@ pub(crate) fn gen_create_table_plan(
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
-    owner: String,
-    properties: HashMap<String, String>,
+    owner: u32,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
@@ -131,7 +146,6 @@ pub(crate) fn gen_materialized_source_plan(
         .table()
         .to_prost(source.schema_id, source.database_id);
     table.owner = owner;
-    table.properties = properties;
     Ok((materialize.into(), table))
 }
 
@@ -139,20 +153,13 @@ pub async fn handle_create_table(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
-    with_options: Vec<SqlOption>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {
-        let (plan, source, table) = gen_create_table_plan(
-            &session,
-            context.into(),
-            table_name.clone(),
-            columns,
-            handle_with_properties("create_table", with_options)?,
-        )?;
-        let plan = plan.to_stream_prost();
-        let graph = StreamFragmenter::build_graph(plan);
+        let (plan, source, table) =
+            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let graph = StreamFragmenterV2::build_graph(plan);
 
         (graph, source, table)
     };
@@ -184,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with ('appendonly' = true);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with (appendonly = true);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 

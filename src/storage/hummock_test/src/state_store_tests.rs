@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::executor::block_on;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -103,7 +102,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -116,7 +115,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -131,7 +130,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -158,7 +157,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -186,7 +185,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -200,7 +199,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -210,11 +209,12 @@ async fn test_basic() {
     // Write aa bb
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -229,7 +229,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -244,7 +244,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -254,11 +254,12 @@ async fn test_basic() {
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -269,11 +270,12 @@ async fn test_basic() {
     // Delete aa, write dd,ee
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -297,7 +299,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -310,7 +312,7 @@ async fn test_basic() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -518,7 +520,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -533,7 +535,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -560,7 +562,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -571,11 +573,12 @@ async fn test_reload_storage() {
     // Write aa bb
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -590,7 +593,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -605,7 +608,7 @@ async fn test_reload_storage() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -615,11 +618,12 @@ async fn test_reload_storage() {
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(
+            None,
             ..=b"ee".to_vec(),
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             },
         )
         .await
@@ -659,69 +663,81 @@ async fn test_write_anytime() {
     let epoch1 = initial_epoch + 1;
 
     let assert_old_value = |epoch| {
-        // check point get
-        assert_eq!(
-            "111".as_bytes(),
-            block_on(hummock_storage.get(
-                "aa".as_bytes(),
-                ReadOptions {
-                    epoch,
-                    table_id: Default::default(),
-                    ttl: None,
-                }
-            ))
-            .unwrap()
-            .unwrap()
-        );
-        assert_eq!(
-            "222".as_bytes(),
-            block_on(hummock_storage.get(
-                "bb".as_bytes(),
-                ReadOptions {
-                    epoch,
-                    table_id: Default::default(),
-                    ttl: None,
-                }
-            ))
-            .unwrap()
-            .unwrap()
-        );
-        assert_eq!(
-            "333".as_bytes(),
-            block_on(hummock_storage.get(
-                "cc".as_bytes(),
-                ReadOptions {
-                    epoch,
-                    table_id: Default::default(),
-                    ttl: None,
-                }
-            ))
-            .unwrap()
-            .unwrap()
-        );
-        // check iter
-        let mut iter = block_on(hummock_storage.iter(
-            "aa".as_bytes()..="cc".as_bytes(),
-            ReadOptions {
-                epoch,
-                table_id: Default::default(),
-                ttl: None,
-            },
-        ))
-        .unwrap();
-        assert_eq!(
-            (Bytes::from("aa"), Bytes::from("111")),
-            block_on(iter.next()).unwrap().unwrap()
-        );
-        assert_eq!(
-            (Bytes::from("bb"), Bytes::from("222")),
-            block_on(iter.next()).unwrap().unwrap()
-        );
-        assert_eq!(
-            (Bytes::from("cc"), Bytes::from("333")),
-            block_on(iter.next()).unwrap().unwrap()
-        );
-        assert!(block_on(iter.next()).unwrap().is_none());
+        let hummock_storage = hummock_storage.clone();
+        async move {
+            // check point get
+            assert_eq!(
+                "111".as_bytes(),
+                hummock_storage
+                    .get(
+                        "aa".as_bytes(),
+                        ReadOptions {
+                            epoch,
+                            table_id: Default::default(),
+                            retention_seconds: None,
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap()
+            );
+            assert_eq!(
+                "222".as_bytes(),
+                hummock_storage
+                    .get(
+                        "bb".as_bytes(),
+                        ReadOptions {
+                            epoch,
+                            table_id: Default::default(),
+                            retention_seconds: None,
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap()
+            );
+            assert_eq!(
+                "333".as_bytes(),
+                hummock_storage
+                    .get(
+                        "cc".as_bytes(),
+                        ReadOptions {
+                            epoch,
+                            table_id: Default::default(),
+                            retention_seconds: None,
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap()
+            );
+            // check iter
+            let mut iter = hummock_storage
+                .iter(
+                    None,
+                    "aa".as_bytes()..="cc".as_bytes(),
+                    ReadOptions {
+                        epoch,
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                (Bytes::from("aa"), Bytes::from("111")),
+                iter.next().await.unwrap().unwrap()
+            );
+            assert_eq!(
+                (Bytes::from("bb"), Bytes::from("222")),
+                iter.next().await.unwrap().unwrap()
+            );
+            assert_eq!(
+                (Bytes::from("cc"), Bytes::from("333")),
+                iter.next().await.unwrap().unwrap()
+            );
+            assert!(iter.next().await.unwrap().is_none());
+        }
     };
 
     let batch1 = vec![
@@ -740,64 +756,76 @@ async fn test_write_anytime() {
         )
         .await
         .unwrap();
-    assert_old_value(epoch1);
+    assert_old_value(epoch1).await;
 
     let assert_new_value = |epoch| {
-        // check point get
-        assert_eq!(
-            "111_new".as_bytes(),
-            block_on(hummock_storage.get(
-                "aa".as_bytes(),
-                ReadOptions {
-                    epoch,
-                    table_id: Default::default(),
-                    ttl: None,
-                }
-            ))
-            .unwrap()
-            .unwrap()
-        );
-        assert!(block_on(hummock_storage.get(
-            "bb".as_bytes(),
-            ReadOptions {
-                epoch,
-                table_id: Default::default(),
-                ttl: None,
-            }
-        ))
-        .unwrap()
-        .is_none());
-        assert_eq!(
-            "333".as_bytes(),
-            block_on(hummock_storage.get(
-                "cc".as_bytes(),
-                ReadOptions {
-                    epoch,
-                    table_id: Default::default(),
-                    ttl: None,
-                }
-            ))
-            .unwrap()
-            .unwrap()
-        );
-        let mut iter = block_on(hummock_storage.iter(
-            "aa".as_bytes()..="cc".as_bytes(),
-            ReadOptions {
-                epoch,
-                table_id: Default::default(),
-                ttl: None,
-            },
-        ))
-        .unwrap();
-        assert_eq!(
-            (Bytes::from("aa"), Bytes::from("111_new")),
-            block_on(iter.next()).unwrap().unwrap()
-        );
-        assert_eq!(
-            (Bytes::from("cc"), Bytes::from("333")),
-            block_on(iter.next()).unwrap().unwrap()
-        );
-        assert!(block_on(iter.next()).unwrap().is_none());
+        let hummock_storage = hummock_storage.clone();
+        async move {
+            // check point get
+            assert_eq!(
+                "111_new".as_bytes(),
+                hummock_storage
+                    .get(
+                        "aa".as_bytes(),
+                        ReadOptions {
+                            epoch,
+                            table_id: Default::default(),
+                            retention_seconds: None,
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap()
+            );
+            assert!(hummock_storage
+                .get(
+                    "bb".as_bytes(),
+                    ReadOptions {
+                        epoch,
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                    }
+                )
+                .await
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                "333".as_bytes(),
+                hummock_storage
+                    .get(
+                        "cc".as_bytes(),
+                        ReadOptions {
+                            epoch,
+                            table_id: Default::default(),
+                            retention_seconds: None,
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap()
+            );
+            let mut iter = hummock_storage
+                .iter(
+                    None,
+                    "aa".as_bytes()..="cc".as_bytes(),
+                    ReadOptions {
+                        epoch,
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                    },
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                (Bytes::from("aa"), Bytes::from("111_new")),
+                iter.next().await.unwrap().unwrap()
+            );
+            assert_eq!(
+                (Bytes::from("cc"), Bytes::from("333")),
+                iter.next().await.unwrap().unwrap()
+            );
+            assert!(iter.next().await.unwrap().is_none());
+        }
     };
 
     // Update aa, delete bb, cc unchanged
@@ -817,7 +845,7 @@ async fn test_write_anytime() {
         .await
         .unwrap();
 
-    assert_new_value(epoch1);
+    assert_new_value(epoch1).await;
 
     let epoch2 = epoch1 + 1;
 
@@ -833,17 +861,17 @@ async fn test_write_anytime() {
         .await
         .unwrap();
     // Assert epoch 1 unchanged
-    assert_new_value(epoch1);
+    assert_new_value(epoch1).await;
     // Assert epoch 2 correctness
-    assert_old_value(epoch2);
+    assert_old_value(epoch2).await;
 
     hummock_storage.sync(Some(epoch1)).await.unwrap();
-    assert_new_value(epoch1);
-    assert_old_value(epoch2);
+    assert_new_value(epoch1).await;
+    assert_old_value(epoch2).await;
 
     hummock_storage.sync(Some(epoch2)).await.unwrap();
-    assert_new_value(epoch1);
-    assert_old_value(epoch2);
+    assert_new_value(epoch1).await;
+    assert_old_value(epoch2).await;
 
     assert!(!hummock_storage.get_uncommitted_ssts(epoch1).is_empty());
     assert!(!hummock_storage.get_uncommitted_ssts(epoch2).is_empty());
@@ -922,7 +950,7 @@ async fn test_delete_get() {
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
-                ttl: None,
+                retention_seconds: None,
             }
         )
         .await

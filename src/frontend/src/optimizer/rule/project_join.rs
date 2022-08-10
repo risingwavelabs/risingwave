@@ -13,12 +13,26 @@
 // limitations under the License.
 
 use super::super::plan_node::*;
-use super::Rule;
-struct ProjectJoinRule {}
+use super::{BoxedRule, Rule};
+pub struct ProjectJoinRule {}
+
+impl ProjectJoinRule {
+    pub fn create() -> BoxedRule {
+        Box::new(Self {})
+    }
+}
+
 impl Rule for ProjectJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
-        let _join = project.input().clone().as_logical_join()?;
-        todo!()
+        let input = project.input();
+        let join = input.as_logical_join()?;
+        let outer_output_indices = project.try_as_projection()?;
+        let inner_output_indices = join.output_indices();
+        let output_indices: Vec<usize> = outer_output_indices
+            .into_iter()
+            .map(|i| inner_output_indices[i])
+            .collect();
+        Some(join.clone_with_output_indices(output_indices).into())
     }
 }

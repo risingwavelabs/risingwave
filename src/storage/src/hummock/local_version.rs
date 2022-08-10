@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::lock_api::ArcRwLockReadGuard;
-use parking_lot::{RawRwLock, RwLock};
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
@@ -28,8 +27,9 @@ use super::shared_buffer::SharedBuffer;
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
-    shared_buffer: BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>>,
+    shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: Arc<PinnedVersion>,
+    pub version_ids_in_use: BTreeSet<HummockVersionId>,
 }
 
 impl LocalVersion {
@@ -37,9 +37,12 @@ impl LocalVersion {
         version: HummockVersion,
         unpin_worker_tx: UnboundedSender<HummockVersionId>,
     ) -> Self {
+        let mut version_ids_in_use = BTreeSet::new();
+        version_ids_in_use.insert(version.id);
         Self {
             shared_buffer: BTreeMap::default(),
             pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
+            version_ids_in_use,
         }
     }
 
@@ -47,39 +50,59 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn get_shared_buffer(&self, epoch: HummockEpoch) -> Option<&Arc<RwLock<SharedBuffer>>> {
+    pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
+        self.shared_buffer.get_mut(&epoch)
+    }
+
+    pub fn get_shared_buffer(&self, epoch: HummockEpoch) -> Option<&SharedBuffer> {
         self.shared_buffer.get(&epoch)
     }
 
-    pub fn iter_shared_buffer(
-        &self,
-    ) -> impl Iterator<Item = (&HummockEpoch, &Arc<RwLock<SharedBuffer>>)> {
+    pub fn iter_shared_buffer(&self) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)> {
         self.shared_buffer.iter()
+    }
+
+    pub fn iter_mut_shared_buffer(
+        &mut self,
+    ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)> {
+        self.shared_buffer.iter_mut()
     }
 
     pub fn new_shared_buffer(
         &mut self,
         epoch: HummockEpoch,
         global_upload_task_size: Arc<AtomicUsize>,
-    ) -> Arc<RwLock<SharedBuffer>> {
+    ) -> &mut SharedBuffer {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::new(global_upload_task_size))))
-            .clone()
+            .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
-    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
+    /// Returns epochs cleaned from shared buffer.
+    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) -> Vec<HummockEpoch> {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
+        let mut cleaned_epoch = vec![];
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
+            cleaned_epoch.append(
+                &mut self
+                    .shared_buffer
+                    .keys()
+                    .filter(|e| **e <= new_pinned_version.max_committed_epoch)
+                    .cloned()
+                    .collect_vec(),
+            );
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
         }
+
+        self.version_ids_in_use.insert(new_pinned_version.id);
 
         // update pinned version
         self.pinned_version = Arc::new(PinnedVersion {
             version: new_pinned_version,
             unpin_worker_tx: self.pinned_version.unpin_worker_tx.clone(),
         });
+        cleaned_epoch
     }
 
     pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
@@ -107,13 +130,15 @@ impl LocalVersion {
         };
 
         ReadVersion {
-            shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
+            shared_buffer: shared_buffer.into_iter().collect(),
             pinned_version,
         }
     }
 
-    pub fn clear_shared_buffer(&mut self) {
+    pub fn clear_shared_buffer(&mut self) -> Vec<HummockEpoch> {
+        let cleaned_epochs = self.shared_buffer.keys().cloned().collect_vec();
         self.shared_buffer.clear();
+        cleaned_epochs
     }
 }
 
@@ -147,11 +172,15 @@ impl PinnedVersion {
     pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {
         match compaction_group_id {
             None => self.version.get_combined_levels(),
-            Some(compaction_group_id) => self
-                .version
-                .get_compaction_group_levels(compaction_group_id)
-                .iter()
-                .collect_vec(),
+            Some(compaction_group_id) => {
+                let levels = self
+                    .version
+                    .get_compaction_group_levels(compaction_group_id);
+                let mut ret = vec![];
+                ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
+                ret.extend(levels.levels.iter());
+                ret
+            }
         }
     }
 
@@ -163,7 +192,7 @@ impl PinnedVersion {
         self.version.safe_epoch
     }
 
-    #[cfg(any(test, feature = "test"))]
+    /// ret value can't be used as `HummockVersion`. it must be modified with delta
     pub fn version(&self) -> HummockVersion {
         self.version.clone()
     }
@@ -171,6 +200,6 @@ impl PinnedVersion {
 
 pub struct ReadVersion {
     /// The shared buffer is sorted by epoch descendingly
-    pub shared_buffer: Vec<ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
+    pub shared_buffer: Vec<SharedBuffer>,
     pub pinned_version: Arc<PinnedVersion>,
 }

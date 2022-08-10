@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::{Future, TryFutureExt};
 use itertools::Itertools;
@@ -29,6 +30,7 @@ use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use tokio::task;
+use tracing::warn;
 
 use super::{Sink, SinkError};
 use crate::sink::Result;
@@ -48,8 +50,7 @@ pub struct KafkaConfig {
     // partition number. The partition number should set by meta.
     pub partition: Option<i32>,
 
-    #[serde(rename = "sink.type")]
-    pub sink_type: String, // accept "append_only" or "debezium"
+    pub format: String, // accept "append_only" or "debezium"
 
     pub identifier: String,
 
@@ -66,10 +67,10 @@ impl KafkaConfig {
         let identifier = values
             .get("identifier")
             .expect("kafka.identifier must be set");
-        let sink_type = values.get("sink.type").expect("sink.type must be set");
-        if sink_type != "append_only" && sink_type != "debezium" {
+        let format = values.get("format").expect("format must be set");
+        if format != "append_only" && format != "debezium" {
             return Err(SinkError::Config(
-                "sink.type must be set to \"append_only\" or \"debezium\"".to_string(),
+                "format must be set to \"append_only\" or \"debezium\"".to_string(),
             ));
         }
 
@@ -83,25 +84,32 @@ impl KafkaConfig {
             timeout: Duration::from_secs(5), // default timeout is 5 seconds
             max_retry_num: 3,                // default max retry num is 3
             retry_interval: Duration::from_millis(100), // default retry interval is 100ms
-            sink_type: sink_type.to_string(),
+            format: format.to_string(),
         })
     }
+}
+
+#[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
+enum KafkaSinkState {
+    Init,
+    // State running with epoch.
+    Running(u64),
 }
 
 pub struct KafkaSink {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
-    latest_success_epoch: u64,
+    state: KafkaSinkState,
     in_transaction_epoch: Option<u64>,
 }
 
 impl KafkaSink {
-    pub async fn new(config: KafkaConfig) -> Result<Self> {
+    pub fn new(config: KafkaConfig) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config).await?,
+            conductor: KafkaTransactionConductor::new(config)?,
             in_transaction_epoch: None,
-            latest_success_epoch: 0,
+            state: KafkaSinkState::Init,
         })
     }
 
@@ -167,6 +175,64 @@ impl KafkaSink {
         )
     }
 
+    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts_ms: u64) -> Result<()> {
+        let mut update_cache: Option<Map<String, Value>> = None;
+        for (op, row) in chunk.rows() {
+            let event_object = match op {
+                Op::Insert => Some(json!({
+                    "schema": schema_to_json(schema),
+                    "payload": {
+                        "before": null,
+                        "after": record_to_json(row.clone(), schema.fields.clone())?,
+                        "op": "c",
+                        "ts_ms": ts_ms,
+                    }
+                })),
+                Op::Delete => Some(json!({
+                    "schema": schema_to_json(schema),
+                    "payload": {
+                        "before": record_to_json(row.clone(), schema.fields.clone())?,
+                        "after": null,
+                        "op": "d",
+                        "ts_ms": ts_ms,
+                    }
+                })),
+                Op::UpdateDelete => {
+                    update_cache = Some(record_to_json(row.clone(), schema.fields.clone())?);
+                    continue;
+                }
+                Op::UpdateInsert => {
+                    if let Some(before) = update_cache.take() {
+                        Some(json!({
+                            "schema": schema_to_json(schema),
+                            "payload": {
+                                "before": before,
+                                "after": record_to_json(row.clone(), schema.fields.clone())?,
+                                "op": "u",
+                                "ts_ms": ts_ms,
+                            }
+                        }))
+                    } else {
+                        warn!(
+                            "not found UpdateDelete in prev row, skipping, row_id {:?}",
+                            row.index()
+                        );
+                        continue;
+                    }
+                }
+            };
+            if let Some(obj) = event_object {
+                self.send(
+                    BaseRecord::to(self.config.topic.as_str())
+                        .key(self.gen_message_key().as_bytes())
+                        .payload(obj.to_string().as_bytes()),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn append_only(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
@@ -187,15 +253,26 @@ impl KafkaSink {
 impl Sink for KafkaSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        if self.in_transaction_epoch.unwrap() <= self.latest_success_epoch {
-            return Ok(());
-        }
-        if self.config.sink_type.as_str() == "append_only" {
-            self.append_only(chunk, schema).await
-        } else if self.config.sink_type.as_str() == "debezium" {
-            todo!()
-        } else {
-            unreachable!()
+        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
+        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
+        // }
+
+        println!("sink chunk {:?}", chunk);
+
+        match self.config.format.as_str() {
+            "append_only" => self.append_only(chunk, schema).await,
+            "debezium" => {
+                self.debezium_update(
+                    chunk,
+                    schema,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                )
+                .await
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -203,10 +280,11 @@ impl Sink for KafkaSink {
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
-        if self.latest_success_epoch == 0 {
+        if self.state == KafkaSinkState::Init {
             self.do_with_retry(|conductor| conductor.init_transaction())
                 .await
                 .map_err(SinkError::Kafka)?;
+            tracing::debug!("init transaction");
         }
 
         self.do_with_retry(|conductor| conductor.start_transaction())
@@ -225,21 +303,31 @@ impl Sink for KafkaSink {
             .await
             .map_err(SinkError::Kafka)?;
         if let Some(epoch) = self.in_transaction_epoch.take() {
-            self.latest_success_epoch = epoch;
+            self.state = KafkaSinkState::Running(epoch);
         } else {
             tracing::error!(
                 "commit without begin_epoch, last success epoch {:?}",
-                self.latest_success_epoch
+                self.state
             );
             return Err(SinkError::Kafka(KafkaError::Canceled));
         }
+        tracing::debug!("commit epoch {:?}", self.state);
         Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
             .await
-            .map_err(SinkError::Kafka)
+            .map_err(SinkError::Kafka)?;
+        tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
+        self.in_transaction_epoch = None;
+        Ok(())
+    }
+}
+
+impl Debug for KafkaSink {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
+        unimplemented!();
     }
 }
 
@@ -331,6 +419,40 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
     Ok(records)
 }
 
+fn fields_to_json(fields: &[Field]) -> Value {
+    let mut res = Vec::new();
+    fields.iter().for_each(|field| {
+        res.push(json!({
+         "field": field.name,
+         "optional": true,
+         "type": field.type_name,
+        }))
+    });
+
+    json!(res)
+}
+
+fn schema_to_json(schema: &Schema) -> Value {
+    let mut schema_fields = Vec::new();
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "before",
+    }));
+    schema_fields.push(json!({
+        "type": "struct",
+        "fields": fields_to_json(&schema.fields),
+        "optional": true,
+        "field": "after",
+    }));
+    json!({
+        "type": "struct",
+        "fields": schema_fields,
+        "optional": false,
+    })
+}
+
 /// the struct conducts all transactions with Kafka
 #[derive(Clone)]
 pub struct KafkaTransactionConductor {
@@ -340,7 +462,7 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    async fn new(config: KafkaConfig) -> Result<Self> {
+    fn new(config: KafkaConfig) -> Result<Self> {
         let inner = ClientConfig::new()
             .set("bootstrap.servers", config.brokers.as_str())
             .set("message.timeout.ms", "5000")
@@ -390,6 +512,7 @@ impl KafkaTransactionConductor {
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
+    #[expect(clippy::unused_async)]
     async fn send<'a, K, P>(
         &'a self,
         record: BaseRecord<'a, K, P>,
@@ -429,12 +552,11 @@ mod test {
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
+        let mut sink = KafkaSink::new(kafka_config.clone()).unwrap();
 
-        for i in 1..4 {
+        for i in 0..10 {
             let mut fail_flag = false;
             sink.begin_epoch(i).await?;
-            println!("begin epoch success");
             for i in 0..100 {
                 match sink
                     .send(
@@ -456,8 +578,6 @@ mod test {
                 sink.commit().await?;
                 println!("commit success");
             }
-
-            // tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
         Ok(())
@@ -545,6 +665,8 @@ mod test {
         ]);
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
+        let schema_json = schema_to_json(&schema);
+        assert_eq!(schema_json.to_string(), "{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}");
         assert_eq!(
             json_chunk[0].as_str(),
             "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}"

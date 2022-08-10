@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
+use super::{
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery, TableFunction,
+};
 
 /// Traverse an expression tree.
 ///
@@ -31,6 +33,7 @@ pub trait ExprVisitor {
             ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
             ExprImpl::Subquery(inner) => self.visit_subquery(inner),
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
+            ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
@@ -49,4 +52,7 @@ pub trait ExprVisitor {
     fn visit_input_ref(&mut self, _: &InputRef) {}
     fn visit_subquery(&mut self, _: &Subquery) {}
     fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {}
+    fn visit_table_function(&mut self, func_call: &TableFunction) {
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr))
+    }
 }

@@ -15,16 +15,16 @@
 #![allow(clippy::mutable_key_type)]
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
 use std::ops::Index;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::error::StreamExecutorResult;
@@ -42,7 +42,7 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     /// Bottom-N Cache. We always try to first fill into the bottom-n cache.
     bottom_n: BTreeMap<OrderedRow, Row>,
     /// Relational table.
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
     /// The number of elements in both cache and storage.
     total_count: usize,
     /// Number of entries to retain in top-n cache after each flush.
@@ -75,7 +75,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = RowBasedStateTable::new_without_distribution(
             store.clone(),
             table_id,
             column_descs,
@@ -185,7 +185,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn insert(&mut self, key: OrderedRow, value: Row) {
+    pub fn insert(&mut self, key: OrderedRow, value: Row) {
         // We can have different strategy of which cache we should insert the element into.
         // Right now, we keep it simple and insert the element into the cache with smaller size,
         // without violating the constraint that these two caches' current range must NOT overlap.
@@ -367,9 +367,7 @@ mod tests {
             .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
 
-        managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone())
-            .await;
+        managed_state.insert(ordered_rows[3].clone(), rows[3].clone());
         // now ("ab", 4)
 
         assert_eq!(
@@ -383,9 +381,8 @@ mod tests {
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.get_cache_len(), 1);
 
-        managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone())
-            .await;
+        managed_state.insert(ordered_rows[2].clone(), rows[2].clone());
+
         // now ("abd", 3) -> ("ab", 4)
 
         assert_eq!(
@@ -399,9 +396,7 @@ mod tests {
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.get_cache_len(), 2);
 
-        managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone())
-            .await;
+        managed_state.insert(ordered_rows[1].clone(), rows[1].clone());
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
         let epoch: u64 = 0;
 
@@ -479,9 +474,8 @@ mod tests {
         managed_state.flush(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
-        managed_state
-            .insert(ordered_rows[0].clone(), rows[0].clone())
-            .await;
+        managed_state.insert(ordered_rows[0].clone(), rows[0].clone());
+
         // now ("abd", 3) -> ("abc", 2)
         assert_eq!(
             managed_state.top_element(),

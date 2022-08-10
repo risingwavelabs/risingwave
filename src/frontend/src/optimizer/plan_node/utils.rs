@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 
-use risingwave_common::catalog::{ColumnDesc, Field};
-use risingwave_common::types::DataType;
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -28,6 +29,7 @@ pub struct TableCatalogBuilder {
     column_names: HashMap<String, i32>,
     order_key: Vec<FieldOrder>,
     pk_indices: Vec<usize>,
+    properties: HashMap<String, String>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -38,9 +40,10 @@ impl TableCatalogBuilder {
         Self::default()
     }
 
-    /// Add a column from Field info.
-    pub fn add_column_desc_from_field(&mut self, order_type: Option<OrderType>, field: &Field) {
-        let column_id = self.cur_col_id();
+    /// Add a column from Field info, return the column index of the table
+    pub fn add_column(&mut self, field: &Field) -> usize {
+        let column_idx = self.columns.len();
+        let column_id = column_idx as i32;
         // Add column desc.
         let mut column_desc = ColumnDesc::from_field_with_column_id(field, column_id);
 
@@ -52,56 +55,11 @@ impl TableCatalogBuilder {
             // All columns in internal table are invisible to batch query.
             is_hidden: false,
         });
-
-        // Ordered column desc must be a pk.
-        if let Some(order) = order_type {
-            self.add_order_column(i32::from(column_desc.column_id) as usize, order);
-        }
-    }
-
-    /// Add a column from Field info. Should use `add_order_column` to build order keys.
-    /// Note that we should make sure `column_id` of columns and order keys index are 1-1 mapping
-    /// (e.g. in hash join)
-    pub fn add_column_desc_from_field_without_order_type(&mut self, field: &Field) {
-        let column_id = self.cur_col_id();
-        // Add column desc.
-        let mut column_desc = ColumnDesc::from_field_with_column_id(field, column_id);
-
-        // Avoid column name duplicate.
-        self.avoid_duplicate_col_name(&mut column_desc);
-
-        self.columns.push(ColumnCatalog {
-            column_desc: column_desc.clone(),
-            // All columns in internal table are invisible to batch query.
-            is_hidden: false,
-        });
-    }
-
-    /// Add a unnamed column.
-    pub fn add_unnamed_column(&mut self, order_type: Option<OrderType>, data_type: DataType) {
-        let column_id = self.cur_col_id();
-
-        // Add column desc.
-        let mut column_desc = ColumnDesc::unnamed(column_id.into(), data_type);
-
-        // Avoid column name duplicate.
-        self.avoid_duplicate_col_name(&mut column_desc);
-
-        self.columns.push(ColumnCatalog {
-            column_desc: column_desc.clone(),
-            // All columns in internal table are invisible to batch query.
-            is_hidden: false,
-        });
-
-        if let Some(order) = order_type {
-            self.add_order_column(i32::from(column_desc.column_id) as usize, order);
-        }
+        column_idx
     }
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
-    /// WARNING: This should only be called by user when building internal table of hash join (after
-    /// `add_column_desc_from_field_without_order_type`).
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
         self.pk_indices.push(index);
         self.order_key.push(FieldOrder {
@@ -111,6 +69,11 @@ impl TableCatalogBuilder {
                 OrderType::Descending => Direction::Desc,
             },
         });
+    }
+
+    /// Add `properties` for `TableCatalog`
+    pub fn add_properties(&mut self, properties: HashMap<String, String>) {
+        self.properties = properties;
     }
 
     /// Check the column name whether exist before. if true, record occurrence and change the name
@@ -137,14 +100,78 @@ impl TableCatalogBuilder {
             is_index_on: None,
             distribution_key,
             appendonly: append_only,
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
-            properties: HashMap::default(),
+            properties: self.properties,
+            read_pattern_prefix_column: 0,
         }
     }
 
-    /// Allocate column id for next column. Column id allocation is always start from 0.
-    pub fn cur_col_id(&self) -> i32 {
-        self.columns.len() as i32
+    /// Consume builder and create `TableCatalog` (for proto).
+    pub fn build_with_column_mapping(
+        self,
+        distribution_key: Vec<usize>,
+        append_only: bool,
+        column_mapping: &[usize],
+    ) -> TableCatalog {
+        // Transform indices to set for checking.
+        let input_dist_key_indices_set: HashSet<usize> =
+            HashSet::from_iter(distribution_key.iter().cloned());
+        let column_mapping_indices_set: HashSet<usize> =
+            HashSet::from_iter(column_mapping.iter().cloned());
+
+        // Only if all `distribution_key` is in `column_mapping`, we return transformed dist key
+        // indices, otherwise empty.
+        if !column_mapping_indices_set.is_superset(&input_dist_key_indices_set) {
+            return self.build(vec![], append_only);
+        }
+
+        // Transform `distribution_key` (based on input schema) to distribution indices on internal
+        // table columns via `column_mapping` (input col idx -> state table col idx).
+        let dist_indices_on_table_columns = distribution_key
+            .iter()
+            .map(|x| {
+                column_mapping
+                    .iter()
+                    .position(|col_idx| *col_idx == *x)
+                    .expect("Have checked that all input indices must be found")
+            })
+            .collect();
+
+        self.build(dist_indices_on_table_columns, append_only)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct IndicesDisplay<'a> {
+    pub indices: &'a [usize],
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Display for IndicesDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.indices
+                .iter()
+                .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
+                .collect_vec()
+                .join(", ")
+        )
+    }
+}
+
+impl fmt::Debug for IndicesDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.indices
+                .iter()
+                .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
+                .collect_vec()
+                .join(", ")
+        )
     }
 }

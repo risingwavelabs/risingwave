@@ -112,7 +112,6 @@ mod tests {
         // Values(1:I32)
         let plan = frontend
             .to_batch_plan("values(1)")
-            .await
             .unwrap()
             .to_batch_prost();
         assert_eq!(
@@ -137,7 +136,7 @@ mod tests {
                         is_nullable: true,
                         ..Default::default()
                     }),
-                    name: "".to_string(),
+                    name: "*VALUES*_0.column_0".to_string(),
                 }],
             })
         );

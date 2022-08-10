@@ -26,7 +26,6 @@
 #![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(map_try_insert)]
-#![feature(let_chains)]
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
@@ -39,25 +38,26 @@
 #![feature(lint_reasons)]
 
 #[macro_use]
-pub mod catalog;
-pub mod binder;
+mod catalog;
+pub use catalog::TableCatalog;
+mod binder;
+pub use binder::{bind_data_type, Binder};
 pub mod expr;
 pub mod handler;
-pub mod observer;
-pub mod optimizer;
-pub mod planner;
+mod observer;
+mod optimizer;
+pub use optimizer::PlanRef;
+mod planner;
+pub use planner::Planner;
 #[expect(dead_code)]
-pub mod scheduler;
+mod scheduler;
 pub mod session;
-pub mod stream_fragmenter;
-pub mod utils;
+mod stream_fragmenter;
+mod utils;
 extern crate log;
 mod meta_client;
 pub mod test_utils;
-extern crate core;
-extern crate risingwave_common;
-
-pub mod user;
+mod user;
 
 use std::ffi::OsString;
 use std::iter;

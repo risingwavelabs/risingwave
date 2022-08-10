@@ -34,12 +34,13 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+mod sstable_id_manager;
 mod utils;
-
+pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 
@@ -52,7 +53,7 @@ const VERSION: u32 = 1;
 
 /// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
-    pub id: HummockSSTableId,
+    pub id: HummockSstableId,
     pub meta: SstableMeta,
     pub blocks: Vec<Arc<Block>>,
 }
@@ -67,7 +68,7 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSSTableId, meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSstableId, meta: SstableMeta) -> Self {
         Self {
             id,
             meta,
@@ -76,14 +77,14 @@ impl Sstable {
     }
 
     pub fn new_with_data(
-        id: HummockSSTableId,
+        id: HummockSstableId,
         meta: SstableMeta,
         data: Bytes,
     ) -> HummockResult<Self> {
         let mut blocks = vec![];
         for block_meta in &meta.block_metas {
             let end_offset = (block_meta.offset + block_meta.len) as usize;
-            let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
+            let block = Block::decode(&data[block_meta.offset as usize..end_offset])?;
             blocks.push(Arc::new(block));
         }
         Ok(Self { id, meta, blocks })
@@ -112,8 +113,9 @@ impl Sstable {
     }
 
     #[inline]
-    pub fn encoded_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size() + self.blocks.iter().map(|block|block.data().len()).sum::<usize>()
+    pub fn estimate_size(&self) -> usize {
+        8 /* id */ + self.meta.encoded_size() +
+            self.blocks.iter().map(|block|block.len() + block.restart_point_len() * 4).sum::<usize>()
     }
 
     #[cfg(test)]
@@ -127,7 +129,6 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
-            unit_id: 0,
         }
     }
 }
@@ -272,6 +273,11 @@ impl SstableMeta {
             + 4 // version
             + 4 // magic
     }
+}
+
+#[derive(Default)]
+pub struct SstableIteratorReadOptions {
+    pub prefetch: bool,
 }
 
 #[cfg(test)]

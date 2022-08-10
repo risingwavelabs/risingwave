@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use rand::distributions::{Distribution as RandDistribution, Uniform};
+use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
-use crate::scheduler::SchedulerResult;
+use crate::scheduler::{SchedulerError, SchedulerResult};
 
 /// `WorkerNodeManager` manages live worker nodes.
 pub struct WorkerNodeManager {
@@ -67,32 +67,32 @@ impl WorkerNodeManager {
     /// Get a random worker node.
     pub fn next_random(&self) -> SchedulerResult<WorkerNode> {
         let current_nodes = self.worker_nodes.read().unwrap();
-        let mut rng = rand::thread_rng();
         if current_nodes.is_empty() {
             tracing::error!("No worker node available.");
-            bail!("No worker node available");
+            return Err(SchedulerError::EmptyWorkerNodes);
         }
 
-        let die = Uniform::from(0..current_nodes.len());
-        Ok(current_nodes.get(die.sample(&mut rng)).unwrap().clone())
+        Ok(current_nodes
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .clone())
     }
 
     pub fn worker_node_count(&self) -> usize {
         self.worker_nodes.read().unwrap().len()
     }
 
+    /// If parallel unit ids is empty, the scheduler may fail to schedule any task and stuck at
+    /// schedule next stage. If we do not return error in this case, needs more complex control
+    /// logic above. Report in this function makes the schedule root fail reason more clear.
     pub fn get_workers_by_parallel_unit_ids(
         &self,
         parallel_unit_ids: &[ParallelUnitId],
     ) -> SchedulerResult<Vec<WorkerNode>> {
-        let current_nodes = self.worker_nodes.read().unwrap();
-        let mut pu_to_worker: HashMap<ParallelUnitId, WorkerNode> = HashMap::new();
-        for node in &*current_nodes {
-            for pu in &node.parallel_units {
-                let res = pu_to_worker.insert(pu.id, node.clone());
-                assert!(res.is_none(), "duplicate parallel unit id");
-            }
+        if parallel_unit_ids.is_empty() {
+            return Err(SchedulerError::EmptyWorkerNodes);
         }
+        let pu_to_worker = get_pu_to_worker_mapping(&self.worker_nodes.read().unwrap());
 
         let mut workers = Vec::with_capacity(parallel_unit_ids.len());
         for parallel_unit_id in parallel_unit_ids {

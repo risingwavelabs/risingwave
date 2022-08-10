@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::tonic_err;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -22,15 +21,19 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{ClusterManagerRef, WorkerKey};
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
+use crate::error::meta_error_to_tonic;
+use crate::hummock::HummockManagerRef;
+use crate::manager::{CatalogManagerRef, ClusterManagerRef, MetaSrvEnv, Notification, WorkerKey};
 use crate::storage::MetaStore;
+use crate::stream::GlobalStreamManagerRef;
+
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
-    user_manager: UserInfoManagerRef<S>,
+    hummock_manager: HummockManagerRef<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -41,13 +44,15 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
-        user_manager: UserInfoManagerRef<S>,
+        hummock_manager: HummockManagerRef<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
     ) -> Self {
         Self {
             env,
             catalog_manager,
             cluster_manager,
-            user_manager,
+            hummock_manager,
+            stream_manager,
         }
     }
 }
@@ -65,55 +70,75 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let host_address = req.get_host().map_err(tonic_err)?.clone();
+        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
+        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        match worker_type {
-            WorkerType::ComputeNode => {
-                self.env
-                    .notification_manager()
-                    .insert_compute_sender(WorkerKey(host_address), tx)
-                    .await
-            }
-            WorkerType::Frontend => {
-                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-                let (database, schema, table, source) = catalog_guard.get_catalog().await?;
+        // let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
 
-                let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-                let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
 
-                let user_guard = self.user_manager.get_user_core_guard().await;
-                let users = user_guard
-                    .get_user_info()
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>();
+        let (database, schema, mut table, source, sink, index) =
+            catalog_guard.database.get_catalog().await?;
 
-                // Send the snapshot on subscription. After that we will send only updates.
-                let meta_snapshot = MetaSnapshot {
-                    nodes,
-                    database,
-                    schema,
-                    source,
+        let users = catalog_guard.user.list_users();
+
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+
+        let hummock_version = Some(self.hummock_manager.get_current_version().await);
+
+        let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
+
+        // Send the snapshot on subscription. After that we will send only updates.
+        let meta_snapshot = match worker_type {
+            WorkerType::Frontend => MetaSnapshot {
+                nodes,
+                database,
+                schema,
+                source,
+                sink,
+                table,
+                users,
+                hummock_version: None,
+                index,
+            },
+
+            WorkerType::Compactor => {
+                table.extend(processing_table_guard.values().cloned());
+
+                MetaSnapshot {
                     table,
-                    users,
-                };
-                tx.send(Ok(SubscribeResponse {
-                    status: None,
-                    operation: Operation::Snapshot as i32,
-                    info: Some(Info::Snapshot(meta_snapshot)),
-                    version: self.env.notification_manager().current_version().await,
-                }))
-                .unwrap();
-                self.env
-                    .notification_manager()
-                    .insert_frontend_sender(WorkerKey(host_address), tx)
-                    .await
+                    ..Default::default()
+                }
             }
+
+            WorkerType::ComputeNode => {
+                table.extend(processing_table_guard.values().cloned());
+
+                MetaSnapshot {
+                    table,
+                    hummock_version,
+                    ..Default::default()
+                }
+            }
+
             _ => unreachable!(),
         };
+
+        tx.send(Ok(SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as i32,
+            info: Some(Info::Snapshot(meta_snapshot)),
+            version: self.env.notification_manager().current_version().await,
+        }))
+        .unwrap();
+
+        self.env
+            .notification_manager()
+            .insert_sender(worker_type, WorkerKey(host_address), tx)
+            .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }

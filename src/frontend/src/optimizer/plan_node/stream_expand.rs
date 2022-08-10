@@ -33,7 +33,7 @@ impl StreamExpand {
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
             logical.schema().clone(),
-            logical.base.pk_indices.to_vec(),
+            logical.base.logical_pk.to_vec(),
             Distribution::SomeShard,
             logical.input().append_only(),
         );
@@ -47,11 +47,7 @@ impl StreamExpand {
 
 impl fmt::Display for StreamExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamExpand {{ column_subsets: {:?} }}",
-            self.logical.column_subsets()
-        )
+        self.logical.fmt_with_name(f, "StreamExpand")
     }
 }
 

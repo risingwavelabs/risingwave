@@ -14,7 +14,8 @@
 
 pub(crate) mod user_authentication;
 pub(crate) mod user_manager;
+pub mod user_privilege;
 pub(crate) mod user_service;
 
-pub type UserName = String;
+pub type UserId = u32;
 pub type UserInfoVersion = u64;

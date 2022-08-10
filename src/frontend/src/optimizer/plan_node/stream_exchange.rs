@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, DistributionDisplay};
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
@@ -31,7 +31,7 @@ pub struct StreamExchange {
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let ctx = input.ctx();
-        let pk_indices = input.pk_indices().to_vec();
+        let pk_indices = input.logical_pk().to_vec();
         // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
@@ -48,7 +48,16 @@ impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = f.debug_struct("StreamExchange");
         builder
-            .field("dist", &format_args!("{:?}", self.base.dist))
+            .field(
+                "dist",
+                &format_args!(
+                    "{:?}",
+                    DistributionDisplay {
+                        distribution: &self.base.dist,
+                        input_schema: self.input.schema()
+                    }
+                ),
+            )
             .finish()
     }
 }

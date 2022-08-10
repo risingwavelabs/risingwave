@@ -2,11 +2,11 @@ statement ok
 INSERT INTO person (
     id,
     name,
-    emailAddress,
-    creditCard,
+    email_address,
+    credit_card,
     city,
     state,
-    dateTime
+    date_time
 ) VALUES
 (1000, 'vicky noris', 'vzbhp@wxv.com', '4355 0142 3460 9324', 'boise', 'ca', '2015-07-15 00:00:00'),
 (1001, 'peter smith', 'lf@sas.com', '1932 7149 7430 9595', 'cheyenne', 'ca', '2015-07-15 00:00:00.005'),

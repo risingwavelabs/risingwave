@@ -21,15 +21,19 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[cfg_attr(coverage, no_coverage)]
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     use clap::StructOpt;
 
     let opts = risingwave_ctl::CliOpts::parse();
 
-    risingwave_rt::oneshot_common();
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-    // console_subscriber::init();a
 
-    risingwave_ctl::start(opts).await
+    // Note: Use a simple current thread runtime for ctl.
+    // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
+    // further investigation.
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(risingwave_ctl::start(opts))
 }
