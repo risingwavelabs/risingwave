@@ -25,14 +25,13 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
-use crate::cluster::{ClusterManager, ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::manager::{
     CompactionGroupManager, CompactionGroupManagerRef,
 };
 use crate::hummock::compaction_group::TableOption;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
-use crate::manager::MetaSrvEnv;
+use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
