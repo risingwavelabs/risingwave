@@ -29,6 +29,7 @@ use crate::hummock::HummockResult;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
+pub const DEFAULT_ENABLE_SST_STREAMING_UPLOAD: bool = false;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
@@ -44,6 +45,8 @@ pub struct SstableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
     /// Approximate bloom filter capacity.
     pub estimate_bloom_filter_capacity: usize,
+    /// Whether to enable streaming upload for sstable.
+    pub enable_sst_streaming_upload: bool,
 }
 
 impl From<&StorageConfig> for SstableBuilderOptions {
@@ -56,6 +59,7 @@ impl From<&StorageConfig> for SstableBuilderOptions {
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: capacity / DEFAULT_ENTRY_SIZE,
+            enable_sst_streaming_upload: options.enable_sst_streaming_upload,
         }
     }
 }
@@ -69,6 +73,7 @@ impl Default for SstableBuilderOptions {
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: DEFAULT_SSTABLE_SIZE / DEFAULT_ENTRY_SIZE,
+            enable_sst_streaming_upload: DEFAULT_ENABLE_SST_STREAMING_UPLOAD,
         }
     }
 }
@@ -260,6 +265,7 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
+            enable_sst_streaming_upload: false,
         };
 
         let b = SstableBuilder::new(0, default_sst_writer_from_opt(&opt), opt);
@@ -294,6 +300,7 @@ pub(super) mod tests {
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
+            enable_sst_streaming_upload: false,
         };
 
         // build remote table

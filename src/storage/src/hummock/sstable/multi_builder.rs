@@ -407,6 +407,7 @@ mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
+            enable_sst_streaming_upload: false,
         };
         test_inner(get_capacity_split_builder_for_batch_upload(opt.clone())).await;
         test_inner(get_capacity_split_builder_for_streaming_upload(opt.clone())).await;
