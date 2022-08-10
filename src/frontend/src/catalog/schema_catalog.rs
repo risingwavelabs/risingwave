@@ -185,6 +185,10 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    pub fn iter_sink(&self) -> impl Iterator<Item = &SinkCatalog> {
+        self.sink_by_name.iter().map(|(_, v)| v)
+    }
+
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
         self.system_table_by_name.iter().map(|(_, v)| v)
     }

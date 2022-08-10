@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
-use std::mem::size_of;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
@@ -71,7 +70,7 @@ impl TieredCacheValue for Box<Block> {
     }
 
     fn decode(buf: Vec<u8>) -> Self {
-        Box::new(Block::decode_from_raw(Bytes::from(buf)))
+        Box::new(Block::decode_from_raw(buf))
     }
 }
 
@@ -159,26 +158,25 @@ impl SstableStore {
         }
     }
 
-    pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
-        let charge = sst
-            .blocks
-            .iter()
-            .map(|block| block.restart_point_len())
-            .sum::<usize>()
-            * size_of::<usize>()
-            + sst.meta.encoded_size()
-            + data.len();
-        self.put_sst_data(sst.id, data).await?;
+    pub async fn put_sst(
+        &self,
+        sst_id: HummockSstableId,
+        meta: SstableMeta,
+        data: Bytes,
+        policy: CachePolicy,
+    ) -> HummockResult<()> {
+        self.put_sst_data(sst_id, data.clone()).await?;
         fail_point!("metadata_upload_err");
-        if let Err(e) = self.put_meta(&sst).await {
-            self.delete_sst_data(sst.id).await?;
+        if let Err(e) = self.put_meta(sst_id, &meta).await {
+            self.delete_sst_data(sst_id).await?;
             return Err(e);
         }
         if let CachePolicy::Fill = policy {
+            let sst = Sstable::new_with_data(sst_id, meta, data).unwrap();
+            let charge = sst.estimate_size();
             self.meta_cache
-                .insert(sst.id, sst.id, charge, Box::new(sst));
+                .insert(sst_id, sst_id, charge, Box::new(sst));
         }
-
         Ok(())
     }
 
@@ -201,9 +199,9 @@ impl SstableStore {
         self.meta_cache.erase(sst_id, &sst_id);
     }
 
-    async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
-        let meta_path = self.get_sst_meta_path(sst.id);
-        let meta = Bytes::from(sst.meta.encode_to_bytes());
+    async fn put_meta(&self, sst_id: HummockSstableId, meta: &SstableMeta) -> HummockResult<()> {
+        let meta_path = self.get_sst_meta_path(sst_id);
+        let meta = Bytes::from(meta.encode_to_bytes());
         self.store
             .upload(&meta_path, meta)
             .await
@@ -232,7 +230,7 @@ impl SstableStore {
         block_idx: u64,
         block_data: Bytes,
     ) -> HummockResult<()> {
-        let block = Box::new(Block::decode(block_data)?);
+        let block = Box::new(Block::decode(&block_data)?);
         self.block_cache.insert(sst_id, block_idx, block);
         Ok(())
     }
@@ -277,7 +275,7 @@ impl SstableStore {
                     .read(&data_path, Some(block_loc))
                     .await
                     .map_err(HummockError::object_io_error)?;
-                let block = Block::decode(block_data)?;
+                let block = Block::decode(&block_data)?;
                 Ok(Box::new(block))
             }
         };
@@ -391,27 +389,19 @@ impl SstableStore {
                                 SstableMeta::decode(&mut &buf[..])?
                             }
                         };
-                        let mut size = meta.encoded_size();
                         let sst = if load_data {
                             let block_data = store
                                 .read(&data_path, None)
                                 .await
                                 .map_err(HummockError::object_io_error)?;
-                            size += block_data.len();
-                            let sst = Sstable::new_with_data(sst_id, meta, block_data)?;
-                            size += sst
-                                .blocks
-                                .iter()
-                                .map(|block| block.restart_point_len())
-                                .sum::<usize>()
-                                * size_of::<usize>();
-                            sst
+                            Sstable::new_with_data(sst_id, meta, block_data)?
                         } else {
                             Sstable::new(sst_id, meta)
                         };
+                        let charge = sst.estimate_size();
                         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                         stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                        Ok((Box::new(sst), size))
+                        Ok((Box::new(sst), charge))
                     }
                 })
                 .await
@@ -458,7 +448,7 @@ mod tests {
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, Sstable, SstableIterator};
+    use crate::hummock::{CachePolicy, SstableIterator};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -473,9 +463,8 @@ mod tests {
                 )
             }),
         );
-        let table = Sstable::new(1, meta.clone());
         sstable_store
-            .put(table, data, CachePolicy::Fill)
+            .put_sst(1, meta.clone(), data, CachePolicy::NotFill)
             .await
             .unwrap();
         let mut stats = StoreLocalStatistic::default();

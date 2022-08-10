@@ -44,8 +44,7 @@ use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::serialize_pk_and_column_id;
 use crate::row_serde::{
-    serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde,
-    RowSerialize,
+    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -61,11 +60,6 @@ pub const READ_WRITE: AccessType = true;
 
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
-
-/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with cell-based
-/// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
-/// if the key of the column id does not exist, it will be Null in the relation
-pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
 
 /// [`RowBasedStorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format.

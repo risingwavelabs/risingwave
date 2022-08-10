@@ -34,7 +34,7 @@ impl StreamSink {
         let ctx = input.ctx();
 
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices();
+        let pk_indices = input.logical_pk();
 
         Ok(PlanBase::new_stream(
             ctx,
