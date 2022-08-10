@@ -107,8 +107,8 @@ impl dyn PlanNode {
         &self.plan_base().schema
     }
 
-    pub fn pk_indices(&self) -> &[usize] {
-        &self.plan_base().pk_indices
+    pub fn logical_pk(&self) -> &[usize] {
+        &self.plan_base().logical_pk
     }
 
     pub fn order(&self) -> &Order {
@@ -176,7 +176,7 @@ impl dyn PlanNode {
             identity: format!("{}", self),
             node_body: node,
             operator_id: self.id().0 as u64,
-            pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
+            pk_indices: self.logical_pk().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }

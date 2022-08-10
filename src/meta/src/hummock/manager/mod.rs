@@ -43,14 +43,13 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::RwLockWriteGuard;
 
-use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{IdCategory, MetaSrvEnv};
+use crate::manager::{ClusterManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};

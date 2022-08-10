@@ -46,7 +46,7 @@ impl LogicalExpand {
             assert!(*key < input_schema_len);
         }
         // The last column should be the flag.
-        let mut pk_indices = input.pk_indices().to_vec();
+        let mut pk_indices = input.logical_pk().to_vec();
         pk_indices.push(input_schema_len);
 
         let schema = Self::derive_schema(input.schema());

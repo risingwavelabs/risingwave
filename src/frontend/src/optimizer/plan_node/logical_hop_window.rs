@@ -73,7 +73,7 @@ impl LogicalHopWindow {
             .position(|&idx| idx == input.schema().len() + 1);
         let pk_indices = (|| {
             let input_pk = input
-                .pk_indices()
+                .logical_pk()
                 .iter()
                 .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx));
             let window_pk = if let Some(start_idx) = window_start_index {
@@ -385,7 +385,7 @@ impl ToStream for LogicalHopWindow {
         let i2o = self.i2o_col_mapping();
         output_indices.extend(
             input
-                .pk_indices()
+                .logical_pk()
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),

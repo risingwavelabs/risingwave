@@ -84,7 +84,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
-    soft_fail: true
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -96,7 +95,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-    soft_fail: true
     retry: *auto-retry
 
   - label: "misc check"

@@ -32,7 +32,7 @@ pub struct StreamGlobalSimpleAgg {
 impl StreamGlobalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.pk_indices.to_vec();
+        let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
