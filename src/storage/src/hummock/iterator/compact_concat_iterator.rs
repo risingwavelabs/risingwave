@@ -18,7 +18,7 @@ use std::future::Future;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::compactor_sstable_store::{CompactorSstableStoreRef, DataHolder};
+use crate::hummock::compactor::{CompactorSstableStoreRef, DataHolder};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::value::HummockValue;

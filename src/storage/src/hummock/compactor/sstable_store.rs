@@ -10,7 +10,8 @@ use risingwave_object_store::object::ObjectStore;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    Block, BlockMeta, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable, SstableMeta,
+    Block, BlockMeta, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable,
+    SstableMeta, SstableStoreWrite,
 };
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
@@ -156,6 +157,37 @@ impl MemoryCollector for CompactorMemoryCollector {
             + self.sstable_store.memory_limiter.get_memory_usage()
     }
 }
+
+#[async_trait::async_trait]
+impl SstableStoreWrite for CompactorSstableStore {
+    async fn put_sst(
+        &self,
+        sst_id: HummockSstableId,
+        meta: SstableMeta,
+        data: Bytes,
+        policy: CachePolicy,
+    ) -> HummockResult<()> {
+        if let CachePolicy::Fill = policy {
+            let blocks = decode_block(&meta.block_metas, &data)?;
+            let charge = blocks.iter().map(|block| block.data().len()).sum::<usize>();
+            if let Some(tracker) = self.memory_limiter.try_require_memory(charge as u64) {
+                self.data_cache.insert(
+                    sst_id,
+                    sst_id,
+                    charge,
+                    SstableBlocks {
+                        blocks,
+                        _tracker: tracker,
+                    },
+                );
+            }
+        }
+        self.sstable_store
+            .put_sst(sst_id, meta, data, CachePolicy::NotFill)
+            .await
+    }
+}
+
 fn decode_block(block_metas: &[BlockMeta], data: &Bytes) -> HummockResult<Vec<Arc<Block>>> {
     let mut blocks = Vec::with_capacity(block_metas.len());
     for block_meta in block_metas {

@@ -19,11 +19,13 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
-use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Context};
 use crate::hummock::iterator::{
     ConcatSstableIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::compactor::{
+    CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
+};
 use crate::hummock::utils::can_concat;
 use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions};
 
@@ -31,17 +33,18 @@ use crate::hummock::{CachePolicy, CompressionAlgorithm, HummockResult, SstableBu
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
+    sstable_store: CompactorSstableStoreRef,
 }
 
 impl CompactorRunner {
-    pub fn new(context: Arc<Context>, task: CompactTask) -> Self {
-        let max_target_file_size = context.options.sstable_size_mb as usize * (1 << 20);
+    pub fn new(context: &CompactorContext, task: CompactTask) -> Self {
+        let max_target_file_size = context.context.options.sstable_size_mb as usize * (1 << 20);
         let cache_policy = if task.target_level == 0 {
             CachePolicy::Fill
         } else {
             CachePolicy::NotFill
         };
-        let mut options: SstableBuilderOptions = context.options.as_ref().into();
+        let mut options: SstableBuilderOptions = context.context.options.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
@@ -49,9 +52,10 @@ impl CompactorRunner {
             _ => CompressionAlgorithm::Zstd,
         };
         let compactor = Compactor::new(
-            context.clone(),
+            context.context.clone(),
             options,
-            context.memory_limiter.clone(),
+            context.sstable_store.clone(),
+            context.context.memory_limiter.clone(),
             task.splits
                 .iter()
                 .map(|split| KeyRange {
@@ -64,9 +68,11 @@ impl CompactorRunner {
             task.gc_delete_keys,
             task.watermark,
         );
+
         Self {
             compactor,
             compact_task: task,
+            sstable_store: context.sstable_store.clone(),
         }
     }
 
@@ -89,19 +95,19 @@ impl CompactorRunner {
             if level.table_infos.is_empty() {
                 continue;
             }
-            // Do not need to filter the table because manager has done it.
 
+            // Do not need to filter the table because manager has done it.
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
                 table_iters.push(ConcatSstableIterator::new(
                     level.table_infos.clone(),
-                    self.compactor.context.sstable_store.clone(),
+                    self.sstable_store.clone(),
                 ));
             } else {
                 for table_info in &level.table_infos {
                     table_iters.push(ConcatSstableIterator::new(
                         vec![table_info.clone()],
-                        self.compactor.context.sstable_store.clone(),
+                        self.sstable_store.clone(),
                     ));
                 }
             }

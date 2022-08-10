@@ -32,9 +32,11 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, Context};
+use risingwave_storage::hummock::compactor::{
+    CompactionExecutor, Compactor, CompactorContext, Context,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::MemoryLimiter;
+use risingwave_storage::hummock::{CompactorSstableStore, MemoryLimiter};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -149,7 +151,8 @@ pub async fn compute_node_serve(
         {
             tracing::info!("start embedded compactor");
             // todo: set shutdown_sender in HummockStorage.
-            let compactor_context = Arc::new(Context {
+            let data_cache_capacity = (storage_config.block_cache_capacity_mb as u64) << 19;
+            let context = Arc::new(Context {
                 options: storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
@@ -160,8 +163,21 @@ pub async fn compute_node_serve(
                 memory_limiter: memory_limiter.clone(),
                 sstable_id_manager: storage.sstable_id_manager(),
             });
-            let (handle, shutdown_sender) =
-                Compactor::start_compactor(compactor_context, hummock_meta_client);
+            // TODO: use normal sstable store for single-process mode.
+            let compact_sstable_store = CompactorSstableStore::new(
+                storage.sstable_store(),
+                Arc::new(MemoryLimiter::new(data_cache_capacity)),
+                data_cache_capacity as usize,
+            );
+            let compactor_context = Arc::new(CompactorContext {
+                context,
+                sstable_store: Arc::new(compact_sstable_store),
+            });
+
+            let (handle, shutdown_sender) = Compactor::start_compactor(
+                compactor_context,
+                hummock_meta_client,
+            );
             sub_tasks.push((handle, shutdown_sender));
         }
         monitor_cache(storage.sstable_store(), &registry).unwrap();

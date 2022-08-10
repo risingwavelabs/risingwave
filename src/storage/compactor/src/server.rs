@@ -26,7 +26,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, Context};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     CompactorMemoryCollector, CompactorSstableStore, MemoryLimiter, SstableIdManager, SstableStore,
@@ -126,11 +126,10 @@ pub async fn compactor_serve(
         hummock_meta_client.clone(),
         storage_config.sstable_id_remote_fetch_number,
     ));
-
-    let compactor_context = Arc::new(Context {
+    let context = Arc::new(Context {
         options: storage_config,
         hummock_meta_client: hummock_meta_client.clone(),
-        sstable_store,
+        sstable_store: sstable_store.clone(),
         stats: state_store_stats,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
@@ -138,7 +137,10 @@ pub async fn compactor_serve(
         memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
     });
-
+    let compactor_context = Arc::new(CompactorContext {
+        context,
+        sstable_store: compact_sstable_store,
+    });
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),

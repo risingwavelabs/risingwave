@@ -17,10 +17,9 @@ use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, HummockResult, SstableBuilder};
+use crate::hummock::{CachePolicy, HummockResult, SstableBuilder, SstableStoreWrite};
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
@@ -47,13 +46,19 @@ pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
     current_builder: Option<SstableBuilder>,
 
     policy: CachePolicy,
-    sstable_store: Arc<dyn SstableS>,
+
+    sstable_store: Arc<dyn SstableStoreWrite>,
+
     tracker: Option<MemoryTracker>,
 }
 
 impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        builder_factory: F,
+        policy: CachePolicy,
+        sstable_store: Arc<dyn SstableStoreWrite>,
+    ) -> Self {
         Self {
             builder_factory,
             sealed_builders: Vec::new(),

@@ -18,7 +18,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::compactor::CompactionExecutor;
+use crate::hummock::compactor::{CompactionExecutor, CompactorSstableStoreRef};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableIdManagerRef};
 use crate::monitor::StateStoreMetrics;
@@ -48,4 +48,10 @@ pub struct Context {
     pub memory_limiter: Arc<MemoryLimiter>,
 
     pub sstable_id_manager: SstableIdManagerRef,
+}
+
+#[derive(Clone)]
+pub struct CompactorContext {
+    pub context: Arc<Context>,
+    pub sstable_store: CompactorSstableStoreRef,
 }

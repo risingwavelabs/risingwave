@@ -158,28 +158,6 @@ impl SstableStore {
         }
     }
 
-    pub async fn put_sst(
-        &self,
-        sst_id: HummockSstableId,
-        meta: SstableMeta,
-        data: Bytes,
-        policy: CachePolicy,
-    ) -> HummockResult<()> {
-        self.put_sst_data(sst_id, data).await?;
-        fail_point!("metadata_upload_err");
-        if let Err(e) = self.put_meta(sst_id, &meta).await {
-            self.delete_sst_data(sst_id).await?;
-            return Err(e);
-        }
-        if let CachePolicy::Fill = policy {
-            let sst = Sstable::new(sst_id, meta);
-            let charge = sst.estimate_size();
-            self.meta_cache
-                .insert(sst_id, sst_id, charge, Box::new(sst));
-        }
-        Ok(())
-    }
-
     pub async fn delete(&self, sst_id: HummockSstableId) -> HummockResult<()> {
         // Meta
         self.store
@@ -417,6 +395,42 @@ impl MemoryCollector for SstableStore {
     // TODO: limit shared-buffer uploading memory
     fn get_total_memory_usage(&self) -> u64 {
         0
+    }
+}
+
+#[async_trait::async_trait]
+pub trait SstableStoreWrite: Send + Sync {
+    async fn put_sst(
+        &self,
+        sst_id: HummockSstableId,
+        meta: SstableMeta,
+        data: Bytes,
+        policy: CachePolicy,
+    ) -> HummockResult<()>;
+}
+
+#[async_trait::async_trait]
+impl SstableStoreWrite for SstableStore {
+    async fn put_sst(
+        &self,
+        sst_id: HummockSstableId,
+        meta: SstableMeta,
+        data: Bytes,
+        policy: CachePolicy,
+    ) -> HummockResult<()> {
+        self.put_sst_data(sst_id, data).await?;
+        fail_point!("metadata_upload_err");
+        if let Err(e) = self.put_meta(sst_id, &meta).await {
+            self.delete_sst_data(sst_id).await?;
+            return Err(e);
+        }
+        if let CachePolicy::Fill = policy {
+            let sst = Sstable::new(sst_id, meta);
+            let charge = sst.estimate_size();
+            self.meta_cache
+                .insert(sst_id, sst_id, charge, Box::new(sst));
+        }
+        Ok(())
     }
 }
 

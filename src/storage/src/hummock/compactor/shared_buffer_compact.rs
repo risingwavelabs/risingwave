@@ -179,10 +179,12 @@ pub struct SharedBufferCompactRunner {
 
 impl SharedBufferCompactRunner {
     pub fn new(context: Arc<Context>, splits: Vec<KeyRange>) -> Self {
+        let sstable_store = context.sstable_store.clone();
         let options = context.options.as_ref().into();
         let compactor = Compactor::new(
             context,
             options,
+            sstable_store,
             Arc::new(MemoryLimiter::new(u64::MAX - 1)),
             splits,
             CachePolicy::Fill,
