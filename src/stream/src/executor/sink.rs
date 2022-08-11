@@ -185,12 +185,12 @@ mod test {
         use crate::executor::Barrier;
 
         let properties = maplit::hashmap! {
-            "sink_type".into() => "mysql".into(),
-            "endpoint".into() => "127.0.0.1:3306".into(),
-            "database".into() => "db".into(),
-            "table".into() => "t".into(),
-            "user".into() => "root".into()
-            };
+        "connector".into() => "mysql".into(),
+        "endpoint".into() => "127.0.0.1:3306".into(),
+        "database".into() => "db".into(),
+        "table".into() => "t".into(),
+        "user".into() => "root".into()
+        };
 
         // Mock `child`
         let mock = MockSource::with_messages(
@@ -213,8 +213,13 @@ mod test {
             ],
         );
 
-        let sink_executor =
-            SinkExecutor::new(Box::new(mock), MemoryStateStore::new(), properties, 0);
+        let sink_executor = SinkExecutor::new(
+            Box::new(mock),
+            MemoryStateStore::new(),
+            Arc::new(StreamingMetrics::unused()),
+            properties,
+            0,
+        );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
 
