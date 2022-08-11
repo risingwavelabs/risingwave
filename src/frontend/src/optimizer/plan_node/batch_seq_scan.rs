@@ -79,11 +79,12 @@ impl BatchSeqScan {
                 Distribution::Single
             } else {
                 match self.logical.distribution_key() {
-                    // FIXME: Should be `Single` if no distribution key.
-                    // Currently the task will be scheduled to frontend under local mode, which is
-                    // unimplemented yet. Enable this when it's done.
                     None => Distribution::SomeShard,
                     Some(distribution_key) => {
+                        // FIXME: Should be `Single` if distribution_key.is_empty().
+                        // Currently the task will be scheduled to frontend under local mode, which
+                        // is unimplemented yet. Enable this when it's done.
+
                         // For other batch operators, `HashShard` is a simple hashing, i.e.,
                         // `target_shard = hash(dist_key) % shard_num`
                         //
