@@ -274,6 +274,10 @@ impl ExchangeSource for FakeExchangeSource {
             }
         }
     }
+
+    fn get_task_id(&self)->crate::task::TaskId {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -31,6 +33,8 @@ use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<C>;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
+
+use super::BatchMetrics;
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ExchangeSourceImpl>,
     context: C,
@@ -38,6 +42,10 @@ pub struct GenericExchangeExecutor<C> {
     schema: Schema,
     task_id: TaskId,
     identity: String,
+
+    /// Batch metrics.
+    /// None: Local mode don't record mertics.
+    metrics: Option<Arc<BatchMetrics>>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -123,6 +131,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             schema: Schema { fields },
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
+            metrics: source.context().stats(),
         }))
     }
 }
@@ -147,7 +156,7 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
         let mut stream = select_all(
             self.sources
                 .into_iter()
-                .map(data_chunk_stream)
+                .map(|source|data_chunk_stream(source,self.metrics.clone(),self.task_id.clone()))
                 .collect_vec(),
         )
         .boxed();
@@ -160,12 +169,24 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
+async fn data_chunk_stream(mut source: ExchangeSourceImpl,metrics:Option<Arc<BatchMetrics>>,downstream_id:TaskId) {
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
                 debug!("Exchange source {:?} output empty chunk.", source);
             }
+            metrics.as_ref().and_then(|metrics|{
+                let upstream_id = source.get_task_id();
+                let downstream_id = {
+                    format!("{}_{}_{}",downstream_id.query_id,downstream_id.stage_id,downstream_id.task_id)
+                };
+                let upstream_id = {
+                    format!("{}_{}_{}",upstream_id.query_id,upstream_id.stage_id,upstream_id.task_id)
+                };
+                metrics.exchange_recv_row_number.with_label_values(&[&upstream_id, &downstream_id]).inc_by(res.cardinality().try_into().unwrap());
+                metrics.exchange_recv_row_number.with_label_values(&["0", "0"]).inc_by(res.cardinality().try_into().unwrap());
+                Some(())
+            });
             yield res;
             continue;
         }
@@ -211,6 +232,7 @@ mod tests {
         }
 
         let executor = Box::new(GenericExchangeExecutor::<ComputeNodeContext> {
+            metrics: context.stats(),
             sources,
             context,
             schema: Schema {

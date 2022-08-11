@@ -71,6 +71,10 @@ impl ExchangeSource for LocalExchangeSource {
             }
         }
     }
+
+    fn get_task_id(&self)->TaskId {
+        self.task_id.clone()
+    }
 }
 
 #[cfg(test)]
