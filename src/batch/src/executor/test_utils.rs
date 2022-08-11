@@ -32,7 +32,7 @@ use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, ProbeSideSourceBuilder,
 };
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, TaskId};
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
 
@@ -276,7 +276,7 @@ impl ExchangeSource for FakeExchangeSource {
     }
 
     fn get_task_id(&self) -> crate::task::TaskId {
-        unimplemented!()
+        TaskId::default()
     }
 }
 

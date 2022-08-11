@@ -56,7 +56,7 @@ impl ExchangeSourceImpl {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.get_task_id(),
             ExchangeSourceImpl::Local(local) => local.get_task_id(),
-            ExchangeSourceImpl::Fake(_fake) => unimplemented!(),
+            ExchangeSourceImpl::Fake(fake) => fake.get_task_id(),
         }
     }
 }
