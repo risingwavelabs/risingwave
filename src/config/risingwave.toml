@@ -6,7 +6,7 @@ heartbeat_interval_ms = 1000
 [streaming]
 checkpoint_interval_ms = 250
 in_flight_barrier_nums = 40
-worker_node_parallelism = 10
+worker_node_parallelism = 4
 
 [storage]
 shared_buffer_capacity_mb = 4096

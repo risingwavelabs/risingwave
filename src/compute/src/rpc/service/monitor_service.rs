@@ -40,6 +40,7 @@ impl MonitorServiceImpl {
 
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
+    #[cfg_attr(coverage, no_coverage)]
     async fn stack_trace(
         &self,
         request: Request<StackTraceRequest>,
