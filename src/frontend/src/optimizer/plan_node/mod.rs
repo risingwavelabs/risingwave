@@ -249,6 +249,7 @@ mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
 mod stream_global_simple_agg;
+mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
