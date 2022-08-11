@@ -37,7 +37,7 @@ macro_rules! impl_split_enumerator {
                                 .map(SplitImpl::$variant_name)
                                 .collect_vec()
                         })
-                        .map_err(|e| ErrorCode::ConnectorError(e.to_string()).into()),
+                        .map_err(|e| ErrorCode::ConnectorError(e.into()).into()),
                     )*
                 }
              }
