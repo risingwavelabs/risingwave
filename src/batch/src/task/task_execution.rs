@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::StreamExt;
+use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -26,7 +27,6 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::sync::oneshot::{Receiver, Sender};
-use tracing_futures::Instrument;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -272,12 +272,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 // close it after task error has been set.
                 if let Err(e) = self
                     .try_execute(exec, &mut sender, shutdown_rx, &mut state_tx)
-                    .instrument(tracing::trace_span!(
-                        "batch_execute",
-                        task_id = ?task_id.task_id,
-                        stage_id = ?task_id.stage_id,
-                        query_id = ?task_id.query_id,
-                    ))
+                    .in_span({
+                        let mut span = Span::enter_with_local_parent("batch_execute");
+                        span.add_property(|| ("task_id", task_id.task_id.to_string()));
+                        span.add_property(|| ("stage_id", task_id.stage_id.to_string()));
+                        span.add_property(|| ("query_id", task_id.query_id.to_string()));
+                        span
+                    })
                     .await
                 {
                     // Prints the entire backtrace of error.

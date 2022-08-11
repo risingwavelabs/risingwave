@@ -21,6 +21,7 @@ use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
+use minitrace::prelude::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -39,9 +40,8 @@ use risingwave_pb::stream_plan::{
     UpdateMutation,
 };
 use smallvec::SmallVec;
-use tracing::trace_span;
 
-use crate::task::{ActorId, ENABLE_BARRIER_AGGREGATION};
+use crate::task::ActorId;
 
 mod actor;
 pub mod aggregation;
@@ -233,21 +233,10 @@ impl Default for Epoch {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
-    pub span: tracing::Span,
-}
-
-impl Default for Barrier {
-    fn default() -> Self {
-        Self {
-            span: tracing::Span::none(),
-            epoch: Epoch::default(),
-            mutation: None,
-        }
-    }
 }
 
 impl Barrier {
@@ -270,13 +259,6 @@ impl Barrier {
     #[must_use]
     pub fn with_stop(self) -> Self {
         self.with_mutation(Mutation::Stop(HashSet::default()))
-    }
-
-    // TODO: The barrier should always contain trace info after we migrated barrier generation to
-    // meta service.
-    #[must_use]
-    pub fn with_span(self, span: tracing::span::Span) -> Self {
-        Self { span, ..self }
     }
 
     /// Whether this barrier carries stop mutation.
@@ -477,11 +459,6 @@ impl Barrier {
             .map(Arc::new);
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
-            span: if ENABLE_BARRIER_AGGREGATION {
-                trace_span!("barrier", epoch = ?epoch, mutation = ?mutation)
-            } else {
-                tracing::Span::none()
-            },
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
         })

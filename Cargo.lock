@@ -1598,7 +1598,7 @@ dependencies = [
  "crossterm_winapi",
  "libc",
  "mio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -1764,7 +1764,7 @@ dependencies = [
  "cfg-if",
  "hashbrown 0.12.3",
  "lock_api",
- "parking_lot_core",
+ "parking_lot_core 0.9.3",
 ]
 
 [[package]]
@@ -3025,7 +3025,7 @@ dependencies = [
  "futures",
  "log",
  "madsim-tokio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "percent-encoding",
  "phf",
  "pin-project-lite",
@@ -3164,6 +3164,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
+name = "minitrace"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a07fdf302cc0591c97eb45939550ddaddd9962e400c20b319aa16c244cb1f16"
+dependencies = [
+ "crossbeam",
+ "futures",
+ "minitrace-macro",
+ "minstant",
+ "once_cell",
+ "parking_lot 0.11.2",
+ "pin-project",
+ "retain_mut",
+]
+
+[[package]]
+name = "minitrace-macro"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4132dfe6097f4a90c0bbb34be0687c38d14303dd2e74f8442ae80e9bc5a34c47"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3209,7 +3237,7 @@ dependencies = [
  "futures-util",
  "num_cpus",
  "once_cell",
- "parking_lot",
+ "parking_lot 0.12.1",
  "quanta",
  "scheduled-thread-pool",
  "skeptic",
@@ -3625,12 +3653,37 @@ checksum = "427c3892f9e783d91cc128285287e70a59e206ca452770ece88a76f7a3eddd72"
 
 [[package]]
 name = "parking_lot"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
+dependencies = [
+ "instant",
+ "lock_api",
+ "parking_lot_core 0.8.5",
+]
+
+[[package]]
+name = "parking_lot"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
 dependencies = [
  "lock_api",
- "parking_lot_core",
+ "parking_lot_core 0.9.3",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d76e8e1493bcac0d2766c42737f34458f1c8c50c0d23bcb24ea953affb273216"
+dependencies = [
+ "cfg-if",
+ "instant",
+ "libc",
+ "redox_syscall",
+ "smallvec",
+ "winapi",
 ]
 
 [[package]]
@@ -3908,7 +3961,7 @@ dependencies = [
  "log",
  "nix",
  "once_cell",
- "parking_lot",
+ "parking_lot 0.12.1",
  "smallvec",
  "symbolic-demangle",
  "tempfile",
@@ -4015,7 +4068,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "memchr",
- "parking_lot",
+ "parking_lot 0.12.1",
  "procfs",
  "protobuf",
  "thiserror",
@@ -4523,8 +4576,9 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "minitrace",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost 0.11.0",
@@ -4574,7 +4628,7 @@ dependencies = [
  "madsim-tokio",
  "moka",
  "nix",
- "parking_lot",
+ "parking_lot 0.12.1",
  "prometheus",
  "rand 0.8.5",
  "risingwave_common",
@@ -4659,7 +4713,7 @@ dependencies = [
  "memcomparable",
  "more-asserts",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "pin-project",
  "postgres-types",
@@ -4710,7 +4764,7 @@ dependencies = [
  "clap 3.2.15",
  "madsim-tokio",
  "madsim-tonic",
- "parking_lot",
+ "parking_lot 0.12.1",
  "prometheus",
  "risingwave_common",
  "risingwave_common_service",
@@ -4753,7 +4807,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost 0.11.0",
@@ -4860,7 +4914,7 @@ dependencies = [
  "comfy-table",
  "futures",
  "madsim-tokio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "risingwave_common",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
@@ -4938,7 +4992,7 @@ dependencies = [
  "md5",
  "num-integer",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "pgwire",
  "prost 0.11.0",
@@ -4993,7 +5047,7 @@ dependencies = [
  "madsim-tokio",
  "num-derive",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "prost 0.11.0",
  "risingwave_common",
  "risingwave_pb",
@@ -5009,7 +5063,7 @@ dependencies = [
  "futures",
  "itertools",
  "madsim-tokio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -5051,7 +5105,7 @@ dependencies = [
  "memcomparable",
  "num-integer",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost 0.11.0",
@@ -5172,7 +5226,7 @@ dependencies = [
  "madsim-tokio",
  "opentelemetry",
  "opentelemetry-jaeger",
- "parking_lot",
+ "parking_lot 0.12.1",
  "pprof",
  "thrift",
  "tokio-stream",
@@ -5226,7 +5280,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost 0.11.0",
@@ -5343,7 +5397,7 @@ dependencies = [
  "nix",
  "num-integer",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost 0.11.0",
@@ -5401,9 +5455,10 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
+ "minitrace",
  "minstant",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "pin-project",
  "prometheus",
@@ -5538,7 +5593,7 @@ version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "977a7519bff143a44f842fd07e80ad1329295bd71686457f18e496736f4bf9bf"
 dependencies = [
- "parking_lot",
+ "parking_lot 0.12.1",
 ]
 
 [[package]]
@@ -6314,7 +6369,7 @@ dependencies = [
  "fallible-iterator",
  "futures",
  "log",
- "parking_lot",
+ "parking_lot 0.12.1",
  "percent-encoding",
  "phf",
  "pin-project-lite",
@@ -6596,7 +6651,7 @@ dependencies = [
  "ansi_term",
  "matchers",
  "once_cell",
- "parking_lot",
+ "parking_lot 0.12.1",
  "regex",
  "sharded-slab",
  "smallvec",
@@ -7040,8 +7095,8 @@ dependencies = [
  "nom 7.1.1",
  "num-integer",
  "num-traits",
- "parking_lot",
- "parking_lot_core",
+ "parking_lot 0.12.1",
+ "parking_lot_core 0.9.3",
  "petgraph",
  "postgres-types",
  "prometheus",

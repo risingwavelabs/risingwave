@@ -21,6 +21,7 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
+minitrace = "0.4"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
