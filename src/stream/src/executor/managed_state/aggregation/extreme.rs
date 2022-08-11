@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -24,11 +23,12 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
-use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair, OrderType};
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
+use super::Cache;
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
@@ -36,58 +36,8 @@ use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
 // TODO(rc): update all doc comments in this file
-// TODO(rc): convert GenericExtremeState to GenericTableState later
-
-#[derive(Debug)]
-struct Cache {
-    synced: bool,            // `false` means not synced with state table (cold start)
-    capacity: Option<usize>, // `None` means unlimited capacity
-    order_pairs: Arc<Vec<OrderPair>>, // order requirements used to sort cached rows
-    rows: BTreeSet<DescOrderedRow>, // in reverse order of `order_pairs`
-}
-
-impl Cache {
-    fn new(capacity: Option<usize>, order_pairs: Vec<OrderPair>) -> Self {
-        Self {
-            synced: false,
-            capacity,
-            order_pairs: Arc::new(order_pairs),
-            rows: BTreeSet::new(),
-        }
-    }
-
-    fn set_synced(&mut self) {
-        self.synced = true;
-    }
-
-    fn insert(&mut self, row: Row) {
-        if self.synced {
-            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
-            self.rows.insert(ordered_row);
-            // evict if capacity is reached
-            if let Some(capacity) = self.capacity {
-                while self.rows.len() > capacity {
-                    self.rows.pop_first();
-                }
-            }
-        }
-    }
-
-    fn remove(&mut self, row: Row) {
-        if self.synced {
-            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
-            self.rows.remove(&ordered_row);
-        }
-    }
-
-    fn first(&self) -> Option<&Row> {
-        if self.synced {
-            self.rows.last().map(|row| &row.row)
-        } else {
-            None
-        }
-    }
-}
+// TODO(yuchao): We can convert GenericExtremeState to GenericTableState later,
+// to implement min/max and string_agg uniformly.
 
 /// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
 ///

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -24,56 +23,16 @@ use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair, OrderType};
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
-use super::ManagedTableState;
+use super::{Cache, ManagedTableState};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
-
-// TODO(rc): this can be merged with extreme::Cache
-#[derive(Debug)]
-struct Cache {
-    synced: bool, // `false` means not synced with state table (cold start)
-    order_pairs: Arc<Vec<OrderPair>>, // order requirements used to sort cached rows
-    rows: BTreeSet<DescOrderedRow>,
-}
-
-impl Cache {
-    fn new(order_pairs: Vec<OrderPair>) -> Cache {
-        Cache {
-            synced: false,
-            order_pairs: Arc::new(order_pairs),
-            rows: BTreeSet::new(),
-        }
-    }
-
-    fn is_cold_start(&self) -> bool {
-        !self.synced
-    }
-
-    fn set_synced(&mut self) {
-        self.synced = true;
-    }
-
-    fn insert(&mut self, row: Row) {
-        if self.synced {
-            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
-            self.rows.insert(ordered_row);
-        }
-    }
-
-    fn remove(&mut self, row: Row) {
-        if self.synced {
-            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
-            self.rows.remove(&ordered_row);
-        }
-    }
-}
 
 pub struct ManagedStringAggState<S: StateStore> {
     _phantom_data: PhantomData<S>,
@@ -91,7 +50,7 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// The column as delimiter in state table.
     state_table_delim_col_idx: usize,
 
-    /// In-memory fully synced cache.
+    /// In-memory all-or-nothing cache.
     cache: Cache,
 }
 
@@ -136,7 +95,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             state_table_col_mapping: col_mapping,
             state_table_agg_col_idx,
             state_table_delim_col_idx,
-            cache: Cache::new(order_pairs),
+            cache: Cache::new(None, order_pairs),
         }
     }
 }
@@ -215,15 +174,15 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             }
         } else {
             // rev() is required because cache.rows is in reverse order
-            for orderable_row in self.cache.rows.iter().rev() {
+            for row in self.cache.iter_rows() {
                 if !first {
-                    let delim = orderable_row.row[self.state_table_delim_col_idx]
+                    let delim = row[self.state_table_delim_col_idx]
                         .clone()
                         .map(ScalarImpl::into_utf8);
                     agg_result.push_str(&delim.unwrap_or_default());
                 }
                 first = false;
-                let value = orderable_row.row[self.state_table_agg_col_idx]
+                let value = row[self.state_table_agg_col_idx]
                     .clone()
                     .map(ScalarImpl::into_utf8);
                 agg_result.push_str(&value.unwrap_or_default());

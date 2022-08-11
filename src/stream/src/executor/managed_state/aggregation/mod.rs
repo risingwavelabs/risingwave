@@ -14,6 +14,7 @@
 
 //! Aggregators with state store support
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 pub use extreme::*;
@@ -21,6 +22,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
+use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
@@ -50,6 +52,66 @@ pub fn verify_batch(
     }
     all_lengths.extend(data.iter().map(|x| x.len()));
     all_lengths.iter().min() == all_lengths.iter().max()
+}
+
+#[derive(Debug)]
+pub struct Cache {
+    synced: bool,            // `false` means not synced with state table (cold start)
+    capacity: Option<usize>, // `None` means unlimited capacity
+    order_pairs: Arc<Vec<OrderPair>>, // order requirements used to sort cached rows
+    rows: BTreeSet<DescOrderedRow>, // in reverse order of `order_pairs`
+}
+
+impl Cache {
+    pub fn new(capacity: Option<usize>, order_pairs: Vec<OrderPair>) -> Self {
+        Self {
+            synced: false,
+            capacity,
+            order_pairs: Arc::new(order_pairs),
+            rows: BTreeSet::new(),
+        }
+    }
+
+    pub fn is_cold_start(&self) -> bool {
+        !self.synced
+    }
+
+    pub fn set_synced(&mut self) {
+        self.synced = true;
+    }
+
+    pub fn insert(&mut self, row: Row) {
+        if self.synced {
+            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
+            self.rows.insert(ordered_row);
+            // evict if capacity is reached
+            if let Some(capacity) = self.capacity {
+                while self.rows.len() > capacity {
+                    self.rows.pop_first();
+                }
+            }
+        }
+    }
+
+    pub fn remove(&mut self, row: Row) {
+        if self.synced {
+            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
+            self.rows.remove(&ordered_row);
+        }
+    }
+
+    pub fn first(&self) -> Option<&Row> {
+        if self.synced {
+            // get the last because the rows are sorted reversely
+            self.rows.last().map(|row| &row.row)
+        } else {
+            None
+        }
+    }
+
+    pub fn iter_rows(&self) -> impl Iterator<Item = &Row> {
+        self.rows.iter().rev().map(|row| &row.row)
+    }
 }
 
 /// All managed state for aggregation. The managed state will manage the cache and integrate
