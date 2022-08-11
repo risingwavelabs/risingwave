@@ -61,7 +61,10 @@ pub struct MetaMetrics {
     pub time_after_last_observation: AtomicU64,
 
     /// num of deltas cloned from meta which is about to be sent from meta to CN
-    pub delta_payload_size: IntGauge,
+    pub delta_cnt_sent_to_cn: IntGauge,
+
+    /// sum of encoded len of each delta cloned from meta which is about to be sent from meta to CN
+    pub delta_total_size_sent_to_cn: IntGauge,
 }
 
 impl MetaMetrics {
@@ -166,9 +169,16 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let delta_payload_size = register_int_gauge_with_registry!(
-            "delta_payload_size",
+        let delta_cnt_sent_to_cn = register_int_gauge_with_registry!(
+            "delta_cnt_sent_to_cn",
             "num of deltas cloned from meta which is about to be sent from meta to CN",
+            registry
+        )
+        .unwrap();
+
+        let delta_total_size_sent_to_cn = register_int_gauge_with_registry!(
+            "delta_total_size_sent_to_cn",
+            "sum of encoded len of each delta cloned from meta which is about to be sent from meta to CN",
             registry
         )
         .unwrap();
@@ -192,7 +202,8 @@ impl MetaMetrics {
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
-            delta_payload_size,
+            delta_cnt_sent_to_cn,
+            delta_total_size_sent_to_cn,
         }
     }
 

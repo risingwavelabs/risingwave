@@ -47,7 +47,9 @@ use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
+use crate::hummock::metrics_utils::{
+    trigger_commit_stat, trigger_delta_sent_stat, trigger_sst_stat,
+};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{ClusterManagerRef, IdCategory, MetaSrvEnv, WorkerKey, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
@@ -869,9 +871,7 @@ where
                 .range((Excluded(global_min), Unbounded))
                 .map(|(k, v)| (*k, v.clone()))
                 .collect();
-            self.metrics
-                .delta_payload_size
-                .set(deltas_to_send.len() as i64);
+            trigger_delta_sent_stat(&self.metrics, &deltas_to_send);
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -1091,9 +1091,7 @@ where
             .range((Excluded(global_min), Unbounded))
             .map(|(k, v)| (*k, v.clone()))
             .collect();
-        self.metrics
-            .delta_payload_size
-            .set(deltas_to_send.len() as i64);
+        trigger_delta_sent_stat(&self.metrics, &deltas_to_send);
         self.env
             .notification_manager()
             .notify_compute_asynchronously(
