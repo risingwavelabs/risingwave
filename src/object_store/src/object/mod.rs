@@ -230,8 +230,6 @@ macro_rules! object_store_impl_method_body {
     };
 }
 
-pub(crate) use object_store_impl_method_body;
-
 #[async_trait::async_trait]
 impl ObjectStore for ObjectStoreImpl {
     type Uploader = MonitoredStreamingUploader<StreamingUploaderImpl>;
@@ -321,11 +319,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             object_store_metrics,
         }
     }
-}
-
-#[async_trait::async_trait]
-impl<OS: ObjectStore> ObjectStore for MonitoredObjectStore<OS> {
-    type Uploader = MonitoredStreamingUploader<OS::Uploader>;
 
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         self.object_store_metrics
@@ -347,7 +340,10 @@ impl<OS: ObjectStore> ObjectStore for MonitoredObjectStore<OS> {
         Ok(())
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader> {
+    async fn streaming_upload(
+        &self,
+        path: &str,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::Uploader>> {
         let handle = self.inner.streaming_upload(path).await?;
         Ok(MonitoredStreamingUploader::new(
             handle,

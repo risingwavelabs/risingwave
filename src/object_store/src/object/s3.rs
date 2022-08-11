@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::output::UploadPartOutput;
@@ -39,7 +39,7 @@ const PART_SIZE: usize = 16 * 1024 * 1024;
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
 pub struct S3StreamingUploader {
-    client: Arc<Client>,
+    client: Client,
     bucket: String,
     /// The key of the object.
     key: String,
@@ -48,10 +48,15 @@ pub struct S3StreamingUploader {
     /// Next part ID.
     next_part_id: PartId,
     /// Join handles for part uploads.
-    join_handles: Vec<JoinHandle<ObjectResult<()>>>,
-    /// Parts that are already uploaded to S3.
-    uploaded_parts: Arc<Mutex<Vec<(PartId, UploadPartOutput)>>>,
+    join_handles: Vec<JoinHandle<ObjectResult<(PartId, UploadPartOutput)>>>,
     /// Buffer for bytes.
+    ///
+    /// We prefer `Vec` over other data structures for better memory usage
+    /// and spatial locality, which is important because we tend to remove multiple
+    /// consecutive elements from `buf` at a time.
+    ///
+    /// Moreover, we preserve at least `MIN_PART_SIZE` of data in the buffer when uploading a part
+    /// due to the minimum part size limitation of S3.
     buf: Vec<Bytes>,
     /// Length of the data that have not been uploaded to S3.
     not_uploaded_len: usize,
@@ -65,7 +70,7 @@ pub struct S3StreamingUploader {
 
 impl S3StreamingUploader {
     pub fn new(
-        client: Arc<Client>,
+        client: Client,
         bucket: String,
         key: String,
         upload_id: String,
@@ -78,7 +83,6 @@ impl S3StreamingUploader {
             upload_id,
             next_part_id: MIN_PART_ID,
             join_handles: Default::default(),
-            uploaded_parts: Default::default(),
             buf: Default::default(),
             not_uploaded_len: 0,
             next_part_len: 0,
@@ -88,10 +92,11 @@ impl S3StreamingUploader {
     }
 
     fn upload_part(&mut self, data: Vec<Bytes>, len: usize) {
+        debug_assert_eq!(data.iter().map(Bytes::len).sum::<usize>(), len);
+
         let part_id = self.next_part_id;
         self.next_part_id += 1;
         let client_cloned = self.client.clone();
-        let uploaded_parts_cloned = self.uploaded_parts.clone();
         let bucket = self.bucket.clone();
         let key = self.key.clone();
         let upload_id = self.upload_id.clone();
@@ -100,6 +105,7 @@ impl S3StreamingUploader {
             .operation_size
             .with_label_values(&["s3_upload_part"])
             .observe(len as f64);
+
         self.join_handles.push(tokio::spawn(async move {
             let timer = metrics
                 .operation_latency
@@ -116,11 +122,7 @@ impl S3StreamingUploader {
                 .send()
                 .await?;
             timer.observe_duration();
-            uploaded_parts_cloned
-                .lock()
-                .map_err(ObjectError::internal)?
-                .push((part_id, upload_output));
-            Ok(())
+            Ok((part_id, upload_output))
         }));
     }
 
@@ -133,17 +135,16 @@ impl S3StreamingUploader {
         // If any part fails to upload, abort the upload.
         let join_handles = self.join_handles.drain(..).collect_vec();
 
+        let mut uploaded_parts = Vec::with_capacity(join_handles.len());
         for result in try_join_all(join_handles)
             .await
             .map_err(ObjectError::internal)?
         {
-            result?;
+            uploaded_parts.push(result?);
         }
 
         let completed_parts = Some(
-            self.uploaded_parts
-                .lock()
-                .map_err(ObjectError::internal)?
+            uploaded_parts
                 .iter()
                 .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
                 .map(|(part_id, output)| {
@@ -255,7 +256,7 @@ fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
 
 /// Object store with S3 backend
 pub struct S3ObjectStore {
-    client: Arc<Client>,
+    client: Client,
     bucket: String,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
@@ -423,7 +424,7 @@ impl S3ObjectStore {
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         let shared_config = aws_config::load_from_env().await;
-        let client = Arc::new(Client::new(&shared_config));
+        let client = Client::new(&shared_config);
 
         Self {
             client,
@@ -451,7 +452,7 @@ impl S3ObjectStore {
             None,
         ));
         let config = builder.build();
-        let client = Arc::new(Client::from_conf(config));
+        let client = Client::from_conf(config);
         Self {
             client,
             bucket: bucket.to_string(),
