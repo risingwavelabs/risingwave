@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package monitor_service;
+
+option optimize_for = SPEED;
+
+message StackTraceRequest {}
+
+message StackTraceResponse {
+    map<uint32, string> actor_traces = 1;
+    map<string, string> grpc_traces = 2;
+}
+
+service MonitorService {
+    rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
+}

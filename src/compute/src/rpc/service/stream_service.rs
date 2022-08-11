@@ -26,26 +26,15 @@ use risingwave_stream::executor::{Barrier, Epoch};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
-use super::stack_trace_layer::GrpcStackTraceManager;
-
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     mgr: Arc<LocalStreamManager>,
     env: StreamEnvironment,
-    grpc_stack_trace_manager: GrpcStackTraceManager,
 }
 
 impl StreamServiceImpl {
-    pub fn new(
-        mgr: Arc<LocalStreamManager>,
-        env: StreamEnvironment,
-        grpc_stack_trace_manager: GrpcStackTraceManager,
-    ) -> Self {
-        StreamServiceImpl {
-            mgr,
-            env,
-            grpc_stack_trace_manager,
-        }
+    pub fn new(mgr: Arc<LocalStreamManager>, env: StreamEnvironment) -> Self {
+        StreamServiceImpl { mgr, env }
     }
 }
 
@@ -251,14 +240,6 @@ impl StreamService for StreamServiceImpl {
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect();
-
-        {
-            let mut manager = self.grpc_stack_trace_manager.lock().await;
-            println!("RPC traces:");
-            for (k, v) in manager.get_all() {
-                println!("RPC {k} => \n{}", &*v);
-            }
-        }
 
         Ok(Response::new(ActorTraceResponse { actor_traces }))
     }
