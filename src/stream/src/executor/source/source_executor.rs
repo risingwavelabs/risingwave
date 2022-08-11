@@ -203,7 +203,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
-            self.split_state_store.take_snapshot(cache, epoch).await?;
+            self.split_state_store.take_snapshot(cache, epoch).await?
         }
 
         Ok(())
@@ -228,7 +228,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }
-        .map_err(StreamExecutorError::source_error)?;
+        .map_err(StreamExecutorError::connector_error)?;
 
         Ok(Box::new(reader))
     }

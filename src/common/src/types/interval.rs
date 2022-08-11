@@ -23,7 +23,6 @@ use byteorder::{BigEndian, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
-use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use super::*;
@@ -36,8 +35,7 @@ use super::*;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-/// FIXME: the comparison of memcomparable encoding will be just compare these three numbers.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct IntervalUnit {
     months: i32,
     days: i32,
@@ -264,6 +262,36 @@ impl IntervalUnit {
         check_unit(self.ms, rhs.ms)?;
 
         res
+    }
+
+    /// Checks if [`IntervalUnit`] is positive.
+    pub fn is_positive(&self) -> bool {
+        self > &Self::new(0, 0, 0)
+    }
+}
+
+impl Serialize for IntervalUnit {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let IntervalUnit { months, days, ms } = {
+            let mut justified = *self;
+            justified.justify_interval();
+            justified
+        };
+        // serialize the `IntervalUnit` as a tuple
+        (months, days, ms).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for IntervalUnit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let (months, days, ms) = <(i32, i32, i64)>::deserialize(deserializer)?;
+        Ok(Self { months, days, ms })
     }
 }
 
@@ -498,6 +526,45 @@ mod tests {
 
             let actual = lhs.div_float(OrderedFloat::<f64>(rhs as f64));
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+        let a = IntervalUnit::new(123, 456, 789);
+        a.serialize(&mut serializer).unwrap();
+        let buf = serializer.into_inner();
+        let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
+        assert_eq!(IntervalUnit::deserialize(&mut deserializer).unwrap(), a);
+    }
+
+    #[test]
+    fn test_memcomparable() {
+        let cases = [
+            ((1, 2, 3), (4, 5, 6), Ordering::Less),
+            ((0, 31, 0), (1, 0, 0), Ordering::Greater),
+            ((1, 0, 0), (0, 0, MONTH_MS + 1), Ordering::Less),
+            ((0, 1, 0), (0, 0, DAY_MS + 1), Ordering::Less),
+            ((2, 3, 4), (1, 2, 4 + DAY_MS + MONTH_MS), Ordering::Equal),
+        ];
+
+        for ((lhs_months, lhs_days, lhs_ms), (rhs_months, rhs_days, rhs_ms), order) in cases {
+            let lhs = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                IntervalUnit::new(lhs_months, lhs_days, lhs_ms)
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let rhs = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                IntervalUnit::new(rhs_months, rhs_days, rhs_ms)
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(lhs.cmp(&rhs), order)
         }
     }
 }

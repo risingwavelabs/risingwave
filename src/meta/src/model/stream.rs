@@ -25,8 +25,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
-use crate::cluster::WorkerId;
-use crate::manager::SourceId;
+use crate::manager::{SourceId, WorkerId};
 use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.

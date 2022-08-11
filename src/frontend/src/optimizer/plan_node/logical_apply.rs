@@ -84,8 +84,8 @@ impl LogicalApply {
         let pk_indices = LogicalJoin::derive_pk(
             left.schema().len(),
             right.schema().len(),
-            left.pk_indices(),
-            right.pk_indices(),
+            left.logical_pk(),
+            right.logical_pk(),
             join_type,
             &output_indices,
         );
