@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
@@ -51,18 +50,14 @@ pub struct S3StreamingUploader {
     join_handles: Vec<JoinHandle<ObjectResult<()>>>,
     /// Parts that are already uploaded to S3.
     // TODO: Perhaps switching to Vec<(PartIdm UploadPartOutput)> is faster.
-    uploaded_parts: Arc<Mutex<BTreeMap<PartId, UploadPartOutput>>>,
+    uploaded_parts: Arc<Mutex<Vec<(PartId, UploadPartOutput)>>>,
     /// Buffer for bytes.
-    // TODO: We might want to remove uploaded parts if we want to trade
-    // robustness for memory usage.
     buf: Vec<Bytes>,
     /// Length of the data that have not been uploaded to S3.
     not_uploaded_len: usize,
     /// Length of the data that exceeds the current part to be uploaded in the buffer.
     next_part_len: usize,
-    /// Two pointers into` buf` indicating the bytes to group into a part for the next upload.
-    /// `part_end` is exclusive.
-    part_begin: usize,
+    /// The data included in the next part are `buf[..part_end]`.
     part_end: usize,
 }
 
@@ -84,7 +79,6 @@ impl S3StreamingUploader {
             buf: Default::default(),
             not_uploaded_len: 0,
             next_part_len: 0,
-            part_begin: 0,
             part_end: 0,
         }
     }
@@ -111,14 +105,14 @@ impl S3StreamingUploader {
             uploaded_parts_cloned
                 .lock()
                 .map_err(ObjectError::internal)?
-                .insert(part_id, upload_output);
+                .push((part_id, upload_output));
             Ok(())
         }));
     }
 
     async fn flush_and_complete(&mut self) -> ObjectResult<()> {
         self.upload_part(
-            Vec::from_iter(self.buf[self.part_begin..].iter().cloned()),
+            Vec::from_iter(self.buf.iter().cloned()),
             self.not_uploaded_len,
         );
 
@@ -137,6 +131,7 @@ impl S3StreamingUploader {
                 .lock()
                 .map_err(ObjectError::internal)?
                 .iter()
+                .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
                 .map(|(part_id, output)| {
                     CompletedPart::builder()
                         .set_e_tag(output.e_tag.clone())
@@ -161,6 +156,26 @@ impl S3StreamingUploader {
 
         Ok(())
     }
+
+    async fn abort(&self) -> ObjectResult<()> {
+        // If any part uploads are currently in progress, those part uploads might or might
+        // not succeed. As a result, it might be necessary to abort a given multipart upload
+        // multiple times in order to completely free all storage consumed by all parts.
+        //
+        // To verify that all parts have been removed, so you don't get charged for the
+        // part storage, you should call the ListParts action and ensure that the parts list is
+        // empty.
+        //
+        // Reference: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
+        self.client
+            .abort_multipart_upload()
+            .bucket(&self.bucket)
+            .key(&self.key)
+            .upload_id(&self.upload_id)
+            .send()
+            .await?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -174,10 +189,9 @@ impl StreamingUploader for S3StreamingUploader {
         self.buf.push(data);
 
         if self.not_uploaded_len > PART_SIZE {
-            if self.part_begin == self.part_end {
+            if self.part_end == 0 {
                 // Mark current slice of buffer to be the next part to be uploaded.
                 self.part_end = self.buf.len();
-                assert!(self.part_begin < self.part_end);
             } else {
                 // `data` should be uploaded in the next part.
                 self.next_part_len += data_len;
@@ -185,13 +199,11 @@ impl StreamingUploader for S3StreamingUploader {
         }
         if self.next_part_len >= MIN_PART_SIZE {
             // Take a 16MiB part and upload it. `Bytes` performs shallow clone.
-            self.upload_part(
-                Vec::from_iter(self.buf[self.part_begin..self.part_end].iter().cloned()),
-                self.not_uploaded_len - self.next_part_len,
-            );
+            let part = self.buf.drain(..self.part_end).collect();
+            self.upload_part(part, self.not_uploaded_len - self.next_part_len);
             self.not_uploaded_len = self.next_part_len;
+            self.part_end = 0;
             self.next_part_len = 0;
-            self.part_begin = self.part_end;
         }
         Ok(())
     }
@@ -203,33 +215,21 @@ impl StreamingUploader for S3StreamingUploader {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
-        if (self.part_begin == 0 && self.part_end == 0) || self.flush_and_complete().await.is_err()
-        {
-            // If any part uploads are currently in progress, those part uploads might or might
-            // not succeed. As a result, it might be necessary to abort a given multipart upload
-            // multiple times in order to completely free all storage consumed by all parts.
-            //
-            // To verify that all parts have been removed, so you don't get charged for the
-            // part storage, you should call the ListParts action and ensure that the parts list is
-            // empty.
-            //
-            // Reference: <https://docs.aws.amazon.com/AmazonS3/latest/API/API_AbortMultipartUpload.html>
-            self.client
-                .abort_multipart_upload()
-                .bucket(&self.bucket)
-                .key(&self.key)
-                .upload_id(&self.upload_id)
-                .send()
-                .await?;
-            let data_len = self.buf.iter().map(|b| b.len() as i64).sum();
+        // Fallback to `PUT`.
+        if self.join_handles.is_empty() {
+            self.abort().await?;
             self.client
                 .put_object()
                 .bucket(&self.bucket)
                 .key(&self.key)
                 .body(get_upload_body(self.buf))
-                .content_length(data_len)
+                .content_length(self.not_uploaded_len as i64)
                 .send()
                 .await?;
+            return Ok(());
+        }
+        if self.flush_and_complete().await.is_err() {
+            self.abort().await?;
         }
         Ok(())
     }
