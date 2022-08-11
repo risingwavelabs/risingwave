@@ -146,7 +146,6 @@ impl S3StreamingUploader {
         let completed_parts = Some(
             uploaded_parts
                 .iter()
-                .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
                 .map(|(part_id, output)| {
                     CompletedPart::builder()
                         .set_e_tag(output.e_tag.clone())
