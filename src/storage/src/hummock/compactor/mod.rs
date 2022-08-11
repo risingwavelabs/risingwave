@@ -298,6 +298,51 @@ impl Compactor {
         compact_success
     }
 
+    /// Fill in the compact task and let hummock manager know the compaction output ssts.
+    async fn compact_done(
+        compact_task: &mut CompactTask,
+        context: Arc<CompactorContext>,
+        output_ssts: Vec<CompactOutput>,
+        task_ok: bool,
+    ) {
+        compact_task.task_status = task_ok;
+        compact_task
+            .sorted_output_ssts
+            .reserve(compact_task.splits.len());
+        let mut compaction_write_bytes = 0;
+        for (_, ssts) in output_ssts {
+            for sst_info in ssts {
+                compaction_write_bytes += sst_info.file_size;
+                compact_task.sorted_output_ssts.push(sst_info);
+            }
+        }
+
+        let group_label = compact_task.compaction_group_id.to_string();
+        let level_label = compact_task.target_level.to_string();
+        context
+            .stats
+            .compact_write_bytes
+            .with_label_values(&[group_label.as_str(), level_label.as_str()])
+            .inc_by(compaction_write_bytes);
+        context
+            .stats
+            .compact_write_sstn
+            .with_label_values(&[group_label.as_str(), level_label.as_str()])
+            .inc_by(compact_task.sorted_output_ssts.len() as u64);
+
+        if let Err(e) = context
+            .hummock_meta_client
+            .report_compaction_task(compact_task.clone())
+            .await
+        {
+            tracing::warn!(
+                "Failed to report compaction task: {}, error: {}",
+                compact_task.task_id,
+                e
+            );
+        }
+    }
+
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.
     #[allow(clippy::too_many_arguments)]
@@ -492,52 +537,6 @@ impl Compactor {
             cache_policy,
             gc_delete_keys,
             watermark,
-        }
-    }
-
-    /// Fill in the compact task and let hummock manager know the compaction output ssts.
-    async fn compact_done(
-        compact_task: &mut CompactTask,
-        context: Arc<CompactorContext>,
-        output_ssts: Vec<CompactOutput>,
-        task_ok: bool,
-    ) {
-        compact_task.task_status = task_ok;
-        compact_task
-            .sorted_output_ssts
-            .reserve(compact_task.splits.len());
-        let mut compaction_write_bytes = 0;
-        for (_, ssts) in output_ssts {
-            for sst_info in ssts {
-                compaction_write_bytes += sst_info.file_size;
-                compact_task.sorted_output_ssts.push(sst_info);
-            }
-        }
-
-        let group_label = compact_task.compaction_group_id.to_string();
-        let level_label = compact_task.target_level.to_string();
-        context
-            .stats
-            .compact_write_bytes
-            .with_label_values(&[group_label.as_str(), level_label.as_str()])
-            .inc_by(compaction_write_bytes);
-        context
-            .stats
-            .compact_write_sstn
-            .with_label_values(&[group_label.as_str(), level_label.as_str()])
-            .inc_by(compact_task.sorted_output_ssts.len() as u64);
-
-        let task_id = compact_task.task_id;
-        if let Err(e) = context
-            .hummock_meta_client
-            .report_compaction_task(compact_task.clone())
-            .await
-        {
-            tracing::warn!(
-                "Failed to report compaction task: {}, error: {}",
-                task_id,
-                e
-            );
         }
     }
 
