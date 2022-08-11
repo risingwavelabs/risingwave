@@ -40,7 +40,7 @@ use crate::executor::PkIndices;
 // by merging ManagedTableState with ManagedValueState.
 
 /// Generic managed agg state for min/max.
-/// It maintains a top N cache internally, using HashSet, and the sort key
+/// It maintains a top N cache internally, using `HashSet`, and the sort key
 /// is composed of (agg input value, upstream pk).
 pub struct GenericExtremeState<S: StateStore> {
     // TODO: Remove the phantoms.
