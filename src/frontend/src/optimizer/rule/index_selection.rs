@@ -129,11 +129,11 @@ impl Rule for IndexSelectionRule {
     }
 }
 
-struct Rewriter {
+struct IndexPredicateRewriter {
     p2s_mapping: HashMap<usize, usize>,
     offset: usize,
 }
-impl ExprRewriter for Rewriter {
+impl ExprRewriter for IndexPredicateRewriter {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         // transform primary predicate to index predicate if it can
         if self.p2s_mapping.contains_key(&input_ref.index) {
@@ -160,7 +160,7 @@ impl IndexSelectionRule {
         //                index_scan   primary_table_scan
         let predicate = logical_scan.predicate().clone();
         let offset = index.index_item.len();
-        let mut rewriter = Rewriter {
+        let mut rewriter = IndexPredicateRewriter {
             p2s_mapping,
             offset,
         };
