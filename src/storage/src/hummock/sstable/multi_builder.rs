@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
@@ -46,7 +47,7 @@ pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
     current_builder: Option<SstableBuilder>,
 
     policy: CachePolicy,
-    sstable_store: SstableStoreRef,
+    sstable_store: Arc<dyn SstableS>,
     tracker: Option<MemoryTracker>,
 }
 

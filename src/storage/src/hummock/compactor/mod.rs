@@ -29,7 +29,7 @@ pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TTLCompactionFilter,
 };
-pub use context::CompactorContext;
+pub use context::Context;
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -87,7 +87,7 @@ impl TableBuilderFactory for RemoteBuilderFactory {
 /// Implementation of Hummock compaction.
 pub struct Compactor {
     /// The context of the compactor.
-    context: Arc<CompactorContext>,
+    context: Arc<Context>,
 
     options: SstableBuilderOptions,
 
@@ -122,7 +122,7 @@ impl Compactor {
 
     /// Handles a compaction task and reports its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
+    pub async fn compact(context: Arc<Context>, mut compact_task: CompactTask) -> bool {
         use risingwave_common::catalog::TableOption;
 
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
@@ -301,7 +301,7 @@ impl Compactor {
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
     async fn compact_done(
         compact_task: &mut CompactTask,
-        context: Arc<CompactorContext>,
+        context: Arc<Context>,
         output_ssts: Vec<CompactOutput>,
         task_ok: bool,
     ) {
@@ -347,7 +347,7 @@ impl Compactor {
     /// manager and runs compaction tasks.
     #[allow(clippy::too_many_arguments)]
     pub fn start_compactor(
-        compactor_context: Arc<CompactorContext>,
+        compactor_context: Arc<Context>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -521,7 +521,7 @@ impl Compactor {
 impl Compactor {
     /// Create a new compactor.
     pub fn new(
-        context: Arc<CompactorContext>,
+        context: Arc<Context>,
         options: SstableBuilderOptions,
         memory_limiter: Arc<MemoryLimiter>,
         splits: Vec<KeyRange>,

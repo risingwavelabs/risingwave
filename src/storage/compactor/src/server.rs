@@ -26,7 +26,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, Context};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     CompactorMemoryCollector, CompactorSstableStore, MemoryLimiter, SstableIdManager, SstableStore,
@@ -127,7 +127,7 @@ pub async fn compactor_serve(
         storage_config.sstable_id_remote_fetch_number,
     ));
 
-    let compactor_context = Arc::new(CompactorContext {
+    let compactor_context = Arc::new(Context {
         options: storage_config,
         hummock_meta_client: hummock_meta_client.clone(),
         sstable_store,

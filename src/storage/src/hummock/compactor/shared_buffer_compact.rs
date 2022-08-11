@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::{CompactOutput, Compactor, CompactorContext};
+use crate::hummock::compactor::{CompactOutput, Compactor, Context};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
@@ -36,7 +36,7 @@ use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
-    context: Arc<CompactorContext>,
+    context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
@@ -81,7 +81,7 @@ pub async fn compact(
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
-    context: Arc<CompactorContext>,
+    context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<SstableInfo>> {
     let mut start_user_keys = payload
@@ -178,7 +178,7 @@ pub struct SharedBufferCompactRunner {
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new(context: Arc<CompactorContext>, splits: Vec<KeyRange>) -> Self {
+    pub fn new(context: Arc<Context>, splits: Vec<KeyRange>) -> Self {
         let options = context.options.as_ref().into();
         let compactor = Compactor::new(
             context,

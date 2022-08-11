@@ -25,7 +25,7 @@ use crate::monitor::StateStoreMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
-pub struct CompactorContext {
+pub struct Context {
     /// Storage configurations.
     pub options: Arc<StorageConfig>,
 

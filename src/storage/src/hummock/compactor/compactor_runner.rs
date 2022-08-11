@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
-use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
+use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Context};
 use crate::hummock::iterator::{
     ConcatSstableIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
 };
@@ -34,7 +34,7 @@ pub struct CompactorRunner {
 }
 
 impl CompactorRunner {
-    pub fn new(context: Arc<CompactorContext>, task: CompactTask) -> Self {
+    pub fn new(context: Arc<Context>, task: CompactTask) -> Self {
         let max_target_file_size = context.options.sstable_size_mb as usize * (1 << 20);
         let cache_policy = if task.target_level == 0 {
             CachePolicy::Fill
@@ -84,7 +84,6 @@ impl CompactorRunner {
     /// Build the merge iterator based on the given input ssts.
     fn build_sst_iter(&self) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
-        let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -97,14 +96,12 @@ impl CompactorRunner {
                 table_iters.push(ConcatSstableIterator::new(
                     level.table_infos.clone(),
                     self.compactor.context.sstable_store.clone(),
-                    read_options.clone(),
                 ));
             } else {
                 for table_info in &level.table_infos {
                     table_iters.push(ConcatSstableIterator::new(
                         vec![table_info.clone()],
                         self.compactor.context.sstable_store.clone(),
-                        read_options.clone(),
                     ));
                 }
             }
