@@ -38,7 +38,7 @@ mod tests {
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
-    use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
+    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::{HummockStorage, MemoryLimiter, SstableIdManager};
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -119,7 +119,7 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
-            compaction_executor: None,
+            compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             filter_key_extractor_manager: Arc::new(FilterKeyExtractorManager::default()),
             memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             sstable_id_manager: Arc::new(SstableIdManager::new(

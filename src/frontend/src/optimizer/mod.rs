@@ -303,6 +303,13 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        let ctx = plan.ctx();
+        let explain_trace = ctx.is_explain_trace();
+        if explain_trace {
+            ctx.trace("To Batch Physical Plan:".to_string());
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
 
@@ -312,8 +319,6 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
         if explain_trace {
             ctx.trace("To Batch Distributed Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -333,6 +338,13 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        let ctx = plan.ctx();
+        let explain_trace = ctx.is_explain_trace();
+        if explain_trace {
+            ctx.trace("To Batch Physical Plan:".to_string());
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
         // Convert to physical plan node
         plan = plan.to_local_with_order_required(&self.required_order)?;
 
@@ -349,8 +361,6 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
         if explain_trace {
             ctx.trace("To Batch Local Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());

@@ -25,6 +25,7 @@ use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
 use super::*;
+use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
@@ -62,13 +63,11 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
-    /// Relational state tables used by this executor.
-    /// One-to-one map with AggCall.
+    /// Relational state tables for each aggregation calls.
     state_tables: Vec<RowBasedStateTable<S>>,
 
     /// State table column mappings for each aggregation calls,
-    /// Index: state table column index, Elem: agg call column index.
-    state_table_col_mappings: Vec<Vec<usize>>,
+    state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -118,7 +117,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             states: None,
             agg_calls,
             state_tables,
-            state_table_col_mappings,
+            state_table_col_mappings: state_table_col_mappings
+                .into_iter()
+                .map(StateTableColumnMapping::new)
+                .map(Arc::new)
+                .collect(),
         })
     }
 
@@ -131,7 +134,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         chunk: StreamChunk,
         epoch: u64,
         state_tables: &mut [RowBasedStateTable<S>],
-        state_table_col_mappings: &[Vec<usize>],
+        state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
