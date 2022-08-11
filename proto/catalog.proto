@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package catalog;
 
-import "common.proto";
 import "expr.proto";
 import "plan_common.proto";
 
