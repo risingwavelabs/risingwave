@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod meta;
 mod scheduler;
 mod source_manager;
 mod stream_graph;
@@ -20,7 +19,6 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 
-pub use meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 pub use scheduler::*;

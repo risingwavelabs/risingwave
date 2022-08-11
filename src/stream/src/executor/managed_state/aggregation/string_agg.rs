@@ -31,6 +31,7 @@ use risingwave_storage::StateStore;
 use super::ManagedTableState;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
 #[derive(Debug)]
@@ -193,11 +194,8 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         let mut first = true;
 
         if self.cache.is_cold_start() {
-            let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
-                state_table.iter_with_pk_prefix(group_key, epoch).await?
-            } else {
-                state_table.iter(epoch).await?
-            };
+            let all_data_iter =
+                iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
             self.cache.set_synced(); // after the following loop the cache should be fully synced

@@ -244,7 +244,7 @@ struct GetFieldDesc {
     column_bindings: Vec<ColumnBinding>,
 }
 
-impl ExprVisitor for GetFieldDesc {
+impl ExprVisitor<()> for GetFieldDesc {
     /// Only check the first input because now we only accept nested column
     /// as first index.
     fn visit_agg_call(&mut self, agg_call: &AggCall) {
