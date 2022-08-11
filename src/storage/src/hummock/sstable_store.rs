@@ -442,14 +442,10 @@ impl SstableStoreWrite for SstableStore {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
-    use crate::hummock::iterator::HummockIterator;
-    use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableStoreWrite};
+    use crate::hummock::{CachePolicy, SstableStoreWrite};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -471,12 +467,6 @@ mod tests {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(1, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
-        let holder = sstable_store.load_table(1, true, &mut stats).await.unwrap();
-        assert_eq!(holder.value().meta, meta);
-        assert_eq!(
-            holder.value().meta.block_metas.len(),
-            holder.value().blocks.len()
-        );
     }
 
     #[test]

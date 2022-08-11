@@ -31,7 +31,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::{CachePolicy, HummockResult, MemoryLimiter};
+use crate::hummock::{CachePolicy, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
@@ -186,7 +186,6 @@ impl SharedBufferCompactRunner {
             context,
             options,
             sstable_store,
-            Arc::new(MemoryLimiter::new(u64::MAX - 1)),
             key_range,
             CachePolicy::Fill,
             false,

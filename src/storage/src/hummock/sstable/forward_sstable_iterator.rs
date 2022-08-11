@@ -198,7 +198,7 @@ mod tests {
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
         gen_test_sstable_data, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{CachePolicy, Sstable};
+    use crate::hummock::{CachePolicy, SstableStoreWrite};
 
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -237,13 +237,6 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(sstable));
         inner_test_forward_iterator(sstable_store.clone(), handle).await;
-
-        let kv_iter =
-            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let sstable = Sstable::new_with_data(0, meta, data).unwrap();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
-        inner_test_forward_iterator(sstable_store, handle).await;
     }
 
     #[tokio::test]

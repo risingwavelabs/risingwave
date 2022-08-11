@@ -35,6 +35,7 @@ pub use compaction_filter::{
 pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
+pub use iterator::ConcatSstableIterator;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
@@ -45,7 +46,7 @@ use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompa
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
 pub use sstable_store::{
-    CompactorMemoryCollector, CompactorSstableStore, CompactorSstableStoreRef, DataHolder,
+    CompactorMemoryCollector, CompactorSstableStore, CompactorSstableStoreRef,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -99,8 +100,6 @@ pub struct Compactor {
     options: SstableBuilderOptions,
 
     sstable_store: Arc<dyn SstableStoreWrite>,
-    memory_limiter: Arc<MemoryLimiter>,
-
     key_range: KeyRange,
     cache_policy: CachePolicy,
     gc_delete_keys: bool,
@@ -539,7 +538,6 @@ impl Compactor {
         context: Arc<Context>,
         options: SstableBuilderOptions,
         sstable_store: Arc<dyn SstableStoreWrite>,
-        memory_limiter: Arc<MemoryLimiter>,
         key_range: KeyRange,
         cache_policy: CachePolicy,
         gc_delete_keys: bool,
@@ -549,7 +547,6 @@ impl Compactor {
             context,
             options,
             sstable_store,
-            memory_limiter,
             key_range,
             cache_policy,
             gc_delete_keys,
@@ -575,7 +572,7 @@ impl Compactor {
         }
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
-            limiter: self.memory_limiter.clone(),
+            limiter: self.context.memory_limiter.clone(),
             options,
             remote_rpc_cost: get_id_time.clone(),
         };

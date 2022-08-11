@@ -38,9 +38,13 @@ mod tests {
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, Context};
+    use risingwave_storage::hummock::compactor::{
+        CompactionExecutor, Compactor, CompactorContext, Context,
+    };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-    use risingwave_storage::hummock::{HummockStorage, MemoryLimiter, SstableIdManager};
+    use risingwave_storage::hummock::{
+        CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager,
+    };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::{ReadOptions, WriteOptions};
@@ -112,8 +116,8 @@ mod tests {
     fn get_compactor_context(
         storage: &HummockStorage,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
-    ) -> Context {
-        Context {
+    ) -> CompactorContext {
+        let context = Arc::new(Context {
             options: storage.options().clone(),
             sstable_store: storage.sstable_store(),
             hummock_meta_client: hummock_meta_client.clone(),
@@ -121,11 +125,18 @@ mod tests {
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             filter_key_extractor_manager: Arc::new(FilterKeyExtractorManager::default()),
-            memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
+            memory_limiter: MemoryLimiter::unlimit(),
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
                 storage.options().sstable_id_remote_fetch_number,
             )),
+        });
+        CompactorContext {
+            sstable_store: Arc::new(CompactorSstableStore::new(
+                context.sstable_store.clone(),
+                context.memory_limiter.clone(),
+            )),
+            context,
         }
     }
 

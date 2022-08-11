@@ -57,7 +57,7 @@ impl SharedBufferUploader {
             )))
         };
         // not limit memory for uploader
-        let memory_limiter = Arc::new(MemoryLimiter::new(u64::MAX - 1));
+        let memory_limiter = MemoryLimiter::unlimit();
         let compactor_context = Arc::new(Context {
             options: options.clone(),
             hummock_meta_client: hummock_meta_client.clone(),

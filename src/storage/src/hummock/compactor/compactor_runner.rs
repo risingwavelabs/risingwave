@@ -57,7 +57,6 @@ impl CompactorRunner {
             context.context.clone(),
             options,
             context.sstable_store.clone(),
-            context.context.memory_limiter.clone(),
             key_range,
             cache_policy,
             task.gc_delete_keys,

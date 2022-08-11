@@ -160,7 +160,7 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
-                memory_limiter: memory_limiter.clone(),
+                memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
             });
             // TODO: use normal sstable store for single-process mode.

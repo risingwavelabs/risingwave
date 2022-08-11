@@ -10,8 +10,8 @@ use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    Block, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable,
-    SstableMeta, SstableStoreWrite,
+    Block, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable, SstableMeta,
+    SstableStoreWrite,
 };
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 

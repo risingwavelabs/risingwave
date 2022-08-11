@@ -190,6 +190,16 @@ pub struct MemoryTracker {
 use std::sync::atomic::Ordering as AtomicOrdering;
 
 impl MemoryLimiter {
+    pub fn unlimit() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Arc::new(MemoryLimiterInner {
+                total_size: AtomicU64::new(0),
+                notify: Notify::new(),
+                quota: u64::MAX - 1,
+            }),
+        })
+    }
+
     pub fn new(quota: u64) -> Self {
         Self {
             inner: Arc::new(MemoryLimiterInner {
