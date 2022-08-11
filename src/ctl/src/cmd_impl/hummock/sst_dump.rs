@@ -150,7 +150,7 @@ async fn print_blocks(
 fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
-    let block = Box::new(Block::decode(block_data).unwrap());
+    let block = Box::new(Block::decode(&block_data).unwrap());
     let holder = BlockHolder::from_owned_block(block);
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();

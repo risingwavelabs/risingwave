@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -55,7 +56,7 @@ impl StreamTableScan {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.clone(),
+            logical.base.logical_pk.clone(),
             distribution,
             logical.table_desc().appendonly,
         );
@@ -78,7 +79,7 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &[usize],
+        primary_to_secondary_mapping: &HashMap<usize, usize>,
     ) -> StreamIndexScan {
         StreamIndexScan::new(self.logical.to_index_scan(
             index_name,
@@ -113,7 +114,7 @@ impl fmt::Display for StreamTableScan {
             builder.field(
                 "pk",
                 &IndicesDisplay {
-                    indices: self.pk_indices(),
+                    indices: self.logical_pk(),
                     input_schema: &self.base.schema,
                 },
             );
@@ -137,7 +138,7 @@ impl ToStreamProst for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
 
@@ -151,7 +152,7 @@ impl StreamTableScan {
                 .collect(),
         };
 
-        let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
+        let pk_indices = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -163,12 +164,8 @@ impl StreamTableScan {
                 },
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
-                    operator_id: if auto_fields {
-                        self.batch_plan_id.0 as u64
-                    } else {
-                        0
-                    },
-                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
@@ -190,7 +187,7 @@ impl StreamTableScan {
                         name: x.name.clone(),
                     })
                     .collect(),
-                // The column idxs need to be forwarded to the downstream
+                // The column indices need to be forwarded to the downstream
                 upstream_column_indices: self
                     .logical
                     .output_column_indices()
@@ -200,16 +197,8 @@ impl StreamTableScan {
                 is_singleton: *self.distribution() == Distribution::Single,
             })),
             pk_indices,
-            operator_id: if auto_fields {
-                self.base.id.0 as u64
-            } else {
-                0
-            },
-            identity: if auto_fields {
-                format!("{}", self)
-            } else {
-                "".into()
-            },
+            operator_id: self.base.id.0 as u64,
+            identity: format!("{}", self),
             append_only: self.append_only(),
         }
     }

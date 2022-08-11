@@ -3,9 +3,12 @@ set -euo pipefail
 
 set +e
 # Set features, depending on our workflow
-# If sqlsmith files are modified, we run unit tests with sqlsmith enabled
-# by overriding RUSTFLAGS to enable sqlsmith feature.
-CHANGED=$(git diff --name-only origin/main | grep "ci/scripts/pr.env.sh\|src/tests/sqlsmith")
+# If sqlsmith files are modified, we run tests with sqlsmith enabled.
+MATCHES="ci/scripts/pr.env.sh\
+\|ci/scripts/run-e2e-test.sh\
+\|ci/scripts/run-unit-test.sh\
+\|src/tests/sqlsmith"
+CHANGED=$(git diff --name-only origin/main | grep "$MATCHES")
 set -e
 
 if [[ -n "$CHANGED" ]]; then

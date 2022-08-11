@@ -26,7 +26,7 @@ use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::StreamFragmenterV2;
 
 /// Generate create MV plan, return plan and mv table info.
 pub fn gen_create_mv_plan(
@@ -103,8 +103,7 @@ pub async fn handle_create_mv(
 
     let (table, graph) = {
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
-        let stream_plan = plan.to_stream_prost();
-        let graph = StreamFragmenter::build_graph(stream_plan);
+        let graph = StreamFragmenterV2::build_graph(plan);
 
         (table, graph)
     };

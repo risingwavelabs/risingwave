@@ -30,6 +30,7 @@ use smallvec::SmallVec;
 
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkDataTypes;
 
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
@@ -305,11 +306,8 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
-            let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
-                state_table.iter_with_pk_prefix(group_key, epoch).await?
-            } else {
-                state_table.iter(epoch).await?
-            };
+            let all_data_iter =
+                iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
             for _ in 0..self.top_n_count.unwrap_or(usize::MAX) {

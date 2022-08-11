@@ -156,9 +156,25 @@ impl FunctionCall {
                     .try_collect()?;
                 Ok(DataType::Varchar)
             }
-            ExprType::RegexpMatch => Ok(DataType::List {
-                datatype: Box::new(DataType::Varchar),
-            }),
+            ExprType::RegexpMatch => {
+                if inputs.len() < 2 || inputs.len() > 3 {
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `RegexpMatch` takes 2 or 3 arguments ({} given)",
+                        inputs.len()
+                    ))
+                    .into());
+                }
+                if inputs.len() == 3 {
+                    return Err(ErrorCode::NotImplemented(
+                        "flag in regexp_match".to_string(),
+                        4545.into(),
+                    )
+                    .into());
+                }
+                Ok(DataType::List {
+                    datatype: Box::new(DataType::Varchar),
+                })
+            }
             ExprType::Vnode => {
                 if inputs.is_empty() {
                     return Err(ErrorCode::BindError(

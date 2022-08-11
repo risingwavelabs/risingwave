@@ -738,15 +738,8 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            &Self::Struct(StructRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            &Self::List(ListRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            _ => {
-                panic!("Type is unable to be serialized.")
-            }
+            &Self::Struct(v) => v.serialize(ser)?,
+            &Self::List(v) => v.serialize(ser)?,
         };
         Ok(())
     }
@@ -798,14 +791,8 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            Ty::Struct { fields: _ } => {
-                let bytes = de.deserialize_struct_or_list()?;
-                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            }
-            Ty::List { datatype: _ } => {
-                let bytes = de.deserialize_struct_or_list()?;
-                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            }
+            Ty::Struct { fields } => StructValue::deserialize(&fields, de)?.to_scalar_value(),
+            Ty::List { datatype } => ListValue::deserialize(&datatype, de)?.to_scalar_value(),
         })
     }
 
@@ -835,14 +822,21 @@ impl ScalarImpl {
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
                     DataType::Timestampz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
-                    DataType::Interval => size_of::<IntervalUnit>(),
-
+                    // IntervalUnit is serialized as (i32, i32, i64)
+                    DataType::Interval => size_of::<(i32, i32, i64)>(),
                     DataType::Decimal => deserializer.read_decimal_len()?,
-                    DataType::List { .. } | DataType::Struct { .. } => {
-                        // these two types is var-length and should only be determine at runtime.
-                        // TODO: need some test for this case (e.g. e2e test)
-                        deserializer.read_struct_and_list_len()?
+                    // these two types is var-length and should only be determine at runtime.
+                    // TODO: need some test for this case (e.g. e2e test)
+                    DataType::List { datatype } => {
+                        let len = u32::deserialize(&mut *deserializer)?;
+                        (0..len)
+                            .map(|_| Self::encoding_data_size(datatype, deserializer))
+                            .try_fold(size_of::<u32>(), |a, b| b.map(|b| a + b))?
                     }
+                    DataType::Struct { fields } => fields
+                        .iter()
+                        .map(|field| Self::encoding_data_size(field, deserializer))
+                        .try_fold(0, |a, b| b.map(|b| a + b))?,
                     DataType::Varchar => deserializer.read_bytes_len()?,
                 };
 
