@@ -83,7 +83,7 @@ impl<S: StateStore> SinkExecutor<S> {
 
         let schema = self.schema().clone();
 
-        // prepare external sink before writing if needed.
+        // prepare the external sink before writing if needed.
         if sink.needs_preparation() {
             sink.prepare(&schema)
                 .await
