@@ -373,6 +373,7 @@ where
             for fragment_id in topological_order {
                 let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
                 self.scheduler.schedule(fragment, &mut locations).await?;
+                table_fragments.update_table_fragment_map(fragment_id);
             }
 
             locations

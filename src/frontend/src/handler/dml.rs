@@ -36,12 +36,18 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
     let check_items = resolve_privileges(&bound);
     check_privileges(&session, &check_items)?;
 
-    let vnodes = match &bound {
-        BoundStatement::Insert(insert) => insert.vnode_mapping.clone(),
-        BoundStatement::Update(update) => update.vnode_mapping.clone(),
-        BoundStatement::Delete(delete) => delete.table.table_catalog.vnode_mapping.clone(),
+    let associate_table_id = match &bound {
+        BoundStatement::Insert(insert) => insert.table_source.associate_table_id,
+        BoundStatement::Update(update) => update.table_source.associate_table_id,
+        BoundStatement::Delete(delete) => delete.table_source.associate_table_id,
         BoundStatement::Query(_) => unreachable!(),
     };
+
+    let vnodes = context
+        .session_ctx
+        .env()
+        .worker_node_manager()
+        .get_table_mapping(&associate_table_id);
 
     let (plan, pg_descs) = {
         // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.

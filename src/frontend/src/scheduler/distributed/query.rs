@@ -425,7 +425,6 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                vnode_mapping: Some(vec![]),
                 retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
             }),
             vec![],
@@ -521,6 +520,7 @@ mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
+        worker_node_manager.insert_table_mapping(0.into(), vec![]);
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::new(worker_node_manager);
         fragmenter.split(batch_exchange_node3.clone()).unwrap()

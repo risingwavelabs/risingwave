@@ -411,6 +411,14 @@ impl TableFragments {
         result
     }
 
+    pub fn update_table_fragment_map(&mut self, fragment_id: FragmentId) {
+        if let Some(fragment) = self.fragments.get(&fragment_id) {
+            for table_id in &fragment.state_table_ids {
+                self.table_to_fragment_map.insert(*table_id, fragment_id);
+            }
+        }
+    }
+
     pub fn internal_table_ids(&self) -> Vec<u32> {
         self.fragments
             .values()
@@ -422,6 +430,10 @@ impl TableFragments {
     pub fn get_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
         self.table_to_fragment_map
             .get(&table_id)
-            .map(|f| self.fragments[f].vnode_mapping.clone().unwrap())
+            .map(|f| {
+                let mut mapping = self.fragments[f].vnode_mapping.clone().unwrap();
+                mapping.table_id = table_id;
+                mapping
+            })
     }
 }
