@@ -22,9 +22,9 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use crate::object::{
-    BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore, StreamingUploader,
-    StreamingUploaderImpl,
+use super::{
+    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+    StreamingUploader,
 };
 
 /// Store multiple parts in a map, and concatenate them on finish.
@@ -44,7 +44,7 @@ impl StreamingUploader for InMemStreamingUploader {
         Ok(())
     }
 
-    async fn finish(self) -> ObjectResult<()> {
+    async fn finish(self: Box<Self>) -> ObjectResult<()> {
         fail_point!("mem_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("mem finish streaming upload error")
         ));
@@ -67,8 +67,6 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
-    type Uploader = StreamingUploaderImpl;
-
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
             "mem upload error"
@@ -85,8 +83,8 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader> {
-        Ok(StreamingUploaderImpl::InMem(InMemStreamingUploader {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+        Ok(Box::new(InMemStreamingUploader {
             path: path.to_string(),
             buf: BytesMut::new(),
             objects: self.objects.clone(),

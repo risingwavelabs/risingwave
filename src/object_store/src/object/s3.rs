@@ -25,9 +25,9 @@ use itertools::Itertools;
 use tokio::task::JoinHandle;
 
 use super::object_metrics::ObjectStoreMetrics;
-use crate::object::{
-    BlockLocation, Bytes, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader, StreamingUploaderImpl,
+use super::{
+    BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
+    ObjectStore, StreamingUploader,
 };
 
 type PartId = i32;
@@ -226,7 +226,7 @@ impl StreamingUploader for S3StreamingUploader {
     /// If the data in the buffer is smaller than `MIN_PART_SIZE`, abort multipart upload
     /// and use `PUT` to upload the data. Otherwise flush the remaining data of the buffer
     /// to S3 as a new part. Fallback to `PUT` on failure.
-    async fn finish(mut self) -> ObjectResult<()> {
+    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
         fail_point!("s3_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("s3 finish streaming upload error")
         ));
@@ -264,8 +264,6 @@ pub struct S3ObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
-    type Uploader = StreamingUploaderImpl;
-
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
             "s3 upload error"
@@ -280,7 +278,7 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::Uploader> {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         fail_point!("s3_streaming_upload_err", |_| Err(ObjectError::internal(
             "s3 streaming upload error"
         )));
@@ -291,7 +289,7 @@ impl ObjectStore for S3ObjectStore {
             .key(path)
             .send()
             .await?;
-        Ok(Self::Uploader::S3(S3StreamingUploader::new(
+        Ok(Box::new(S3StreamingUploader::new(
             self.client.clone(),
             self.bucket.clone(),
             path.to_string(),

@@ -25,8 +25,8 @@ use futures::future::try_join_all;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
-use crate::object::{
-    BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore, StreamingUploaderImpl,
+use super::{
+    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
 };
 
 pub(super) mod utils {
@@ -174,8 +174,6 @@ impl DiskObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
-    type Uploader = StreamingUploaderImpl;
-
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let mut file =
             utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
@@ -188,7 +186,7 @@ impl ObjectStore for DiskObjectStore {
         Ok(())
     }
 
-    async fn streaming_upload(&self, _path: &str) -> ObjectResult<Self::Uploader> {
+    async fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
         unimplemented!("streaming upload is not implemented for disk object store");
     }
 
