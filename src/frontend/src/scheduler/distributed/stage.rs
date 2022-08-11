@@ -50,6 +50,7 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
 
+#[derive(PartialEq)]
 enum StageState {
     Pending,
     Started,
@@ -207,6 +208,10 @@ impl StageExecution {
         // Set state to failed.
         {
             let mut state = self.state.write().await;
+            // Ignore if already finished.
+            if *state == StageState::Completed {
+                return;
+            }
             // FIXME: Be careful for state jump back.
             *state = StageState::Failed
         }
@@ -365,29 +370,37 @@ impl StageRunner {
                             // different tasks.
                             let status = stauts_res_inner.map_err(|e| RpcError(e.into()))?;
                             use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
-                            if TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status)
-                                == Some(TaskStatusProst::Running)
-                            {
-                                running_task_cnt += 1;
-                                // The task running count should always less or equal than the registered tasks
-                                // number.
-                                assert!(running_task_cnt <= self.tasks.keys().len());
-                                // All tasks in this stage have been scheduled. Notify query runner to schedule next
-                                // stage.
-                                if running_task_cnt == self.tasks.keys().len() {
-                                    self.notify_schedule_next_stage().await?;
-                                    sent_signal_to_next = true;
+                            match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap() {
+                                TaskStatusProst::Running => {
+                                    running_task_cnt += 1;
+                                    // The task running count should always less or equal than the registered tasks
+                                    // number.
+                                    assert!(running_task_cnt <= self.tasks.keys().len());
+                                    // All tasks in this stage have been scheduled. Notify query runner to schedule next
+                                    // stage.
+                                    if running_task_cnt == self.tasks.keys().len() {
+                                        self.notify_schedule_next_stage().await?;
+                                        sent_signal_to_next = true;
+                                    }
+                                }
+
+                                TaskStatusProst::Failed => {
+                                    // If receive task failure, report to query runner and abort tasks.
+                                    let task_execution_err = SchedulerError::TaskExecutionError;
+                                    self.send_event(QueryMessage::Stage(StageEvent::Failed {id: self.stage.id, reason: task_execution_err})).await?;
+                                    self.abort_all_running_tasks().await?;
+
+                                    break;
+                                }
+
+                                TaskStatusProst::Finished => {
+                                    // no-op
+                                }
+
+                                status => {
+                                    unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }
-
-                            // If receive task failure, report to query runner and also cancel
-                            if TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status) == Some(TaskStatusProst::Failed) {
-                                let task_execution_err = SchedulerError::TaskExecutionError;
-                                self.send_event(QueryMessage::Stage(StageEvent::Failed {id: self.stage.id, reason: task_execution_err})).await?;
-                                // Abort all tasks and break.
-                                self.abort_all_running_tasks().await?;
-                                break;
-                        }
                          } else {
                         // After processing all stream status, we must have sent signal (Either Scheduled or
                         // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
