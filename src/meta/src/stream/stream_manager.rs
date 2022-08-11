@@ -1384,7 +1384,7 @@ mod tests {
             .select_table_fragments_by_table_id(&table_id)
             .await
             .unwrap();
-        assert_eq!(4, table_fragments.internal_table_ids().len());
+        assert_eq!(table_fragments.actor_ids(), (0..5).collect_vec());
 
         // test drop materialized_view
         services
