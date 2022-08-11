@@ -233,15 +233,19 @@ impl StreamingUploader for S3StreamingUploader {
         // Fallback to `PUT`.
         if self.join_handles.is_empty() {
             self.abort().await?;
-            self.client
-                .put_object()
-                .bucket(&self.bucket)
-                .key(&self.key)
-                .body(get_upload_body(self.buf))
-                .content_length(self.not_uploaded_len as i64)
-                .send()
-                .await?;
-            return Ok(());
+            return if self.buf.is_empty() {
+                Ok(())
+            } else {
+                self.client
+                    .put_object()
+                    .bucket(&self.bucket)
+                    .key(&self.key)
+                    .body(get_upload_body(self.buf))
+                    .content_length(self.not_uploaded_len as i64)
+                    .send()
+                    .await?;
+                Ok(())
+            };
         }
         if self.flush_and_complete().await.is_err() {
             self.abort().await?;
@@ -268,14 +272,18 @@ impl ObjectStore for S3ObjectStore {
         fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
             "s3 upload error"
         )));
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .body(aws_sdk_s3::types::ByteStream::from(obj))
-            .key(path)
-            .send()
-            .await?;
-        Ok(())
+        if obj.is_empty() {
+            Ok(())
+        } else {
+            self.client
+                .put_object()
+                .bucket(&self.bucket)
+                .body(aws_sdk_s3::types::ByteStream::from(obj))
+                .key(path)
+                .send()
+                .await?;
+            Ok(())
+        }
     }
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {

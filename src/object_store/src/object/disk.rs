@@ -175,15 +175,19 @@ impl DiskObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let mut file =
-            utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
-        file.write_all(&obj)
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
-        file.flush()
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
-        Ok(())
+        if obj.is_empty() {
+            Ok(())
+        } else {
+            let mut file =
+                utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
+            file.write_all(&obj)
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
+            file.flush()
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
+            Ok(())
+        }
     }
 
     async fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
