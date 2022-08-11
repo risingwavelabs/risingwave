@@ -37,6 +37,7 @@ impl StreamExchange {
             ctx,
             input.schema().clone(),
             pk_indices,
+            input.functional_dependency().clone(),
             dist,
             input.append_only(),
         );

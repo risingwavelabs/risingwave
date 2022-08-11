@@ -85,7 +85,6 @@ impl LogicalScan {
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>();
-
         let schema = Schema { fields };
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
@@ -371,7 +370,7 @@ impl fmt::Display for LogicalScan {
         if self.predicate.always_true() {
             write!(
                 f,
-                "LogicalScan {{ table: {}, columns: [{}] }}",
+                "LogicalScan {{ table: {}, columns: [{}] }} pk: {:?}",
                 self.table_name,
                 if verbose {
                     self.column_names_with_table_prefix()
@@ -379,6 +378,7 @@ impl fmt::Display for LogicalScan {
                     self.column_names()
                 }
                 .join(", "),
+                self.logical_pk(),
             )
         } else {
             let required_col_names = self
