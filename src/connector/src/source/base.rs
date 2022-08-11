@@ -194,7 +194,9 @@ pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
 pub fn spawn_data_generation(
     mut generator_next: impl FnMut() -> Result<Vec<SourceMessage>> + Send + 'static,
 ) -> DataGenerationReceiver {
-    let (generation_tx, generation_rx) = mpsc::channel(4);
+    const GENERATION_BUFFER: usize = 4;
+
+    let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
     std::thread::spawn(move || loop {
         let result = generator_next();
         if generation_tx.blocking_send(result).is_err() {
