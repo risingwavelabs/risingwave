@@ -33,10 +33,10 @@ use risingwave_pb::stream_plan::{
     MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
-use crate::manager::MetaSrvEnv;
+use crate::manager::{FragmentManager, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{CreateMaterializedViewContext, FragmentManager};
+use crate::stream::CreateMaterializedViewContext;
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
