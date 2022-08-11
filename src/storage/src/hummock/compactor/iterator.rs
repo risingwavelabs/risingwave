@@ -15,10 +15,12 @@
 use std::cmp::Ordering;
 use std::future::Future;
 
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::compactor::{CompactorSstableStoreRef, DataHolder};
+use crate::hummock::compactor::sstable_store::SstableBlocks;
+use crate::hummock::compactor::CompactorSstableStoreRef;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::value::HummockValue;
@@ -35,34 +37,36 @@ pub struct SstablePrefetchIterator {
     /// Reference to the sst
     sst: TableHolder,
 
-    data: DataHolder,
+    blocks: SstableBlocks,
 }
 
 impl SstablePrefetchIterator {
-    pub fn new(sst: TableHolder, data: DataHolder) -> Self {
+    pub fn new(sst: TableHolder, blocks: SstableBlocks) -> Self {
         Self {
             block_iter: None,
             cur_idx: 0,
             sst,
-            data,
+            blocks,
         }
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.sst.value().block_count() {
-            self.block_iter = None;
-        } else {
-            let block = BlockHolder::from_ref_block(self.data.value().blocks[idx].clone());
-            let mut block_iter = BlockIterator::new(block);
-            if let Some(key) = seek_key {
-                block_iter.seek(key);
-            } else {
-                block_iter.seek_to_first();
+        while let Some((next_idx, block)) = self.blocks.next() {
+            if next_idx >= idx {
+                let block = BlockHolder::from_ref_block(block);
+                let mut block_iter = BlockIterator::new(block);
+                if let Some(key) = seek_key {
+                    block_iter.seek(key);
+                } else {
+                    block_iter.seek_to_first();
+                }
+                self.block_iter = Some(block_iter);
+                self.cur_idx = idx;
+                return Ok(());
             }
-            self.block_iter = Some(block_iter);
-            self.cur_idx = idx;
         }
+        self.block_iter = None;
         Ok(())
     }
 
@@ -72,16 +76,14 @@ impl SstablePrefetchIterator {
         if block_iter.is_valid() {
             Ok(())
         } else {
-            // seek to next block
-            if self.cur_idx + 1 >= self.sst.value().block_count() {
-                self.block_iter = None;
-            } else {
-                let block =
-                    BlockHolder::from_ref_block(self.data.value().blocks[self.cur_idx + 1].clone());
-                let mut block_iter = BlockIterator::new(block);
+            if let Some((idx, block)) = self.blocks.next() {
+                assert_eq!(idx, self.cur_idx + 1);
+                let mut block_iter = BlockIterator::new(BlockHolder::from_ref_block(block));
                 block_iter.seek_to_first();
                 self.block_iter = Some(block_iter);
                 self.cur_idx += 1;
+            } else {
+                self.block_iter = None;
             }
             Ok(())
         }
@@ -118,7 +120,6 @@ impl SstablePrefetchIterator {
                 ord == Ordering::Less || ord == Ordering::Equal
             })
             .saturating_sub(1); // considering the boundary of 0
-
         self.seek_idx(block_idx, Some(key))?;
         if !self.is_valid() {
             // seek to next block
@@ -129,6 +130,8 @@ impl SstablePrefetchIterator {
 }
 
 pub struct ConcatSstableIterator {
+    key_range: KeyRange,
+
     /// The iterator of the current table.
     sstable_iter: Option<SstablePrefetchIterator>,
 
@@ -147,8 +150,13 @@ impl ConcatSstableIterator {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
-    pub fn new(tables: Vec<SstableInfo>, sstable_store: CompactorSstableStoreRef) -> Self {
+    pub fn new(
+        tables: Vec<SstableInfo>,
+        key_range: KeyRange,
+        sstable_store: CompactorSstableStoreRef,
+    ) -> Self {
         Self {
+            key_range,
             sstable_iter: None,
             cur_idx: 0,
             tables,
@@ -167,9 +175,23 @@ impl ConcatSstableIterator {
                 .sstable_store
                 .sstable(self.tables[idx].id, &mut self.stats)
                 .await?;
+            let block_metas = &table.value().meta.block_metas;
+            let start_index = block_metas
+                .partition_point(|block| {
+                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
+                        != Ordering::Greater
+                })
+                .saturating_sub(1);
+            let end_index = table.value().meta.block_metas.partition_point(|block| {
+                VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
+                    != Ordering::Greater
+            });
+            if end_index <= start_index {
+                return Ok(());
+            }
             let data = self
                 .sstable_store
-                .load_data(table.value(), &mut self.stats)
+                .scan(table.value(), start_index, end_index, &mut self.stats)
                 .await?;
             let mut sstable_iter = SstablePrefetchIterator::new(table, data);
             if let Some(key) = seek_key {
@@ -201,7 +223,15 @@ impl HummockIterator for ConcatSstableIterator {
                 Ok(())
             } else {
                 // seek to next table
-                self.seek_idx(self.cur_idx + 1, None).await
+                let mut next_idx = self.cur_idx + 1;
+                while next_idx < self.tables.len() {
+                    self.seek_idx(next_idx, None).await?;
+                    if self.sstable_iter.is_some() {
+                        break;
+                    }
+                    next_idx += 1;
+                }
+                Ok(())
             }
         }
     }
@@ -234,11 +264,13 @@ impl HummockIterator for ConcatSstableIterator {
                     ord == Ordering::Less || ord == Ordering::Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
-
-            self.seek_idx(table_idx, Some(key)).await?;
-            if !self.is_valid() {
-                // Seek to next table
-                self.seek_idx(table_idx + 1, None).await?;
+            let mut next_idx = table_idx;
+            while next_idx < self.tables.len() {
+                self.seek_idx(next_idx, None).await?;
+                if self.sstable_iter.is_some() {
+                    break;
+                }
+                next_idx += 1;
             }
             Ok(())
         }

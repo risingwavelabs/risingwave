@@ -167,17 +167,14 @@ pub async fn compute_node_serve(
             let compact_sstable_store = CompactorSstableStore::new(
                 storage.sstable_store(),
                 Arc::new(MemoryLimiter::new(data_cache_capacity)),
-                data_cache_capacity as usize,
             );
             let compactor_context = Arc::new(CompactorContext {
                 context,
                 sstable_store: Arc::new(compact_sstable_store),
             });
 
-            let (handle, shutdown_sender) = Compactor::start_compactor(
-                compactor_context,
-                hummock_meta_client,
-            );
+            let (handle, shutdown_sender) =
+                Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
         monitor_cache(storage.sstable_store(), &registry).unwrap();

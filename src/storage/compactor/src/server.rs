@@ -115,7 +115,6 @@ pub async fn compactor_serve(
     let compact_sstable_store = Arc::new(CompactorSstableStore::new(
         sstable_store.clone(),
         Arc::new(MemoryLimiter::new(block_cache_capacity)),
-        block_cache_capacity as usize,
     ));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),

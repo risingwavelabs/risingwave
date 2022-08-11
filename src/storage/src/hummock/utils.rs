@@ -136,6 +136,46 @@ impl MemoryLimiterInner {
         self.total_size.fetch_sub(quota, AtomicOrdering::Release);
         self.notify.notify_waiters();
     }
+
+    pub async fn require_memory(&self, quota: u64) {
+        let current_quota = self.total_size.load(AtomicOrdering::Acquire);
+        if current_quota < self.quota
+            && self
+                .total_size
+                .compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                )
+                .is_ok()
+        {
+            // fast path.
+            return;
+        }
+        loop {
+            let notified = self.notify.notified();
+            let current_quota = self.total_size.load(AtomicOrdering::Acquire);
+            if current_quota < self.quota {
+                match self.total_size.compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                ) {
+                    Ok(_) => break,
+                    Err(old_quota) => {
+                        // The quota is enough but just changed by other threads. So just try to
+                        // update again without waiting notify.
+                        if old_quota < self.quota {
+                            continue;
+                        }
+                    }
+                }
+            }
+            notified.await;
+        }
+    }
 }
 
 pub struct MemoryLimiter {
@@ -203,47 +243,7 @@ impl MemoryLimiter {
         if quota > self.inner.quota {
             return None;
         }
-        let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
-        if current_quota < self.inner.quota
-            && self
-                .inner
-                .total_size
-                .compare_exchange(
-                    current_quota,
-                    current_quota + quota,
-                    AtomicOrdering::SeqCst,
-                    AtomicOrdering::SeqCst,
-                )
-                .is_ok()
-        {
-            // fast path.
-            return Some(MemoryTracker {
-                limiter: self.inner.clone(),
-                quota,
-            });
-        }
-        loop {
-            let notified = self.inner.notify.notified();
-            let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
-            if current_quota < self.inner.quota {
-                match self.inner.total_size.compare_exchange(
-                    current_quota,
-                    current_quota + quota,
-                    AtomicOrdering::SeqCst,
-                    AtomicOrdering::SeqCst,
-                ) {
-                    Ok(_) => break,
-                    Err(old_quota) => {
-                        // The quota is enough but just changed by other threads. So just try to
-                        // update again without waiting notify.
-                        if old_quota < self.inner.quota {
-                            continue;
-                        }
-                    }
-                }
-            }
-            notified.await;
-        }
+        self.inner.require_memory(quota).await;
         Some(MemoryTracker {
             limiter: self.inner.clone(),
             quota,
@@ -252,6 +252,16 @@ impl MemoryLimiter {
 
     pub fn get_memory_usage(&self) -> u64 {
         self.inner.total_size.load(AtomicOrdering::Acquire)
+    }
+}
+
+impl MemoryTracker {
+    pub async fn increase_memory(&mut self, target: u64) {
+        if self.quota >= target {
+            return;
+        }
+        self.limiter.require_memory(target - self.quota).await;
+        self.quota = target;
     }
 }
 

@@ -16,8 +16,10 @@ mod compaction_executor;
 mod compaction_filter;
 mod compactor_runner;
 mod context;
+mod iterator;
 mod shared_buffer_compact;
 mod sstable_store;
+
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -99,7 +101,7 @@ pub struct Compactor {
     sstable_store: Arc<dyn SstableStoreWrite>,
     memory_limiter: Arc<MemoryLimiter>,
 
-    splits: Vec<KeyRange>,
+    key_range: KeyRange,
     cache_policy: CachePolicy,
     gc_delete_keys: bool,
     watermark: u64,
@@ -252,10 +254,13 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compaction_executor = context.compaction_executor.clone();
             let filter = multi_filter.clone();
-            let compactor_runner =
-                CompactorRunner::new(compactor_context.as_ref(), compact_task.clone());
+            let compactor_runner = CompactorRunner::new(
+                split_index,
+                compactor_context.as_ref(),
+                compact_task.clone(),
+            );
             let rx = match Compactor::request_execution(compaction_executor, async move {
-                compactor_runner.run(split_index, filter).await
+                compactor_runner.run(filter).await
             }) {
                 Ok(rx) => rx,
                 Err(err) => {
@@ -456,7 +461,7 @@ impl Compactor {
 
     pub async fn compact_and_build_sst<T: TableBuilderFactory>(
         sst_builder: &mut CapacitySplitTableBuilder<T>,
-        kr: KeyRange,
+        kr: &KeyRange,
         mut iter: impl HummockIterator<Direction = Forward>,
         gc_delete_keys: bool,
         watermark: Epoch,
@@ -535,7 +540,7 @@ impl Compactor {
         options: SstableBuilderOptions,
         sstable_store: Arc<dyn SstableStoreWrite>,
         memory_limiter: Arc<MemoryLimiter>,
-        splits: Vec<KeyRange>,
+        key_range: KeyRange,
         cache_policy: CachePolicy,
         gc_delete_keys: bool,
         watermark: u64,
@@ -545,7 +550,7 @@ impl Compactor {
             options,
             sstable_store,
             memory_limiter,
-            splits,
+            key_range,
             cache_policy,
             gc_delete_keys,
             watermark,
@@ -556,11 +561,9 @@ impl Compactor {
     /// Upon a successful return, the built SSTs are already uploaded to object store.
     async fn compact_key_range_impl(
         &self,
-        split_index: usize,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-    ) -> HummockResult<CompactOutput> {
-        let kr = self.splits[split_index].clone();
+    ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
         let mut options = self.options.clone();
         options.estimate_bloom_filter_capacity = self
@@ -593,7 +596,7 @@ impl Compactor {
 
         Compactor::compact_and_build_sst(
             &mut builder,
-            kr,
+            &self.key_range,
             iter,
             self.gc_delete_keys,
             self.watermark,
@@ -646,7 +649,7 @@ impl Compactor {
             .stats
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
-        Ok((split_index, ssts))
+        Ok(ssts)
     }
 }
 

@@ -418,18 +418,24 @@ impl SstableStoreWrite for SstableStore {
         data: Bytes,
         policy: CachePolicy,
     ) -> HummockResult<()> {
-        self.put_sst_data(sst_id, data).await?;
+        self.put_sst_data(sst_id, data.clone()).await?;
         fail_point!("metadata_upload_err");
         if let Err(e) = self.put_meta(sst_id, &meta).await {
             self.delete_sst_data(sst_id).await?;
             return Err(e);
         }
         if let CachePolicy::Fill = policy {
-            let sst = Sstable::new(sst_id, meta);
-            let charge = sst.estimate_size();
-            self.meta_cache
-                .insert(sst_id, sst_id, charge, Box::new(sst));
+            for (block_idx, block_meta) in meta.block_metas.iter().enumerate() {
+                let end_offset = (block_meta.offset + block_meta.len) as usize;
+                let block = Block::decode(&data[block_meta.offset as usize..end_offset])?;
+                self.block_cache
+                    .insert(sst_id, block_idx as u64, Box::new(block));
+            }
         }
+        let sst = Sstable::new(sst_id, meta);
+        let charge = sst.estimate_size();
+        self.meta_cache
+            .insert(sst_id, sst_id, charge, Box::new(sst));
         Ok(())
     }
 }
@@ -443,7 +449,7 @@ mod tests {
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator};
+    use crate::hummock::{CachePolicy, SstableIterator, SstableStoreWrite};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
