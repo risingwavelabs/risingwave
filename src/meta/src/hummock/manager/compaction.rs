@@ -12,4 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod context;
+use std::collections::BTreeMap;
+
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
+use risingwave_pb::hummock::CompactTaskAssignment;
+
+use crate::hummock::compaction::CompactStatus;
+
+#[derive(Default)]
+pub(super) struct Compaction {
+    /// Compaction task that is already assigned to a compactor
+    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
+    /// `CompactStatus` of each compaction group
+    pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
+}

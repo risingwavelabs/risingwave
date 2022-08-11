@@ -20,16 +20,12 @@ use itertools::Itertools;
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
 use crate::array::{ArrayImpl, Row, RowRef};
-use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     DatumRef,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
-
-/// The sentinel cell id is `-1_i32`, which is ensured to be the first kv pair in the row.
-pub const SENTINEL_CELL_ID: ColumnId = ColumnId::new(-1_i32);
 
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.

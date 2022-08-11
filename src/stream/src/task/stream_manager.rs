@@ -280,13 +280,7 @@ impl LocalStreamManager {
         let (actor_ids_to_send, actor_ids_to_collect) = {
             let core = self.core.lock();
             let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
-            let actor_ids_to_collect = core
-                .context
-                .actor_infos
-                .read()
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
+            let actor_ids_to_collect = core.handles.keys().cloned().collect::<HashSet<_>>();
             (actor_ids_to_send, actor_ids_to_collect)
         };
         if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
@@ -295,7 +289,6 @@ impl LocalStreamManager {
         let barrier = &Barrier {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
-            span: tracing::Span::none(),
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;

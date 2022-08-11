@@ -26,8 +26,9 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, ExprImpl, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -83,11 +84,17 @@ impl LogicalScan {
             .pk
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
-            .collect::<Option<Vec<_>>>()
-            .unwrap_or_default();
+            .collect::<Option<Vec<_>>>();
 
         let schema = Schema { fields };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let (functional_dependency, pk_indices) = match pk_indices {
+            Some(pk_indices) => (
+                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
+                pk_indices,
+            ),
+            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
 
         let mut required_col_idx = output_col_idx.clone();
         let mut visitor =
@@ -240,18 +247,35 @@ impl LogicalScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &[usize],
+        primary_to_secondary_mapping: &HashMap<usize, usize>,
     ) -> LogicalScan {
-        assert_eq!(
-            primary_to_secondary_mapping.len(),
-            self.table_desc.columns.len()
-        );
         let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
 
         // create index scan plan to match the output order of the current table scan
         for &col_idx in &self.required_col_idx {
-            new_required_col_idx.push(primary_to_secondary_mapping[col_idx]);
+            new_required_col_idx.push(*primary_to_secondary_mapping.get(&col_idx).unwrap());
         }
+
+        struct Rewriter<'a> {
+            primary_to_secondary_mapping: &'a HashMap<usize, usize>,
+        }
+        impl ExprRewriter for Rewriter<'_> {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                InputRef::new(
+                    *self
+                        .primary_to_secondary_mapping
+                        .get(&input_ref.index)
+                        .unwrap(),
+                    input_ref.return_type(),
+                )
+                .into()
+            }
+        }
+        let mut rewriter = Rewriter {
+            primary_to_secondary_mapping,
+        };
+
+        let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
 
         Self::new(
             index_name.to_string(),
@@ -260,7 +284,7 @@ impl LogicalScan {
             index_table_desc,
             vec![],
             self.ctx(),
-            self.predicate.clone(),
+            new_predicate,
         )
     }
 
@@ -332,6 +356,10 @@ impl LogicalScan {
 
     pub fn output_col_idx(&self) -> &Vec<usize> {
         &self.output_col_idx
+    }
+
+    pub fn required_col_idx(&self) -> &Vec<usize> {
+        &self.required_col_idx
     }
 }
 
@@ -463,7 +491,7 @@ impl ToStream for LogicalScan {
                 None.into(),
             )));
         }
-        match self.base.pk_indices.is_empty() {
+        match self.base.logical_pk.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();
 
