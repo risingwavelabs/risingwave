@@ -32,14 +32,19 @@ use super::{
 
 type PartId = i32;
 
+/// MinIO and S3 share the same minimum part ID and part size.
 const MIN_PART_ID: PartId = 1;
 const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
-const PART_SIZE: usize = 16 * 1024 * 1024;
+
+const S3_PART_SIZE: usize = 16 * 1024 * 1024;
+// TODO: we should do some benchmark to determine the proper part size for MinIO
+const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
 
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
 pub struct S3StreamingUploader {
     client: Client,
+    part_size: usize,
     bucket: String,
     /// The key of the object.
     key: String,
@@ -72,6 +77,7 @@ impl S3StreamingUploader {
     pub fn new(
         client: Client,
         bucket: String,
+        part_size: usize,
         key: String,
         upload_id: String,
         metrics: Arc<ObjectStoreMetrics>,
@@ -79,6 +85,7 @@ impl S3StreamingUploader {
         Self {
             client,
             bucket,
+            part_size,
             key,
             upload_id,
             next_part_id: MIN_PART_ID,
@@ -202,7 +209,7 @@ impl StreamingUploader for S3StreamingUploader {
         self.not_uploaded_len += data_len;
         self.buf.push(data);
 
-        if self.not_uploaded_len > PART_SIZE {
+        if self.not_uploaded_len > self.part_size {
             if self.part_end == 0 {
                 // Mark current slice of buffer to be the next part to be uploaded.
                 self.part_end = self.buf.len();
@@ -246,8 +253,9 @@ impl StreamingUploader for S3StreamingUploader {
                 Ok(())
             };
         }
-        if self.flush_and_complete().await.is_err() {
+        if let Err(e) = self.flush_and_complete().await {
             self.abort().await?;
+            return Err(e);
         }
         Ok(())
     }
@@ -261,6 +269,7 @@ fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
 pub struct S3ObjectStore {
     client: Client,
     bucket: String,
+    part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
 }
@@ -299,6 +308,7 @@ impl ObjectStore for S3ObjectStore {
         Ok(Box::new(S3StreamingUploader::new(
             self.client.clone(),
             self.bucket.clone(),
+            self.part_size,
             path.to_string(),
             resp.upload_id.unwrap(),
             self.metrics.clone(),
@@ -434,6 +444,7 @@ impl S3ObjectStore {
         Self {
             client,
             bucket,
+            part_size: S3_PART_SIZE,
             metrics,
         }
     }
@@ -446,21 +457,22 @@ impl S3ObjectStore {
         let (address, bucket) = rest.split_once('/').unwrap();
 
         let loader = aws_config::ConfigLoader::default();
-        let builder = aws_sdk_s3::config::Builder::from(&loader.load().await);
-        let builder = builder.region(Region::new("custom"));
-        let builder = builder.endpoint_resolver(Endpoint::immutable(
-            format!("http://{}", address).try_into().unwrap(),
-        ));
-        let builder = builder.credentials_provider(aws_sdk_s3::Credentials::from_keys(
-            access_key_id,
-            secret_access_key,
-            None,
-        ));
+        let builder = aws_sdk_s3::config::Builder::from(&loader.load().await)
+            .region(Region::new("custom"))
+            .endpoint_resolver(Endpoint::immutable(
+                format!("http://{}", address).try_into().unwrap(),
+            ))
+            .credentials_provider(aws_sdk_s3::Credentials::from_keys(
+                access_key_id,
+                secret_access_key,
+                None,
+            ));
         let config = builder.build();
         let client = Client::from_conf(config);
         Self {
             client,
             bucket: bucket.to_string(),
+            part_size: MINIO_PART_SIZE,
             metrics,
         }
     }
