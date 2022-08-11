@@ -84,9 +84,11 @@ impl<S: StateStore> SinkExecutor<S> {
         let schema = self.schema().clone();
 
         // prepare external sink before writing if needed.
-        sink.prepare(&schema)
-            .await
-            .map_err(StreamExecutorError::sink_error)?;
+        if sink.needs_preparation() {
+            sink.prepare(&schema)
+                .await
+                .map_err(StreamExecutorError::sink_error)?;
+        }
 
         let input = self.input.execute();
 
