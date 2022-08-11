@@ -54,9 +54,6 @@ pub struct Args {
 
     #[clap(short, long, default_value = "1")]
     jobs: usize,
-
-    #[clap(long)]
-    ddl: Option<String>,
 }
 
 #[cfg(madsim)]
@@ -140,14 +137,7 @@ async fn main() {
         .ip([192, 168, 100, 1].into())
         .build();
     client_node
-        .spawn(async move {
-            match args.ddl {
-                Some(ref file) => run_slt_task(file, &args, &frontend_ip).await,
-                None => (),
-            }
-
-            run_slt_task(&args.files, &args, &frontend_ip).await
-        })
+        .spawn(async move { run_slt_task(&args.files, &args, &frontend_ip).await })
         .await
         .unwrap();
 }
