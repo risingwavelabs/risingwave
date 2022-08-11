@@ -195,7 +195,6 @@ pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<O
                     $((None, Some(ScalarImpl::$tt(r))) => Ok(compare_values(None, Some(r), &order_pair.order_type)),)*
                     (None, None) => Ok(compare_values::<()>(None, None, &order_pair.order_type)),
                     (Some(l), Some(r)) => Err(InternalError(format!("Unmatched scalar types, lhs is: {:?}, rhs is: {:?}", l, r))),
-                    (l, r) => Err(InternalError(format!("Unsupported types, lhs is: {:?}, rhs is: {:?}", l, r))),
                 }?
             }
         }
@@ -215,7 +214,9 @@ pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<O
                 Interval,
                 NaiveDate,
                 NaiveDateTime,
-                NaiveTime
+                NaiveTime,
+                Struct,
+                List
             ]
         );
 
@@ -278,7 +279,9 @@ pub fn compare_rows_in_chunk(
                 Interval,
                 NaiveDate,
                 NaiveDateTime,
-                NaiveTime
+                NaiveTime,
+                Struct,
+                List
             ]
         );
         if res != Ordering::Equal {
@@ -291,9 +294,12 @@ pub fn compare_rows_in_chunk(
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
+    use std::sync::Arc;
+
+    use itertools::Itertools;
 
     use super::{compare_rows, OrderPair, OrderType};
-    use crate::array::{DataChunk, Row};
+    use crate::array::{DataChunk, ListValue, Row, StructValue};
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 
@@ -344,6 +350,99 @@ mod tests {
             OrderPair::new(1, OrderType::Descending),
         ];
 
+        assert_eq!(
+            Ordering::Equal,
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &order_pairs).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_compare_all_types() {
+        let row1 = Row::new(vec![
+            Some(ScalarImpl::Int16(16)),
+            Some(ScalarImpl::Int32(32)),
+            Some(ScalarImpl::Int64(64)),
+            Some(ScalarImpl::Float32(3.2.into())),
+            Some(ScalarImpl::Float64(6.4.into())),
+            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Decimal(10.into())),
+            Some(ScalarImpl::Interval(Default::default())),
+            Some(ScalarImpl::NaiveDate(Default::default())),
+            Some(ScalarImpl::NaiveDateTime(Default::default())),
+            Some(ScalarImpl::NaiveTime(Default::default())),
+            Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some(ScalarImpl::Float32(3.0.into())),
+            ]))),
+            Some(ScalarImpl::List(ListValue::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some(ScalarImpl::Int32(2)),
+            ]))),
+        ]);
+        let row2 = Row::new(vec![
+            Some(ScalarImpl::Int16(16)),
+            Some(ScalarImpl::Int32(32)),
+            Some(ScalarImpl::Int64(64)),
+            Some(ScalarImpl::Float32(3.2.into())),
+            Some(ScalarImpl::Float64(6.4.into())),
+            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Bool(true)),
+            Some(ScalarImpl::Decimal(10.into())),
+            Some(ScalarImpl::Interval(Default::default())),
+            Some(ScalarImpl::NaiveDate(Default::default())),
+            Some(ScalarImpl::NaiveDateTime(Default::default())),
+            Some(ScalarImpl::NaiveTime(Default::default())),
+            Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some(ScalarImpl::Float32(33333.0.into())), // larger than row1
+            ]))),
+            Some(ScalarImpl::List(ListValue::new(vec![
+                Some(ScalarImpl::Int32(1)),
+                Some(ScalarImpl::Int32(2)),
+            ]))),
+        ]);
+
+        let order_pairs = (0..row1.size())
+            .map(|i| OrderPair::new(i, OrderType::Ascending))
+            .collect_vec();
+        assert_eq!(
+            Ordering::Equal,
+            compare_rows(&row1, &row1, &order_pairs).unwrap()
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_rows(&row1, &row2, &order_pairs).unwrap()
+        );
+
+        let chunk = DataChunk::from_rows(
+            &[row1, row2],
+            &[
+                DataType::Int16,
+                DataType::Int32,
+                DataType::Int64,
+                DataType::Float32,
+                DataType::Float64,
+                DataType::Varchar,
+                DataType::Boolean,
+                DataType::Decimal,
+                DataType::Interval,
+                DataType::Date,
+                DataType::Timestamp,
+                DataType::Time,
+                DataType::Struct {
+                    fields: Arc::new([DataType::Int32, DataType::Float32]),
+                },
+                DataType::List {
+                    datatype: Box::new(DataType::Int32),
+                },
+            ],
+        )
+        .unwrap();
         assert_eq!(
             Ordering::Equal,
             compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()

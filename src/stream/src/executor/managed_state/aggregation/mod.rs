@@ -14,6 +14,8 @@
 
 //! Aggregators with state store support
 
+use std::sync::Arc;
+
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
@@ -25,6 +27,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
+use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
@@ -119,7 +122,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         key_hash_code: Option<HashCode>,
         pk: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
-        state_table_col_indices: Vec<usize>,
+        state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -149,8 +152,8 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 agg_call,
                 pk,
                 pk_indices,
-                state_table_col_indices,
-            )?))),
+                state_table_col_mapping,
+            )))),
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {

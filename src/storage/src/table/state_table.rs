@@ -226,6 +226,8 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 
 pub type RowStream<'a, S: StateStore, RS: RowSerde> =
     impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowBasedRowStream<'a, S> = RowStream<'a, S, RowBasedSerde>;
+
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_table_iter: C,
