@@ -46,7 +46,7 @@ impl StateTableColumnMapping {
     }
 
     /// Return the number of columns in the mapping.
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.upstream_columns.len()
     }
 
@@ -73,7 +73,7 @@ mod tests {
         assert_eq!(mapping.upstream_to_state_table(0), Some(2));
         assert_eq!(mapping.upstream_to_state_table(1), Some(3));
         assert_eq!(mapping.upstream_to_state_table(4), None);
-        assert_eq!(mapping.size(), 4);
+        assert_eq!(mapping.len(), 4);
         assert_eq!(mapping.upstream_columns(), &[2, 3, 0, 1]);
     }
 }
