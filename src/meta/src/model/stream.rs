@@ -428,12 +428,10 @@ impl TableFragments {
     }
 
     pub fn get_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
-        self.table_to_fragment_map
-            .get(&table_id)
-            .map(|f| {
-                let mut mapping = self.fragments[f].vnode_mapping.clone().unwrap();
-                mapping.table_id = table_id;
-                mapping
-            })
+        self.table_to_fragment_map.get(&table_id).map(|f| {
+            let mut mapping = self.fragments[f].vnode_mapping.clone().unwrap();
+            mapping.table_id = table_id;
+            mapping
+        })
     }
 }
