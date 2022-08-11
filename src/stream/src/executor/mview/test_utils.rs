@@ -60,5 +60,5 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
     }
     state.commit(epoch).await.unwrap();
 
-    table.into()
+    table
 }

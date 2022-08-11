@@ -379,7 +379,6 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = state.storage_table().clone();
     let table = StorageTableBase::new_for_test(
         memory_state_store,
         TableId::from(0x42),

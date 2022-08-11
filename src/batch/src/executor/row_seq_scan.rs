@@ -229,7 +229,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             for scan_range in &seq_scan_node.scan_ranges {
                 let scan_type = async {
                     let pk_types = pk_types.clone();
-                    let table = table.clone();
+                    let mut table = table.clone();
                     let keyspace = keyspace.clone();
 
                     let (pk_prefix_value, next_col_bounds) =

@@ -26,9 +26,7 @@ use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId, TableOption,
-};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -40,11 +38,8 @@ use risingwave_pb::catalog::Table;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::{
-    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
-};
-use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, WriteOptions};
+use crate::row_serde::{serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde};
+use crate::store::ReadOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 mod iter_utils;
@@ -77,15 +72,10 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde> {
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
-    row_serializer: RS::Serializer,
+    row_deserializer: RS::Deserializer,
 
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
-
-    /// Indices of primary key.
-    /// Note that the index is based on the all columns of the table, instead of the output ones.
-    // FIXME: revisit constructions and usages.
-    pk_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -266,10 +256,9 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
         table_option: TableOption,
         read_pattern_prefix_column: u32,
     ) -> Self {
-        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
-
         assert_eq!(order_types.len(), pk_indices.len());
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
+        let row_deserializer = RS::create_deserializer(mapping.clone());
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
@@ -293,9 +282,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
             table_columns,
             schema,
             pk_serializer,
-            row_serializer,
+            row_deserializer,
             mapping,
-            pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
@@ -368,16 +356,16 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
     }
 
     /// Get a single row by point get
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+    pub async fn get_row(&mut self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk = self.serialize_pk_with_vnode(pk);
-        let mut deserializer = RS::create_deserializer(self.mapping.clone());
         let read_options = self.get_read_option(epoch);
         if let Some(value) = self
             .keyspace
             .get(&serialized_pk, read_options.clone())
             .await?
         {
-            let deserialize_res = deserializer
+            let deserialize_res = self
+                .row_deserializer
                 .deserialize(&serialized_pk, &value)
                 .map_err(err)?;
             Ok(Some(deserialize_res.2))
@@ -394,8 +382,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
         }
     }
 }
-
-const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
