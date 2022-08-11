@@ -176,16 +176,24 @@ impl ConcatSstableIterator {
                 .sstable(self.tables[idx].id, &mut self.stats)
                 .await?;
             let block_metas = &table.value().meta.block_metas;
-            let start_index = block_metas
-                .partition_point(|block| {
-                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
+            let start_index = if self.key_range.left.is_empty() {
+                0
+            } else {
+                block_metas
+                    .partition_point(|block| {
+                        VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
+                            != Ordering::Greater
+                    })
+                    .saturating_sub(1)
+            };
+            let end_index = if self.key_range.right.is_empty() {
+                block_metas.len()
+            } else {
+                block_metas.partition_point(|block| {
+                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
                         != Ordering::Greater
                 })
-                .saturating_sub(1);
-            let end_index = table.value().meta.block_metas.partition_point(|block| {
-                VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
-                    != Ordering::Greater
-            });
+            };
             if end_index <= start_index {
                 return Ok(());
             }
@@ -266,7 +274,7 @@ impl HummockIterator for ConcatSstableIterator {
                 .saturating_sub(1); // considering the boundary of 0
             let mut next_idx = table_idx;
             while next_idx < self.tables.len() {
-                self.seek_idx(next_idx, None).await?;
+                self.seek_idx(next_idx, Some(key)).await?;
                 if self.sstable_iter.is_some() {
                     break;
                 }
@@ -278,5 +286,87 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         stats.add(&self.stats)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_hummock_sdk::key_range::KeyRange;
+
+    use crate::hummock::compactor::ConcatSstableIterator;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
+    };
+    use crate::hummock::value::HummockValue;
+    use crate::hummock::{CompactorSstableStore, MemoryLimiter};
+
+    #[tokio::test]
+    async fn test_concat_iterator() {
+        let sstable_store = mock_sstable_store();
+        let mut table_infos = vec![];
+        for sst_id in 0..3 {
+            let start_index = sst_id * TEST_KEYS_COUNT;
+            let end_index = (sst_id + 1) * TEST_KEYS_COUNT;
+            let table = gen_test_sstable(
+                default_builder_opt_for_test(),
+                sst_id as u64,
+                (start_index..end_index)
+                    .map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+                sstable_store.clone(),
+            )
+            .await;
+            table_infos.push(table.get_sstable_info());
+        }
+        let compact_store = Arc::new(CompactorSstableStore::new(
+            sstable_store,
+            MemoryLimiter::unlimit(),
+        ));
+        let start_index = 5000;
+        let end_index = 25000;
+
+        let kr = KeyRange::new(
+            test_key_of(start_index).into(),
+            test_key_of(end_index).into(),
+        );
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        iter.seek(&kr.left).await.unwrap();
+
+        for idx in start_index..end_index {
+            let key = iter.key();
+            let val = iter.value();
+            assert_eq!(key, test_key_of(idx).as_slice(), "failed at {}", idx);
+            assert_eq!(
+                val.into_user_value().unwrap(),
+                test_value_of(idx).as_slice()
+            );
+            iter.next().await.unwrap();
+        }
+
+        // seek non-overlap range
+        let kr = KeyRange::new(test_key_of(30000).into(), test_key_of(40000).into());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        iter.seek(&kr.left).await.unwrap();
+        assert!(!iter.is_valid());
+        let kr = KeyRange::new(test_key_of(start_index).into(), test_key_of(40000).into());
+        let mut iter =
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+        iter.seek(&kr.left).await.unwrap();
+        for idx in start_index..30000 {
+            let key = iter.key();
+            let val = iter.value();
+            assert_eq!(key, test_key_of(idx).as_slice(), "failed at {}", idx);
+            assert_eq!(
+                val.into_user_value().unwrap(),
+                test_value_of(idx).as_slice()
+            );
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
     }
 }
