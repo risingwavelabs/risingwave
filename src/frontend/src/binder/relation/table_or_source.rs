@@ -22,7 +22,7 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, TableId};
+use crate::catalog::{CatalogError, IndexCatalog, TableId};
 use crate::user::UserId;
 
 #[derive(Debug, Clone)]
@@ -30,7 +30,7 @@ pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
-    pub table_indexes: Vec<Arc<TableCatalog>>,
+    pub table_indexes: Vec<Arc<IndexCatalog>>,
 }
 
 /// `BoundTableSource` is used by DML statement on table source like insert, update.
@@ -139,13 +139,13 @@ impl Binder {
         &mut self,
         schema_name: &str,
         table_id: TableId,
-    ) -> Result<Vec<Arc<TableCatalog>>> {
+    ) -> Result<Vec<Arc<IndexCatalog>>> {
         Ok(self
             .catalog
             .get_schema_by_name(&self.db_name, schema_name)?
             .iter_index()
-            .filter(|x| x.is_index_on == Some(table_id))
-            .map(|table| table.clone().into())
+            .filter(|index| index.primary_table.id == table_id)
+            .map(|index| index.clone().into())
             .collect())
     }
 

@@ -17,7 +17,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +50,7 @@ use itertools::Itertools;
 pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
+use postgres_types::{ToSql, Type};
 use prost::Message;
 use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
 
@@ -651,6 +652,67 @@ pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
 }
 
 impl ScalarRefImpl<'_> {
+    /// Encode the scalar to postgresql binary format.
+    /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
+    pub fn binary_serialize(&self) -> Bytes {
+        let placeholder = Type::ANY;
+        let mut output = BytesMut::new();
+        match self {
+            Self::Int64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Utf8(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Bool(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int16(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Decimal(v) => match v {
+                Decimal::Normalized(v) => {
+                    v.to_sql(&placeholder, &mut output).unwrap();
+                }
+                Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF => {
+                    output.reserve(8);
+                    output.put_u16(0);
+                    output.put_i16(0);
+                    output.put_u16(0xC000);
+                    output.put_i16(0);
+                }
+            },
+            Self::NaiveDate(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveDateTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Struct(_) => {
+                todo!("Don't support struct serialization yet")
+            }
+            Self::List(_) => {
+                todo!("Don't support list serialization yet")
+            }
+            Self::Interval(_) => {
+                todo!("Don't support interval serialization yet")
+            }
+        };
+        output.freeze()
+    }
+
     /// Serialize the scalar.
     pub fn serialize(
         &self,
@@ -676,15 +738,8 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            &Self::Struct(StructRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            &Self::List(ListRef::ValueRef { val }) => {
-                ser.serialize_struct_or_list(val.to_protobuf_owned())?
-            }
-            _ => {
-                panic!("Type is unable to be serialized.")
-            }
+            &Self::Struct(v) => v.serialize(ser)?,
+            &Self::List(v) => v.serialize(ser)?,
         };
         Ok(())
     }
@@ -736,14 +791,8 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            Ty::Struct { fields: _ } => {
-                let bytes = de.deserialize_struct_or_list()?;
-                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            }
-            Ty::List { datatype: _ } => {
-                let bytes = de.deserialize_struct_or_list()?;
-                ScalarImpl::bytes_to_scalar(&bytes, &ty.to_protobuf()).unwrap()
-            }
+            Ty::Struct { fields } => StructValue::deserialize(&fields, de)?.to_scalar_value(),
+            Ty::List { datatype } => ListValue::deserialize(&datatype, de)?.to_scalar_value(),
         })
     }
 
@@ -773,14 +822,21 @@ impl ScalarImpl {
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
                     DataType::Timestampz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
-                    DataType::Interval => size_of::<IntervalUnit>(),
-
+                    // IntervalUnit is serialized as (i32, i32, i64)
+                    DataType::Interval => size_of::<(i32, i32, i64)>(),
                     DataType::Decimal => deserializer.read_decimal_len()?,
-                    DataType::List { .. } | DataType::Struct { .. } => {
-                        // these two types is var-length and should only be determine at runtime.
-                        // TODO: need some test for this case (e.g. e2e test)
-                        deserializer.read_struct_and_list_len()?
+                    // these two types is var-length and should only be determine at runtime.
+                    // TODO: need some test for this case (e.g. e2e test)
+                    DataType::List { datatype } => {
+                        let len = u32::deserialize(&mut *deserializer)?;
+                        (0..len)
+                            .map(|_| Self::encoding_data_size(datatype, deserializer))
+                            .try_fold(size_of::<u32>(), |a, b| b.map(|b| a + b))?
                     }
+                    DataType::Struct { fields } => fields
+                        .iter()
+                        .map(|field| Self::encoding_data_size(field, deserializer))
+                        .try_fold(0, |a, b| b.map(|b| a + b))?,
                     DataType::Varchar => deserializer.read_bytes_len()?,
                 };
 

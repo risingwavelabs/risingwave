@@ -27,6 +27,8 @@ use crate::write_batch::WriteBatch;
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
+pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
+    Future<Output = StorageResult<I>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
 pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
@@ -35,29 +37,33 @@ pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + S
 macro_rules! define_state_store_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
-            where
-                R: 'static + Send + RangeBounds<B>,
-                B: 'static + Send + AsRef<[u8]>;
-        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
-            where
-                R: 'static + Send + RangeBounds<B>,
-                B: 'static + Send + AsRef<[u8]>;
-
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl SyncFutureTrait<'a>;
-        type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send
-            where
-                R: 'static + Send + RangeBounds<B>,
-                B: 'static + Send + AsRef<[u8]>;
-        type BackwardIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send
-            where
-                R: 'static + Send + RangeBounds<B>,
-                B: 'static + Send + AsRef<[u8]>;
+
+        type BackwardIterFuture<'a, R, B> = impl IterFutureTrait<'a, Self::Iter, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
+        type IterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
+        type BackwardScanFuture<'a, R, B> =impl ScanFutureTrait<'a, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
+        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
         type ClearSharedBufferFuture<'a> = impl EmptyFutureTrait<'a>;
-    }
+    };
 }
 
 pub trait StateStore: Send + Sync + 'static + Clone {
@@ -83,12 +89,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type SyncFuture<'a>: SyncFutureTrait<'a>;
 
-    type IterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
+    type IterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
     where
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
 
-    type BackwardIterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
+    type BackwardIterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
     where
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
@@ -100,12 +106,15 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan<R, B>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -146,10 +155,17 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         write_options: WriteOptions,
     ) -> Self::ReplicateBatchFuture<'_>;
 
-    /// Opens and returns an iterator for given `key_range`.
-    /// The returned iterator will iterate data based on a snapshot corresponding to the given
-    /// `epoch`.
-    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
+    /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
+    /// the given `epoch`.
+    fn iter<R, B>(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
@@ -207,7 +223,7 @@ pub trait StateStoreIter: Send + 'static {
 pub struct ReadOptions {
     pub epoch: u64,
     pub table_id: Option<TableId>,
-    pub ttl: Option<u32>, // second
+    pub retention_seconds: Option<u32>, // second
 }
 
 #[derive(Default, Clone)]
@@ -219,8 +235,10 @@ pub struct WriteOptions {
 impl ReadOptions {
     pub fn min_epoch(&self) -> u64 {
         let epoch = Epoch(self.epoch);
-        match self.ttl {
-            Some(ttl_second_u32) => epoch.subtract_ms((ttl_second_u32 * 1000) as u64).0,
+        match self.retention_seconds.as_ref() {
+            Some(retention_seconds_u32) => {
+                epoch.subtract_ms((retention_seconds_u32 * 1000) as u64).0
+            }
             None => 0,
         }
     }

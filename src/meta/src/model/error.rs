@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
@@ -38,12 +37,5 @@ impl From<ProstFieldNotFound> for MetadataModelError {
             "Failed to decode prost: field not found `{}`",
             p.0
         ))
-    }
-}
-
-// TODO(zehua): replace `RwError` with meta's own error type.
-impl From<MetadataModelError> for RwError {
-    fn from(err: MetadataModelError) -> Self {
-        RwError::from(ErrorCode::InternalError(err.to_string()))
     }
 }

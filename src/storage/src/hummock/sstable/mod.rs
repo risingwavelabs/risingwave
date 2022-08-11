@@ -38,8 +38,9 @@ use risingwave_hummock_sdk::HummockSstableId;
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+mod sstable_id_manager;
 mod utils;
-
+pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 
@@ -83,7 +84,7 @@ impl Sstable {
         let mut blocks = vec![];
         for block_meta in &meta.block_metas {
             let end_offset = (block_meta.offset + block_meta.len) as usize;
-            let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
+            let block = Block::decode(&data[block_meta.offset as usize..end_offset])?;
             blocks.push(Arc::new(block));
         }
         Ok(Self { id, meta, blocks })
@@ -112,8 +113,9 @@ impl Sstable {
     }
 
     #[inline]
-    pub fn encoded_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size() + self.blocks.iter().map(|block|block.data().len()).sum::<usize>()
+    pub fn estimate_size(&self) -> usize {
+        8 /* id */ + self.meta.encoded_size() +
+            self.blocks.iter().map(|block|block.len() + block.restart_point_len() * 4).sum::<usize>()
     }
 
     #[cfg(test)]

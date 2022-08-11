@@ -14,6 +14,7 @@
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{register_int_counter_vec_with_registry, Registry};
+
 #[derive(Debug)]
 pub struct SourceMetrics {
     pub registry: Registry,

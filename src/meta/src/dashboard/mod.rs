@@ -21,15 +21,13 @@ use axum::http::{Method, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, get_service};
 use axum::Router;
-use risingwave_common::error::ErrorCode;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::cluster::ClusterManagerRef;
+use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 
 #[derive(Clone)]
 pub struct DashboardService<S: MetaStore> {
@@ -192,7 +190,7 @@ where
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())
             .await
-            .map_err(|err| ErrorCode::MetaError(err.to_string()))?;
+            .map_err(|err| anyhow!(err))?;
         Ok(())
     }
 }

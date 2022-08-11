@@ -66,7 +66,7 @@ pub enum SinkState {
 
 impl SinkConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> RwResult<Self> {
-        const SINK_TYPE_KEY: &str = "sink_type";
+        const SINK_TYPE_KEY: &str = "connector";
         let sink_type = properties.get(SINK_TYPE_KEY).ok_or_else(|| {
             RwError::from(ErrorCode::InvalidConfigValue {
                 config_entry: SINK_TYPE_KEY.to_string(),
@@ -77,6 +77,14 @@ impl SinkConfig {
             KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
             MYSQL_SINK => Ok(SinkConfig::Mysql(MySQLConfig::from_hashmap(properties)?)),
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn get_connector(&self) -> &'static str {
+        match self {
+            SinkConfig::Mysql(_) => "mysql",
+            SinkConfig::Kafka(_) => "kafka",
+            SinkConfig::Redis(_) => "redis",
         }
     }
 }

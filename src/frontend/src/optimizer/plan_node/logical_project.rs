@@ -29,7 +29,7 @@ use crate::expr::{
     assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Construct a `LogicalProject` and dedup expressions.
@@ -61,10 +61,6 @@ impl LogicalProjectBuilder {
         self.exprs_index.get(expr).copied()
     }
 
-    pub fn exprs_num(&self) -> usize {
-        self.exprs.len()
-    }
-
     /// build the `LogicalProject` from `LogicalProjectBuilder`
     pub fn build(self, input: PlanRef) -> LogicalProject {
         LogicalProject::new(input, self.exprs)
@@ -86,13 +82,15 @@ impl LogicalProject {
 
         let ctx = input.ctx();
         let schema = Self::derive_schema(&exprs, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
+        let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
         }
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let functional_dependency =
+            Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProject { base, exprs, input }
     }
 
@@ -198,6 +196,21 @@ impl LogicalProject {
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default()
+    }
+
+    fn derive_fd(
+        input_len: usize,
+        input_fd_set: &FunctionalDependencySet,
+        exprs: &[ExprImpl],
+    ) -> FunctionalDependencySet {
+        let i2o = Self::i2o_col_mapping_inner(input_len, exprs);
+        let mut fd_set = FunctionalDependencySet::new(exprs.len());
+        for fd in input_fd_set.as_dependencies() {
+            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+                fd_set.add_functional_dependency(fd);
+            }
+        }
+        fd_set
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
@@ -402,7 +415,7 @@ impl ToStream for LogicalProject {
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.pk_indices();
+        let input_pk = input.logical_pk();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();

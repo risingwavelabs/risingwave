@@ -36,29 +36,28 @@ use crate::task::BatchTaskContext;
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
 
-/// Generate `batch_num` data chunks with type `Int64`, each data chunk has cardinality of
+/// Generate `batch_num` data chunks with type `data_types`, each data chunk has cardinality of
 /// `batch_size`.
-pub fn gen_data(batch_size: usize, batch_num: usize) -> Vec<DataChunk> {
-    let mut data_gen =
-        FieldGeneratorImpl::with_random(DataType::Int64, None, None, None, None, SEED).unwrap();
+pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) -> Vec<DataChunk> {
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
 
     for i in 0..batch_num {
-        let mut array_builder = DataType::Int64.create_array_builder(batch_size);
-
-        for j in 0..batch_size {
-            array_builder
-                .append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64))
-                .unwrap();
+        let mut columns = Vec::new();
+        for data_type in data_types {
+            let mut data_gen =
+                FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED)
+                    .unwrap();
+            let mut array_builder = data_type.create_array_builder(batch_size);
+            for j in 0..batch_size {
+                array_builder
+                    .append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64))
+                    .unwrap();
+            }
+            let array = array_builder.finish().unwrap();
+            columns.push(Column::new(Arc::new(array)));
         }
-
-        let array = array_builder.finish().unwrap();
-        ret.push(DataChunk::new(
-            vec![Column::new(Arc::new(array))],
-            batch_size,
-        ));
+        ret.push(DataChunk::new(columns, batch_size));
     }
-
     ret
 }
 

@@ -78,16 +78,6 @@ impl TableSourceV2 {
 
         Ok(notifier_rx)
     }
-
-    /// Write stream chunk into table using `write_chunk`, and then block until a reader consumes
-    /// the chunk.
-    ///
-    /// Returns the cardinality of this chunk.
-    pub async fn blocking_write_chunk(&self, chunk: StreamChunk) -> Result<usize> {
-        let rx = self.write_chunk(chunk)?;
-        let written_cardinality = rx.await.unwrap();
-        Ok(written_cardinality)
-    }
 }
 
 // TODO: Currently batch read directly calls api from `ScannableTable` instead of using
@@ -198,9 +188,7 @@ mod tests {
                     vec![column_nonnull!(I64Array, [$i])],
                     None,
                 );
-                tokio::spawn(async move {
-                    source.blocking_write_chunk(chunk).await.unwrap();
-                })
+                source.write_chunk(chunk).unwrap();
             }};
         }
 

@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
+pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
+
 /// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
 /// separately.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -171,9 +173,35 @@ pub struct StorageConfig {
     /// Capacity of sstable meta cache.
     #[serde(default = "default::compactor_memory_limit_mb")]
     pub compactor_memory_limit_mb: usize,
+
+    /// Number of SST ids fetched from meta per RPC
+    #[serde(default = "default::sstable_id_remote_fetch_number")]
+    pub sstable_id_remote_fetch_number: u32,
+
+    #[serde(default)]
+    pub file_cache: FileCacheConfig,
 }
 
 impl Default for StorageConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileCacheConfig {
+    #[serde(default = "default::file_cache_capacity")]
+    pub capacity: usize,
+
+    #[serde(default = "default::file_cache_total_buffer_capacity")]
+    pub total_buffer_capacity: usize,
+
+    #[serde(default = "default::file_cache_cache_file_fallocate_unit")]
+    pub cache_file_fallocate_unit: usize,
+}
+
+impl Default for FileCacheConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -291,11 +319,30 @@ mod default {
     }
 
     pub fn worker_node_parallelism() -> usize {
-        num_cpus::get()
+        std::thread::available_parallelism().unwrap().get()
     }
 
     pub fn compactor_memory_limit_mb() -> usize {
         512
+    }
+
+    pub fn sstable_id_remote_fetch_number() -> u32 {
+        10
+    }
+
+    pub fn file_cache_capacity() -> usize {
+        // 1 GiB
+        1024 * 1024 * 1024
+    }
+
+    pub fn file_cache_total_buffer_capacity() -> usize {
+        // 128 MiB
+        128 * 1024 * 1024
+    }
+
+    pub fn file_cache_cache_file_fallocate_unit() -> usize {
+        // 96 MiB
+        96 * 1024 * 1024
     }
 }
 
@@ -318,7 +365,7 @@ pub mod constant {
             }
         }
 
-        pub const TABLE_OPTION_DUMMY_TTL: u32 = 0;
-        pub const PROPERTIES_TTL_KEY: &str = "ttl";
+        pub const TABLE_OPTION_DUMMY_RETAINTION_SECOND: u32 = 0;
+        pub const PROPERTIES_RETAINTION_SECOND_KEY: &str = "retention_seconds";
     }
 }

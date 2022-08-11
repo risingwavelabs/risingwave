@@ -26,7 +26,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::monitor::Print;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
+use risingwave_storage::hummock::compactor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
@@ -171,14 +171,14 @@ async fn main() {
         worker_node.id,
     ));
 
-    let table_id_to_slice_transform = Arc::new(RwLock::new(HashMap::new()));
+    let table_id_to_filter_key_extractor = Arc::new(RwLock::new(HashMap::new()));
     let state_store = StateStoreImpl::new(
         &opts.store,
         config.clone(),
         mock_hummock_meta_client.clone(),
         state_store_stats.clone(),
         object_store_stats.clone(),
-        table_id_to_slice_transform.clone(),
+        table_id_to_filter_key_extractor.clone(),
     )
     .await
     .expect("Failed to get state_store");
@@ -194,7 +194,7 @@ async fn main() {
                 compaction_executor: Some(Arc::new(CompactionExecutor::new(Some(
                     config.share_buffer_compaction_worker_threads_number as usize,
                 )))),
-                table_id_to_slice_transform: table_id_to_slice_transform.clone(),
+                table_id_to_filter_key_extractor: table_id_to_filter_key_extractor.clone(),
                 memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             }),
             hummock.local_version_manager(),

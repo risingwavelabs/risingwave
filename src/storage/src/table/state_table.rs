@@ -32,18 +32,8 @@ use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
 use crate::error::{StorageError, StorageResult};
-use crate::row_serde::{
-    serialize_pk, CellBasedRowSerde, DedupPkCellBasedRowSerde, RowBasedSerde, RowSerde,
-};
+use crate::row_serde::{serialize_pk, RowBasedSerde, RowSerde};
 use crate::StateStore;
-
-/// Identical to `StateTable`. Used when we want to
-/// rows to have dedup pk cell encoding.
-pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerde>;
-
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with cell-based
-/// encoding.
-pub type StateTable<S> = StateTableBase<S, CellBasedRowSerde>;
 
 /// `RowBasedStateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
@@ -236,6 +226,8 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 
 pub type RowStream<'a, S: StateStore, RS: RowSerde> =
     impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowBasedRowStream<'a, S> = RowStream<'a, S, RowBasedSerde>;
+
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_table_iter: C,

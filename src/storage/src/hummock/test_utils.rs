@@ -49,6 +49,8 @@ pub fn default_config_for_test() -> StorageConfig {
         local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
+        sstable_id_remote_fetch_number: 1,
+        ..Default::default()
     }
 }
 
@@ -92,6 +94,7 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
         restart_interval: DEFAULT_RESTART_INTERVAL,
         bloom_false_positive: 0.1,
         compression_algorithm: CompressionAlgorithm::None,
+        ..Default::default()
     }
 }
 
@@ -119,7 +122,7 @@ pub async fn gen_test_sstable_inner(
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
     let sst = Sstable::new(sst_id, meta.clone());
     sstable_store
-        .put(Sstable::new(sst_id, meta.clone()), data, policy)
+        .put_sst(sst_id, meta, data, policy)
         .await
         .unwrap();
     sst
@@ -132,7 +135,7 @@ pub async fn gen_test_sstable(
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::Fill).await
+    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::NotFill).await
 }
 
 /// The key (with epoch 0) of an index in the test table

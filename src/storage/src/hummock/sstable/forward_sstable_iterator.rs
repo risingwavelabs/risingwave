@@ -104,6 +104,30 @@ impl SstableIterator {
 
         Ok(())
     }
+
+    // Only for compaction because it would not load block from sstablestore.
+    pub fn next_for_compact(&mut self) -> HummockResult<()> {
+        self.stats.scan_key_count += 1;
+        let block_iter = self.block_iter.as_mut().expect("no block iter");
+        block_iter.next();
+        if block_iter.is_valid() {
+            Ok(())
+        } else {
+            // seek to next block
+            if self.cur_idx + 1 >= self.sst.value().block_count() {
+                self.block_iter = None;
+            } else {
+                debug_assert!(!self.sst.value().blocks.is_empty());
+                let block =
+                    BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx + 1].clone());
+                let mut block_iter = BlockIterator::new(block);
+                block_iter.seek_to_first();
+                self.block_iter = Some(block_iter);
+                self.cur_idx += 1;
+            }
+            Ok(())
+        }
+    }
 }
 
 impl HummockIterator for SstableIterator {
@@ -329,13 +353,8 @@ mod tests {
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
         let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let sstable = Sstable {
-            id: 0,
-            meta,
-            blocks: vec![],
-        };
         sstable_store
-            .put(sstable, data, CachePolicy::NotFill)
+            .put_sst(0, meta, data, CachePolicy::NotFill)
             .await
             .unwrap();
 

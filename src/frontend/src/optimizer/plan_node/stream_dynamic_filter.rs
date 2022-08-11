@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::collections::HashMap;
 use std::fmt;
 
 use risingwave_common::catalog::{DatabaseId, Schema, SchemaId};
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -42,7 +44,7 @@ impl StreamDynamicFilter {
         let base = PlanBase::new_stream(
             left.ctx(),
             left.schema().clone(),
-            left.pk_indices().to_vec(),
+            left.logical_pk().to_vec(),
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
@@ -123,9 +125,23 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     // The pk of dynamic filter internal table should be left_key + input_pk.
     let mut pk_indices = vec![left_key_index];
     // TODO(yuhao): dedup the dist key and pk.
-    pk_indices.extend(&base.pk_indices);
+    pk_indices.extend(&base.logical_pk);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+    if !base.ctx.inner().with_properties.is_empty() {
+        let properties: HashMap<_, _> = base
+            .ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
+        if !properties.is_empty() {
+            internal_table_catalog_builder.add_properties(properties);
+        }
+    }
 
     schema.fields().iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
@@ -134,6 +150,21 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     pk_indices.iter().for_each(|idx| {
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
+
+    if !base.ctx.inner().with_properties.is_empty() {
+        let properties: HashMap<_, _> = base
+            .ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
+        if !properties.is_empty() {
+            internal_table_catalog_builder.add_properties(properties);
+        }
+    }
 
     internal_table_catalog_builder.build(dist_keys, append_only)
 }

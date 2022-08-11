@@ -21,36 +21,12 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode};
 use risingwave_common::util::ordered::OrderedRowSerializer;
 
-use self::cell_based_row_deserializer::CellBasedRowDeserializer;
-use self::cell_based_row_serializer::CellBasedRowSerializer;
-use self::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use self::row_based_deserializer::RowBasedDeserializer;
 use self::row_based_serializer::RowBasedSerializer;
 
-pub mod cell_based_encoding_util;
-pub mod cell_based_row_deserializer;
-pub mod cell_based_row_serializer;
-pub mod dedup_pk_cell_based_row_deserializer;
-pub mod dedup_pk_cell_based_row_serializer;
 pub mod row_based_deserializer;
 pub mod row_based_serializer;
-
-#[derive(Clone)]
-pub struct CellBasedRowSerde;
-
-impl RowSerde for CellBasedRowSerde {
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = CellBasedRowSerializer;
-}
-
-#[derive(Clone)]
-pub struct DedupPkCellBasedRowSerde;
-
-impl RowSerde for DedupPkCellBasedRowSerde {
-    // FIXME: should use `DedupPkCellBasedRowDeserializer` here.
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = DedupPkCellBasedRowSerializer;
-}
+pub mod row_serde_util;
 
 #[derive(Clone)]
 pub struct RowBasedSerde;
@@ -63,7 +39,7 @@ impl RowSerde for RowBasedSerde {
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
-/// `Encoding` defines an interface for encoding a key row into kv storage.
+/// `RowSerialize` defines an interface for encoding a key row into kv storage.
 pub trait RowSerialize: Clone {
     /// Constructs a new serializer.
     fn create_row_serializer(
@@ -78,35 +54,29 @@ pub trait RowSerialize: Clone {
         vnode: VirtualNode,
         pk: &[u8],
         row: Row,
-    ) -> Result<Vec<(KeyBytes, ValueBytes)>>;
-
-    /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
-    /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
-    /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    fn serialize_for_update(
-        &mut self,
-        vnode: VirtualNode,
-        pk: &[u8],
-        row: Row,
-    ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
-
-    fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>>;
+    ) -> Result<(KeyBytes, ValueBytes)>;
 }
 
-/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
+/// `ColumnDescMapping` is the record mapping from [`ColumnDesc`], [`ColumnId`], and is used in both
+/// cell-based encoding and row-based encoding.
 #[derive(Clone)]
 pub struct ColumnDescMapping {
+    /// output_columns are some of the columns that to be partialy scan.
     pub output_columns: Vec<ColumnDesc>,
 
-    pub id_to_column_index: HashMap<ColumnId, usize>,
+    /// The output column's column index in output row, which is used in cell-based deserialize.
+    pub output_id_to_index: HashMap<ColumnId, usize>,
 
+    /// The full row data types, which is used in row-based deserialize.
     pub all_data_types: Vec<DataType>,
+
+    /// The output column's column index in full row, which is used in row-based deserialize.
+    pub output_index: Vec<usize>,
 }
 
-/// `Decoding` defines an interface for decoding a key row from kv storage.
+/// `RowDeserialize` defines an interface for decoding a key row from kv storage.
 pub trait RowDeserialize {
-    /// Constructs a new serializer.
-    // TODO: more parameters might be required for pk dedup.
+    /// Constructs a new deserializer.
     fn create_row_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self;
 
     /// When we encounter a new key, we can be sure that the previous row has been fully
@@ -115,10 +85,7 @@ pub trait RowDeserialize {
         &mut self,
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>>;
-
-    /// Take the remaining data out of the deserializer.
-    fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
+    ) -> Result<(VirtualNode, Vec<u8>, Row)>;
 }
 
 /// `RowSerde` provides the ability to convert between Row and KV entry.
