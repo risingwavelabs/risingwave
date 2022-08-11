@@ -77,6 +77,8 @@ impl Binder {
     }
 
     fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
+        // This is a binder function rather than `impl From<AstDateTimeField> for DateTimeField`,
+        // so that the `sqlparser` crate and the `common` crate are kept independent.
         match field {
             AstDateTimeField::Year => DateTimeField::Year,
             AstDateTimeField::Month => DateTimeField::Month,
