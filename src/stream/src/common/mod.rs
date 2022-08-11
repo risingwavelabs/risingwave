@@ -14,3 +14,6 @@
 
 mod builder;
 pub use builder::*;
+
+mod column_mapping;
+pub use column_mapping::*;
