@@ -148,6 +148,17 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 
         let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
+
+        let Distribution {
+            dist_key_indices,
+            vnodes,
+        } = match vnodes {
+            Some(vnodes) => Distribution {
+                dist_key_indices,
+                vnodes,
+            },
+            None => Distribution::fallback(),
+        };
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -158,7 +169,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
-            vnodes: vnodes.unwrap(),
+            vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
         }
     }
