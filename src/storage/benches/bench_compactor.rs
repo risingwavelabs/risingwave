@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -122,8 +121,11 @@ async fn scan_all_table(sstable_store: SstableStoreRef) {
 }
 
 fn bench_table_build(c: &mut Criterion) {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
     c.bench_function("bench_table_build", |b| {
-        b.to_async(FuturesExecutor)
+        b.to_async(&runtime)
             .iter(|| build_table(0, 0..(MAX_KEY_COUNT as u64), 1));
     });
 }
@@ -150,7 +152,7 @@ fn bench_table_scan(c: &mut Criterion) {
     });
 
     c.bench_function("bench_table_iterator", |b| {
-        b.to_async(FuturesExecutor)
+        b.to_async(&runtime)
             .iter(|| scan_all_table(sstable_store.clone()));
     });
 }
@@ -268,8 +270,8 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
 
     let ((data1, meta1), (data2, meta2)) = runtime.block_on(async move {
         (
-            build_table(1, 0..test_key_size, 2).await,
-            build_table(2, 0..test_key_size, 2).await,
+            build_table(3, 0..test_key_size, 2).await,
+            build_table(4, 0..test_key_size, 2).await,
         )
     });
     let sstable_store1 = sstable_store.clone();
@@ -287,7 +289,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
-        b.to_async(FuturesExecutor).iter(|| {
+        b.to_async(&runtime).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
                 HummockIteratorUnion::First(ConcatIterator::new(
@@ -307,7 +309,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     c.bench_function("bench_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
-        b.to_async(FuturesExecutor).iter(|| {
+        b.to_async(&runtime).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
                 ConcatSstableIterator::new(

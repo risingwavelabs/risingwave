@@ -80,7 +80,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 
 [dev-dependencies]
-criterion = { version = "0.3", features = ["async_futures"] }
+criterion = { version = "0.3", features = ["async_tokio"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
