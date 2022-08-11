@@ -35,11 +35,6 @@ impl StateTableColumnMapping {
         }
     }
 
-    /// Convert state table column index to upstream chunk column index.
-    pub fn state_table_to_upstream(&self, idx: usize) -> Option<usize> {
-        self.upstream_columns.get(idx).copied()
-    }
-
     /// Convert upstream chunk column index to state table column index.
     pub fn upstream_to_state_table(&self, idx: usize) -> Option<usize> {
         self.mapping.get(&idx).copied()
@@ -64,11 +59,6 @@ mod tests {
     #[test]
     fn test_column_mapping() {
         let mapping = StateTableColumnMapping::new(vec![2, 3, 0, 1]);
-        assert_eq!(mapping.state_table_to_upstream(0), Some(2));
-        assert_eq!(mapping.state_table_to_upstream(1), Some(3));
-        assert_eq!(mapping.state_table_to_upstream(2), Some(0));
-        assert_eq!(mapping.state_table_to_upstream(3), Some(1));
-        assert_eq!(mapping.state_table_to_upstream(4), None);
         assert_eq!(mapping.upstream_to_state_table(2), Some(0));
         assert_eq!(mapping.upstream_to_state_table(3), Some(1));
         assert_eq!(mapping.upstream_to_state_table(0), Some(2));
