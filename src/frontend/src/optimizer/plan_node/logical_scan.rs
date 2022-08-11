@@ -370,7 +370,7 @@ impl fmt::Display for LogicalScan {
         if self.predicate.always_true() {
             write!(
                 f,
-                "LogicalScan {{ table: {}, columns: [{}] }} pk: {:?}",
+                "LogicalScan {{ table: {}, columns: [{}] }}",
                 self.table_name,
                 if verbose {
                     self.column_names_with_table_prefix()
@@ -378,7 +378,6 @@ impl fmt::Display for LogicalScan {
                     self.column_names()
                 }
                 .join(", "),
-                self.logical_pk(),
             )
         } else {
             let required_col_names = self

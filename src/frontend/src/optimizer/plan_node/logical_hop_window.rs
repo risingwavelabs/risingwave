@@ -191,7 +191,7 @@ impl LogicalHopWindow {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }} pk: {:?}, fd: {}",
+            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
             name,
             format_args!(
                 "{}",
@@ -229,8 +229,6 @@ impl LogicalHopWindow {
                     }
                 )
             },
-            self.logical_pk(),
-            self.functional_dependency()
         )
     }
 }
