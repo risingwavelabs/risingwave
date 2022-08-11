@@ -448,6 +448,11 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_percentage("Actor Input Blocking Time", [
+                panels.target(
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
+                ),
+            ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
                 panels.target(
                     "rate(stream_actor_barrier_time[$__rate_interval]) > 0", "{{actor_id}}"
