@@ -25,6 +25,7 @@ for filename in "$SCRIPT_PATH"/test_data/*; do
     "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$topic" --create --partitions "$partition"
 done
 
+
 # prepare for sink test
 "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$SINK_TARGET_TOPIC" --delete || true
 "$KAFKA_BIN"/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic "$SINK_TARGET_TOPIC" --create --partitions 1
