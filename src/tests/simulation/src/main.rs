@@ -222,4 +222,16 @@ impl sqllogictest::AsyncDB for Postgres {
     async fn sleep(dur: Duration) {
         tokio::time::sleep(dur).await
     }
+
+    async fn run_task<F>(futures: Vec<F>)
+    where
+        F: std::future::Future + Send + 'static,
+        <F as std::future::Future>::Output: Send + 'static,
+    {
+        let handles = futures.into_iter().map(|future| tokio::spawn(future));
+
+        for handle in handles {
+            handle.await.unwrap();
+        }
+    }
 }

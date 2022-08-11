@@ -5940,9 +5940,9 @@ dependencies = [
  "humantime",
  "itertools",
  "log",
- "madsim-tokio",
  "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
