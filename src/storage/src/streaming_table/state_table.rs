@@ -34,12 +34,12 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
-use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
-use crate::{error::{StorageError, StorageResult}, row_serde::RowSerialize};
-use crate::row_serde::{serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde};
+use crate::error::{StorageError, StorageResult};
+use crate::row_serde::{
+    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
+};
 use crate::store::ReadOptions;
-use crate::table_v2::storage_table::DEFAULT_VNODE;
 use crate::{Keyspace, StateStore};
 
 /// `RowBasedStateTable` is the interface accessing relational data in KV(`StateStore`) with
@@ -47,6 +47,9 @@ use crate::{Keyspace, StateStore};
 pub type RowBasedStateTable<S> = StateTableBase<S, RowBasedSerde>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerde` for row to KV entries.
+///
+/// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
+pub const DEFAULT_VNODE: VirtualNode = 0;
 #[derive(Clone)]
 pub struct StateTableBase<S: StateStore, RS: RowSerde> {
     /// buffer row operations.
@@ -141,13 +144,13 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
                     })
             })
             .collect_vec();
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
+        // let distribution = match vnodes {
+        //     Some(vnodes) => Distribution {
+        //         dist_key_indices,
+        //         vnodes,
+        //     },
+        //     None => Distribution::fallback(),
+        // };
 
         let keyspace = Keyspace::table_root(store, &table_id);
         let pk_serializer = OrderedRowSerializer::new(order_types);
@@ -247,7 +250,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
                     let row = deserializer
                         .deserialize(serialized_pk, row_bytes)
                         .map_err(err)?
-                        .unwrap()
                         .2;
                     Ok(Some(row))
                 }
@@ -256,7 +258,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
                     let row = deserializer
                         .deserialize(serialized_pk, row_bytes)
                         .map_err(err)?
-                        .unwrap()
                         .2;
                     Ok(Some(row))
                 }
@@ -268,7 +269,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
                     let row = deserializer
                         .deserialize(&serialized_pk, &storage_row_bytes)
                         .map_err(err)?
-                        .unwrap()
                         .2;
                     Ok(Some(row))
                 } else {
@@ -296,11 +296,11 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         let pk = Row::new(datums);
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         let vnode = self.compute_vnode_by_row(&value);
-        let value = self
+        let (key_bytes, value_bytes) = self
             .row_serializer
             .serialize(vnode, &pk_bytes, value)
             .map_err(err)?;
-        self.mem_table.insert(pk_bytes, value);
+        self.mem_table.insert(key_bytes, value_bytes);
         Ok(())
     }
 
@@ -313,7 +313,12 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         }
         let pk = Row::new(datums);
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
-        self.mem_table.delete(pk_bytes, old_value);
+        let vnode = self.compute_vnode_by_row(&old_value);
+        let (key_bytes, value_bytes) = self
+            .row_serializer
+            .serialize(vnode, &pk_bytes, old_value)
+            .map_err(err)?;
+        self.mem_table.delete(key_bytes, value_bytes);
         Ok(())
     }
 
@@ -322,13 +327,25 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         let pk = old_value.by_indices(self.pk_indices());
         debug_assert_eq!(pk, new_value.by_indices(self.pk_indices()));
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
-        self.mem_table.update(pk_bytes, old_value, new_value);
+
+        let old_vnode = self.compute_vnode_by_row(&old_value);
+        let (_, old_value_bytes) = self
+            .row_serializer
+            .serialize(old_vnode, &pk_bytes, old_value.clone())
+            .map_err(err)?;
+        let new_vnode = self.compute_vnode_by_row(&old_value);
+        let (new_key_bytes, new_value_bytes) = self
+            .row_serializer
+            .serialize(new_vnode, &pk_bytes, old_value)
+            .map_err(err)?;
+        self.mem_table
+            .update(new_key_bytes, old_value_bytes, new_value_bytes);
         Ok(())
     }
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.storage_table
+        self.mem_table
             .batch_write_rows(mem_table, new_epoch)
             .await?;
         Ok(())

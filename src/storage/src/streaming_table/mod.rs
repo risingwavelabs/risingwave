@@ -14,7 +14,6 @@
 
 pub mod mem_table;
 pub mod state_table;
-pub mod storage_table;
 
 #[cfg(test)]
 pub mod test_relational_table;

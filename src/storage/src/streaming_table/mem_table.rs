@@ -17,6 +17,8 @@ use std::ops::RangeBounds;
 
 use risingwave_common::array::Row;
 
+use crate::error::StorageResult;
+
 #[derive(Clone)]
 pub enum RowOp {
     Insert(Vec<u8>),
@@ -145,5 +147,14 @@ impl MemTable {
         R: RangeBounds<Vec<u8>> + 'a,
     {
         self.buffer.range(key_range)
+    }
+
+    /// Write to state store.
+    pub async fn batch_write_rows(
+        &mut self,
+        buffer: BTreeMap<Vec<u8>, RowOp>,
+        epoch: u64,
+    ) -> StorageResult<()> {
+        todo!()
     }
 }
