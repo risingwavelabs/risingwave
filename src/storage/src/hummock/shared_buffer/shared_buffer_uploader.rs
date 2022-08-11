@@ -35,7 +35,7 @@ pub struct SharedBufferUploader {
     sstable_store: SstableStoreRef,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     stats: Arc<StateStoreMetrics>,
-    compaction_executor: Option<Arc<CompactionExecutor>>,
+    compaction_executor: Arc<CompactionExecutor>,
     compactor_context: Arc<CompactorContext>,
 }
 
@@ -50,11 +50,11 @@ impl SharedBufferUploader {
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Self {
         let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
-            None
+            Arc::new(CompactionExecutor::new(None))
         } else {
-            Some(Arc::new(CompactionExecutor::new(Some(
+            Arc::new(CompactionExecutor::new(Some(
                 options.share_buffer_compaction_worker_threads_number as usize,
-            ))))
+            )))
         };
         // not limit memory for uploader
         let memory_limiter = Arc::new(MemoryLimiter::new(u64::MAX - 1));
@@ -64,7 +64,7 @@ impl SharedBufferUploader {
             sstable_store: sstable_store.clone(),
             stats: stats.clone(),
             is_share_buffer_compact: true,
-            compaction_executor: compaction_executor.as_ref().cloned(),
+            compaction_executor: compaction_executor.clone(),
             filter_key_extractor_manager,
             memory_limiter,
             sstable_id_manager,
