@@ -457,7 +457,7 @@ where
                             })
                             .collect::<HashMap<_, _>>();
 
-                        // Trasform the mapping of parallel unit to the mapping of actor.
+                        // Transform the mapping of parallel unit to the mapping of actor.
                         let ParallelUnitMapping {
                             original_indices,
                             data,
