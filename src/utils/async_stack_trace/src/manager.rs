@@ -73,11 +73,7 @@ impl TraceReporter {
         root_span: impl Into<SpanValue>,
         report_detached: bool,
         interval: Duration,
-        enabled: bool,
     ) -> F::Output {
-        if !enabled {
-            return future.await;
-        }
         TRACE_CONTEXT
             .scope(
                 TraceContext::new(root_span.into(), report_detached).into(),
@@ -108,6 +104,23 @@ impl TraceReporter {
                 },
             )
             .await
+    }
+
+    /// Optionally provide a stack tracing context. Check [`TraceReporter::trace`] for more details.
+    pub async fn optional_trace<F: Future>(
+        self,
+        future: F,
+        root_span: impl Into<SpanValue>,
+        report_detached: bool,
+        interval: Duration,
+        enabled: bool,
+    ) -> F::Output {
+        if enabled {
+            self.trace(future, root_span, report_detached, interval)
+                .await
+        } else {
+            future.await
+        }
     }
 }
 

@@ -44,11 +44,11 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
-    /// Commands for Stream
-    Trace,
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
+    /// Commands for tracing the compute nodes
+    Trace,
 }
 
 #[derive(Subcommand)]
@@ -101,15 +101,6 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
-}
-
-#[derive(Subcommand)]
-enum StreamCommands {
-    /// get traces of all actors or some specific actor
-    Trace {
-        #[clap(short, long = "actor-id")]
-        actor_id: Option<u32>,
-    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {

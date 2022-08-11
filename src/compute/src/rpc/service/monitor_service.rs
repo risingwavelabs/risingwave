@@ -22,7 +22,6 @@ use tonic::{Request, Response, Status};
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: Arc<LocalStreamManager>,
-
     grpc_stack_trace_mgr: GrpcStackTraceManagerRef,
 }
 
@@ -84,6 +83,7 @@ pub mod grpc_middleware {
     use tokio::sync::Mutex;
     use tower::{Layer, Service};
 
+    /// Manages the stack trace of all `gRPC` requests that are currently served by the compute node
     pub type GrpcStackTraceManagerRef = Arc<Mutex<StackTraceManager<u64>>>;
 
     #[derive(Clone)]
@@ -147,7 +147,7 @@ pub mod grpc_middleware {
                 let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
 
                 sender
-                    .trace(
+                    .optional_trace(
                         inner.call(req),
                         root_span,
                         false,

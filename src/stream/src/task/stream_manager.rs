@@ -566,7 +566,7 @@ impl LocalStreamManagerCore {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 };
-                let traced = trace_reporter.trace(
+                let traced = trace_reporter.optional_trace(
                     actor,
                     format!("Actor {actor_id}"),
                     false,
