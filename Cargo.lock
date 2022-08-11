@@ -5207,6 +5207,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap 3.2.15",
+ "futures",
  "glob",
  "madsim",
  "madsim-tokio",
@@ -5935,6 +5936,7 @@ version = "0.6.0"
 dependencies = [
  "async-trait",
  "difference",
+ "futures",
  "futures-lite",
  "glob",
  "humantime",
@@ -5942,7 +5944,6 @@ dependencies = [
  "log",
  "tempfile",
  "thiserror",
- "tokio",
 ]
 
 [[package]]
