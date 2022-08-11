@@ -18,12 +18,13 @@ use std::marker::PhantomData;
 use std::ops::Index;
 use std::sync::Arc;
 
+use bytes::BufMut;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -35,8 +36,9 @@ use risingwave_pb::catalog::Table;
 use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
-use crate::error::{StorageError, StorageResult};
-use crate::row_serde::{serialize_pk, ColumnDescMapping, RowBasedSerde, RowSerde};
+use crate::{error::{StorageError, StorageResult}, row_serde::RowSerialize};
+use crate::row_serde::{serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde};
+use crate::store::ReadOptions;
 use crate::table_v2::storage_table::DEFAULT_VNODE;
 use crate::{Keyspace, StateStore};
 
@@ -79,36 +81,26 @@ pub struct StateTableBase<S: StateStore, RS: RowSerde> {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
+
+    /// Virtual nodes that the table is partitioned into.
+    ///
+    /// Only the rows whose vnode of the primary key is in this set will be visible to the
+    /// executor. For READ_WRITE instances, the table will also check whether the writed rows
+    /// confirm to this partition.
+    vnodes: Arc<Bitmap>,
+
+    /// Used for catalog table_properties
+    table_option: TableOption,
 }
 
 impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
-    /// Create a state table without distribution, used for singleton executors and unit tests.
-    pub fn new_without_distribution(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-        )
-    }
-
-
     /// Create state table from table catalog and store.
     pub fn from_table_catalog(
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-
-    
+        let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -123,16 +115,32 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
                 )
             })
             .collect();
-        let dist_key_indices = table_catalog
+        let dist_key_indices: Vec<usize> = table_catalog
             .distribution_key
             .iter()
             .map(|dist_index| *dist_index as usize)
             .collect();
+
         let pk_indices = table_catalog
             .order_key
             .iter()
             .map(|col_order| col_order.index as usize)
-            .collect();
+            .collect_vec();
+
+        let dist_key_in_pk_indices = dist_key_indices
+            .iter()
+            .map(|&di| {
+                pk_indices
+                    .iter()
+                    .position(|&pi| di == pi)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "distribution key {:?} must be a subset of primary key {:?}",
+                            dist_key_indices, pk_indices
+                        )
+                    })
+            })
+            .collect_vec();
         let distribution = match vnodes {
             Some(vnodes) => Distribution {
                 dist_key_indices,
@@ -143,16 +151,24 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 
         let keyspace = Keyspace::table_root(store, &table_id);
         let pk_serializer = OrderedRowSerializer::new(order_types);
-        let column_ids = table_columns.iter().map(|c| c.column_id).collect();
+        let column_ids = table_columns.iter().map(|c| c.column_id).collect_vec();
 
-        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, column_ids);
-        let mapping = ColumnDescMapping::new_partial(&table_columns, column_ids);
+        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
+        let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
         Self {
             mem_table: MemTable::new(),
+            keyspace,
+            table_columns,
+            pk_serializer,
+            row_serializer,
+            mapping,
+            pk_indices: pk_indices.to_vec(),
+            dist_key_indices,
+            dist_key_in_pk_indices,
+            vnodes: vnodes.unwrap(),
+            table_option: TableOption::build_table_option(table_catalog.get_properties()),
         }
     }
-    
-
 
     /// Get vnode value with `indices` on the given `row`. Should not be used directly.
     fn compute_vnode(&self, row: &Row, indices: &[usize]) -> VirtualNode {
@@ -170,6 +186,16 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
             self.check_vnode_is_set(vnode);
         }
         vnode
+    }
+
+    /// Check whether the given `vnode` is set in the `vnodes` of this table.
+    fn check_vnode_is_set(&self, vnode: VirtualNode) {
+        let is_set = self.vnodes.is_set(vnode as usize).unwrap();
+        assert!(
+            is_set,
+            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
+            vnode, self.table_columns, self.dist_key_indices
+        );
     }
 
     fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
@@ -196,30 +222,68 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         self.mem_table.is_dirty()
     }
 
-    
-
+    fn get_read_option(&self, epoch: u64) -> ReadOptions {
+        ReadOptions {
+            epoch,
+            table_id: Some(self.keyspace.table_id()),
+            retention_seconds: self.table_option.retention_seconds,
+        }
+    }
+}
+// get
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from storage table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
-    pub async fn get_row<'a>(
-        &'a self,
-        pk: &'a Row,
-        epoch: u64,
-    ) -> StorageResult<Option<Cow<'a, Row>>> {
+    pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());
         let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
+        let serialized_pk = self.serialize_pk_with_vnode(pk);
+        let mut deserializer = RS::create_deserializer(self.mapping.clone());
+        let read_options = self.get_read_option(epoch);
         match mem_table_res {
             Some(row_op) => match row_op {
-                RowOp::Insert(row) => Ok(Some(Cow::Borrowed(row))),
+                RowOp::Insert(row_bytes) => {
+                    let row = deserializer
+                        .deserialize(serialized_pk, row_bytes)
+                        .map_err(err)?
+                        .unwrap()
+                        .2;
+                    Ok(Some(row))
+                }
                 RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, row)) => Ok(Some(Cow::Borrowed(row))),
+                RowOp::Update((_, row_bytes)) => {
+                    let row = deserializer
+                        .deserialize(serialized_pk, row_bytes)
+                        .map_err(err)?
+                        .unwrap()
+                        .2;
+                    Ok(Some(row))
+                }
             },
-            None => Ok(self.storage_table.get_row(pk, epoch).await?.map(Cow::Owned)),
+            None => {
+                if let Some(storage_row_bytes) =
+                    self.keyspace.get(&serialized_pk, read_options).await?
+                {
+                    let row = deserializer
+                        .deserialize(&serialized_pk, &storage_row_bytes)
+                        .map_err(err)?
+                        .unwrap()
+                        .2;
+                    Ok(Some(row))
+                } else {
+                    Ok(None)
+                }
+            }
         }
     }
 
-    pub async fn get_owned_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        Ok(self.get_row(pk, epoch).await?.map(|r| r.into_owned()))
+    /// `vnode | pk`
+    fn serialize_pk_with_vnode(&self, pk: &Row) -> Vec<u8> {
+        let mut output = Vec::new();
+        output.put_slice(&self.compute_vnode_by_pk(pk).to_be_bytes());
+        self.pk_serializer.serialize(pk, &mut output);
+        output
     }
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
@@ -234,7 +298,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         let vnode = self.compute_vnode_by_row(&value);
         let value = self
             .row_serializer
-            .serialize(vnode, &pk, value)
+            .serialize(vnode, &pk_bytes, value)
             .map_err(err)?;
         self.mem_table.insert(pk_bytes, value);
         Ok(())
