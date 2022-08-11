@@ -90,6 +90,21 @@ impl Sstable {
         Ok(Self { id, meta, blocks })
     }
 
+    pub fn new_with_blocks(
+        id: HummockSstableId,
+        meta: SstableMeta,
+        compressed_blocks: Vec<Bytes>,
+    ) -> HummockResult<Self> {
+        let blocks = compressed_blocks
+            .into_iter()
+            .map(|b| {
+                let block = Block::decode(b.chunk())?;
+                Ok(Arc::new(block))
+            })
+            .collect::<HummockResult<Vec<Arc<Block>>>>()?;
+        Ok(Self { id, meta, blocks })
+    }
+
     pub fn has_bloom_filter(&self) -> bool {
         !self.meta.bloom_filter.is_empty()
     }
