@@ -267,8 +267,7 @@ impl<'a> TableScanIoEstimator<'a> {
                             .map(|x| &table_desc.columns[x.column_idx]),
                     )
                     .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
-                    .reduce(|x, y| x + y)
-                    .unwrap(),
+                    .sum::<usize>(),
         }
     }
 
