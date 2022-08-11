@@ -13,14 +13,21 @@
 // limitations under the License.
 
 use std::cmp::min;
+use std::collections::HashMap;
 
+use itertools::Itertools;
+use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
+use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprImpl, ExprType, ExprVisitor, FunctionCall};
-use crate::optimizer::plan_node::LogicalScan;
+use crate::catalog::IndexCatalog;
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
+use crate::optimizer::plan_node::{
+    LogicalJoin, LogicalScan, PlanTreeNodeBinary, PredicatePushdown,
+};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
@@ -34,7 +41,7 @@ use crate::utils::Condition;
 ///
 /// Range      | 500| 50 | 20 | 10 | 10 |
 ///
-/// All        |10000| 100| 50 | 20 | 10 |
+/// All        |10000| 100| 30 | 20 | 10 |
 ///
 /// total cost = cost(match type of 0 idx)
 ///             * cost(match type of 1 idx)
@@ -59,8 +66,9 @@ const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
     [1, 1, 1, 1, 1],
     [10, 8, 5, 5, 5],
     [500, 50, 20, 10, 10],
-    [10000, 100, 50, 20, 20],
+    [10000, 100, 30, 20, 20],
 ];
+const LOOKUP_COST_CONST: usize = 3;
 
 pub struct IndexSelectionRule {}
 impl Rule for IndexSelectionRule {
@@ -74,7 +82,7 @@ impl Rule for IndexSelectionRule {
         let mut primary_table_scan_io_estimator = TableScanIoEstimator::new(logical_scan);
         let primary_cost = primary_table_scan_io_estimator.estimate(logical_scan.predicate());
 
-        let mut final_plan = logical_scan.clone();
+        let mut final_plan: PlanRef = logical_scan.clone().into();
         let mut min_cost = primary_cost.clone();
 
         let required_col_idx = logical_scan.required_col_idx();
@@ -92,18 +100,146 @@ impl Rule for IndexSelectionRule {
                 let index_cost = index_table_scan_io_estimator.estimate(index_scan.predicate());
                 if index_cost.le(&min_cost) {
                     min_cost = index_cost;
-                    final_plan = index_scan;
+                    final_plan = index_scan.into();
                 }
             } else {
-                // TODO: non-covering index selection
+                // non-covering index selection
+                // only enable non-covering index selection when lookup join is enabled
+                let config = logical_scan.base.ctx.inner().session_ctx.config();
+                if config.get_batch_enable_lookup_join()
+                    && config.get_query_mode() == QueryMode::Local
+                {
+                    let (index_lookup, lookup_cost) =
+                        self.gen_index_lookup(logical_scan, index, p2s_mapping);
+                    if lookup_cost.le(&min_cost) {
+                        min_cost = lookup_cost;
+                        final_plan = index_lookup;
+                    }
+                }
             }
         }
+
+        // TODO: support merge index
 
         if min_cost == primary_cost {
             None
         } else {
-            Some(final_plan.into())
+            Some(final_plan)
         }
+    }
+}
+
+struct Rewriter {
+    p2s_mapping: HashMap<usize, usize>,
+    offset: usize,
+}
+impl ExprRewriter for Rewriter {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        // transform primary predicate to index predicate if it can
+        if self.p2s_mapping.contains_key(&input_ref.index) {
+            InputRef::new(
+                *self.p2s_mapping.get(&input_ref.index()).unwrap(),
+                input_ref.return_type(),
+            )
+            .into()
+        } else {
+            InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
+        }
+    }
+}
+
+impl IndexSelectionRule {
+    fn gen_index_lookup(
+        &self,
+        logical_scan: &LogicalScan,
+        index: &IndexCatalog,
+        p2s_mapping: HashMap<usize, usize>,
+    ) -> (PlanRef, IndexCost) {
+        // 1. logical_scan ->  logical_join
+        //                      /        \
+        //                index_scan   primary_table_scan
+        let predicate = logical_scan.predicate().clone();
+        let offset = index.index_item.len();
+        let mut rewriter = Rewriter {
+            p2s_mapping,
+            offset,
+        };
+        let new_predicate = predicate.rewrite_expr(&mut rewriter);
+
+        let index_scan = LogicalScan::create(
+            index.index_table.name.clone(),
+            false,
+            index.index_table.table_desc().into(),
+            vec![],
+            logical_scan.ctx(),
+        );
+
+        let primary_table_scan = LogicalScan::create(
+            index.primary_table.name.clone(),
+            false,
+            index.primary_table.table_desc().into(),
+            vec![],
+            logical_scan.ctx(),
+        );
+
+        let conjunctions = index
+            .primary_table_order_key_ref_to_index_table()
+            .iter()
+            .zip_eq(index.primary_table.order_key.iter())
+            .map(|(x, y)| {
+                ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+                    ExprType::Equal,
+                    vec![
+                        ExprImpl::InputRef(Box::new(InputRef::new(
+                            x.index,
+                            index.index_table.columns[x.index].data_type().clone(),
+                        ))),
+                        ExprImpl::InputRef(Box::new(InputRef::new(
+                            y.index + index.index_item.len(),
+                            index.primary_table.columns[y.index].data_type().clone(),
+                        ))),
+                    ],
+                    DataType::Boolean,
+                )))
+            })
+            .chain(new_predicate.into_iter())
+            .collect_vec();
+        let on = Condition { conjunctions };
+        let join = LogicalJoin::new(
+            index_scan.into(),
+            primary_table_scan.into(),
+            JoinType::Inner,
+            on,
+        );
+
+        // 2. push down predicate, so we can calculate the cost of index lookup
+        let join_ref = join.predicate_pushdown(Condition::true_cond());
+
+        let join_with_predicate_push_down =
+            join_ref.as_logical_join().expect("must be a logical join");
+        let new_join_left = join_with_predicate_push_down.left();
+        let index_scan_with_predicate: &LogicalScan = new_join_left
+            .as_logical_scan()
+            .expect("must be a logical scan");
+
+        // 3. calculate the cost
+        let mut index_table_scan_io_estimator =
+            TableScanIoEstimator::new(index_scan_with_predicate);
+        let index_cost =
+            index_table_scan_io_estimator.estimate(index_scan_with_predicate.predicate());
+        // lookup cost = index cost * LOOKUP_COST_CONST
+        let lookup_cost = index_cost.mul(&IndexCost::new(LOOKUP_COST_CONST));
+
+        // 4. keep the same schema with original logical_scan
+        let scan_output_col_idx = logical_scan.output_col_idx();
+        let lookup_join = join_ref.prune_col(
+            &scan_output_col_idx
+                .iter()
+                .map(|&col_idx| col_idx + offset)
+                .collect_vec(),
+        );
+
+        (lookup_join, lookup_cost)
     }
 }
 
@@ -114,15 +250,25 @@ struct TableScanIoEstimator<'a> {
 
 impl<'a> TableScanIoEstimator<'a> {
     pub fn new(table_scan: &'a LogicalScan) -> Self {
+        // 5 for table_id + 1 for vnode + 8 for epoch
+        let row_meta_field_estimate_size = 14_usize;
+        let table_desc = table_scan.table_desc();
         Self {
             table_scan,
-            row_size: table_scan
-                .table_desc()
-                .columns
-                .iter()
-                .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
-                .reduce(|x, y| x + y)
-                .unwrap(),
+            row_size: row_meta_field_estimate_size
+                + table_desc
+                    .columns
+                    .iter()
+                    // add order key twice for its appearance both in key and value
+                    .chain(
+                        table_desc
+                            .order_key
+                            .iter()
+                            .map(|x| &table_desc.columns[x.column_idx]),
+                    )
+                    .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
+                    .reduce(|x, y| x + y)
+                    .unwrap(),
         }
     }
 
