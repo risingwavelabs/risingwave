@@ -26,6 +26,8 @@ macro_rules! for_all_metrics {
             read_bytes: GenericCounter<AtomicU64>,
             operation_latency: HistogramVec,
             operation_size: HistogramVec,
+            s3_num_writes: GenericCounter<AtomicU64>,
+            s3_num_reads: GenericCounter<AtomicU64>,
         }
     };
 }
@@ -65,6 +67,20 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
+        let s3_num_writes = register_int_counter_with_registry!(
+            "object_store_s3_num_writes",
+            "Total number of write requests to object store",
+            registry
+        )
+        .unwrap();
+
+        let s3_num_reads = register_int_counter_with_registry!(
+            "object_store_s3_num_reads",
+            "Total number of read requests to object store",
+            registry
+        )
+        .unwrap();
+
         let latency_opts = histogram_opts!(
             "object_store_operation_latency",
             "Total latency of operation on object store",
@@ -100,6 +116,8 @@ impl ObjectStoreMetrics {
             read_bytes,
             operation_latency,
             operation_size,
+            s3_num_writes,
+            s3_num_reads,
         }
     }
 

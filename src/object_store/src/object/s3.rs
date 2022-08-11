@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
     BlockLocation, BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectResult,
-    ObjectStore, StreamingUploader,
+    ObjectStore, StoreMediaTypeE, StreamingUploader,
 };
 
 type PartId = i32;
@@ -430,6 +430,10 @@ impl ObjectStore for S3ObjectStore {
             }
         }
         Ok(ret)
+    }
+
+    fn store_media_type(&self) -> StoreMediaTypeE {
+        StoreMediaTypeE::S3
     }
 }
 

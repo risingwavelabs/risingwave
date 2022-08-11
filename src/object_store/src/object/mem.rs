@@ -24,7 +24,7 @@ use tokio::sync::Mutex;
 
 use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StreamingUploader,
+    StoreMediaTypeE, StreamingUploader,
 };
 
 /// Store multiple parts in a map, and concatenate them on finish.
@@ -142,6 +142,10 @@ impl ObjectStore for InMemObjectStore {
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
             .collect_vec())
+    }
+
+    fn store_media_type(&self) -> StoreMediaTypeE {
+        StoreMediaTypeE::Mem
     }
 }
 

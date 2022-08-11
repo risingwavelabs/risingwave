@@ -99,6 +99,11 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Bps", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_requests_per_sec(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Qps", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_bytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="decbytes", fillOpacity=10,
@@ -303,6 +308,24 @@ def section_compaction(panels):
 def section_object_storage(panels):
     return [
         panels.row("Object Storage"),
+        panels.timeseries_requests_per_sec("S3 Request QPS", [
+            panels.target(
+                "sum(rate(object_store_s3_num_reads[$__rate_interval]))by(job,instance)",
+                "s3-read - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(object_store_s3_num_writes[$__rate_interval]))by(job,instance)",
+                "s3-write - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(object_store_s3_num_reads[$__rate_interval]))by(job)",
+                "s3-read sum - {{job}}"
+            ),
+            panels.target(
+                "sum(rate(object_store_s3_num_writes[$__rate_interval]))by(job)",
+                "s3-write sum - {{job}}"
+            ),
+        ]),
         panels.timeseries_bytes_per_sec("Operation Throughput", [
             panels.target(
                 "sum(rate(object_store_read_bytes[$__rate_interval]))by(job,instance)", "read - {{job}} @ {{instance}}"

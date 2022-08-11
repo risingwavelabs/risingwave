@@ -140,6 +140,15 @@ pub trait ObjectStore: Send + Sync {
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
+
+    fn store_media_type(&self) -> StoreMediaTypeE;
+}
+
+pub enum StoreMediaTypeE {
+    None,
+    Mem,
+    Disk,
+    S3,
 }
 
 pub enum ObjectStoreImpl {
@@ -240,6 +249,10 @@ impl ObjectStoreImpl {
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         object_store_impl_method_body!(self, list, prefix)
     }
+
+    fn store_media_type(&self) -> StoreMediaTypeE {
+        StoreMediaTypeE::None
+    }
 }
 
 pub struct MonitoredStreamingUploader {
@@ -314,6 +327,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_size
             .with_label_values(&["upload"])
             .observe(obj.len() as f64);
+        if let StoreMediaTypeE::S3 = self.inner.store_media_type() {
+            self.object_store_metrics.s3_num_writes.inc();
+        }
         self.inner
             .upload(path, obj)
             .stack_trace("object_store_upload")
@@ -335,7 +351,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["read"])
             .start_timer();
-
+        if let StoreMediaTypeE::S3 = self.inner.store_media_type() {
+            self.object_store_metrics.s3_num_reads.inc();
+        }
         let ret = self
             .inner
             .read(path, block_loc)
@@ -367,6 +385,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["readv"])
             .start_timer();
+        if let StoreMediaTypeE::S3 = self.inner.store_media_type() {
+            self.object_store_metrics
+                .s3_num_reads
+                .inc_by(block_locs.len() as u64);
+        }
         let ret = self
             .inner
             .readv(path, block_locs)
@@ -384,6 +407,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["metadata"])
             .start_timer();
+        if let StoreMediaTypeE::S3 = self.inner.store_media_type() {
+            self.object_store_metrics.s3_num_reads.inc();
+        }
         self.inner
             .metadata(path)
             .stack_trace("object_store_metadata")
@@ -396,6 +422,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["delete"])
             .start_timer();
+        if let StoreMediaTypeE::S3 = self.inner.store_media_type() {
+            self.object_store_metrics.s3_num_writes.inc();
+        }
         self.inner
             .delete(path)
             .stack_trace("object_store_delete")
@@ -408,6 +437,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .operation_latency
             .with_label_values(&["list"])
             .start_timer();
+        if let StoreMediaTypeE::S3 = self.inner.store_media_type() {
+            self.object_store_metrics.s3_num_reads.inc();
+        }
         self.inner
             .list(prefix)
             .stack_trace("object_store_list")
