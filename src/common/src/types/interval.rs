@@ -272,7 +272,7 @@ impl IntervalUnit {
 }
 
 impl Serialize for IntervalUnit {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -287,7 +287,7 @@ impl Serialize for IntervalUnit {
 }
 
 impl<'de> Deserialize<'de> for IntervalUnit {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
