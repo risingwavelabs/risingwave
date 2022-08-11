@@ -24,6 +24,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
 pub struct ManagedTopNStateNew<S: StateStore> {
@@ -130,11 +131,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         num_limit: Option<usize>,
         epoch: u64,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
-        let state_table_iter = if let Some(prefix) = pk_prefix {
-            self.state_table.iter_with_pk_prefix(prefix, epoch).await?
-        } else {
-            self.state_table.iter(epoch).await?
-        };
+        let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
         pin_mut!(state_table_iter);
 
         // here we don't expect users to have large OFFSET.
@@ -163,11 +160,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         cache_size_limit: usize,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
-        let state_table_iter = if let Some(prefix) = pk_prefix {
-            self.state_table.iter_with_pk_prefix(prefix, epoch).await?
-        } else {
-            self.state_table.iter(epoch).await?
-        };
+        let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(item?);
