@@ -12,15 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::marker::PhantomData;
+use std::collections::BTreeMap;
 use std::ops::Index;
 use std::sync::Arc;
 
 use bytes::BufMut;
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
@@ -30,7 +26,6 @@ use risingwave_common::types::VirtualNode;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::range_of_prefix;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
@@ -39,12 +34,13 @@ use crate::error::{StorageError, StorageResult};
 use crate::row_serde::{
     serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
 };
-use crate::store::ReadOptions;
+use crate::storage_value::StorageValue;
+use crate::store::{ReadOptions, WriteOptions};
 use crate::{Keyspace, StateStore};
 
-/// `RowBasedStateTable` is the interface accessing relational data in KV(`StateStore`) with
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
-pub type RowBasedStateTable<S> = StateTableBase<S, RowBasedSerde>;
+pub type StateTable<S> = StateTableBase<S, RowBasedSerde>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerde` for row to KV entries.
 ///
@@ -96,6 +92,7 @@ pub struct StateTableBase<S: StateStore, RS: RowSerde> {
     table_option: TableOption,
 }
 
+// init Statetable
 impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Create state table from table catalog and store.
     pub fn from_table_catalog(
@@ -144,13 +141,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
                     })
             })
             .collect_vec();
-        // let distribution = match vnodes {
-        //     Some(vnodes) => Distribution {
-        //         dist_key_indices,
-        //         vnodes,
-        //     },
-        //     None => Distribution::fallback(),
-        // };
 
         let keyspace = Keyspace::table_root(store, &table_id);
         let pk_serializer = OrderedRowSerializer::new(order_types);
@@ -170,6 +160,72 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
             dist_key_in_pk_indices,
             vnodes: vnodes.unwrap(),
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
+        }
+    }
+
+    /// Create a state table without distribution, used for unit tests.
+    pub fn new_without_distribution(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+        )
+    }
+
+    /// Create a state table with distribution specified with `distribution`. Should use
+    /// `Distribution::fallback()` for tests.
+    pub fn new_with_distribution(
+        store: S,
+        table_id: TableId,
+        table_columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        Distribution {
+            dist_key_indices,
+            vnodes,
+        }: Distribution,
+    ) -> Self {
+        let keyspace = Keyspace::table_root(store, &table_id);
+
+        let column_ids = table_columns.iter().map(|c| c.column_id).collect_vec();
+        let pk_serializer = OrderedRowSerializer::new(order_types);
+        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
+        let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
+        let dist_key_in_pk_indices = dist_key_indices
+            .iter()
+            .map(|&di| {
+                pk_indices
+                    .iter()
+                    .position(|&pi| di == pi)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "distribution key {:?} must be a subset of primary key {:?}",
+                            dist_key_indices, pk_indices
+                        )
+                    })
+            })
+            .collect_vec();
+        Self {
+            mem_table: MemTable::new(),
+            keyspace,
+            table_columns,
+            pk_serializer,
+            row_serializer,
+            mapping,
+            pk_indices,
+            dist_key_indices,
+            dist_key_in_pk_indices,
+            vnodes,
+            table_option: Default::default(),
         }
     }
 
@@ -233,15 +289,16 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         }
     }
 }
-// get
+
+// point get
 impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Get a single row from state table. This function will return a Cow. If the value is from
     /// memtable, it will be a [`Cow::Borrowed`]. If is from storage table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
     pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
-        let pk_bytes = serialize_pk(pk, self.pk_serializer());
-        let mem_table_res = self.mem_table.get_row_op(&pk_bytes);
         let serialized_pk = self.serialize_pk_with_vnode(pk);
+        let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
+
         let mut deserializer = RS::create_deserializer(self.mapping.clone());
         let read_options = self.get_read_option(epoch);
         match mem_table_res {
@@ -285,7 +342,10 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         self.pk_serializer.serialize(pk, &mut output);
         output
     }
+}
 
+// write
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
@@ -345,9 +405,35 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.mem_table
-            .batch_write_rows(mem_table, new_epoch)
-            .await?;
+        self.batch_write_rows(mem_table, new_epoch).await?;
+        Ok(())
+    }
+
+    /// Write to state store.
+    pub async fn batch_write_rows(
+        &mut self,
+        buffer: BTreeMap<Vec<u8>, RowOp>,
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            epoch,
+            table_id: self.keyspace.table_id(),
+        });
+        let mut local = batch.prefixify(&self.keyspace);
+        for (pk, row_op) in buffer {
+            match row_op {
+                RowOp::Insert(row) => {
+                    local.put(pk, StorageValue::new_default_put(row));
+                }
+                RowOp::Delete(_) => {
+                    local.delete(pk);
+                }
+                RowOp::Update((_, new_row)) => {
+                    local.put(pk, StorageValue::new_default_put(new_row));
+                }
+            }
+        }
+        batch.ingest().await?;
         Ok(())
     }
 }

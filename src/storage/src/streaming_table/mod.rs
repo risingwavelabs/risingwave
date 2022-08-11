@@ -16,7 +16,7 @@ pub mod mem_table;
 pub mod state_table;
 
 #[cfg(test)]
-pub mod test_relational_table;
+pub mod test_streaming_table;
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 
 use crate::error::StorageResult;
-use crate::table::storage_table::DEFAULT_VNODE;
+use crate::streaming_table::state_table::DEFAULT_VNODE;
 
 /// Represents the distribution for a specific table instance.
 #[derive(Debug)]
