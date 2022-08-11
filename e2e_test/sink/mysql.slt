@@ -6,7 +6,7 @@ CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;
 
 statement ok
 CREATE SINK s FROM mv WITH (
-    sink_type = 'mysql',
+    connector = 'mysql',
     endpoint = '172.24.2.2:3306',
     user = 'root',
     database = 'test',
