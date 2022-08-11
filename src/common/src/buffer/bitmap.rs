@@ -199,13 +199,7 @@ impl Bitmap {
     }
 
     fn num_bytes(num_bits: usize) -> usize {
-        let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
-        let r = num_bytes % 64;
-        if r == 0 {
-            num_bytes
-        } else {
-            num_bytes + 64 - r
-        }
+        num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 }
     }
 
     /// Returns the number of valid bits in the bitmap,
