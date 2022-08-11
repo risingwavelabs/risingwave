@@ -38,15 +38,15 @@ services:
     pid: host
     userns_mode: host
     network_mode: host
-    # networks:
-    #   nw:
-    #     ipv4_address: 172.24.2.1
+    networks:
+      nw:
+        ipv4_address: 172.24.2.1
 
   mysql:
     image: mysql/mysql-server:latest
     container_name: mysql
-    # ports:
-    #   - '3306:3306'
+    ports:
+      - '3306:3306'
     volumes:
       - ./init:/docker-entrypoint-initdb.d
     environment:
@@ -58,14 +58,14 @@ services:
     pid: host
     userns_mode: host
     network_mode: host
-#     networks:
-#       nw:
-#         ipv4_address: 172.24.2.2
+    networks:
+      nw:
+        ipv4_address: 172.24.2.2
 
-# networks:
-#   nw:
-#     driver: bridge
-#     ipam:
-#         driver: default
-#         config:
-#             - subnet: "172.24.2.0/16"
+networks:
+  nw:
+    driver: bridge
+    ipam:
+        driver: default
+        config:
+            - subnet: "172.24.2.0/16"
