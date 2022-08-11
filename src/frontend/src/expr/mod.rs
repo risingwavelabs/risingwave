@@ -191,7 +191,7 @@ macro_rules! impl_has_variant {
                             has: bool,
                         }
 
-                        impl ExprVisitor for Has {
+                        impl ExprVisitor<()> for Has {
                             fn [<visit_ $variant:snake>](&mut self, _: &$variant) {
                                 self.has = true;
                             }
@@ -220,7 +220,7 @@ impl ExprImpl {
             depth: usize,
         }
 
-        impl ExprVisitor for Has {
+        impl ExprVisitor<()> for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
                 if correlated_input_ref.depth() == self.depth {
                     self.has = true;
@@ -258,7 +258,7 @@ impl ExprImpl {
             correlated_id: CorrelatedId,
         }
 
-        impl ExprVisitor for Has {
+        impl ExprVisitor<()> for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
                 if correlated_input_ref.correlated_id() == self.correlated_id {
                     self.has = true;
@@ -343,7 +343,7 @@ impl ExprImpl {
         struct Has {
             has: bool,
         }
-        impl ExprVisitor for Has {
+        impl ExprVisitor<()> for Has {
             fn visit_expr(&mut self, expr: &ExprImpl) {
                 match expr {
                     ExprImpl::Literal(_inner) => {}
