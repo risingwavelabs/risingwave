@@ -33,9 +33,6 @@ use crate::sink::redis::{RedisConfig, RedisSink};
 
 #[async_trait]
 pub trait Sink {
-    // prepares external sink in order to start transactions.
-    async fn prepare(&mut self, schema: &Schema) -> Result<()>;
-
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -110,18 +107,25 @@ impl SinkImpl {
             }
         })
     }
+
+    pub fn needs_preparation(&self) -> bool {
+        match self {
+            SinkImpl::MySQL(_) => true,
+            SinkImpl::Redis(_) => false,
+            SinkImpl::Kafka(_) => false,
+        }
+    }
+
+    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.prepare(schema).await,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[async_trait]
 impl Sink for SinkImpl {
-    async fn prepare(&mut self, schema: &Schema) -> Result<()> {
-        match self {
-            SinkImpl::MySQL(sink) => sink.prepare(schema).await,
-            SinkImpl::Redis(sink) => sink.prepare(schema).await,
-            SinkImpl::Kafka(sink) => sink.prepare(schema).await,
-        }
-    }
-
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         match self {
             SinkImpl::MySQL(sink) => sink.write_batch(chunk, schema).await,

@@ -77,6 +77,26 @@ impl MySQLSink {
         })
     }
 
+    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+        // Create a table
+        let create_table = format!(
+            r"CREATE TABLE IF NOT EXISTS `{}`.`{}` ( {} );",
+            self.cfg.database.clone().unwrap(),
+            self.cfg.table,
+            join(
+                schema
+                    .names()
+                    .iter()
+                    .zip_eq(schema.data_types().iter())
+                    .map(|(n, dt)| format!("`{}` {}", n, MySQLDataType::from(dt)))
+                    .collect_vec(),
+                ", ",
+            )
+        );
+        self.conn.query_drop(create_table).await?;
+        Ok(())
+    }
+
     fn endpoint(&self) -> String {
         self.cfg.endpoint.clone()
     }
@@ -180,26 +200,6 @@ impl From<&DataType> for MySQLDataType {
 
 #[async_trait]
 impl Sink for MySQLSink {
-    async fn prepare(&mut self, schema: &Schema) -> Result<()> {
-        // Create a table
-        let create_table = format!(
-            r"CREATE TABLE IF NOT EXISTS `{}`.`{}` ( {} );",
-            self.cfg.database.clone().unwrap(),
-            self.cfg.table,
-            join(
-                schema
-                    .names()
-                    .iter()
-                    .zip_eq(schema.data_types().iter())
-                    .map(|(n, dt)| format!("`{}` {}", n, MySQLDataType::from(dt)))
-                    .collect_vec(),
-                ", ",
-            )
-        );
-        self.conn.query_drop(create_table).await?;
-        Ok(())
-    }
-
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         self.chunk_cache.push((chunk, schema.clone()));
         Ok(())
