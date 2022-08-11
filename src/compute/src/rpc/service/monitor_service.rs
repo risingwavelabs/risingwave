@@ -112,9 +112,7 @@ pub mod grpc_middleware {
     #[derive(Clone)]
     pub struct StackTraceMiddleware<S> {
         inner: S,
-
         manager: GrpcStackTraceManagerRef,
-
         next_id: Arc<AtomicU64>,
     }
 

@@ -569,7 +569,7 @@ impl LocalStreamManagerCore {
                 let traced = trace_reporter.optional_trace(
                     actor,
                     format!("Actor {actor_id}"),
-                    false,
+                    true,
                     Duration::from_millis(1000),
                     *ENABLE_ASYNC_STACK_TRACE,
                 );
