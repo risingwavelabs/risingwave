@@ -21,14 +21,14 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
-    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
-    NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -117,10 +117,7 @@ impl LocalFrontend {
             let session = self.session_ref();
 
             let bound = {
-                let mut binder = Binder::new(
-                    session.env().catalog_reader().read_guard(),
-                    session.database().to_string(),
-                );
+                let mut binder = Binder::new(&session);
                 binder.bind(Statement::Query(query.clone()))?
             };
             Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
@@ -235,6 +232,31 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_sink_inner(sink, graph)
     }
 
+    async fn create_index(
+        &self,
+        mut index: ProstIndex,
+        mut index_table: ProstTable,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        index_table.id = self.gen_id();
+        index_table.mapping = Some(ParallelUnitMapping {
+            table_id: index_table.id,
+            original_indices: [0, 10, 20].to_vec(),
+            data: [1, 2, 3].to_vec(),
+        });
+        self.catalog.write().create_table(&index_table);
+        self.add_table_or_index_id(
+            index_table.id,
+            index_table.schema_id,
+            index_table.database_id,
+        );
+
+        index.id = index_table.id;
+        index.index_table_id = index_table.id;
+        self.catalog.write().create_index(&index);
+        Ok(())
+    }
+
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.drop_table_or_source_id(table_id.table_id);
@@ -268,6 +290,33 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_sink(database_id, schema_id, sink_id);
+        Ok(())
+    }
+
+    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+        let &schema_id = self
+            .table_id_to_schema_id
+            .read()
+            .get(&index_id.index_id)
+            .unwrap();
+        let database_id = self.get_database_id_by_schema(schema_id);
+
+        let index = {
+            let catalog_reader = self.catalog.read();
+            let schema_catalog = catalog_reader
+                .get_schema_by_id(&database_id, &schema_id)
+                .unwrap();
+            schema_catalog.get_index_by_id(&index_id).unwrap().clone()
+        };
+
+        let index_table_id = index.index_table.id;
+        let (database_id, schema_id) = self.drop_table_or_index_id(index_id.index_id);
+        self.catalog
+            .write()
+            .drop_index(database_id, schema_id, index_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, index_table_id);
         Ok(())
     }
 
@@ -339,7 +388,22 @@ impl MockCatalogWriter {
             .insert(table_id, schema_id);
     }
 
+    fn add_table_or_index_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
+        self.table_id_to_schema_id
+            .write()
+            .insert(table_id, schema_id);
+    }
+
     fn drop_table_or_sink_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+        let schema_id = self
+            .table_id_to_schema_id
+            .write()
+            .remove(&table_id)
+            .unwrap();
+        (self.get_database_id_by_schema(schema_id), schema_id)
+    }
+
+    fn drop_table_or_index_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
         let schema_id = self
             .table_id_to_schema_id
             .write()
@@ -416,6 +480,8 @@ impl UserInfoWriter for MockUserInfoWriter {
                 user_info.can_login = update_user.can_login;
             } else if field == UpdateField::CreateDb as i32 {
                 user_info.can_create_db = update_user.can_create_db;
+            } else if field == UpdateField::CreateUser as i32 {
+                user_info.can_create_user = update_user.can_create_user;
             } else if field == UpdateField::AuthInfo as i32 {
                 user_info.auth_info = update_user.auth_info.clone();
             } else if field == UpdateField::Rename as i32 {
@@ -504,6 +570,7 @@ impl MockUserInfoWriter {
             name: DEFAULT_SUPER_USER.to_string(),
             is_supper: true,
             can_create_db: true,
+            can_create_user: true,
             can_login: true,
             ..Default::default()
         });
@@ -549,6 +616,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
 pub static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
     package test;

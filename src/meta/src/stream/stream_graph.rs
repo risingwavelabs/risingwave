@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{generate_intertable_name_with_type, TableId};
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -32,11 +32,13 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-use super::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
-use crate::cluster::WorkerId;
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use super::CreateMaterializedViewContext;
+use crate::manager::{
+    BuildGraphInfo, FragmentManagerRef, IdCategory, IdGeneratorManagerRef, WorkerId,
+};
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
+use crate::MetaResult;
 
 /// Id of an Actor, maybe local or global
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -475,7 +477,7 @@ impl StreamGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
         actor_id_offset: u32,
         actor_id_len: u32,
-    ) -> Result<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
+    ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
 
         for builder in self.actor_builders.values_mut() {
@@ -484,6 +486,7 @@ impl StreamGraphBuilder {
 
         for builder in self.actor_builders.values() {
             let actor_id = builder.actor_id;
+            let fragment_id = builder.get_fragment_id();
             let mut actor = builder.build();
             let mut upstream_actors = builder
                 .upstreams
@@ -499,6 +502,7 @@ impl StreamGraphBuilder {
                 ctx,
                 actor.get_nodes()?,
                 actor_id,
+                fragment_id,
                 &mut upstream_actors,
                 &mut upstream_fragments,
             )?;
@@ -523,9 +527,10 @@ impl StreamGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
         stream_node: &StreamNode,
         actor_id: LocalActorId,
+        fragment_id: GlobalFragmentId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
-    ) -> Result<StreamNode> {
+    ) -> MetaResult<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
         let mut check_and_fill_internal_table = |table_id: u32, table: Option<Table>| {
             ctx.internal_table_id_map.entry(table_id).or_insert(table);
@@ -548,6 +553,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "HashJoinLeft",
                             );
@@ -559,6 +565,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "HashJoinRight",
                             );
@@ -584,6 +591,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "ArrangeNode",
                             );
@@ -600,6 +608,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "HashAgg",
                             );
@@ -634,6 +643,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "GlobalSimpleAgg",
                             );
@@ -648,6 +658,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "DynamicFilterLeft",
                             );
@@ -659,6 +670,7 @@ impl StreamGraphBuilder {
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
+                                fragment_id.as_global_id(),
                                 table.id,
                                 "DynamicFilterRight",
                             );
@@ -696,6 +708,7 @@ impl StreamGraphBuilder {
                                 ctx,
                                 input,
                                 actor_id,
+                                fragment_id,
                                 upstream_actor_id,
                                 upstream_fragment_id,
                             )?;
@@ -708,7 +721,7 @@ impl StreamGraphBuilder {
     }
 
     /// Resolve the chain node, only rewrite the schema of input `MergeNode`.
-    fn resolve_chain_node(&self, stream_node: &StreamNode) -> Result<StreamNode> {
+    fn resolve_chain_node(&self, stream_node: &StreamNode) -> MetaResult<StreamNode> {
         let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap() else {
             unreachable!()
         };
@@ -783,7 +796,7 @@ impl ActorGraphBuilder {
         fragment_graph: &StreamFragmentGraphProto,
         default_parallelism: u32,
         ctx: &mut CreateMaterializedViewContext,
-    ) -> Result<Self>
+    ) -> MetaResult<Self>
     where
         S: MetaStore,
     {
@@ -835,7 +848,7 @@ impl ActorGraphBuilder {
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         ctx: &mut CreateMaterializedViewContext,
-    ) -> Result<BTreeMap<FragmentId, Fragment>>
+    ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
     {
@@ -849,7 +862,7 @@ impl ActorGraphBuilder {
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         ctx: &mut CreateMaterializedViewContext,
-    ) -> Result<BTreeMap<FragmentId, Fragment>>
+    ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
     {
@@ -920,7 +933,7 @@ impl ActorGraphBuilder {
         &self,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // poped out from the heap will be the top-most node in plan, or the sink in stream graph.)
         let mut actionable_fragment_id = VecDeque::new();
@@ -956,7 +969,7 @@ impl ActorGraphBuilder {
 
         if !downstream_cnts.is_empty() {
             // There are fragments that are not processed yet.
-            return Err(ErrorCode::InternalError("graph is not a DAG".into()).into());
+            bail!("graph is not a DAG");
         }
 
         Ok(())
@@ -967,7 +980,7 @@ impl ActorGraphBuilder {
         fragment_id: GlobalFragmentId,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-    ) -> Result<()> {
+    ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
 
         let parallel_degree = self

@@ -100,7 +100,7 @@ impl PlanRoot {
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
     /// (`out_fields`).
-    pub fn as_subplan(self) -> PlanRef {
+    pub fn into_subplan(self) -> PlanRef {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
@@ -235,6 +235,14 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // Push down the calculation of inputs of join's condition.
+        plan = self.optimize_by_rules(
+            plan,
+            "Push Down the Calculation of Inputs of Join's Condition".to_string(),
+            vec![PushCalculationOfJoinRule::create()],
+            ApplyOrder::TopDown,
+        );
+
         // Convert distinct aggregates.
         plan = self.optimize_by_rules(
             plan,
@@ -264,6 +272,9 @@ impl PlanRoot {
                 // merge should be applied before eliminate
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
+                // project-join merge should be applied after merge
+                // and eliminate
+                ProjectJoinRule::create(),
             ],
             ApplyOrder::BottomUp,
         );
@@ -271,10 +282,23 @@ impl PlanRoot {
         plan
     }
 
+    /// Batch specific logical optimization
+    fn batch_logical_optimize(&self, plan: PlanRef) -> PlanRef {
+        self.optimize_by_rules(
+            plan,
+            "Index Selection".to_string(),
+            vec![IndexSelectionRule::create()],
+            ApplyOrder::BottomUp,
+        )
+    }
+
     /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
+
+        // Batch specific logical optimization
+        plan = self.batch_logical_optimize(plan);
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -302,6 +326,9 @@ impl PlanRoot {
     pub fn gen_batch_local_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
+
+        // Batch specific logical optimization
+        plan = self.batch_logical_optimize(plan);
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -437,7 +464,7 @@ mod tests {
             out_fields,
             out_names,
         );
-        let subplan = root.as_subplan();
+        let subplan = root.into_subplan();
         assert_eq!(
             subplan.schema(),
             &Schema::new(vec![Field::with_name(DataType::Int32, "v1"),])

@@ -14,12 +14,15 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
                   LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalProject { exprs: [t2.y, (1.5:Decimal * min(t2.x))] }
-        LogicalAgg { group_key: [t2.y], aggs: [min(t2.x)] }
-          LogicalProject { exprs: [t2.y, t2.x] }
-            LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.y = 1000:Int32) }
+      LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x))] }
+        LogicalAgg { group_key: [t1.y], aggs: [min(t2.x)] }
+          LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t1.y, t2.x] }
+            LogicalAgg { group_key: [t1.y], aggs: [] }
+              LogicalScan { table: t1, columns: [t1.y] }
+            LogicalProject { exprs: [t2.y, t2.x] }
+              LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.y = 1000:Int32) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -91,12 +94,15 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalProject { exprs: [t2.y, (1.5:Decimal * min(t2.x))] }
-        LogicalAgg { group_key: [t2.y], aggs: [min(t2.x)] }
-          LogicalProject { exprs: [t2.y, t2.x] }
-            LogicalScan { table: t2, columns: [t2.x, t2.y] }
+      LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x))] }
+        LogicalAgg { group_key: [t1.y], aggs: [min(t2.x)] }
+          LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t1.y, t2.x] }
+            LogicalAgg { group_key: [t1.y], aggs: [] }
+              LogicalScan { table: t1, columns: [t1.y] }
+            LogicalProject { exprs: [t2.y, t2.x] }
+              LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -112,10 +118,14 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > count), output: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > count(1:Int32)), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalAgg { group_key: [t2.y], aggs: [count] }
-        LogicalScan { table: t2, columns: [t2.y] }
+      LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32)] }
+        LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t1.y, 1:Int32] }
+          LogicalAgg { group_key: [t1.y], aggs: [] }
+            LogicalScan { table: t1, columns: [t1.y] }
+          LogicalProject { exprs: [t2.y, 1:Int32] }
+            LogicalScan { table: t2, columns: [t2.y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -131,11 +141,15 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (count + count)), output: [t1.x, t1.y] }
+    LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > (count(1:Int32) + count(1:Int32))), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalProject { exprs: [t2.y, (count + count)] }
-        LogicalAgg { group_key: [t2.y], aggs: [count, count] }
-          LogicalScan { table: t2, columns: [t2.y] }
+      LogicalProject { exprs: [t1.y, (count(1:Int32) + count(1:Int32))] }
+        LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32), count(1:Int32)] }
+          LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t1.y, 1:Int32] }
+            LogicalAgg { group_key: [t1.y], aggs: [] }
+              LogicalScan { table: t1, columns: [t1.y] }
+            LogicalProject { exprs: [t2.y, 1:Int32] }
+              LogicalScan { table: t2, columns: [t2.y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -185,8 +199,9 @@
             LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x > (t2.x + 1000:Int32)), output: [t1.x] }
-      LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalProject { exprs: [t2.y, t2.x] }
+      LogicalProject { exprs: [t1.x, t1.y, t1.x] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y] }
+      LogicalProject { exprs: [t2.y, (t2.x + 1000:Int32)] }
         LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - sql: |
     create table t1(x int, y int);
@@ -319,10 +334,9 @@
                 LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
   optimized_logical_plan: |
     LogicalTopN { order: "[t2.x ASC]", limit: 100, offset: 0 }
-      LogicalProject { exprs: [t2.x, t1.x, t2.x] }
-        LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t2.x, t1.x] }
-          LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.x > 100:Int32) }
-          LogicalScan { table: t1, columns: [t1.x, t1.y] }
+      LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t2.x, t1.x, t2.x] }
+        LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.x > 100:Int32) }
+        LogicalScan { table: t1, columns: [t1.x, t1.y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -374,73 +388,99 @@
     select count(*) from a, b where a3 = b2 and 3 = (select count(*) from c where b2 = c2 and a3 = c3);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.a3 = c.c3) AND (b.b2 = c.c2), output: [] }
+      LogicalJoin { type: Inner, on: (a.a3 = a.a3) AND (b.b2 = b.b2), output: [] }
         LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
           LogicalScan { table: a, columns: [a.a3] }
           LogicalScan { table: b, columns: [b.b2] }
-        LogicalProject { exprs: [c.c3, c.c2] }
-          LogicalFilter { predicate: (3:Int32 = count) }
-            LogicalAgg { group_key: [c.c3, c.c2], aggs: [count] }
-              LogicalProject { exprs: [c.c3, c.c2] }
-                LogicalScan { table: c, columns: [c.c2, c.c3] }
+        LogicalProject { exprs: [a.a3, b.b2] }
+          LogicalFilter { predicate: (3:Int32 = count(1:Int32)) }
+            LogicalAgg { group_key: [a.a3, b.b2], aggs: [count(1:Int32)] }
+              LogicalJoin { type: LeftOuter, on: (a.a3 = c.c3) AND (b.b2 = c.c2), output: [a.a3, b.b2, 1:Int32] }
+                LogicalAgg { group_key: [a.a3, b.b2], aggs: [] }
+                  LogicalJoin { type: Inner, on: true, output: all }
+                    LogicalScan { table: a, columns: [a.a3] }
+                    LogicalScan { table: b, columns: [b.b2] }
+                LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
+                  LogicalScan { table: c, columns: [c.c2, c.c3] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z and a.x = 3);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.x = a.x) AND (a.z = a.z) AND (a.y = count), output: [] }
-        LogicalScan { table: a, output_columns: [a.x, a.y, a.z], required_columns: [x, y, z], predicate: (a.x = 3:Int32) }
-        LogicalAgg { group_key: [a.x, a.z], aggs: [count] }
-          LogicalJoin { type: Inner, on: (b.z = a.z), output: [a.x, a.z] }
+      LogicalJoin { type: Inner, on: (a.x = a.x) AND (a.z = a.z) AND (a.y::Int64 = count(1:Int32)), output: [] }
+        LogicalProject { exprs: [a.x, a.z, a.y::Int64] }
+          LogicalScan { table: a, output_columns: [a.x, a.y, a.z], required_columns: [x, y, z], predicate: (a.x = 3:Int32) }
+        LogicalAgg { group_key: [a.x, a.z], aggs: [count(1:Int32)] }
+          LogicalJoin { type: LeftOuter, on: (a.x = a.x) AND (a.z = a.z), output: [a.x, a.z, 1:Int32] }
             LogicalAgg { group_key: [a.x, a.z], aggs: [] }
-              LogicalScan { table: a, output_columns: [a.x, a.z], required_columns: [x, z], predicate: (a.x = 3:Int32) }
-            LogicalScan { table: b, columns: [b.z] }
+              LogicalScan { table: a, columns: [a.x, a.z] }
+            LogicalProject { exprs: [a.x, a.z, 1:Int32] }
+              LogicalJoin { type: Inner, on: (b.z = a.z), output: [a.x, a.z] }
+                LogicalAgg { group_key: [a.x, a.z], aggs: [] }
+                  LogicalScan { table: a, output_columns: [a.x, a.z], required_columns: [x, z], predicate: (a.x = 3:Int32) }
+                LogicalScan { table: b, columns: [b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = count), output: [] }
-        LogicalScan { table: a, output_columns: [a.y, a.z], required_columns: [y, z, x], predicate: (a.x = 3:Int32) }
-        LogicalAgg { group_key: [b.z], aggs: [count] }
-          LogicalScan { table: b, columns: [b.z] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(1:Int32)), output: [] }
+        LogicalProject { exprs: [a.z, a.y::Int64] }
+          LogicalScan { table: a, output_columns: [a.y, a.z], required_columns: [y, z, x], predicate: (a.x = 3:Int32) }
+        LogicalAgg { group_key: [a.z], aggs: [count(1:Int32)] }
+          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, 1:Int32] }
+            LogicalAgg { group_key: [a.z], aggs: [] }
+              LogicalScan { table: a, columns: [a.z] }
+            LogicalProject { exprs: [b.z, 1:Int32] }
+              LogicalScan { table: b, columns: [b.z] }
 - sql: |
     create table a(x int, y varchar, z int);
     create table b(x varchar, y int, z int);
     select count(*) from a where a.y = (select string_agg(x order by x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = string_agg(b.x order_by(b.x ASC NULLS LAST))), output: [] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y = string_agg(b.x order_by(b.x ASC NULLS LAST))), output: [] }
         LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [b.z], aggs: [string_agg(b.x order_by(b.x ASC NULLS LAST))] }
-          LogicalProject { exprs: [b.z, b.x] }
-            LogicalScan { table: b, columns: [b.x, b.z] }
+        LogicalAgg { group_key: [a.z], aggs: [string_agg(b.x order_by(b.x ASC NULLS LAST))] }
+          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+            LogicalAgg { group_key: [a.z], aggs: [] }
+              LogicalScan { table: a, columns: [a.z] }
+            LogicalProject { exprs: [b.z, b.x] }
+              LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
     select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = count(b.x) filter((flag = 0:Int64))), output: [] }
-        LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [b.z], aggs: [count(b.x) filter((flag = 0:Int64))] }
-          LogicalAgg { group_key: [b.z, b.x, flag], aggs: [] }
-            LogicalExpand { column_subsets: [[b.z, b.x]] }
-              LogicalProject { exprs: [b.z, b.x] }
-                LogicalScan { table: b, columns: [b.x, b.z] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x) filter((flag = 0:Int64))), output: [] }
+        LogicalProject { exprs: [a.z, a.y::Int64] }
+          LogicalScan { table: a, columns: [a.y, a.z] }
+        LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((flag = 0:Int64))] }
+          LogicalAgg { group_key: [a.z, b.x, flag], aggs: [] }
+            LogicalExpand { column_subsets: [[a.z, b.x]] }
+              LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+                LogicalAgg { group_key: [a.z], aggs: [] }
+                  LogicalScan { table: a, columns: [a.z] }
+                LogicalProject { exprs: [b.z, b.x] }
+                  LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
     select count(*) from a where a.y = (select count(x) filter(where x < 100) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = count(b.x) filter((b.x < 100:Int32))), output: [] }
-        LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [b.z], aggs: [count(b.x) filter((b.x < 100:Int32))] }
-          LogicalProject { exprs: [b.z, b.x] }
-            LogicalScan { table: b, columns: [b.x, b.z] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x) filter((b.x < 100:Int32))), output: [] }
+        LogicalProject { exprs: [a.z, a.y::Int64] }
+          LogicalScan { table: a, columns: [a.y, a.z] }
+        LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((b.x < 100:Int32))] }
+          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+            LogicalAgg { group_key: [a.z], aggs: [] }
+              LogicalScan { table: a, columns: [a.z] }
+            LogicalProject { exprs: [b.z, b.x] }
+              LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -476,11 +516,10 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t1.y) AND (t1.x = t1.x) AND (t1.y = t1.y), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalProject { exprs: [t1.x, t1.y, t1.y] }
-        LogicalJoin { type: Inner, on: (t1.x = t2.x), output: [t1.x, t1.y] }
-          LogicalAgg { group_key: [t1.x, t1.y], aggs: [] }
-            LogicalScan { table: t1, columns: [t1.x, t1.y] }
-          LogicalScan { table: t2, columns: [t2.x] }
+      LogicalJoin { type: Inner, on: (t1.x = t2.x), output: [t1.x, t1.y, t1.y] }
+        LogicalAgg { group_key: [t1.x, t1.y], aggs: [] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y] }
+        LogicalScan { table: t2, columns: [t2.x] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -554,7 +593,7 @@
       LogicalJoin { type: LeftSemi, on: (t2.y = (t3.y + t2.y)) AND (t2.y = t2.y) AND (t2.x = t3.x), output: [t2.x] }
         LogicalScan { table: t2, columns: [t2.x, t2.y] }
         LogicalProject { exprs: [t3.x, t2.y, (t3.y + t2.y)] }
-          LogicalJoin { type: Inner, on: true, output: all }
+          LogicalJoin { type: Inner, on: true, output: [t3.x, t2.y, t3.y] }
             LogicalAgg { group_key: [t2.y], aggs: [] }
               LogicalScan { table: t2, columns: [t2.y] }
             LogicalScan { table: t3, columns: [t3.x, t3.y] }
@@ -563,13 +602,11 @@
     create table t2 (b int, c int);
     select a, (select t1.a), c from t1, t2 where t1.b = t2.b order by c;
   optimized_logical_plan: |
-    LogicalProject { exprs: [t1.a, t1.a, t2.c] }
-      LogicalJoin { type: LeftOuter, on: (t1.a = t1.a), output: [t1.a, t2.c, t1.a] }
-        LogicalJoin { type: Inner, on: (t1.b = t2.b), output: [t1.a, t2.c] }
-          LogicalScan { table: t1, columns: [t1.a, t1.b] }
-          LogicalScan { table: t2, columns: [t2.b, t2.c] }
-        LogicalProject { exprs: [t1.a, t1.a] }
-          LogicalJoin { type: Inner, on: true, output: all }
-            LogicalAgg { group_key: [t1.a], aggs: [] }
-              LogicalScan { table: t1, columns: [t1.a] }
-            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    LogicalJoin { type: LeftOuter, on: (t1.a = t1.a), output: [t1.a, t1.a, t2.c] }
+      LogicalJoin { type: Inner, on: (t1.b = t2.b), output: [t1.a, t2.c] }
+        LogicalScan { table: t1, columns: [t1.a, t1.b] }
+        LogicalScan { table: t2, columns: [t2.b, t2.c] }
+      LogicalJoin { type: Inner, on: true, output: [t1.a, t1.a] }
+        LogicalAgg { group_key: [t1.a], aggs: [] }
+          LogicalScan { table: t1, columns: [t1.a] }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }

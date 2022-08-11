@@ -106,16 +106,6 @@ impl<T: Float> OrderedFloat<T> {
     }
 }
 
-impl OrderedFloat<f32> {
-    pub const MAX: Self = Self(f32::MAX);
-    pub const MIN: Self = Self(f32::MIN);
-}
-
-impl OrderedFloat<f64> {
-    pub const MAX: Self = Self(f64::MAX);
-    pub const MIN: Self = Self(f64::MIN);
-}
-
 impl<T: Float> AsRef<T> for OrderedFloat<T> {
     #[inline]
     fn as_ref(&self) -> &T {
@@ -206,6 +196,16 @@ impl<T: Float> Hash for OrderedFloat<T> {
 impl<T: Float + fmt::Display> fmt::Display for OrderedFloat<T> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let v = self.0;
+        if v.is_nan() {
+            return write!(f, "NaN");
+        }
+        if v.is_infinite() {
+            if v.is_sign_negative() {
+                write!(f, "-")?
+            }
+            return write!(f, "Infinity");
+        }
         self.0.fmt(f)
     }
 }

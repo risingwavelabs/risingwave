@@ -17,22 +17,20 @@
 
 mod resolve_id;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
-use risingwave_frontend::binder::Binder;
+use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_source, create_table, drop_table,
 };
-use risingwave_frontend::optimizer::PlanRef;
-use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
-use risingwave_frontend::FrontendOpts;
-use risingwave_sqlparser::ast::{ObjectName, Statement, WithProperties};
+use risingwave_frontend::{Binder, FrontendOpts, PlanRef, Planner};
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -71,9 +69,9 @@ pub struct TestCase {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
-    /// Proto JSON of generated stream plan
-    pub stream_plan_proto: Option<String>,
-
+    // TODO: uncomment for Proto JSON of generated stream plan
+    //  was: "stream_plan_proto": Option<String>
+    // pub plan_graph_proto: Option<String>,
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -128,9 +126,6 @@ pub struct TestCaseResult {
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
-    /// Proto JSON of generated stream plan
-    pub stream_plan_proto: Option<String>,
-
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -170,7 +165,6 @@ impl TestCaseResult {
             batch_plan: self.batch_plan,
             batch_local_plan: self.batch_local_plan,
             stream_plan: self.stream_plan,
-            stream_plan_proto: self.stream_plan_proto,
             batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
@@ -262,7 +256,7 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(session.clone(), Arc::from(sql));
+            let mut context = OptimizerContext::new(session.clone(), Arc::from(sql));
             context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
             match stmt.clone() {
                 Statement::Query(_)
@@ -284,7 +278,9 @@ impl TestCase {
                     with_options,
                     ..
                 } => {
-                    create_table::handle_create_table(context, name, columns, with_options).await?;
+                    context.with_properties =
+                        handle_with_properties("handle_create_table", with_options.clone())?;
+                    create_table::handle_create_table(context, name, columns).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
@@ -296,10 +292,12 @@ impl TestCase {
                     name,
                     table_name,
                     columns,
+                    include,
                     // TODO: support unique and if_not_exist in planner test
                     ..
                 } => {
-                    create_index::handle_create_index(context, name, table_name, columns).await?;
+                    create_index::handle_create_index(context, name, table_name, columns, include)
+                        .await?;
                 }
                 Statement::CreateView {
                     materialized: true,
@@ -309,8 +307,9 @@ impl TestCase {
                     with_options,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, query, WithProperties(with_options))
-                        .await?;
+                    context.with_properties =
+                        handle_with_properties("handle_create_mv", with_options.clone())?;
+                    create_mv::handle_create_mv(context, name, query).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
@@ -330,10 +329,7 @@ impl TestCase {
         let mut ret = TestCaseResult::default();
 
         let bound = {
-            let mut binder = Binder::new(
-                session.env().catalog_reader().read_guard(),
-                session.database().to_string(),
-            );
+            let mut binder = Binder::new(&session);
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
@@ -348,7 +344,7 @@ impl TestCase {
         let logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
-                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
                 }
                 logical_plan
             }
@@ -404,32 +400,23 @@ impl TestCase {
             }
         }
 
-        if self.stream_plan.is_some() || self.stream_plan_proto.is_some() {
+        if self.stream_plan.is_some() {
             let q = if let Statement::Query(q) = stmt {
                 q.as_ref().clone()
             } else {
                 return Err(anyhow!("expect a query"));
             };
 
-            let (stream_plan, table) = create_mv::gen_create_mv_plan(
+            let (stream_plan, _table) = create_mv::gen_create_mv_plan(
                 &session,
                 context,
                 Box::new(q),
                 ObjectName(vec!["test".into()]),
-                HashMap::new(),
             )?;
 
             // Only generate stream_plan if it is specified in test case
             if self.stream_plan.is_some() {
                 ret.stream_plan = Some(explain_plan(&stream_plan));
-            }
-
-            // Only generate stream_plan_proto if it is specified in test case
-            if self.stream_plan_proto.is_some() {
-                ret.stream_plan_proto = Some(
-                    serde_yaml::to_string(&stream_plan.to_stream_prost_auto_fields(false))?
-                        + &serde_yaml::to_string(&table)?,
-                );
             }
         }
 
@@ -468,11 +455,6 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &actual.batch_local_plan,
     )?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
-    check_option_plan_eq(
-        "stream_plan_proto",
-        &expected.stream_plan_proto,
-        &actual.stream_plan_proto,
-    )?;
     check_option_plan_eq(
         "batch_plan_proto",
         &expected.batch_plan_proto,

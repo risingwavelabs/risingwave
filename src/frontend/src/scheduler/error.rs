@@ -29,6 +29,9 @@ pub enum SchedulerError {
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
 
+    #[error("Empty workers found")]
+    EmptyWorkerNodes,
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }

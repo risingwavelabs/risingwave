@@ -18,6 +18,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
+use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -47,7 +48,7 @@ impl StreamMaterialize {
         let ctx = input.ctx();
 
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices();
+        let pk_indices = input.logical_pk();
 
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
@@ -87,7 +88,7 @@ impl StreamMaterialize {
                     ))
                 } else {
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.pk_indices())
+                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
                 }
             }
         };
@@ -95,7 +96,7 @@ impl StreamMaterialize {
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
-        let pk_indices = &base.pk_indices;
+        let pk_indices = &base.logical_pk;
 
         let mut col_names = HashSet::new();
         for name in &out_names {
@@ -155,6 +156,15 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
+        let ctx = input.ctx();
+        let properties: HashMap<_, _> = ctx
+            .inner()
+            .with_properties
+            .iter()
+            .filter(|(key, _)| key.as_str() == PROPERTIES_RETAINTION_SECOND_KEY)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -167,7 +177,7 @@ impl StreamMaterialize {
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
-            properties: HashMap::default(),
+            properties,
             read_pattern_prefix_column: 0,
         };
 
@@ -227,7 +237,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
         assert_eq!(new.plan_base().schema, self.plan_base().schema);
-        assert_eq!(new.plan_base().pk_indices, self.plan_base().pk_indices);
+        assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
         new
     }
 }

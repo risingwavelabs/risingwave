@@ -30,7 +30,7 @@ use crate::catalog::check_schema_writable;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::StreamFragmenterV2;
 
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
@@ -108,6 +108,14 @@ pub async fn handle_create_source(
             columns: bind_sql_columns(stmt.columns)?,
             pk_column_ids: vec![0],
         },
+        SourceSchema::DebeziumJson => StreamSourceInfo {
+            properties: with_properties.clone(),
+            row_format: RowFormatType::DebeziumJson as i32,
+            row_schema_location: "".to_string(),
+            row_id_index: 0,
+            columns: bind_sql_columns(stmt.columns)?,
+            pk_column_ids: vec![0],
+        },
     };
 
     let session = context.session_ctx.clone();
@@ -115,14 +123,9 @@ pub async fn handle_create_source(
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
         let (graph, table) = {
-            let (plan, table) = gen_materialized_source_plan(
-                context.into(),
-                source.clone(),
-                session.user_id(),
-                with_properties.clone(),
-            )?;
-            let plan = plan.to_stream_prost();
-            let graph = StreamFragmenter::build_graph(plan);
+            let (plan, table) =
+                gen_materialized_source_plan(context.into(), source.clone(), session.user_id())?;
+            let graph = StreamFragmenterV2::build_graph(plan);
 
             (graph, table)
         };

@@ -31,12 +31,13 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
             tracing::info!("using .. as range");
             hummock
                 .scan::<_, Vec<u8>>(
+                    None,
                     ..,
                     None,
                     ReadOptions {
                         epoch: u64::MAX,
                         table_id: None,
-                        ttl: None,
+                        retention_seconds: None,
                     },
                 )
                 .await?
@@ -48,12 +49,13 @@ pub async fn list_kv(epoch: u64, table_id: Option<u32>) -> anyhow::Result<()> {
             let range = buf.to_vec()..next_key(buf.to_vec().as_slice());
             hummock
                 .scan::<_, Vec<u8>>(
+                    None,
                     range,
                     None,
                     ReadOptions {
                         epoch: u64::MAX,
                         table_id: Some(TableId { table_id }),
-                        ttl: None,
+                        retention_seconds: None,
                     },
                 )
                 .await?

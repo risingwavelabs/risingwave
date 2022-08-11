@@ -33,7 +33,7 @@ impl StreamFilter {
     pub fn new(logical: LogicalFilter) -> Self {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
-        let pk_indices = logical.base.pk_indices.to_vec();
+        let pk_indices = logical.base.logical_pk.to_vec();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
