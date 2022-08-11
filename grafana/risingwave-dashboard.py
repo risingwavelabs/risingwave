@@ -607,6 +607,18 @@ def section_streaming_exchange(outer_panels):
         ]),
     ]
 
+def section_batch_exchange(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed("Batch Exchange", [
+            panels.timeseries_rowsps("Exchange Recv Throughput", [
+                panels.target(
+                    "rate(batch_exchange_recv_size[$__rate_interval])", "{{up_task_id}}->{{down_task_id}}"
+                ),
+            ]),
+        ]),
+    ]
+
 
 def section_hummock(panels):
     return [
@@ -1244,6 +1256,7 @@ dashboard = Dashboard(
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
+        *section_batch_exchange(panels),
         *section_hummock(panels),
         *section_hummock_manager(panels),
         *section_grpc_meta_catalog_service(panels),
