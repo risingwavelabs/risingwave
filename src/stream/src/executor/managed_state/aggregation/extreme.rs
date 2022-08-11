@@ -216,7 +216,7 @@ impl<S: StateStore> GenericExtremeState<S> {
 
     fn state_row_to_cache_row(&self, state_row: &Row) -> Row {
         state_row.by_indices(
-            &(0..self.state_table_col_mapping.size())
+            &(0..self.state_table_col_mapping.len())
                 .skip(self.group_key_len())
                 .collect_vec(),
         )
