@@ -383,24 +383,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    pub fn abort_task(&self) -> Result<()> {
-        let sender = self.shutdown_tx.lock().take().ok_or_else(|| {
-            ErrorCode::InternalError(format!(
-                "Task{:?}'s shutdown channel does not exist. \
-                    Either the task has been aborted once, \
-                    or the channel has neven been initialized.",
-                self.task_id
-            ))
-        })?;
-        self.change_state(TaskStatus::Aborting);
-        // Stop task execution.
-        sender.send(0).map_err(|err| {
-            ErrorCode::InternalError(format!(
-                "Task{:?};s shutdown channel send error:{:?}",
-                self.task_id, err
-            ))
-            .into()
-        })
+    pub fn abort_task(&self) {
+        if let Some(sender) = self.shutdown_tx.lock().take() {
+            self.change_state(TaskStatus::Aborting);
+            // Stop task execution.
+            if sender.send(0).is_err() {
+                warn!("The task has already died before this request, so the abort did no-op")
+            }
+        };
     }
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
