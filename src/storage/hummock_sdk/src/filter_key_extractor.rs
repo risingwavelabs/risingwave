@@ -513,7 +513,6 @@ mod tests {
             optional_associated_source_id: None,
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            mapping: None,
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),

@@ -306,12 +306,13 @@ where
             .await?;
 
         // 2. drop mv in stream manager
-        let _table_fragments = self
+        let table_fragments = self
             .stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
 
-        // FIXME: should notify vnode mapping change proactively or through drop table.
+        self.notify_table_mapping(&table_fragments, Operation::Delete)
+            .await;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -764,12 +765,13 @@ where
         // 2. Drop source and mv separately.
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
         // `SourceManager` before we can drop the source
-        let _table_fragments = self
+        let table_fragments = self
             .stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
 
-        // FIXME: should notify vnode mapping change proactively or through drop table.
+        self.notify_table_mapping(&table_fragments, Operation::Delete)
+            .await;
 
         self.source_manager.drop_source(source_id).await?;
 

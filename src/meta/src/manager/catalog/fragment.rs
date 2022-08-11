@@ -304,7 +304,7 @@ where
         &self,
         migrate_map: &HashMap<ActorId, WorkerId>,
         node_map: &HashMap<WorkerId, WorkerNode>,
-    ) -> MetaResult<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnit>)> {
+    ) -> MetaResult<Vec<TableFragments>> {
         let mut parallel_unit_migrate_map = HashMap::new();
         let mut pu_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
         // split parallel units of node into types, map them with WorkerId
@@ -350,7 +350,7 @@ where
         });
         // update fragments
         self.batch_update_table_fragments(&new_fragments).await?;
-        Ok((new_fragments, parallel_unit_migrate_map))
+        Ok(new_fragments)
     }
 
     pub async fn all_node_actors(
