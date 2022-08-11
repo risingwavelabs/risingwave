@@ -67,7 +67,7 @@ impl MetadataModel for TableFragments {
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
-        let internal_table_to_fragment_map: HashMap<u32, FragmentId> = prost
+        let table_to_fragment_map: HashMap<u32, FragmentId> = prost
             .fragments
             .values()
             .flat_map(|f| f.state_table_ids.iter().map(|&t| (t, f.fragment_id)))
@@ -77,7 +77,7 @@ impl MetadataModel for TableFragments {
             table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
-            table_to_fragment_map: internal_table_to_fragment_map,
+            table_to_fragment_map,
         }
     }
 
@@ -88,7 +88,7 @@ impl MetadataModel for TableFragments {
 
 impl TableFragments {
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
-        let internal_table_to_fragment_map: HashMap<u32, FragmentId> = fragments
+        let table_to_fragment_map: HashMap<u32, FragmentId> = fragments
             .values()
             .flat_map(|f| f.state_table_ids.iter().map(|&t| (t, f.fragment_id)))
             .collect();
@@ -97,7 +97,7 @@ impl TableFragments {
             table_id,
             fragments,
             actor_status: BTreeMap::default(),
-            table_to_fragment_map: internal_table_to_fragment_map,
+            table_to_fragment_map,
         }
     }
 
