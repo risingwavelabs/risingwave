@@ -292,9 +292,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 
 // point get
 impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
-    /// Get a single row from state table. This function will return a Cow. If the value is from
-    /// memtable, it will be a [`Cow::Borrowed`]. If is from storage table, it will be an owned
-    /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
+    /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
