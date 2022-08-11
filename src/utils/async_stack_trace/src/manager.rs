@@ -37,7 +37,7 @@ pub struct StackTraceReport {
 impl Default for StackTraceReport {
     fn default() -> Self {
         Self {
-            report: "<not reported>".to_string(),
+            report: "<not reported>\n".to_string(),
             capture_time: std::time::Instant::now(),
         }
     }
