@@ -322,6 +322,19 @@ risedev:
     - use: frontend
     - use: compactor
 
+  bz:
+    - use: minio
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+      enable-tiered-cache: true
+    - use: frontend
+    - use: compactor
+    - use: prometheus
+    - use: grafana
+
   ci-kafka:
     - use: minio
     - use: etcd

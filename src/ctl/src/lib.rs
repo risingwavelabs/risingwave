@@ -45,8 +45,7 @@ enum Commands {
     #[clap(subcommand)]
     Meta(MetaCommands),
     /// Commands for Stream
-    #[clap(subcommand)]
-    Stream(StreamCommands),
+    Trace,
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -139,9 +138,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
-        Commands::Stream(StreamCommands::Trace { actor_id }) => {
-            cmd_impl::stream::trace(actor_id).await?
-        }
+        Commands::Trace => cmd_impl::trace::trace().await?,
     }
     Ok(())
 }
