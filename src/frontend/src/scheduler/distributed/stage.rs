@@ -212,14 +212,12 @@ impl StageExecution {
         }
 
         // Send message to tell Stage Runner stop.
-        let shutdown_tx = self
-            .shutdown_rx
-            .write()
-            .await
-            .take()
-            .expect("Only expect to stop once");
-        if shutdown_tx.send(StageMessage::Stop).is_err() {
-            // The stage runner handle has already closed. so do no-op.
+        if let Some(shutdown_tx) = self.shutdown_rx.write().await.take() {
+            // It's possible that the stage has not been scheduled, so the channel sender is
+            // None.
+            if shutdown_tx.send(StageMessage::Stop).is_err() {
+                // The stage runner handle has already closed. so do no-op.
+            }
         }
     }
 
