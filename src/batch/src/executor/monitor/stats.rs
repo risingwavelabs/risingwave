@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_with_registry, Histogram, Registry, core::{GenericCounterVec, AtomicU64}, register_int_counter_vec_with_registry,
+    exponential_buckets, histogram_opts, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, Histogram, Registry,
 };
 
 pub struct BatchMetrics {

@@ -32,9 +32,8 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<C>;
-use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
-
 use super::BatchMetrics;
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ExchangeSourceImpl>,
     context: C,
@@ -156,7 +155,7 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
         let mut stream = select_all(
             self.sources
                 .into_iter()
-                .map(|source|data_chunk_stream(source,self.metrics.clone(),self.task_id.clone()))
+                .map(|source| data_chunk_stream(source, self.metrics.clone(), self.task_id.clone()))
                 .collect_vec(),
         )
         .boxed();
@@ -169,24 +168,43 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: ExchangeSourceImpl,metrics:Option<Arc<BatchMetrics>>,downstream_id:TaskId) {
+async fn data_chunk_stream(
+    mut source: ExchangeSourceImpl,
+    metrics: Option<Arc<BatchMetrics>>,
+    downstream_id: TaskId,
+) {
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
                 debug!("Exchange source {:?} output empty chunk.", source);
             }
-            metrics.as_ref().and_then(|metrics|{
+            if metrics.is_some() {
                 let upstream_id = source.get_task_id();
                 let downstream_id = {
-                    format!("{}_{}_{}",downstream_id.query_id,downstream_id.stage_id,downstream_id.task_id)
+                    format!(
+                        "{}_{}_{}",
+                        downstream_id.query_id, downstream_id.stage_id, downstream_id.task_id
+                    )
                 };
                 let upstream_id = {
-                    format!("{}_{}_{}",upstream_id.query_id,upstream_id.stage_id,upstream_id.task_id)
+                    format!(
+                        "{}_{}_{}",
+                        upstream_id.query_id, upstream_id.stage_id, upstream_id.task_id
+                    )
                 };
-                metrics.exchange_recv_row_number.with_label_values(&[&upstream_id, &downstream_id]).inc_by(res.cardinality().try_into().unwrap());
-                metrics.exchange_recv_row_number.with_label_values(&["0", "0"]).inc_by(res.cardinality().try_into().unwrap());
-                Some(())
-            });
+                metrics
+                    .as_ref()
+                    .unwrap()
+                    .exchange_recv_row_number
+                    .with_label_values(&[&upstream_id, &downstream_id])
+                    .inc_by(res.cardinality().try_into().unwrap());
+                metrics
+                    .as_ref()
+                    .unwrap()
+                    .exchange_recv_row_number
+                    .with_label_values(&["0", "0"])
+                    .inc_by(res.cardinality().try_into().unwrap());
+            }
             yield res;
             continue;
         }

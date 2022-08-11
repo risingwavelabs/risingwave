@@ -31,7 +31,7 @@ pub trait ExchangeSource: Send + Debug {
     fn take_data(&mut self) -> Self::TakeDataFuture<'_>;
 
     /// Get upstream task id.
-    fn get_task_id(&self)->TaskId;
+    fn get_task_id(&self) -> TaskId;
 }
 
 #[derive(Debug)]
@@ -52,9 +52,7 @@ impl ExchangeSourceImpl {
         }
     }
 
-    pub(crate) fn get_task_id(
-        &self,
-    ) -> TaskId {
+    pub(crate) fn get_task_id(&self) -> TaskId {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.get_task_id(),
             ExchangeSourceImpl::Local(local) => local.get_task_id(),

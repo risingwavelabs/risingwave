@@ -23,9 +23,9 @@ use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskOutpu
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
-use crate::task::TaskId;
 
 use crate::exchange_source::ExchangeSource;
+use crate::task::TaskId;
 
 /// Use grpc client as the source.
 pub struct GrpcExchangeSource {
@@ -92,7 +92,7 @@ impl ExchangeSource for GrpcExchangeSource {
         }
     }
 
-    fn get_task_id(&self)->TaskId {
+    fn get_task_id(&self) -> TaskId {
         TaskId::from(self.task_output_id.get_task_id().unwrap())
     }
 }
