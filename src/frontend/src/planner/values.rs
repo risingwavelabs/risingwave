@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use crate::binder::BoundValues;
 use crate::optimizer::plan_node::{LogicalValues, PlanRef};
@@ -20,6 +20,12 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_values(&mut self, values: BoundValues) -> Result<PlanRef> {
+        if values.is_correlated() {
+            return Err(ErrorCode::InternalError(
+                "Values is disallowed to have CorrelatedInputRef.".to_string(),
+            )
+            .into());
+        }
         Ok(LogicalValues::create(
             values.rows,
             values.schema,

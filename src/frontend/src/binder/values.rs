@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{align_types, ExprImpl};
+use crate::expr::{align_types, CorrelatedId, ExprImpl};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {
@@ -32,6 +32,25 @@ impl BoundValues {
     /// The schema returned of this [`BoundValues`].
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    pub fn is_correlated(&self) -> bool {
+        self.rows
+            .iter()
+            .flatten()
+            .any(|expr| expr.has_correlated_input_ref_by_depth())
+    }
+
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
+        let mut correlated_indices = vec![];
+        self.rows.iter_mut().flatten().for_each(|expr| {
+            correlated_indices
+                .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
+        });
+        correlated_indices
     }
 }
 
