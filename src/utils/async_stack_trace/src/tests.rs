@@ -132,7 +132,7 @@ async fn test_stack_trace_display() {
     });
 
     TraceReporter { tx: watch_tx }
-        .trace(hello(), "actor 233", true, Duration::from_millis(50))
+        .trace(hello(), "actor 233", true, Duration::from_millis(50), true)
         .await;
 
     collector.await.unwrap();

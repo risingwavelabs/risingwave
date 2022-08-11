@@ -73,7 +73,11 @@ impl TraceReporter {
         root_span: impl Into<SpanValue>,
         report_detached: bool,
         interval: Duration,
+        enabled: bool,
     ) -> F::Output {
+        if !enabled {
+            return future.await;
+        }
         TRACE_CONTEXT
             .scope(
                 TraceContext::new(root_span.into(), report_detached).into(),
@@ -97,8 +101,9 @@ impl TraceReporter {
                     };
 
                     tokio::select! {
+                        biased; // always prefer reporting
+                        _ = reporter => unreachable!(),
                         output = future => output,
-                        _ = reporter => unreachable!()
                     }
                 },
             )

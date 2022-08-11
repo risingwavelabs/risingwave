@@ -80,6 +80,7 @@ pub mod grpc_middleware {
     use async_stack_trace::{SpanValue, StackTraceManager};
     use futures::Future;
     use hyper::Body;
+    use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
     use tokio::sync::Mutex;
     use tower::{Layer, Service};
 
@@ -151,6 +152,7 @@ pub mod grpc_middleware {
                         root_span,
                         false,
                         Duration::from_millis(100),
+                        *ENABLE_ASYNC_STACK_TRACE,
                     )
                     .await
             }

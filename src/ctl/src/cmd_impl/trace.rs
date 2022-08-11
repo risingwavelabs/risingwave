@@ -29,6 +29,7 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::env_var::ASYNC_STACK_TRACE_KEY;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::ComputeClientPool;
@@ -61,14 +62,16 @@ pub async fn trace() -> anyhow::Result<()> {
         all_actor_traces.extend(actor_traces);
         all_grpc_traces.extend(grpc_traces.into_iter().map(|(k, v)| {
             (
-                format!("[{}]{}", HostAddr::from(cn.get_host().unwrap()), k),
+                format!("{} ({})", HostAddr::from(cn.get_host().unwrap()), k),
                 v,
             )
         }));
     }
 
     if all_actor_traces.is_empty() && all_grpc_traces.is_empty() {
-        println!("No traces found. No actors are running, or `RW_ASYNC_STACK_TRACE` is not set?");
+        println!(
+            "No traces found. No actors are running, or `{ASYNC_STACK_TRACE_KEY}` is not set?"
+        );
     } else {
         println!("--- Actor Traces ---");
         for (key, trace) in all_actor_traces {
