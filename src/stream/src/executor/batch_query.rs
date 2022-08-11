@@ -17,7 +17,7 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
+use risingwave_storage::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
@@ -26,8 +26,8 @@ use super::{Executor, ExecutorInfo, Message};
 use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
-    /// The [`RowBasedStorageTable`] that needs to be queried
-    table: RowBasedStorageTable<S, READ_ONLY>,
+    /// The [`StorageTable`] that needs to be queried
+    table: StorageTable<S>,
 
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
@@ -41,11 +41,7 @@ where
 {
     const DEFAULT_BATCH_SIZE: usize = 100;
 
-    pub fn new(
-        table: RowBasedStorageTable<S, READ_ONLY>,
-        batch_size: Option<usize>,
-        info: ExecutorInfo,
-    ) -> Self {
+    pub fn new(table: StorageTable<S>, batch_size: Option<usize>, info: ExecutorInfo) -> Self {
         Self {
             table,
             batch_size: batch_size.unwrap_or(Self::DEFAULT_BATCH_SIZE),

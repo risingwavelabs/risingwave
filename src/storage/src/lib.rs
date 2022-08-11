@@ -55,6 +55,7 @@ pub mod row_serde;
 pub mod storage_value;
 #[macro_use]
 pub mod store;
+pub mod batch_table;
 pub mod error;
 pub mod store_impl;
 pub mod table;

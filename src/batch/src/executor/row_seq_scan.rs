@@ -28,9 +28,10 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+// use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
+use risingwave_storage::batch_table::storage_table::{StorageTable, StorageTableIter};
+use risingwave_storage::batch_table::{Distribution, TableIter};
 use risingwave_storage::row_serde::RowBasedSerde;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
-use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -201,7 +202,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let batch_stats = source.context().stats();
-            let table = RowBasedStorageTable::new_partial(
+            let table = StorageTable::new_partial(
                 state_store.clone(),
                 table_id,
                 column_descs,

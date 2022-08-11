@@ -16,13 +16,11 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::batch_table::storage_table::{StorageTable, StorageTableBase};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::state_table::RowBasedStateTable;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 
-pub async fn gen_basic_table(
-    row_count: usize,
-) -> RowBasedStorageTable<MemoryStateStore, READ_ONLY> {
+pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
@@ -34,13 +32,20 @@ pub async fn gen_basic_table(
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let mut state = RowBasedStateTable::new_without_distribution(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices.clone(),
+    );
+
+    let table = StorageTableBase::new_for_test(
         state_store,
         TableId::from(0x42),
         column_descs.clone(),
         order_types,
         pk_indices,
     );
-    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     for idx in 0..row_count {
