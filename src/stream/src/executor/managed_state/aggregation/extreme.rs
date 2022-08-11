@@ -35,33 +35,15 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
 
-// TODO(rc): update all doc comments in this file
 // TODO(yuchao): We can convert GenericExtremeState to GenericTableState later,
-// to implement min/max and string_agg uniformly.
+// to implement min/max and string_agg uniformly. We can reuse code even further
+// by merging ManagedTableState with ManagedValueState.
 
-/// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
-///
-/// There are several prerequisites for using the `MinState`.
-/// * Sort key must be unique. Users should always encode the sort key as value + row id. The
-///   current interface doesn't support this, and we should add support in the next refactor. The
-///   `K: Scalar` trait bound should be something like `SortKeySerializer`, and what actually stored
-///   in the `BTreeMap` should be `(Datum, RowId)`.
-/// * The order encoded key and the `Ord` implementation of the sort key must be the same. If they
-///   are different, it is more likely a bug of the encoder, and should be fixed.
-/// * Key can be null.
-///
-/// In the state store, the datum is stored as `sort_key -> encoded_value`. Therefore, we should
-/// have the following relationship:
-/// * `sort_key = sort_key_encode(key)`
-/// * `encoded_value = datum_encode(key)`
-/// * `key = datum_decode(encoded_value)`
-///
-/// The `ExtremeState` need some special properties from the storage engine and the executor.
-/// * The output of an `ExtremeState` is only correct when all changes have been flushed to the
-///   state store.
-/// * The `RowIDs` must be i64
+/// Generic managed agg state for min/max.
+/// It maintains a top N cache internally, using HashSet, and the sort key
+/// is composed of (agg input value, upstream pk).
 pub struct GenericExtremeState<S: StateStore> {
-    // TODO(rc): Remove the phantoms.
+    // TODO: Remove the phantoms.
     _phantom_data: PhantomData<S>,
 
     /// Group key to aggregate with group.
@@ -72,12 +54,15 @@ pub struct GenericExtremeState<S: StateStore> {
     state_table_col_mapping: Arc<StateTableColumnMapping>,
 
     /// Number of items in the state including those not in top n cache but in state store.
-    total_count: usize, // TODO(rc): is this really needed?
+    total_count: usize, // TODO(yuchao): is this really needed?
 
-    /// Cache for top N elements in the state.
+    /// Cache for the top N elements in the state.
+    /// Note that the cache won't store group_key so the column indices
+    /// should be offseted by group_key.len(), which is handled by
+    /// `state_row_to_cache_row`.
     cache: Cache,
 
-    /// The column to aggregate in state table.
+    /// The column to aggregate in the cache.
     cache_agg_col_idx: usize,
 }
 
