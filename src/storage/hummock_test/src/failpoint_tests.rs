@@ -79,6 +79,7 @@ async fn test_failpoints_state_store_read_upload() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: 1,
                 table_id: Default::default(),
@@ -123,6 +124,7 @@ async fn test_failpoints_state_store_read_upload() {
     let result = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
@@ -147,6 +149,7 @@ async fn test_failpoints_state_store_read_upload() {
     let value = hummock_storage
         .get(
             b"ee".as_ref(),
+            true,
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
@@ -179,6 +182,7 @@ async fn test_failpoints_state_store_read_upload() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: 5,
                 table_id: Default::default(),

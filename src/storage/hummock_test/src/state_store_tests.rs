@@ -94,6 +94,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -107,6 +108,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &Bytes::from("bb"),
+            true,
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -122,6 +124,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &Bytes::from("ab"),
+            true,
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -149,6 +152,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -177,6 +181,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -191,6 +196,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &Bytes::from("ff"),
+            true,
             ReadOptions {
                 epoch: epoch3,
                 table_id: Default::default(),
@@ -221,6 +227,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -236,6 +243,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -291,6 +299,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &Bytes::from("bb"),
+            true,
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -304,6 +313,7 @@ async fn test_basic() {
     let value = hummock_storage
         .get(
             &Bytes::from("dd"),
+            true,
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -503,6 +513,7 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -518,6 +529,7 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &Bytes::from("ab"),
+            true,
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -545,6 +557,7 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -576,6 +589,7 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch1,
                 table_id: Default::default(),
@@ -591,6 +605,7 @@ async fn test_reload_storage() {
     let value = hummock_storage
         .get(
             &anchor,
+            true,
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),
@@ -655,6 +670,7 @@ async fn test_write_anytime() {
                 hummock_storage
                     .get(
                         "aa".as_bytes(),
+                        true,
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
@@ -670,6 +686,7 @@ async fn test_write_anytime() {
                 hummock_storage
                     .get(
                         "bb".as_bytes(),
+                        true,
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
@@ -685,6 +702,7 @@ async fn test_write_anytime() {
                 hummock_storage
                     .get(
                         "cc".as_bytes(),
+                        true,
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
@@ -751,6 +769,7 @@ async fn test_write_anytime() {
                 hummock_storage
                     .get(
                         "aa".as_bytes(),
+                        true,
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
@@ -764,6 +783,7 @@ async fn test_write_anytime() {
             assert!(hummock_storage
                 .get(
                     "bb".as_bytes(),
+                    true,
                     ReadOptions {
                         epoch,
                         table_id: Default::default(),
@@ -778,6 +798,7 @@ async fn test_write_anytime() {
                 hummock_storage
                     .get(
                         "cc".as_bytes(),
+                        true,
                         ReadOptions {
                             epoch,
                             table_id: Default::default(),
@@ -922,6 +943,7 @@ async fn test_delete_get() {
     assert!(hummock_storage
         .get(
             "bb".as_bytes(),
+            true,
             ReadOptions {
                 epoch: epoch2,
                 table_id: Default::default(),

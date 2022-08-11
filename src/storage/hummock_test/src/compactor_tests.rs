@@ -250,6 +250,7 @@ mod tests {
         let get_val = storage
             .get(
                 &key,
+                true,
                 ReadOptions {
                     epoch: (32 * 1000) << 16,
                     table_id: Default::default(),
@@ -265,6 +266,7 @@ mod tests {
         let ret = storage
             .get(
                 &key,
+                true,
                 ReadOptions {
                     epoch: (31 * 1000) << 16,
                     table_id: Default::default(),
@@ -360,6 +362,7 @@ mod tests {
         let get_val = storage
             .get(
                 &key,
+                true,
                 ReadOptions {
                     epoch: 129,
                     table_id: Default::default(),

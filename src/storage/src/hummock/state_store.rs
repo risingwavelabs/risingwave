@@ -239,6 +239,7 @@ impl HummockStorage {
     pub async fn get<'a>(
         &'a self,
         key: &'a [u8],
+        check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
@@ -283,7 +284,13 @@ impl HummockStorage {
                                 .await?;
                             table_counts += 1;
                             if let Some(v) = self
-                                .get_from_table(table, &internal_key, key, &mut stats)
+                                .get_from_table(
+                                    table,
+                                    &internal_key,
+                                    key,
+                                    check_bloom_filter,
+                                    &mut stats,
+                                )
                                 .await?
                             {
                                 return Ok(v);
@@ -308,7 +315,7 @@ impl HummockStorage {
                     .await?;
                 table_counts += 1;
                 if let Some(v) = self
-                    .get_from_table(table, &internal_key, key, &mut stats)
+                    .get_from_table(table, &internal_key, key, check_bloom_filter, &mut stats)
                     .await?
                 {
                     return Ok(v);
@@ -358,8 +365,13 @@ impl StateStore for HummockStorage {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
-        async move { self.get(key, read_options).await }
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
+        async move { self.get(key, check_bloom_filter, read_options).await }
     }
 
     fn scan<R, B>(

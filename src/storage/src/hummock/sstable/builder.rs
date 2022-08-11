@@ -190,7 +190,9 @@ impl SstableBuilder {
         if self.last_full_key.is_empty() {
             self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
         }
-        self.last_full_key = full_key.to_vec();
+
+        self.last_full_key.clear();
+        self.last_full_key.extend_from_slice(full_key);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block();

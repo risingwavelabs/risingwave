@@ -1,6 +1,6 @@
 // Copyright 2022 Singularity Data
 //
-// Licensed under the Apa&che License, Version 2.0 (the "License");
+// Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
@@ -327,33 +327,6 @@ impl Compactor {
             );
         }
     }
-
-    // async fn compact_key_range(
-    //     &self,
-    //     split_index: usize,
-    //     iter: impl HummockIterator<Direction = Forward>,
-    //     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-    // ) -> HummockResult<CompactOutput> {
-    //     let dummy_compaction_filter = DummyCompactionFilter {};
-    //     self.compact_key_range_impl(
-    //         split_index,
-    //         iter,
-    //         dummy_compaction_filter,
-    //         filter_key_extractor,
-    //     )
-    //     .await
-    // }
-
-    // async fn compact_key_range_with_filter(
-    //     &self,
-    //     split_index: usize,
-    //     iter: impl HummockIterator<Direction = Forward>,
-    //     compaction_filter: impl CompactionFilter,
-    //     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-    // ) -> HummockResult<CompactOutput> {
-    //     self.compact_key_range_impl(split_index, iter, compaction_filter, filter_key_extractor)
-    //         .await
-    // }
 
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.

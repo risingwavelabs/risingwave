@@ -393,9 +393,19 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let mut deserializer = RS::create_deserializer(self.mapping.clone());
         let read_options = self.get_read_option(epoch);
+        assert!(pk.size() <= self.pk_indices.len());
+        let key_indices = (0..pk.size())
+            .into_iter()
+            .map(|index| self.pk_indices[index])
+            .collect_vec();
+
         if let Some(value) = self
             .keyspace
-            .get(&serialized_pk, read_options.clone())
+            .get(
+                &serialized_pk,
+                self.dist_key_indices == key_indices,
+                read_options.clone(),
+            )
             .await?
         {
             let deserialize_res = deserializer
