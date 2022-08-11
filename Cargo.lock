@@ -4891,6 +4891,8 @@ dependencies = [
  "serde_with",
  "smallvec",
  "static_assertions",
+ "strum",
+ "strum_macros",
  "tempfile",
  "thiserror",
  "tokio-retry",
@@ -6024,6 +6026,9 @@ name = "strum"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
+dependencies = [
+ "strum_macros",
+]
 
 [[package]]
 name = "strum_macros"
@@ -7113,6 +7118,7 @@ dependencies = [
  "smallvec",
  "socket2",
  "stable_deref_trait",
+ "strum",
  "syn",
  "tokio",
  "tokio-stream",

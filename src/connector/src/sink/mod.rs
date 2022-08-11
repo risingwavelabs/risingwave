@@ -107,6 +107,21 @@ impl SinkImpl {
             }
         })
     }
+
+    pub fn needs_preparation(&self) -> bool {
+        match self {
+            SinkImpl::MySQL(_) => true,
+            SinkImpl::Redis(_) => false,
+            SinkImpl::Kafka(_) => false,
+        }
+    }
+
+    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.prepare(schema).await,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[async_trait]
