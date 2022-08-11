@@ -35,15 +35,12 @@ services:
         condition: service_healthy
     volumes:
       - ..:/risingwave
-    pid: host
-    userns_mode: host
-    network_mode: host
     networks:
       nw:
         ipv4_address: 172.24.2.1
 
   mysql:
-    image: mysql/mysql-server:latest
+    image: mysql/mysql-server:8.0
     container_name: mysql
     ports:
       - '3306:3306'
@@ -55,9 +52,6 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
-    pid: host
-    userns_mode: host
-    network_mode: host
     networks:
       nw:
         ipv4_address: 172.24.2.2
