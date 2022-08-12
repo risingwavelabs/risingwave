@@ -60,8 +60,8 @@ pub struct Cache {
     is_cold_start: bool,
     /// The cache is synced with the state table.
     synced: bool,
-    /// `None` means unlimited capacity
-    capacity: Option<usize>,
+    /// The capacity of the cache.
+    capacity: usize,
     /// Order requirements used to sort cached rows
     order_pairs: Arc<Vec<OrderPair>>,
     /// Cached rows in reverse order of `order_pairs`
@@ -70,7 +70,8 @@ pub struct Cache {
 
 impl Cache {
     /// Create a new cache with specified capacity and order requirements.
-    pub fn new(capacity: Option<usize>, order_pairs: Vec<OrderPair>) -> Self {
+    /// To create a cache with unlimited capacity, use usize::MAX for `capacity`.
+    pub fn new(capacity: usize, order_pairs: Vec<OrderPair>) -> Self {
         Self {
             is_cold_start: true,
             synced: false,
@@ -104,10 +105,8 @@ impl Cache {
             let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.insert(ordered_row);
             // evict if capacity is reached
-            if let Some(capacity) = self.capacity {
-                while self.rows.len() > capacity {
-                    self.rows.pop_first();
-                }
+            while self.rows.len() > self.capacity {
+                self.rows.pop_first();
             }
         }
     }
@@ -224,8 +223,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         pk_indices,
                         state_table_col_mapping,
                         row_count.unwrap(),
-                        // TODO: estimate a good cache size instead of hard-coding
-                        Some(1024),
+                        1024, // TODO: estimate a good cache size instead of hard-coding
                     ))))
                 }
             }

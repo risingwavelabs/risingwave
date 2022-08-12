@@ -95,7 +95,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             state_table_col_mapping: col_mapping,
             state_table_agg_col_idx,
             state_table_delim_col_idx,
-            cache: Cache::new(None, order_pairs),
+            cache: Cache::new(usize::MAX, order_pairs),
         }
     }
 }

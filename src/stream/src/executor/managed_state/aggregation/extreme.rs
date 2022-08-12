@@ -104,7 +104,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         pk_indices: PkIndices,
         col_mapping: Arc<StateTableColumnMapping>,
         row_count: usize,
-        cache_capacity: Option<usize>,
+        cache_capacity: usize,
     ) -> Self {
         let group_key_len = group_key.map(|row| row.size()).unwrap_or(0);
         // map agg column to cache row column index
@@ -220,7 +220,7 @@ impl<S: StateStore> GenericExtremeState<S> {
 
             self.cache.begin_sync();
             #[for_await]
-            for state_row in all_data_iter.take(self.cache.capacity.unwrap_or(usize::MAX)) {
+            for state_row in all_data_iter.take(self.cache.capacity) {
                 let state_row = state_row?;
                 let cache_row = self.state_row_to_cache_row(state_row.as_ref());
                 self.cache.insert(cache_row);
@@ -329,7 +329,7 @@ mod tests {
             input_pk_indices.clone(),
             state_table_col_mapping.clone(),
             0,
-            None,
+            usize::MAX,
         );
 
         let mut epoch = 0;
@@ -407,7 +407,7 @@ mod tests {
                 input_pk_indices,
                 state_table_col_mapping,
                 row_count,
-                None,
+                usize::MAX,
             );
             let res = managed_state.get_output(epoch, &state_table).await?;
             match res {
@@ -453,7 +453,7 @@ mod tests {
             input_pk_indices.clone(),
             state_table_col_mapping.clone(),
             0,
-            None,
+            usize::MAX,
         );
 
         let mut epoch = 0;
@@ -531,7 +531,7 @@ mod tests {
                 input_pk_indices,
                 state_table_col_mapping,
                 row_count,
-                None,
+                usize::MAX,
             );
             let res = managed_state.get_output(epoch, &state_table).await?;
             match res {
@@ -594,7 +594,7 @@ mod tests {
             input_pk_indices.clone(),
             state_table_col_mapping_1.clone(),
             0,
-            None,
+            usize::MAX,
         );
         let mut managed_state_2 = GenericExtremeState::new(
             agg_call_2.clone(),
@@ -602,7 +602,7 @@ mod tests {
             input_pk_indices.clone(),
             state_table_col_mapping_2.clone(),
             0,
-            None,
+            usize::MAX,
         );
 
         let mut epoch = 0;
@@ -695,7 +695,7 @@ mod tests {
             input_pk_indices.clone(),
             state_table_col_mapping.clone(),
             0,
-            None,
+            usize::MAX,
         );
 
         let mut epoch = 0;
@@ -772,7 +772,7 @@ mod tests {
                 input_pk_indices,
                 state_table_col_mapping,
                 row_count,
-                None,
+                usize::MAX,
             );
             let res = managed_state.get_output(epoch, &state_table).await?;
             match res {
@@ -818,7 +818,7 @@ mod tests {
             input_pk_indices.clone(),
             state_table_col_mapping.clone(),
             0,
-            Some(1024),
+            1024,
         );
 
         let mut rng = thread_rng();
