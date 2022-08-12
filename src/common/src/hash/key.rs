@@ -330,7 +330,8 @@ impl HashKeySerDe<'_> for Decimal {
 impl HashKeySerDe<'_> for IntervalUnit {
     type S = [u8; 16];
 
-    fn serialize(self) -> Self::S {
+    fn serialize(mut self) -> Self::S {
+        self.justify_interval();
         let mut ret = [0; 16];
         ret[0..4].copy_from_slice(&self.get_months().to_ne_bytes());
         ret[4..8].copy_from_slice(&self.get_days().to_ne_bytes());
