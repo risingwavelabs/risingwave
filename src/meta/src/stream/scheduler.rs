@@ -247,6 +247,8 @@ where
     }
 
     /// Build a vnode mapping according to parallel units where the fragment is scheduled.
+    /// For example, if `parallel_units` is `[0, 1, 2]`, and the total vnode count is 10, we'll
+    /// generate mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
     fn build_vnode_mapping(parallel_units: &[ParallelUnit]) -> VnodeMapping {
         let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
 
