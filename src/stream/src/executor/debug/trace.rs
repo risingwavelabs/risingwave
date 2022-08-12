@@ -14,11 +14,11 @@
 
 use std::sync::Arc;
 
+use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
+use minitrace::prelude::*;
 use tracing::event;
-use tracing_futures::Instrument;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -45,27 +45,16 @@ pub async fn trace(
     let executor_id_string = executor_id.to_string();
 
     let span = || {
-        tracing::trace_span!(
-            "next",
-            otel.name = span_name.as_str(),
-            next = info.identity.as_str(), // For the upstream trace pipe, its output is our input.
-            input_pos = input_pos,
-        )
-    };
-    let debug_context = || DebugContext::StreamExecutor {
-        actor_id,
-        executor_id: executor_id as u32, // Use the lower 32 bit to match the dashboard.
-        identity: info.identity.clone(),
+        let mut span = Span::enter_with_local_parent("next");
+        span.add_property(|| ("otel.name", span_name.to_string()));
+        span.add_property(|| ("next", info.identity.to_string()));
+        span.add_property(|| ("input_pos", input_pos.to_string()));
+        span
     };
 
     pin_mut!(input);
 
-    while let Some(message) = DEBUG_CONTEXT
-        .scope(debug_context(), input.next())
-        .instrument(span())
-        .await
-        .transpose()?
-    {
+    while let Some(message) = input.next().in_span(span()).await.transpose()? {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
                 if ENABLE_EXECUTOR_ROW_COUNT {
@@ -106,6 +95,29 @@ pub async fn metrics(
             }
         }
 
+        yield message;
+    }
+}
+
+/// Streams wrapped by `stack_trace` will print the async stack trace of the executors.
+#[try_stream(ok = Message, error = StreamExecutorError)]
+pub async fn stack_trace(
+    info: Arc<ExecutorInfo>,
+    actor_id: ActorId,
+    executor_id: u64,
+    input: impl MessageStream,
+) {
+    pin_mut!(input);
+
+    let span: SpanValue = format!(
+        "{} (actor {}, executor {})",
+        info.identity,
+        actor_id,
+        executor_id as u32 // Use the lower 32 bit to match the dashboard.
+    )
+    .into();
+
+    while let Some(message) = input.next().stack_trace(span.clone()).await.transpose()? {
         yield message;
     }
 }

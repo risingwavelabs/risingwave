@@ -18,9 +18,9 @@ use std::sync::Arc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 
-pub mod bind_context;
+mod bind_context;
 mod delete;
-pub(crate) mod expr;
+mod expr;
 mod insert;
 mod query;
 mod relation;
@@ -33,7 +33,7 @@ mod values;
 
 pub use bind_context::{BindContext, LateralBindContext};
 pub use delete::BoundDelete;
-pub use expr::bind_data_type;
+pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
@@ -71,6 +71,7 @@ pub struct Binder {
     lateral_contexts: Vec<LateralBindContext>,
 
     next_subquery_id: usize,
+    next_values_id: usize,
     /// Map the cte's name to its Relation::Subquery.
     cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
 }
@@ -85,6 +86,7 @@ impl Binder {
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
+            next_values_id: 0,
             cte_to_relation: HashMap::new(),
         }
     }
@@ -149,6 +151,12 @@ impl Binder {
         self.next_subquery_id += 1;
         id
     }
+
+    fn next_values_id(&mut self) -> usize {
+        let id = self.next_values_id;
+        self.next_values_id += 1;
+        id
+    }
 }
 
 #[cfg(test)]
@@ -166,3 +174,5 @@ pub mod test_utils {
 pub const UNNAMED_COLUMN: &str = "?column?";
 /// The table name stored in [`BindContext`] for a subquery without an alias.
 const UNNAMED_SUBQUERY: &str = "?subquery?";
+/// The table name stored in [`BindContext`] for a column group.
+const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";

@@ -36,6 +36,7 @@ use super::{
     expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
     StreamExecutorResult,
 };
+use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
@@ -83,8 +84,11 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
 
+    /// Relational state tables for each aggregation calls.
     state_tables: Vec<RowBasedStateTable<S>>,
-    state_table_col_mappings: Vec<Vec<usize>>,
+
+    /// State table column mappings for each aggregation calls,
+    state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -128,13 +132,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             extra: HashAggExecutorExtra {
                 schema,
                 pk_indices,
-                identity: format!("HashAggExecutor-{:X}", executor_id),
+                identity: format!("HashAggExecutor {:X}", executor_id),
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_calls,
                 key_indices,
                 state_tables,
-                state_table_col_mappings,
+                state_table_col_mappings: state_table_col_mappings
+                    .into_iter()
+                    .map(StateTableColumnMapping::new)
+                    .map(Arc::new)
+                    .collect(),
             },
             _phantom: PhantomData,
         })

@@ -15,10 +15,11 @@
 use std::any::type_name;
 use std::str::FromStr;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use num_traits::ToPrimitive;
 use risingwave_common::types::{
-    Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64,
+    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
+    OrderedF64,
 };
 
 use crate::{ExprError, Result};
@@ -80,6 +81,13 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 }
 
 #[inline(always)]
+pub fn timestampz_to_utc_string(elem: i64) -> Result<String> {
+    // Just a meaningful representation as placeholder. The real implementation depends on TimeZone
+    // from session. See #3552.
+    Ok(Utc.timestamp_nanos(elem * 1000).to_rfc3339())
+}
+
+#[inline(always)]
 pub fn str_parse<T>(elem: &str) -> Result<T>
 where
     T: FromStr,
@@ -87,11 +95,6 @@ where
 {
     elem.parse()
         .map_err(|_| ExprError::Cast(type_name::<str>(), type_name::<T>()))
-}
-
-#[inline(always)]
-pub fn date_to_timestamp(elem: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper> {
-    Ok(NaiveDateTimeWrapper::new(elem.0.and_hms(0, 0, 0)))
 }
 
 /// Define the cast function to primitive types.
@@ -150,6 +153,29 @@ pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
     to_i64(elem.round_dp(0))
 }
 
+/// In `PostgreSQL`, casting from timestamp to date discards the time part.
+#[inline(always)]
+pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> Result<NaiveDateWrapper> {
+    Ok(NaiveDateWrapper(elem.0.date()))
+}
+
+/// In `PostgreSQL`, casting from timestamp to time discards the date part.
+#[inline(always)]
+pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> Result<NaiveTimeWrapper> {
+    Ok(NaiveTimeWrapper(elem.0.time()))
+}
+
+/// In `PostgreSQL`, casting from interval to time discards the days part.
+#[inline(always)]
+pub fn interval_to_time(elem: IntervalUnit) -> Result<NaiveTimeWrapper> {
+    let ms = elem.get_ms_of_day();
+    let secs = (ms / 1000) as u32;
+    let nano = (ms % 1000 * 1_000_000) as u32;
+    Ok(NaiveTimeWrapper(NaiveTime::from_num_seconds_from_midnight(
+        secs, nano,
+    )))
+}
+
 #[inline(always)]
 pub fn general_cast<T1, T2>(elem: T1) -> Result<T2>
 where
@@ -196,9 +222,10 @@ pub fn bool_out(input: bool) -> Result<String> {
 mod tests {
     use num_traits::FromPrimitive;
 
+    use super::*;
+
     #[test]
     fn parse_str() {
-        use super::*;
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
         assert_eq!(
@@ -263,5 +290,25 @@ mod tests {
         );
 
         assert_eq!(general_to_string(Decimal::NaN).unwrap(), "NaN");
+    }
+
+    #[test]
+    fn temporal_cast() {
+        assert_eq!(
+            timestamp_to_date(str_to_timestamp("1999-01-08 04:02").unwrap()).unwrap(),
+            str_to_date("1999-01-08").unwrap(),
+        );
+        assert_eq!(
+            timestamp_to_time(str_to_timestamp("1999-01-08 04:02").unwrap()).unwrap(),
+            str_to_time("04:02").unwrap(),
+        );
+        assert_eq!(
+            interval_to_time(IntervalUnit::new(1, 2, 61003)).unwrap(),
+            str_to_time("00:01:01.003").unwrap(),
+        );
+        assert_eq!(
+            interval_to_time(IntervalUnit::new(0, 0, -61003)).unwrap(),
+            str_to_time("23:58:58.997").unwrap(),
+        );
     }
 }

@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use crate::session::OptimizerContext;
 
-pub(super) fn handle_set(
+pub fn handle_set(
     context: OptimizerContext,
     name: Ident,
     value: Vec<SetVariableValue>,
@@ -83,9 +83,9 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
         all_variables.len() as i32,
         rows,
         vec![
-            PgFieldDescriptor::new("name".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("setting".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("description".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
         ],
         true,
     ))

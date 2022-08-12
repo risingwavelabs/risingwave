@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::monitor::StateStoreMetrics;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
+use crate::monitor::StateStoreMetrics;
 #[derive(Default)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
@@ -26,7 +28,7 @@ pub struct StoreLocalStatistic {
     pub processed_key_count: u64,
     pub bloom_filter_true_negative_count: u64,
     pub bloom_filter_might_positive_count: u64,
-    pub remote_io_time: f64,
+    pub remote_io_time: Arc<AtomicU64>,
 }
 
 impl StoreLocalStatistic {
@@ -41,7 +43,10 @@ impl StoreLocalStatistic {
         self.processed_key_count += other.processed_key_count;
         self.bloom_filter_true_negative_count += other.bloom_filter_true_negative_count;
         self.bloom_filter_might_positive_count += other.bloom_filter_might_positive_count;
-        self.remote_io_time += other.remote_io_time;
+        self.remote_io_time.fetch_add(
+            other.remote_io_time.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
     }
 
     pub fn report(&self, metrics: &StateStoreMetrics) {
@@ -84,9 +89,9 @@ impl StoreLocalStatistic {
                 .bloom_filter_might_positive_counts
                 .inc_by(self.bloom_filter_might_positive_count);
         }
-
-        if self.remote_io_time > 0.0 {
-            metrics.remote_read_time.observe(self.remote_io_time);
+        let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
+        if t > 0.0 {
+            metrics.remote_read_time.observe(t / 1000.0);
         }
     }
 }

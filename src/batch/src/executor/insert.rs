@@ -86,11 +86,10 @@ impl InsertExecutor {
             assert!(data_chunk.visibility().is_none());
 
             // add row-id column as first column
-            let row_ids = source_desc.next_row_id_batch(len);
             let mut builder = I64ArrayBuilder::new(len);
-            row_ids
-                .into_iter()
-                .for_each(|row_id| builder.append(Some(row_id)).unwrap());
+            for _ in 0..len {
+                builder.append(None).unwrap();
+            }
 
             let rowid_column = once(Column::from(builder.finish().unwrap()));
             let child_columns = data_chunk.into_parts().0.into_iter();
@@ -159,7 +158,7 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
+    use risingwave_source::{MemSourceManager, SourceManager};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
@@ -255,14 +254,14 @@ mod tests {
         let chunk = reader.next().await?;
 
         // Row id column
-        assert!(chunk.chunk.columns()[0]
+        assert!(chunk.columns()[0]
             .array()
             .as_int64()
             .iter()
-            .all(|x| x.is_some()));
+            .all(|x| x.is_none()));
 
         assert_eq!(
-            chunk.chunk.columns()[1]
+            chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()
@@ -271,7 +270,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.chunk.columns()[2]
+            chunk.columns()[2]
                 .array()
                 .as_int32()
                 .iter()
@@ -290,7 +289,7 @@ mod tests {
         )
         .unwrap()
         .into();
-        assert_eq!(*chunk.chunk.columns()[3].array(), array);
+        assert_eq!(*chunk.columns()[3].array(), array);
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.
@@ -304,7 +303,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
-                    ttl: None,
+                    retention_seconds: None,
                 },
             )
             .await?;

@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 
+use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::addr::is_local_address;
@@ -44,6 +45,8 @@ pub type BoxedOutput = Box<dyn Output>;
 pub struct LocalOutput {
     actor_id: ActorId,
 
+    span: SpanValue,
+
     ch: Sender<Message>,
 }
 
@@ -57,7 +60,11 @@ impl Debug for LocalOutput {
 
 impl LocalOutput {
     pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+        Self {
+            actor_id,
+            span: format!("LocalOutput (actor {:?})", actor_id).into(),
+            ch,
+        }
     }
 }
 
@@ -66,6 +73,7 @@ impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         self.ch
             .send(message)
+            .stack_trace(self.span.clone())
             .await
             .map_err(|_| internal_error("failed to send"))
     }
@@ -83,6 +91,8 @@ impl Output for LocalOutput {
 pub struct RemoteOutput {
     actor_id: ActorId,
 
+    span: SpanValue,
+
     ch: Sender<Message>,
 }
 
@@ -96,7 +106,11 @@ impl Debug for RemoteOutput {
 
 impl RemoteOutput {
     pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+        Self {
+            actor_id,
+            span: format!("RemoteOutput (actor {:?})", actor_id).into(),
+            ch,
+        }
     }
 }
 
@@ -110,6 +124,7 @@ impl Output for RemoteOutput {
 
         self.ch
             .send(message)
+            .stack_trace(self.span.clone())
             .await
             .map_err(|_| internal_error("failed to send"))
     }

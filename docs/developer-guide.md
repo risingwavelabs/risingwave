@@ -37,7 +37,6 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
   - [Update Grafana dashboard](#update-grafana-dashboard)
   - [Add new files](#add-new-files)
   - [Add new dependencies](#add-new-dependencies)
-  - [Check in PRs from forks](#check-in-prs-from-forks)
   - [Submit PRs](#submit-prs)
 
 
@@ -88,6 +87,8 @@ You can now build RiseDev and start a dev cluster. It is as simple as:
 ./risedev d                        # shortcut for ./risedev dev
 psql -h localhost -p 4566 -d dev -U root
 ```
+
+If you detect memory bottlenecks while compiling, either allocate some disk space on your computer as swap memory, or lower the compilation parallelism with [`CARGO_BUILD_JOBS`](https://doc.rust-lang.org/cargo/reference/config.html#buildjobs), e.g. `CARGO_BUILD_JOBS=2`.
 
 The default dev cluster includes metadata-node, compute-node and frontend-node processes, and an embedded volatile in-memory state storage. No data will be persisted. This configuration is intended to make it easier to develop and debug RisingWave.
 
@@ -281,7 +282,7 @@ Use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run R
 sqllogictest installation is included when you install test tools with the `./risedev install-tools` command. You may also install it with:
 
 ```shell
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
 ```
 
 Before running end-to-end tests, you will need to start a full cluster first:

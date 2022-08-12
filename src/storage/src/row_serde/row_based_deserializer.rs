@@ -20,7 +20,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
-use super::cell_based_encoding_util::parse_raw_key_to_vnode_and_key;
+use super::row_serde_util::parse_raw_key_to_vnode_and_key;
 use super::{ColumnDescMapping, RowDeserialize};
 
 #[derive(Clone)]
@@ -33,15 +33,11 @@ impl RowDeserialize for RowBasedDeserializer {
         Self { column_mapping }
     }
 
-    fn take(&mut self) -> Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)> {
-        None
-    }
-
     fn deserialize(
         &mut self,
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
-    ) -> Result<Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)>> {
+    ) -> Result<(risingwave_common::types::VirtualNode, Vec<u8>, Row)> {
         // todo: raw_key will be used in row-based pk dudup later.
         self.deserialize_inner(raw_key, value)
     }
@@ -52,7 +48,7 @@ impl RowBasedDeserializer {
         &mut self,
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+    ) -> Result<(VirtualNode, Vec<u8>, Row)> {
         let raw_key = raw_key.as_ref();
         if raw_key.len() < VIRTUAL_NODE_SIZE {
             // vnode + cell_id
@@ -71,7 +67,7 @@ impl RowBasedDeserializer {
         for col_idx in &self.column_mapping.output_index {
             output_row.push(origin_row.0[*col_idx].take());
         }
-        Ok(Some((vnode, key_bytes.to_vec(), Row(output_row))))
+        Ok((vnode, key_bytes.to_vec(), Row(output_row)))
     }
 }
 
@@ -131,17 +127,16 @@ mod tests {
             .collect_vec();
 
         let mut se = RowBasedSerializer::create_row_serializer(&[], &column_descs, &column_ids);
-        let value_bytes = se.serialize(DEFAULT_VNODE, &[], row.clone()).unwrap();
+        let (pk, value) = se.serialize(DEFAULT_VNODE, &[], row.clone()).unwrap();
         // each cell will add a is_none flag (u8)
 
         let mut de =
             RowBasedDeserializer::create_row_deserializer(ColumnDescMapping::new(column_descs));
-        for (pk, value) in value_bytes {
-            assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
-            let row1 = de.deserialize(pk, value).unwrap();
-            assert_eq!(DEFAULT_VNODE, row1.clone().unwrap().0);
-            assert_eq!(row, row1.unwrap().2);
-        }
+
+        assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
+        let row1 = de.deserialize(pk, value).unwrap();
+        assert_eq!(DEFAULT_VNODE, row1.0);
+        assert_eq!(row, row1.2);
     }
 
     #[test]
@@ -184,7 +179,7 @@ mod tests {
             .collect_vec();
 
         let mut se = RowBasedSerializer::create_row_serializer(&[], &column_descs, &column_ids);
-        let value_bytes = se.serialize(DEFAULT_VNODE, &[], row).unwrap();
+        let (pk, value) = se.serialize(DEFAULT_VNODE, &[], row).unwrap();
         // each cell will add a is_none flag (u8)
 
         let mut de = RowBasedDeserializer::create_row_deserializer(ColumnDescMapping::new_partial(
@@ -201,11 +196,10 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        for (pk, value) in value_bytes {
-            assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
-            let deser_row = de.deserialize(pk, value).unwrap();
-            assert_eq!(DEFAULT_VNODE, deser_row.clone().unwrap().0);
-            assert_eq!(partial_row, deser_row.unwrap().2);
-        }
+
+        assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
+        let deser_row = de.deserialize(pk, value).unwrap();
+        assert_eq!(DEFAULT_VNODE, deser_row.0);
+        assert_eq!(partial_row, deser_row.2);
     }
 }

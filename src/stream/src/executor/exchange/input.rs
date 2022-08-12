@@ -14,10 +14,11 @@
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Instant;
 
-use futures::Stream;
+use async_stack_trace::{SpanValue, StackTrace};
+use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
-use madsim::time::Instant;
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
@@ -47,15 +48,21 @@ pub trait Input: MessageStream {
 pub type BoxedInput = Pin<Box<dyn Input>>;
 
 /// `LocalInput` receives data from a local channel.
+#[pin_project]
 pub struct LocalInput {
-    channel: Receiver<Message>,
+    #[pin]
+    inner: LocalInputStreamInner,
 
     actor_id: ActorId,
 }
+type LocalInputStreamInner = impl MessageStream;
 
 impl LocalInput {
     fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
-        Self { channel, actor_id }
+        Self {
+            inner: Self::run(channel, actor_id),
+            actor_id,
+        }
     }
 
     #[cfg(test)]
@@ -63,14 +70,22 @@ impl LocalInput {
         // `actor_id` is currently only used by configuration change, use a dummy value.
         Self::new(channel, 0).boxed_input()
     }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn run(mut channel: Receiver<Message>, actor_id: ActorId) {
+        let span: SpanValue = format!("LocalInput (actor {actor_id})").into();
+        while let Some(msg) = channel.recv().stack_trace(span.clone()).await {
+            yield msg;
+        }
+    }
 }
 
 impl Stream for LocalInput {
     type Item = MessageStreamItem;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // TODO: shall we pass the error with local exchange?
-        self.channel.poll_recv(cx).map(|m| m.map(Ok))
+        self.project().inner.poll_next(cx)
     }
 }
 
@@ -122,7 +137,7 @@ impl RemoteInput {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
     ) {
-        let client = client_pool.get_client_for_addr(upstream_addr).await?;
+        let client = client_pool.get_by_addr(upstream_addr).await?;
         let stream = client
             .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
             .await?;
@@ -135,8 +150,10 @@ impl RemoteInput {
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
 
-        #[for_await]
-        for data_res in stream {
+        let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
+
+        pin_mut!(stream);
+        while let Some(data_res) = stream.next().stack_trace(span.clone()).await {
             match data_res {
                 Ok(stream_msg) => {
                     let bytes = Message::get_encoded_len(&stream_msg);

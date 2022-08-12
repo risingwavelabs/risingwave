@@ -16,7 +16,6 @@
 
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
@@ -25,10 +24,16 @@ use risingwave_rpc_client::HummockMetaClient;
 
 mod block_cache;
 pub use block_cache::*;
+
+#[cfg(target_os = "linux")]
+pub mod file_cache;
+
+mod tiered_cache;
+pub use tiered_cache::*;
+
 pub mod sstable;
 pub use sstable::*;
 
-pub mod compaction_executor;
 pub mod compaction_group_client;
 pub mod compactor;
 pub mod conflict_detector;
@@ -47,8 +52,6 @@ pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
 
-#[cfg(target_os = "linux")]
-pub mod file_cache;
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
@@ -68,7 +71,6 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
-use crate::store::ReadOptions;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -154,7 +156,6 @@ impl HummockStorage {
         sstable: TableHolder,
         internal_key: &[u8],
         key: &[u8],
-        _read_options: &ReadOptions,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
         // TODO: via read_options to determine whether to check bloom_filter next PR
@@ -204,19 +205,9 @@ impl HummockStorage {
     }
 
     async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
-        match tokio::time::timeout(
-            Duration::from_secs(10),
-            self.compaction_group_client
-                .get_compaction_group_id(table_id.table_id),
-        )
-        .await
-        {
-            Err(_) => Err(HummockError::other(format!(
-                "get_compaction_group_id {} timeout",
-                table_id
-            ))),
-            Ok(resp) => resp,
-        }
+        self.compaction_group_client
+            .get_compaction_group_id(table_id.table_id)
+            .await
     }
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
