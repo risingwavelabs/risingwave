@@ -43,7 +43,7 @@ use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use super::SstableStoreRef;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::SyncUncommittedTaskSst::{SyncSst, SyncTask};
+use crate::hummock::local_version::SyncUncommittedData::{Synced, Syncing};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{
@@ -524,7 +524,6 @@ impl LocalVersionManager {
                 notify1.notified().await;
             }
         }
-        self.sync_epoch_notify.notify_waiters();
         let (uncommitted_data, task_write_batch_size) = {
             // We keep the lock on max_sync_epoch until the task is saved in the sync task vec.
             let mut max_sync_epoch_guard = self.max_sync_epoch.write();
@@ -541,9 +540,12 @@ impl LocalVersionManager {
                     return Ok((0, vec![]));
                 }
             };
-            local_version_guard.add_sync_state(epoch, SyncTask(uncommitted_data.clone()));
+            local_version_guard.add_sync_state(epoch, Syncing(uncommitted_data.clone()));
             (uncommitted_data, task_write_batch_size)
         };
+
+        self.sync_epoch_notify.notify_waiters();
+
         let (size, ssts) = self
             .sync_shared_buffer_epoch(epoch, uncommitted_data, task_write_batch_size)
             .await?;
@@ -577,10 +579,7 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
-        let task_result = self
-            .shared_buffer_uploader
-            .flush(epoch, false, task_payload)
-            .await;
+        let task_result = self.shared_buffer_uploader.flush(epoch, task_payload).await;
         let mut local_version_guard = self.local_version.write();
         let ssts = task_result?;
 
@@ -591,7 +590,7 @@ impl LocalVersionManager {
                 UncommittedData::Sst(sst),
             );
         }
-        local_version_guard.add_sync_state(epoch, SyncSst(new_sst.into_values().collect()));
+        local_version_guard.add_sync_state(epoch, Synced(new_sst.into_values().collect()));
 
         self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
         Ok(ssts)
@@ -603,10 +602,7 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
     ) -> HummockResult<()> {
-        let task_result = self
-            .shared_buffer_uploader
-            .flush(epoch, true, task_payload)
-            .await;
+        let task_result = self.shared_buffer_uploader.flush(epoch, task_payload).await;
 
         let mut local_version_guard = self.local_version.write();
         let shared_buffer_guard = local_version_guard

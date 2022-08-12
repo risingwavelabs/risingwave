@@ -90,16 +90,9 @@ impl TaskService for BatchServiceImpl {
         req: Request<AbortTaskRequest>,
     ) -> Result<Response<AbortTaskResponse>, Status> {
         let req = req.into_inner();
-        let res = self
-            .mgr
+        self.mgr
             .abort_task(req.get_task_id().expect("no task id found"));
-        match res {
-            Ok(_) => Ok(Response::new(AbortTaskResponse { status: None })),
-            Err(e) => {
-                error!("failed to abort task {}", e);
-                Err(e.into())
-            }
-        }
+        Ok(Response::new(AbortTaskResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

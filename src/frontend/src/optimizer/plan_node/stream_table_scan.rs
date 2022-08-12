@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -48,8 +49,7 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
-                // Follows upstream distribution from TableCatalog
-                Distribution::HashShard(distribution_key)
+                Distribution::UpstreamHashShard(distribution_key)
             }
         };
         let base = PlanBase::new_stream(
@@ -78,7 +78,7 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &[usize],
+        primary_to_secondary_mapping: &HashMap<usize, usize>,
     ) -> StreamIndexScan {
         StreamIndexScan::new(self.logical.to_index_scan(
             index_name,

@@ -698,9 +698,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BinaryHeap;
-    use std::sync::Arc;
-
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -799,16 +796,8 @@ mod tests {
 
         Box::new(OrderByExecutor::new(
             child,
-            vec![],
-            vec![],
-            vec![],
-            BinaryHeap::new(),
-            Arc::new(order_pairs),
-            vec![],
-            false,
-            false,
-            "OrderByExecutor".to_string(),
-            2048,
+            order_pairs,
+            "OrderByExecutor".into(),
         ))
     }
 

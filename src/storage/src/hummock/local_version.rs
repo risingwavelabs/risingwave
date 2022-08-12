@@ -33,13 +33,16 @@ pub struct LocalVersion {
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
-    pub sync_uncommitted_tasks_ssts: Vec<(HummockEpoch, SyncUncommittedTaskSst)>,
+    pub sync_uncommitted_data: Vec<(HummockEpoch, SyncUncommittedData)>,
 }
 
 #[derive(Debug, Clone)]
-pub enum SyncUncommittedTaskSst {
-    SyncTask(KeyIndexedUncommittedData),
-    SyncSst(Vec<UncommittedData>),
+pub enum SyncUncommittedData {
+    /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
+    /// as `Syncing`.
+    Syncing(KeyIndexedUncommittedData),
+    /// After we finish syncing, we changed `Syncing` to `Synced`.
+    Synced(Vec<UncommittedData>),
 }
 
 impl LocalVersion {
@@ -53,7 +56,7 @@ impl LocalVersion {
             shared_buffer: BTreeMap::default(),
             pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
             version_ids_in_use,
-            sync_uncommitted_tasks_ssts: Default::default(),
+            sync_uncommitted_data: Default::default(),
         }
     }
 
@@ -72,36 +75,36 @@ impl LocalVersion {
     pub fn add_sync_state(
         &mut self,
         sync_epoch: HummockEpoch,
-        sync_uncommitted_task_sst: SyncUncommittedTaskSst,
+        sync_uncommitted_data: SyncUncommittedData,
     ) {
         let node = self
-            .sync_uncommitted_tasks_ssts
+            .sync_uncommitted_data
             .iter_mut()
             .find(|(epoch, _)| epoch == &sync_epoch);
         match &node {
             None => {
                 assert!(matches!(
-                    sync_uncommitted_task_sst,
-                    SyncUncommittedTaskSst::SyncTask(_)
+                    sync_uncommitted_data,
+                    SyncUncommittedData::Syncing(_)
                 ));
-                if let Some(last) = self.sync_uncommitted_tasks_ssts.last() {
+                if let Some(last) = self.sync_uncommitted_data.last() {
                     assert!(last.0 < sync_epoch)
                 }
-                self.sync_uncommitted_tasks_ssts
-                    .push((sync_epoch, sync_uncommitted_task_sst));
+                self.sync_uncommitted_data
+                    .push((sync_epoch, sync_uncommitted_data));
                 return;
             }
-            Some((_, SyncUncommittedTaskSst::SyncTask(_))) => {
+            Some((_, SyncUncommittedData::Syncing(_))) => {
                 assert!(matches!(
-                    sync_uncommitted_task_sst,
-                    SyncUncommittedTaskSst::SyncSst(_)
+                    sync_uncommitted_data,
+                    SyncUncommittedData::Synced(_)
                 ));
             }
-            Some((_, SyncUncommittedTaskSst::SyncSst(_))) => {
+            Some((_, SyncUncommittedData::Synced(_))) => {
                 panic!("sync over, can't modify uncommitted sst state");
             }
         }
-        *node.unwrap() = (sync_epoch, sync_uncommitted_task_sst);
+        *node.unwrap() = (sync_epoch, sync_uncommitted_data);
     }
 
     pub fn iter_shared_buffer(&self) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)> {
@@ -139,7 +142,7 @@ impl LocalVersion {
             );
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
-            self.sync_uncommitted_tasks_ssts
+            self.sync_uncommitted_data
                 .retain(|(epoch, _)| epoch > &new_pinned_version.max_committed_epoch);
         }
 
@@ -155,7 +158,7 @@ impl LocalVersion {
 
     pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
         use parking_lot::RwLockReadGuard;
-        let (pinned_version, (shared_buffer, sync_uncommitted_task_sst)) = {
+        let (pinned_version, (shared_buffer, sync_uncommitted_datas)) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
             let pinned_version = guard.pinned_version.clone();
@@ -168,8 +171,8 @@ impl LocalVersion {
                         .rev() // Important: order by epoch descendingly
                         .map(|(_, shared_buffer)| shared_buffer.clone())
                         .collect();
-                    let result_sync: Vec<SyncUncommittedTaskSst> = guard
-                        .sync_uncommitted_tasks_ssts
+                    let result_sync: Vec<SyncUncommittedData> = guard
+                        .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
                             node.0 <= read_epoch && node.0 >= smallest_uncommitted_epoch
@@ -188,7 +191,7 @@ impl LocalVersion {
         ReadVersion {
             shared_buffer: shared_buffer.into_iter().collect(),
             pinned_version,
-            sync_uncommitted_tasks_ssts: sync_uncommitted_task_sst,
+            sync_uncommitted_datas,
         }
     }
 
@@ -259,5 +262,5 @@ pub struct ReadVersion {
     /// The shared buffer is sorted by epoch descendingly
     pub shared_buffer: Vec<SharedBuffer>,
     pub pinned_version: Arc<PinnedVersion>,
-    pub sync_uncommitted_tasks_ssts: Vec<SyncUncommittedTaskSst>,
+    pub sync_uncommitted_datas: Vec<SyncUncommittedData>,
 }

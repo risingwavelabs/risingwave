@@ -16,18 +16,17 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::StreamExt;
+use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::sync::oneshot::{Receiver, Sender};
-use tracing_futures::Instrument;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -233,18 +232,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = DEBUG_CONTEXT
-            .scope(
-                DebugContext::BatchQuery,
-                ExecutorBuilder::new(
-                    self.plan.root.as_ref().unwrap(),
-                    &self.task_id,
-                    self.context.clone(),
-                    self.epoch,
-                )
-                .build(),
-            )
-            .await?;
+        let exec = ExecutorBuilder::new(
+            self.plan.root.as_ref().unwrap(),
+            &self.task_id,
+            self.context.clone(),
+            self.epoch,
+        )
+        .build()
+        .await?;
 
         // Init shutdown channel and data receivers.
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
@@ -275,17 +270,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             let join_handle = tokio::spawn(async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = DEBUG_CONTEXT
-                    .scope(
-                        DebugContext::BatchQuery,
-                        self.try_execute(exec, &mut sender, shutdown_rx, &mut state_tx),
-                    )
-                    .instrument(tracing::trace_span!(
-                        "batch_execute",
-                        task_id = ?task_id.task_id,
-                        stage_id = ?task_id.stage_id,
-                        query_id = ?task_id.query_id,
-                    ))
+                if let Err(e) = self
+                    .try_execute(exec, &mut sender, shutdown_rx, &mut state_tx)
+                    .in_span({
+                        let mut span = Span::enter_with_local_parent("batch_execute");
+                        span.add_property(|| ("task_id", task_id.task_id.to_string()));
+                        span.add_property(|| ("stage_id", task_id.stage_id.to_string()));
+                        span.add_property(|| ("query_id", task_id.query_id.to_string()));
+                        span
+                    })
                     .await
                 {
                     // Prints the entire backtrace of error.
@@ -391,24 +384,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    pub fn abort_task(&self) -> Result<()> {
-        let sender = self.shutdown_tx.lock().take().ok_or_else(|| {
-            ErrorCode::InternalError(format!(
-                "Task{:?}'s shutdown channel does not exist. \
-                    Either the task has been aborted once, \
-                    or the channel has neven been initialized.",
-                self.task_id
-            ))
-        })?;
-        self.change_state(TaskStatus::Aborting);
-        // Stop task execution.
-        sender.send(0).map_err(|err| {
-            ErrorCode::InternalError(format!(
-                "Task{:?};s shutdown channel send error:{:?}",
-                self.task_id, err
-            ))
-            .into()
-        })
+    pub fn abort_task(&self) {
+        if let Some(sender) = self.shutdown_tx.lock().take() {
+            self.change_state(TaskStatus::Aborting);
+            // Stop task execution.
+            if sender.send(0).is_err() {
+                warn!("The task has already died before this request, so the abort did no-op")
+            }
+        };
     }
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {

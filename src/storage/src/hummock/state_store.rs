@@ -34,7 +34,7 @@ use crate::hummock::iterator::{
     HummockIteratorUnion,
 };
 use crate::hummock::local_version::PinnedVersion;
-use crate::hummock::local_version::SyncUncommittedTaskSst::{SyncSst, SyncTask};
+use crate::hummock::local_version::SyncUncommittedData::{Synced, Syncing};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
@@ -390,46 +390,42 @@ impl HummockStorage {
             .map(|shared_buffer| shared_buffer.get_overlap_data(key_range))
             .collect();
         let sync_uncommitted_data: Vec<OrderSortedUncommittedData> = read_version
-            .sync_uncommitted_tasks_ssts
+            .sync_uncommitted_datas
             .iter()
-            .map(
-                |sync_uncommitted_task_sst| match sync_uncommitted_task_sst {
-                    SyncTask(task) => {
-                        let local_data_iter = task
-                            .iter()
-                            .filter(|(_, data)| match data {
-                                UncommittedData::Batch(batch) => range_overlap(
-                                    key_range,
-                                    batch.start_user_key(),
-                                    batch.end_user_key(),
-                                ),
-                                UncommittedData::Sst((_, info)) => {
-                                    filter_single_sst(info, key_range)
-                                }
-                            })
-                            .map(|((_, order_index), data)| (*order_index, data.clone()));
-
-                        let mut uncommitted_data = BTreeMap::new();
-                        for (order_index, data) in local_data_iter {
-                            uncommitted_data
-                                .entry(order_index)
-                                .or_insert_with(Vec::new)
-                                .push(data);
-                        }
-                        uncommitted_data.into_values().rev().collect()
-                    }
-                    SyncSst(ssts) => vec![ssts
+            .map(|sync_uncommitted_data| match sync_uncommitted_data {
+                Syncing(task) => {
+                    let local_data_iter = task
                         .iter()
-                        .filter(|data| match data {
-                            UncommittedData::Batch(_) => {
-                                panic!("sync uncommitted states can't save batch")
-                            }
+                        .filter(|(_, data)| match data {
+                            UncommittedData::Batch(batch) => range_overlap(
+                                key_range,
+                                batch.start_user_key(),
+                                batch.end_user_key(),
+                            ),
                             UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
                         })
-                        .cloned()
-                        .collect()],
-                },
-            )
+                        .map(|((_, order_index), data)| (*order_index, data.clone()));
+
+                    let mut uncommitted_data = BTreeMap::new();
+                    for (order_index, data) in local_data_iter {
+                        uncommitted_data
+                            .entry(order_index)
+                            .or_insert_with(Vec::new)
+                            .push(data);
+                    }
+                    uncommitted_data.into_values().rev().collect()
+                }
+                Synced(ssts) => vec![ssts
+                    .iter()
+                    .filter(|data| match data {
+                        UncommittedData::Batch(_) => {
+                            panic!("sync uncommitted states can't save batch")
+                        }
+                        UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                    })
+                    .cloned()
+                    .collect()],
+            })
             .collect();
         Ok((
             shared_buffer_data,

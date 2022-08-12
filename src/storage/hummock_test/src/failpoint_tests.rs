@@ -21,7 +21,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
@@ -29,6 +29,7 @@ use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::StateStore;
 
 #[tokio::test]
+#[ignore]
 #[cfg(all(test, feature = "failpoints"))]
 async fn test_failpoints_state_store_read_upload() {
     let mem_upload_err = "mem_upload_err";
@@ -160,40 +161,38 @@ async fn test_failpoints_state_store_read_upload() {
     let result = hummock_storage.sync(3).await;
     assert!(result.is_err());
     fail::remove(mem_upload_err);
-    // TODO: We cannot sync discontinuously now, we will remove the comment after supporting
-    // uploading multiple shared buffers.#4442
 
-    // let (_, ssts) = hummock_storage.sync(3).await.unwrap();
-    // meta_client.commit_epoch(3, ssts).await.unwrap();
-    // local_version_manager
-    //     .refresh_version(meta_client.as_ref())
-    //     .await;
-    //
-    // let value = hummock_storage
-    //     .get(
-    //         &anchor,
-    //         ReadOptions {
-    //             epoch: 5,
-    //             table_id: Default::default(),
-    //             retention_seconds: None,
-    //         },
-    //     )
-    //     .await
-    //     .unwrap()
-    //     .unwrap();
-    // assert_eq!(value, Bytes::from("111"));
-    // let mut iters = hummock_storage
-    //     .iter(
-    //         None,
-    //         ..=b"ee".to_vec(),
-    //         ReadOptions {
-    //             epoch: 5,
-    //             table_id: Default::default(),
-    //             retention_seconds: None,
-    //         },
-    //     )
-    //     .await
-    //     .unwrap();
-    // let len = count_iter(&mut iters).await;
-    // assert_eq!(len, 2);
+    let (_, ssts) = hummock_storage.sync(3).await.unwrap();
+    meta_client.commit_epoch(3, ssts).await.unwrap();
+    local_version_manager
+        .refresh_version(meta_client.as_ref())
+        .await;
+
+    let value = hummock_storage
+        .get(
+            &anchor,
+            ReadOptions {
+                epoch: 5,
+                table_id: Default::default(),
+                retention_seconds: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, Bytes::from("111"));
+    let mut iters = hummock_storage
+        .iter(
+            None,
+            ..=b"ee".to_vec(),
+            ReadOptions {
+                epoch: 5,
+                table_id: Default::default(),
+                retention_seconds: None,
+            },
+        )
+        .await
+        .unwrap();
+    let len = count_iter(&mut iters).await;
+    assert_eq!(len, 2);
 }

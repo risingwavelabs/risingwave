@@ -21,7 +21,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::SyncUncommittedTaskSst;
+use risingwave_storage::hummock::local_version::SyncUncommittedData;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::{to_order_sorted, UncommittedData};
@@ -174,7 +174,7 @@ async fn test_update_uncommitted_ssts() {
                 .unwrap();
 
             local_version_guard
-                .add_sync_state(epochs[0], SyncUncommittedTaskSst::SyncTask(payload.clone()));
+                .add_sync_state(epochs[0], SyncUncommittedData::Syncing(payload.clone()));
             let payload = to_order_sorted(&payload);
             {
                 assert_eq!(1, payload.len());
@@ -222,7 +222,7 @@ async fn test_update_uncommitted_ssts() {
                 .get_uncommitted_data()
                 .unwrap();
             local_version_guard
-                .add_sync_state(epochs[1], SyncUncommittedTaskSst::SyncTask(payload.clone()));
+                .add_sync_state(epochs[1], SyncUncommittedData::Syncing(payload.clone()));
             let payload = to_order_sorted(&payload);
             {
                 assert_eq!(1, payload.len());
