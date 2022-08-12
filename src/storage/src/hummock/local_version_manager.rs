@@ -526,9 +526,8 @@ impl LocalVersionManager {
         }
         let (uncommitted_data, task_write_batch_size) = {
             // We keep the lock on max_sync_epoch until the task is saved in the sync task vec.
-            let mut max_sync_epoch_guard = self.max_sync_epoch.write();
             let mut local_version_guard = self.local_version.write();
-            *max_sync_epoch_guard = epoch;
+            *self.max_sync_epoch.write() = epoch;
             let (uncommitted_data, task_write_batch_size) = match local_version_guard
                 .get_mut_shared_buffer(epoch)
                 .unwrap()
