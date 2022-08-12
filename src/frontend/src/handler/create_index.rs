@@ -99,18 +99,19 @@ pub(crate) fn gen_create_index_plan(
         .filter(|x| set.insert(*x))
         .collect_vec();
 
+    let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
+
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
         table_name,
         table.id,
         table_desc.clone(),
         context,
-        index_name.to_string(),
+        index_table_name.clone(),
         &index_columns,
         &include_columns,
     )?;
 
-    let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
     check_schema_writable(&index_schema_name)?;
     let (index_database_id, index_schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
