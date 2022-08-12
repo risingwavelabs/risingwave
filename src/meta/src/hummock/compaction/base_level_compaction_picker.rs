@@ -180,6 +180,7 @@ impl LevelCompactionPicker {
             self.compact_task_id,
             0,
             self.target_level,
+            self.config.sub_level_max_compaction_bytes,
             self.overlap_strategy.clone(),
         );
 

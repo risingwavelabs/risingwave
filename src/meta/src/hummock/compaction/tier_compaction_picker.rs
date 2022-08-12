@@ -216,6 +216,7 @@ impl TierCompactionPicker {
                 self.compact_task_id,
                 0,
                 0,
+                self.config.sub_level_max_compaction_bytes,
                 self.overlap_strategy.clone(),
             );
 

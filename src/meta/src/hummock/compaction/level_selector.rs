@@ -119,6 +119,7 @@ impl DynamicLevelSelector {
                 task_id,
                 select_level,
                 select_level + 1,
+                self.config.max_bytes_for_level_base,
                 self.overlap_strategy.clone(),
             ))
         }

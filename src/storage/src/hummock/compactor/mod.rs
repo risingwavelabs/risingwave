@@ -290,11 +290,6 @@ impl Compactor {
             compact_task_to_string(&compact_task)
         );
         context.stats.compact_task_pending_num.dec();
-        for level in &compact_task.input_ssts {
-            for table in &level.table_infos {
-                context.sstable_store.delete_cache(table.id);
-            }
-        }
         compact_success
     }
 
