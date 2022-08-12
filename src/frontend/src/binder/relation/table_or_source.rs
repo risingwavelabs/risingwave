@@ -38,7 +38,7 @@ pub struct BoundBaseTable {
 pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
-    pub associate_table_id: TableId,
+    pub associated_mview_id: TableId,
     pub columns: Vec<ColumnDesc>,
     pub append_only: bool,
     pub owner: UserId,
@@ -210,7 +210,7 @@ impl Binder {
         Ok(BoundTableSource {
             name: source_name,
             source_id,
-            associate_table_id,
+            associated_mview_id: associate_table_id,
             columns,
             append_only,
             owner,

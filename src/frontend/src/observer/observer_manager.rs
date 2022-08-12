@@ -60,7 +60,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
-            Info::Mapping(_) => self.handle_table_mapping_notification(resp),
+            Info::ParallelUnitMapping(_) => self.handle_table_mapping_notification(resp),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -231,7 +231,7 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::Mapping(parallel_unit_mapping) => match resp.operation() {
+            Info::ParallelUnitMapping(parallel_unit_mapping) => match resp.operation() {
                 Operation::Add => {
                     let table_id = TableId::new(parallel_unit_mapping.table_id);
                     let mapping = decompress_data(

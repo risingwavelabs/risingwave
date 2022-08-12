@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{VnodeMapping, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -230,8 +230,8 @@ where
         &self,
         fragment: &mut Fragment,
         parallel_units: &[ParallelUnit],
-    ) -> MetaResult<Vec<ParallelUnitId>> {
-        let vnode_mapping = Self::build_hash_mapping(parallel_units);
+    ) -> MetaResult<VnodeMapping> {
+        let vnode_mapping = Self::build_vnode_mapping(parallel_units);
         let (original_indices, data) = compress_data(&vnode_mapping);
         fragment.vnode_mapping = Some(ParallelUnitMapping {
             original_indices,
@@ -247,7 +247,7 @@ where
     }
 
     /// Build a vnode mapping according to parallel units where the fragment is scheduled.
-    fn build_hash_mapping(parallel_units: &[ParallelUnit]) -> Vec<ParallelUnitId> {
+    fn build_vnode_mapping(parallel_units: &[ParallelUnit]) -> VnodeMapping {
         let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
 
         let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();

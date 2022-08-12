@@ -77,10 +77,9 @@ impl CreateMaterializedViewContext {
     pub fn internal_tables(&self) -> Vec<Table> {
         self.internal_table_id_map
             .values()
-            .filter(|t| t.is_some())
+            .flatten()
             .cloned()
-            .map(|t| t.unwrap())
-            .collect_vec()
+            .collect()
     }
 
     pub fn internal_table_ids(&self) -> Vec<u32> {

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
@@ -469,9 +469,7 @@ impl BatchPlanFragmenter {
 }
 
 // TODO: let frontend store owner_mapping directly?
-fn vnode_mapping_to_owner_mapping(
-    vnode_mapping: Vec<ParallelUnitId>,
-) -> HashMap<ParallelUnitId, Buffer> {
+fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Buffer> {
     let mut m: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
     let num_vnodes = vnode_mapping.len();
     for (i, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {

@@ -411,6 +411,7 @@ impl TableFragments {
         result
     }
 
+    /// Update table fragment map, this should be called after fragment scheduled.
     pub fn update_table_fragment_map(&mut self, fragment_id: FragmentId) {
         if let Some(fragment) = self.fragments.get(&fragment_id) {
             for table_id in &fragment.state_table_ids {
@@ -419,6 +420,7 @@ impl TableFragments {
         }
     }
 
+    /// Returns the internal table ids without the mview table.
     pub fn internal_table_ids(&self) -> Vec<u32> {
         self.fragments
             .values()
@@ -427,6 +429,7 @@ impl TableFragments {
             .collect_vec()
     }
 
+    /// Get the table mapping info from the fragment it belongs to.
     pub fn get_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
         self.table_to_fragment_map.get(&table_id).map(|f| {
             let mut mapping = self.fragments[f].vnode_mapping.clone().unwrap();

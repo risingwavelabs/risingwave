@@ -190,7 +190,7 @@ message SubscribeResponse {
     catalog.Index index = 10;
     user.UserInfo user = 11;
     hummock.HummockSnapshot hummock_snapshot = 12;
-    common.ParallelUnitMapping mapping = 13;
+    common.ParallelUnitMapping parallel_unit_mapping = 13;
     MetaSnapshot snapshot = 20;
   }
 }

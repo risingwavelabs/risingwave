@@ -18,13 +18,13 @@ use std::sync::{Arc, RwLock};
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
 use crate::scheduler::{SchedulerError, SchedulerResult};
 
-/// `WorkerNodeManager` manages live worker nodes.
+/// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
     inner: RwLock<WorkerNodeManagerInner>,
 }
@@ -33,7 +33,7 @@ pub struct WorkerNodeManager {
 struct WorkerNodeManagerInner {
     worker_nodes: Vec<WorkerNode>,
     /// table vnode mapping info.
-    table_vnode_mapping: HashMap<TableId, Vec<ParallelUnitId>>,
+    table_vnode_mapping: HashMap<TableId, VnodeMapping>,
 }
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
@@ -76,7 +76,7 @@ impl WorkerNodeManager {
             .retain(|x| *x != node);
     }
 
-    pub fn refresh(&self, nodes: Vec<WorkerNode>, mapping: HashMap<TableId, Vec<ParallelUnitId>>) {
+    pub fn refresh(&self, nodes: Vec<WorkerNode>, mapping: HashMap<TableId, VnodeMapping>) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes = nodes;
         write_guard.table_vnode_mapping = mapping;
@@ -126,7 +126,7 @@ impl WorkerNodeManager {
         Ok(workers)
     }
 
-    pub fn get_table_mapping(&self, table_id: &TableId) -> Option<Vec<ParallelUnitId>> {
+    pub fn get_table_mapping(&self, table_id: &TableId) -> Option<VnodeMapping> {
         self.inner
             .read()
             .unwrap()
@@ -135,21 +135,22 @@ impl WorkerNodeManager {
             .cloned()
     }
 
-    pub fn insert_table_mapping(&self, table_id: TableId, vnode_ids: Vec<ParallelUnitId>) {
+    pub fn insert_table_mapping(&self, table_id: TableId, vnode_mapping: VnodeMapping) {
         self.inner
             .write()
             .unwrap()
             .table_vnode_mapping
-            .try_insert(table_id, vnode_ids)
+            .try_insert(table_id, vnode_mapping)
             .unwrap();
     }
 
-    pub fn update_table_mapping(&self, table_id: TableId, vnode_ids: Vec<ParallelUnitId>) {
+    pub fn update_table_mapping(&self, table_id: TableId, vnode_mapping: VnodeMapping) {
         self.inner
             .write()
             .unwrap()
             .table_vnode_mapping
-            .insert(table_id, vnode_ids);
+            .insert(table_id, vnode_mapping)
+            .unwrap();
     }
 
     pub fn remove_table_mapping(&self, table_id: &TableId) {
@@ -157,7 +158,8 @@ impl WorkerNodeManager {
             .write()
             .unwrap()
             .table_vnode_mapping
-            .remove(table_id);
+            .remove(table_id)
+            .unwrap();
     }
 }
 

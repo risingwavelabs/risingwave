@@ -448,7 +448,7 @@ where
                 .expect("no data distribution found");
             self.env
                 .notification_manager()
-                .notify_frontend(operation, Info::Mapping(mapping))
+                .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
                 .await;
         }
     }

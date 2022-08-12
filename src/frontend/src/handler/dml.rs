@@ -36,10 +36,10 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
     let check_items = resolve_privileges(&bound);
     check_privileges(&session, &check_items)?;
 
-    let associate_table_id = match &bound {
-        BoundStatement::Insert(insert) => insert.table_source.associate_table_id,
-        BoundStatement::Update(update) => update.table_source.associate_table_id,
-        BoundStatement::Delete(delete) => delete.table_source.associate_table_id,
+    let associated_mview_id = match &bound {
+        BoundStatement::Insert(insert) => insert.table_source.associated_mview_id,
+        BoundStatement::Update(update) => update.table_source.associated_mview_id,
+        BoundStatement::Delete(delete) => delete.table_source.associated_mview_id,
         BoundStatement::Query(_) => unreachable!(),
     };
 
@@ -47,7 +47,7 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
         .session_ctx
         .env()
         .worker_node_manager()
-        .get_table_mapping(&associate_table_id);
+        .get_table_mapping(&associated_mview_id);
 
     let (plan, pg_descs) = {
         // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
