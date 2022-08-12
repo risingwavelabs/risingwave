@@ -16,8 +16,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::source::base::SplitMetaData;
-use crate::source::SplitId;
 use crate::source::error::SourceResult;
+use crate::source::SplitId;
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq, Hash)]
 pub struct DatagenSplit {

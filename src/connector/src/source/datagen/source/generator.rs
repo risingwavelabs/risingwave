@@ -20,8 +20,8 @@ use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::{Map, Value};
 
 use super::DEFAULT_DATAGEN_INTERVAL;
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::{SourceMessage, SplitId};
-use crate::source::error::{SourceResult, SourceError};
 
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,

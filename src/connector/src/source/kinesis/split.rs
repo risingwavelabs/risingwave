@@ -15,8 +15,8 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::source::{SplitId, SplitMetaData};
 use crate::source::error::SourceResult;
+use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub enum KinesisOffset {

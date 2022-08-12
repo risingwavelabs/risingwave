@@ -189,7 +189,12 @@ impl SourceChunkBuilder for ConnectorSourceReader {}
 
 impl ConnectorSourceReader {
     pub async fn next(&mut self) -> Result<StreamChunkWithState> {
-        let batch = self.message_rx.recv().await.unwrap().map_err(|e| anyhow::anyhow!(e))?;
+        let batch = self
+            .message_rx
+            .recv()
+            .await
+            .unwrap()
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         let mut events = Vec::with_capacity(batch.len());
         let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
@@ -207,7 +212,8 @@ impl ConnectorSourceReader {
             }
         }
 
-        let columns = Self::build_columns(&self.columns, events.iter().flat_map(|e| &e.rows)).map_err(|e| anyhow::anyhow!(e))?;
+        let columns = Self::build_columns(&self.columns, events.iter().flat_map(|e| &e.rows))
+            .map_err(|e| anyhow::anyhow!(e))?;
         let ops = events.into_iter().flat_map(|e| e.ops).collect();
 
         Ok(StreamChunkWithState {
