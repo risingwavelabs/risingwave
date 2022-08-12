@@ -186,7 +186,7 @@ pub enum Mutation {
     Update {
         dispatchers: HashMap<ActorId, DispatcherUpdate>,
         merges: HashMap<ActorId, MergeUpdate>,
-        vnode_bitmaps: HashMap<ActorId, Bitmap>,
+        vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
     },
     Add {
@@ -297,6 +297,17 @@ impl Barrier {
                 _ => None,
             })
     }
+
+    /// Returns the new vnode bitmap if this barrier is to update the vnode bitmap for the actor
+    /// with `actor_id`.
+    pub fn as_update_vnode_bitmap(&self, actor_id: ActorId) -> Option<Arc<Bitmap>> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Update { vnode_bitmaps, .. } => vnode_bitmaps.get(&actor_id).cloned(),
+                _ => None,
+            })
+    }
 }
 
 impl PartialEq for Barrier {
@@ -384,7 +395,7 @@ impl Mutation {
                 vnode_bitmaps: update
                     .actor_vnode_bitmap_update
                     .iter()
-                    .map(|(&actor_id, bitmap)| (actor_id, bitmap.into()))
+                    .map(|(&actor_id, bitmap)| (actor_id, Arc::new(bitmap.into())))
                     .collect(),
                 dropped_actors: update.dropped_actors.iter().cloned().collect(),
             },

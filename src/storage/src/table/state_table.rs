@@ -96,6 +96,15 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         self.storage_table.disable_sanity_check();
     }
 
+    /// Update the vnode bitmap of this state table, used for fragment scaling or migration.
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        assert!(
+            !self.is_dirty(),
+            "vnode bitmap should only be updated when state table is clean"
+        );
+        self.storage_table.update_vnode_bitmap(new_vnodes);
+    }
+
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
     pub fn storage_table(&self) -> &StorageTableBase<S, RS, READ_WRITE> {
         &self.storage_table
