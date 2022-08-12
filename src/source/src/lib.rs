@@ -34,12 +34,12 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
+use risingwave_connector::source::SplitId;
 pub use table_v2::*;
 
 use crate::connector_source::{ConnectorSource, ConnectorSourceReader};
@@ -78,11 +78,10 @@ pub enum SourceStreamReaderImpl {
     Connector(ConnectorSourceReader),
 }
 
-#[async_trait]
-impl StreamSourceReader for SourceStreamReaderImpl {
-    async fn next(&mut self) -> Result<StreamChunkWithState> {
+impl SourceStreamReaderImpl {
+    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
         match self {
-            SourceStreamReaderImpl::TableV2(t) => t.next().await,
+            SourceStreamReaderImpl::TableV2(t) => t.next().await.map(Into::into),
             SourceStreamReaderImpl::Connector(c) => c.next().await,
         }
     }
@@ -94,12 +93,15 @@ impl StreamSourceReader for SourceStreamReaderImpl {
 #[derive(Clone, Debug)]
 pub struct StreamChunkWithState {
     pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<String, String>>,
+    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
 }
 
-#[async_trait]
-pub trait StreamSourceReader: Send + Sync + 'static {
-    /// `next` always returns a StreamChunk. If the queue is empty, it will
-    /// block until new data coming
-    async fn next(&mut self) -> Result<StreamChunkWithState>;
+/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
+impl From<StreamChunk> for StreamChunkWithState {
+    fn from(chunk: StreamChunk) -> Self {
+        Self {
+            chunk,
+            split_offset_mapping: None,
+        }
+    }
 }

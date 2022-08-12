@@ -116,7 +116,7 @@ impl<K> StackTraceManager<K>
 where
     K: std::hash::Hash + Eq + std::fmt::Debug,
 {
-    /// Register with given key. Returns a sender that should be provided to [`stack_traced`].
+    /// Register with given key. Returns a sender that can be called `trace` on.
     pub fn register(&mut self, key: K) -> TraceReporter {
         let (tx, rx) = watch::channel(Default::default());
         self.rxs.try_insert(key, rx).unwrap();
