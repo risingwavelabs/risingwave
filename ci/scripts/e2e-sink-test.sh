@@ -41,7 +41,6 @@ cargo make link-all-in-one-binaries
 
 echo "debug"
 cat /etc/hosts
-mysqladmin ping -h 127.0.0.1 -P 23306 -uroot
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
