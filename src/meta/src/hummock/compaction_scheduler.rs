@@ -171,32 +171,17 @@ where
             };
             // TODO: skip busy compactor
 
-            // 2.2 Send the compaction task to the compactor.
-            let send_task = async {
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    compactor
-                        .send_task(Task::CompactTask(compact_task.clone()))
-                        .await
-                        .is_ok()
-                })
-                .await
-                .unwrap_or(false)
-            };
+            // 2.2 Assign the compaction task.
             match self
                 .hummock_manager
-                .assign_compaction_task(&compact_task, compactor.context_id(), send_task)
+                .assign_compaction_task(&compact_task, compactor.context_id())
                 .await
             {
                 Ok(_) => {
-                    // TODO: timeout assigned compaction task and move send_task after
-                    // assign_compaction_task
                     tracing::trace!(
                         "Assigned compaction task. {}",
                         compact_task_to_string(&compact_task)
                     );
-                    // Reschedule it in case there are more tasks from this compaction group.
-                    request_channel.try_send(compaction_group);
-                    return true;
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -214,6 +199,36 @@ where
                     continue 'send_task;
                 }
             }
+
+            // 2.3 Send the compaction task.
+            if let Err(e) = compactor
+                .send_task(Task::CompactTask(compact_task.clone()))
+                .await
+            {
+                tracing::warn!(
+                    "Failed to send task {} to {}. {:#?}",
+                    compact_task.task_id,
+                    compactor.context_id(),
+                    e
+                );
+                // Cancel the task at best effort
+                compact_task.task_status = false;
+                if let Err(e) = self
+                    .hummock_manager
+                    .report_compact_task(compactor.context_id(), &compact_task)
+                    .await
+                {
+                    tracing::warn!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
+                    // TODO #3677: handle cancellation via compaction heartbeat after #4496
+                    return false;
+                }
+                continue 'send_task;
+            }
+
+            // Reschedule it in case there are more tasks from this compaction group.
+            request_channel.try_send(compaction_group);
+
+            return true;
         }
     }
 }

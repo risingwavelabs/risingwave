@@ -175,7 +175,7 @@ mod tests {
         val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .assign_compaction_task(&compact_task, worker_node.id)
             .await
             .unwrap();
 
@@ -274,7 +274,7 @@ mod tests {
         compact_task.current_epoch_time = 0;
 
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .assign_compaction_task(&compact_task, worker_node.id)
             .await
             .unwrap();
 
@@ -521,7 +521,7 @@ mod tests {
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .assign_compaction_task(&compact_task, worker_node.id)
             .await
             .unwrap();
 
@@ -676,7 +676,7 @@ mod tests {
         compact_task.current_epoch_time = epoch;
 
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .assign_compaction_task(&compact_task, worker_node.id)
             .await
             .unwrap();
 
