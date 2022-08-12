@@ -53,7 +53,7 @@ impl MonitorService for MonitorServiceImpl {
             .map(|(k, v)| (k, v.to_string()))
             .collect();
 
-        let grpc_traces = self
+        let rpc_traces = self
             .grpc_stack_trace_mgr
             .lock()
             .await
@@ -63,7 +63,7 @@ impl MonitorService for MonitorServiceImpl {
 
         Ok(Response::new(StackTraceResponse {
             actor_traces,
-            grpc_traces,
+            rpc_traces,
         }))
     }
 }
@@ -83,7 +83,7 @@ pub mod grpc_middleware {
     use tokio::sync::Mutex;
     use tower::{Layer, Service};
 
-    /// Manages the stack trace of all `gRPC` requests that are currently served by the compute node
+    /// Manages the stack trace of `gRPC` requests that are currently served by the compute node.
     pub type GrpcStackTraceManagerRef = Arc<Mutex<StackTraceManager<u64>>>;
 
     #[derive(Clone)]

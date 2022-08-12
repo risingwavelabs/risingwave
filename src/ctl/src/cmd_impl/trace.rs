@@ -48,7 +48,7 @@ pub async fn trace() -> anyhow::Result<()> {
     let clients = ComputeClientPool::new(u64::MAX);
 
     let mut all_actor_traces = BTreeMap::new();
-    let mut all_grpc_traces = BTreeMap::new();
+    let mut all_rpc_traces = BTreeMap::new();
 
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
@@ -56,11 +56,11 @@ pub async fn trace() -> anyhow::Result<()> {
         let client = clients.get(&cn).await?;
         let StackTraceResponse {
             actor_traces,
-            grpc_traces,
+            rpc_traces,
         } = client.stack_trace().await?;
 
         all_actor_traces.extend(actor_traces);
-        all_grpc_traces.extend(grpc_traces.into_iter().map(|(k, v)| {
+        all_rpc_traces.extend(rpc_traces.into_iter().map(|(k, v)| {
             (
                 format!("{} ({})", HostAddr::from(cn.get_host().unwrap()), k),
                 v,
@@ -68,7 +68,7 @@ pub async fn trace() -> anyhow::Result<()> {
         }));
     }
 
-    if all_actor_traces.is_empty() && all_grpc_traces.is_empty() {
+    if all_actor_traces.is_empty() && all_rpc_traces.is_empty() {
         println!(
             "No traces found. No actors are running, or `{ASYNC_STACK_TRACE_KEY}` is not set?"
         );
@@ -77,9 +77,9 @@ pub async fn trace() -> anyhow::Result<()> {
         for (key, trace) in all_actor_traces {
             println!(">> Actor {key}\n{trace}");
         }
-        println!("--- gRPC Traces ---");
-        for (key, trace) in all_grpc_traces {
-            println!(">> gRPC {key}\n{trace}");
+        println!("--- RPC Traces ---");
+        for (key, trace) in all_rpc_traces {
+            println!(">> RPC {key}\n{trace}");
         }
     }
 
