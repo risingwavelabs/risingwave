@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
 use async_trait::async_trait;
 use aws_sdk_kinesis::model::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
 
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::*;
 use crate::source::SplitEnumerator;
@@ -33,7 +33,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
     type Properties = KinesisProperties;
     type Split = KinesisSplit;
 
-    async fn new(properties: KinesisProperties) -> Result<Self> {
+    async fn new(properties: KinesisProperties) -> SourceResult<Self> {
         let client = build_client(properties.clone()).await?;
         let stream_name = properties.stream_name.clone();
         Ok(Self {
@@ -42,7 +42,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> Result<Vec<KinesisSplit>> {
+    async fn list_splits(&mut self) -> SourceResult<Vec<KinesisSplit>> {
         let mut next_token: Option<String> = None;
         let mut shard_collect: Vec<Shard> = Vec::new();
 
@@ -53,11 +53,12 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                 .set_next_token(next_token)
                 .stream_name(&self.stream_name)
                 .send()
-                .await?;
+                .await
+                .map_err(|e| SourceError::sdk_error(e.to_string()))?;
             match list_shard_output.shards {
                 Some(shard) => shard_collect.extend(shard),
                 None => {
-                    return Err(anyhow::Error::msg(format!(
+                    return Err(SourceError::source_error(format!(
                         "no shards in stream {}",
                         &self.stream_name
                     )));
@@ -88,7 +89,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_kinesis_split_enumerator() -> Result<()> {
+    async fn test_kinesis_split_enumerator() -> SourceResult<()> {
         let stream_name = "kinesis_debug".to_string();
         let config = aws_config::from_env()
             .region(Region::new("cn-northwest-1"))

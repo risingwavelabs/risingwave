@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::Result as RwResult;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{StreamChunkWithState, StreamSourceReader};
@@ -63,7 +63,7 @@ impl TableSourceV2 {
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
-    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+    pub fn write_chunk(&self, chunk: StreamChunk) -> RwResult<oneshot::Receiver<usize>> {
         let tx = {
             let core = self.core.read().unwrap();
             core.changes_txs
@@ -100,7 +100,7 @@ pub struct TableV2StreamReader {
 
 #[async_trait]
 impl StreamSourceReader for TableV2StreamReader {
-    async fn next(&mut self) -> Result<StreamChunkWithState> {
+    async fn next(&mut self) -> RwResult<StreamChunkWithState> {
         let (chunk, notifier) = self
             .rx
             .recv()
@@ -132,7 +132,7 @@ impl StreamSourceReader for TableV2StreamReader {
 impl TableSourceV2 {
     /// Create a new stream reader.
     #[expect(clippy::unused_async)]
-    pub async fn stream_reader(&self, column_ids: Vec<ColumnId>) -> Result<TableV2StreamReader> {
+    pub async fn stream_reader(&self, column_ids: Vec<ColumnId>) -> RwResult<TableV2StreamReader> {
         let column_indices = column_ids
             .into_iter()
             .map(|id| {
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_table_source_v2() -> Result<()> {
+    async fn test_table_source_v2() -> Result<(), anyhow::Error> {
         let source = Arc::new(new_source());
         let mut reader = source.stream_reader(vec![ColumnId::from(0)]).await?;
 

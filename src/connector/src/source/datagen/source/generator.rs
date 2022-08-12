@@ -13,13 +13,13 @@
 // limitations under the License.
 use std::collections::HashMap;
 
-use anyhow::Result;
 use bytes::Bytes;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration, Instant};
 
 use super::DEFAULT_DATAGEN_INTERVAL;
+use crate::source::error::SourceResult;
 use crate::source::SourceMessage;
 
 pub struct DatagenEventGenerator {
@@ -38,7 +38,7 @@ impl DatagenEventGenerator {
         split_id: String,
         split_num: u64,
         split_index: u64,
-    ) -> Result<Self> {
+    ) -> SourceResult<Self> {
         let partition_size = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
@@ -53,7 +53,7 @@ impl DatagenEventGenerator {
         })
     }
 
-    pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    pub async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         let now = Instant::now();
         let mut res = vec![];
         let mut generated_count: u64 = 0;

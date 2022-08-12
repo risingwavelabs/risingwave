@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
+use crate::source::error::SourceResult;
 use crate::source::SplitMetaData;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
@@ -35,8 +35,8 @@ impl SplitMetaData for KafkaSplit {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
-    fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    fn restore_from_bytes(bytes: &[u8]) -> SourceResult<Self> {
+        serde_json::from_slice(bytes).map_err(|e| e.into())
     }
 }
 

@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync as tokio_sync;
+
+use crate::source::error::SourceResult;
 
 ///  [`EntryStat`] Describes a directory or file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or a bucket in S3.
@@ -87,8 +88,8 @@ pub trait Directory: Send + Sync {
         &self,
         sender: tokio_sync::mpsc::Sender<EntryOptEvent>,
         task_status: tokio_sync::watch::Receiver<StatusWatch>,
-    ) -> Result<()>;
-    async fn list_entries(&self) -> Result<Vec<EntryStat>>;
+    ) -> SourceResult<()>;
+    async fn list_entries(&self) -> SourceResult<Vec<EntryStat>>;
     // async fn last_modification(&self) -> i64;
     fn entry_discover(&self) -> EntryDiscover;
 }
@@ -99,12 +100,12 @@ mod test {
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
 
-    use anyhow::Result;
     use async_trait::async_trait;
     use chrono::Local;
     use itertools::Itertools;
     use tokio::{sync, time};
 
+    use crate::source::error::{SourceError, SourceResult};
     use crate::source::filesystem::file_common::{
         Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,
     };
@@ -255,7 +256,7 @@ mod test {
             &self,
             sender: tokio::sync::mpsc::Sender<EntryOptEvent>,
             mut task_status: tokio::sync::watch::Receiver<StatusWatch>,
-        ) -> anyhow::Result<()> {
+        ) -> SourceResult<()> {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(2));
             let file_system_clone = Arc::new(&self.file_system);
             println!(
@@ -309,7 +310,7 @@ mod test {
                 }
                 match send_opt_event_err {
                     Some(tx_send_err) => {
-                        break Err(anyhow::Error::from(tx_send_err));
+                        break Err(SourceError::send_error(tx_send_err.to_string()));
                         // break Error::from(tx_send_err.to_string());
                     }
                     None => {
@@ -320,7 +321,7 @@ mod test {
             rs
         }
 
-        async fn list_entries(&self) -> Result<Vec<EntryStat>> {
+        async fn list_entries(&self) -> SourceResult<Vec<EntryStat>> {
             let entries = self
                 .file_system
                 .list_files()

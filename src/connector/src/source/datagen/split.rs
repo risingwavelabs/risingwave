@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::source::base::SplitMetaData;
+use crate::source::error::SourceResult;
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq, Hash)]
 pub struct DatagenSplit {
@@ -34,8 +34,8 @@ impl SplitMetaData for DatagenSplit {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
-    fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    fn restore_from_bytes(bytes: &[u8]) -> SourceResult<Self> {
+        serde_json::from_slice(bytes).map_err(Into::into)
     }
 }
 

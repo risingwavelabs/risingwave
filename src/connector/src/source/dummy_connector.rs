@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
 
+use super::error::SourceResult;
 use crate::source::{Column, ConnectorState, SourceMessage, SplitReader};
 
 /// [`DummySplitReader`] is a placeholder for source executor that is assigned no split. It will
@@ -31,11 +31,11 @@ impl SplitReader for DummySplitReader {
         _properties: Self::Properties,
         _state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self> {
+    ) -> SourceResult<Self> {
         Ok(Self {})
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         let pending = future::pending();
         let () = pending.await;
 

@@ -14,9 +14,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::EventType;
 use crate::source::nexmark::source::generator::NexmarkEventGenerator;
@@ -37,7 +37,7 @@ impl SplitReader for NexmarkSplitReader {
         properties: NexmarkProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
+    ) -> SourceResult<Self>
     where
         Self: Sized,
     {
@@ -52,7 +52,12 @@ impl SplitReader for NexmarkSplitReader {
             "Person" => EventType::Person,
             "Auction" => EventType::Auction,
             "Bid" => EventType::Bid,
-            _ => return Err(anyhow!("Unknown table type {} found", event_type_string)),
+            _ => {
+                return Err(SourceError::source_error(format!(
+                    "Unknown table type {} found",
+                    event_type_string
+                )))
+            }
         };
 
         let use_real_time = properties.use_real_time;
@@ -105,9 +110,9 @@ impl SplitReader for NexmarkSplitReader {
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         let chunk = match self.generator.next().await {
-            Err(e) => return Err(anyhow!(e)),
+            Err(e) => return Err(e.into()),
             Ok(chunk) => chunk,
         };
 

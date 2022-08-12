@@ -117,9 +117,10 @@ impl<S: StateStore> SourceStateHandler<S> {
         let s = self.restore_states(stream_source_split.id(), epoch).await?;
 
         let split = match s {
-            Some(s) => {
-                Some(SplitImpl::restore_from_bytes(&s).map_err(StreamExecutorError::source_error)?)
-            }
+            Some(s) => Some(
+                SplitImpl::restore_from_bytes(&s)
+                    .map_err(|e| StreamExecutorError::source_error(anyhow::anyhow!(e)))?,
+            ),
             None => None,
         };
 
@@ -131,6 +132,7 @@ impl<S: StateStore> SourceStateHandler<S> {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
+    use risingwave_connector::source::error::{SourceError, SourceResult};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use serde::{Deserialize, Serialize};
@@ -160,8 +162,8 @@ mod tests {
             Bytes::from(serde_json::to_string(self).unwrap())
         }
 
-        fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-            serde_json::from_slice(bytes).map_err(|e| anyhow::anyhow!(e))
+        fn restore_from_bytes(bytes: &[u8]) -> SourceResult<Self> {
+            serde_json::from_slice(bytes).map_err(SourceError::from)
         }
     }
 

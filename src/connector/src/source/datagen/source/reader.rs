@@ -14,13 +14,13 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 
 use super::generator::DatagenEventGenerator;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
+use crate::source::error::SourceResult;
 use crate::source::{
     Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader,
 };
@@ -40,7 +40,7 @@ impl SplitReader for DatagenSplitReader {
         properties: DatagenProperties,
         state: ConnectorState,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>
+    ) -> SourceResult<Self>
     where
         Self: Sized,
     {
@@ -201,7 +201,7 @@ impl SplitReader for DatagenSplitReader {
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         self.generator.next().await
     }
 }
@@ -213,7 +213,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_generator() -> Result<()> {
+    async fn test_generator() -> SourceResult<()> {
         let mock_datum = vec![
             Column {
                 name: "_".to_string(),
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_random_deterministic() -> Result<()> {
+    async fn test_random_deterministic() -> SourceResult<()> {
         let mock_datum = vec![
             Column {
                 name: "_".to_string(),

@@ -27,6 +27,7 @@ use thiserror::Error;
 use tokio::sync;
 use tokio::sync::mpsc::Sender;
 
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::filesystem::file_common::{
     Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,
 };
@@ -121,7 +122,7 @@ fn find_prefix(match_pattern: &str) -> String {
 pub async fn new_share_config(
     region: String,
     credential: AwsCredential,
-) -> anyhow::Result<aws_types::SdkConfig> {
+) -> SourceResult<aws_types::SdkConfig> {
     let region_obj = Some(Region::new(region));
     let credential_provider = match credential {
         AwsCredential::Default => SharedCredentialsProvider::new(
@@ -206,7 +207,7 @@ pub struct S3Directory {
 }
 
 impl S3Directory {
-    pub fn is_match(&self, s3_object_key: String) -> anyhow::Result<bool> {
+    pub fn is_match(&self, s3_object_key: String) -> SourceResult<bool> {
         let match_string_option = self.source_config.clone().basic_config.match_pattern;
         if let Some(match_string) = match_string_option {
             let glob = globset::Glob::new(match_string.as_str());
@@ -214,7 +215,7 @@ impl S3Directory {
                 let glob_matcher = matcher.compile_matcher();
                 Ok(glob_matcher.is_match(s3_object_key.as_str()))
             } else {
-                Err(anyhow::Error::from(glob.err().unwrap()))
+                Err(glob.err().unwrap().into())
             }
         } else {
             Ok(true)
@@ -239,7 +240,7 @@ impl S3Directory {
         sender: &Sender<EntryOptEvent>,
         sqs_msg: aws_sdk_sqs::model::Message,
         sqs_client: &sqs_client::Client,
-    ) -> anyhow::Result<()> {
+    ) -> SourceResult<()> {
         let msg_body = sqs_msg.body.as_ref();
         match msg_body {
             Some(body) => {
@@ -275,7 +276,9 @@ impl S3Directory {
                                         })
                                         .await;
                                     if send_rs.is_err() {
-                                        return Err(anyhow::Error::from(send_rs.err().unwrap()));
+                                        return Err(SourceError::send_error(
+                                            send_rs.err().unwrap().to_string(),
+                                        ));
                                     } else {
                                         let del_msg_rs = sqs_client
                                             .delete_message()
@@ -293,8 +296,8 @@ impl S3Directory {
                                                 "sqs_recv_msg_post del sqs msg error. {:?}",
                                                 del_msg_rs
                                             );
-                                            return Err(anyhow::Error::from(
-                                                del_msg_rs.err().unwrap(),
+                                            return Err(SourceError::sdk_error(
+                                                del_msg_rs.err().unwrap().to_string(),
                                             ));
                                         }
                                     }
@@ -304,7 +307,7 @@ impl S3Directory {
                     }
                     Err(err) => {
                         error!("S3Directory receive sqs message error cause by {:?}", err);
-                        return Err(anyhow::Error::from(err));
+                        return Err(err.into());
                     }
                 }
             }
@@ -322,7 +325,7 @@ impl Directory for S3Directory {
         &self,
         sender: Sender<EntryOptEvent>,
         mut running_status: watch::Receiver<StatusWatch>,
-    ) -> anyhow::Result<()> {
+    ) -> SourceResult<()> {
         let sqs_config = self.source_config.clone().sqs_config;
         let sqs_queue_url_rs = match self
             .client_for_sqs
@@ -350,7 +353,7 @@ impl Directory for S3Directory {
         let sqs_queue_url = match sqs_queue_url_rs {
             Ok(queue) => queue,
             Err(err) => {
-                return Err(err.into());
+                return Err(SourceError::filesystem_opt_error(err.to_string()));
             }
         };
         loop {
@@ -407,13 +410,13 @@ impl Directory for S3Directory {
                 }
                 Err(e) => {
                     error!("sqs response message error");
-                    return Err(e.into());
+                    return Err(SourceError::sdk_error(e.to_string()));
                 }
             }
         }
     }
 
-    async fn list_entries(&self) -> anyhow::Result<Vec<EntryStat>> {
+    async fn list_entries(&self) -> SourceResult<Vec<EntryStat>> {
         let prefix_string =
             if let Some(match_string) = self.source_config.clone().basic_config.match_pattern {
                 let glob = globset::Glob::new(match_string.as_str());
@@ -459,10 +462,12 @@ impl Directory for S3Directory {
                         None => Ok(Vec::default()),
                     }
                 } else {
-                    Err(anyhow::Error::from(obj_keys_rsp.err().unwrap()))
+                    Err(SourceError::sdk_error(
+                        obj_keys_rsp.err().unwrap().to_string(),
+                    ))
                 }
             }
-            Err(err) => Err(anyhow::Error::from(err)),
+            Err(err) => Err(err.into()),
         }
     }
 

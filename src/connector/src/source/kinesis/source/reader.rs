@@ -15,7 +15,6 @@
 use core::result::Result::Ok;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
@@ -28,6 +27,7 @@ use futures_concurrency::prelude::*;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::{build_client, KinesisProperties};
@@ -62,7 +62,7 @@ pub struct KinesisSplitReader {
 }
 
 impl KinesisSplitReader {
-    pub async fn new(properties: KinesisProperties, split: KinesisSplit) -> Result<Self> {
+    pub async fn new(properties: KinesisProperties, split: KinesisSplit) -> SourceResult<Self> {
         let stream_name = properties.stream_name.clone();
         let client = build_client(properties).await?;
         Ok(Self {
@@ -76,7 +76,7 @@ impl KinesisSplitReader {
         })
     }
 
-    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
+    pub async fn next(&mut self) -> SourceResult<Vec<SourceMessage>> {
         if self.shard_iter.is_none() {
             self.new_shard_iter().await?;
         }
@@ -109,13 +109,13 @@ impl KinesisSplitReader {
                         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                         continue;
                     }
-                    e => return Err(anyhow!(e)),
+                    e => return Err(SourceError::sdk_error(e.to_string())),
                 },
             };
         }
     }
 
-    async fn new_shard_iter(&mut self) -> Result<()> {
+    async fn new_shard_iter(&mut self) -> SourceResult<()> {
         let (starting_seq_num, iter_type) = if self.latest_offset.is_some() {
             (
                 self.latest_offset.take(),
@@ -139,16 +139,15 @@ impl KinesisSplitReader {
             .shard_iterator_type(iter_type)
             .set_starting_sequence_number(starting_seq_num)
             .send()
-            .await?;
+            .await
+            .map_err(|e| SourceError::sdk_error(e.to_string()))?;
 
         self.shard_iter = resp.shard_iterator().map(String::from);
 
         Ok(())
     }
 
-    async fn get_records(
-        &mut self,
-    ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
+    async fn get_records(&mut self) -> Result<GetRecordsOutput, SdkError<GetRecordsError>> {
         self.client
             .get_records()
             .set_shard_iterator(self.shard_iter.take())
@@ -179,7 +178,7 @@ impl SplitReader for KinesisMultiSplitReader {
         properties: KinesisProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
+    ) -> SourceResult<Self>
     where
         Self: Sized,
     {
@@ -189,16 +188,19 @@ impl SplitReader for KinesisMultiSplitReader {
                 .iter()
                 .map(|split| match split {
                     SplitImpl::Kinesis(ks) => Ok(ks.to_owned()),
-                    _ => Err(anyhow!(format!("expect KinesisSplit, got {:?}", split))),
+                    _ => Err(SourceError::source_error(format!(
+                        "expect KinesisSplit, got {:?}",
+                        split
+                    ))),
                 })
-                .collect::<Result<Vec<KinesisSplit>>>()?,
+                .collect::<SourceResult<Vec<KinesisSplit>>>()?,
             properties,
             message_cache: Arc::new(Mutex::new(Vec::new())),
             consumer_handler: None,
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         if self.consumer_handler.is_none() {
             let split_readers = join_all(
                 self.splits
@@ -263,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_single_thread_kinesis_reader() -> Result<()> {
+    async fn test_single_thread_kinesis_reader() -> SourceResult<()> {
         let properties = KinesisProperties {
             assume_role_arn: None,
             credentials_access_key: None,
@@ -314,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_multi_splits() -> Result<()> {
+    async fn test_multi_splits() -> SourceResult<()> {
         let properties = KinesisProperties {
             assume_role_arn: None,
             credentials_access_key: None,

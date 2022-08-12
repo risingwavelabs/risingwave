@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 
+use crate::source::error::SourceResult;
 use crate::source::nexmark::split::NexmarkSplit;
 use crate::source::nexmark::NexmarkProperties;
 use crate::source::SplitEnumerator;
@@ -29,12 +30,12 @@ impl SplitEnumerator for NexmarkSplitEnumerator {
     type Properties = NexmarkProperties;
     type Split = NexmarkSplit;
 
-    async fn new(properties: NexmarkProperties) -> anyhow::Result<NexmarkSplitEnumerator> {
+    async fn new(properties: NexmarkProperties) -> SourceResult<NexmarkSplitEnumerator> {
         let split_num = properties.split_num;
         Ok(Self { split_num })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<NexmarkSplit>> {
+    async fn list_splits(&mut self) -> SourceResult<Vec<NexmarkSplit>> {
         let mut splits = vec![];
         for i in 0..self.split_num {
             splits.push(NexmarkSplit {

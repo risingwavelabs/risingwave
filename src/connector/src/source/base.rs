@@ -14,20 +14,20 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::error::ErrorCode;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
 
+use super::error::SourceResult;
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
 };
 use crate::source::dummy_connector::DummySplitReader;
+use crate::source::error::SourceError;
 use crate::source::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::source::kafka::enumerator::KafkaSplitEnumerator;
 use crate::source::kafka::source::KafkaSplitReader;
@@ -53,8 +53,8 @@ pub trait SplitEnumerator: Sized {
     type Split: SplitMetaData + Send + Sync;
     type Properties;
 
-    async fn new(properties: Self::Properties) -> Result<Self>;
-    async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+    async fn new(properties: Self::Properties) -> SourceResult<Self>;
+    async fn list_splits(&mut self) -> SourceResult<Vec<Self::Split>>;
 }
 
 /// [`SplitReader`] is an abstraction of the external connector read interface,
@@ -70,9 +70,9 @@ pub trait SplitReader: Sized {
         properties: Self::Properties,
         state: ConnectorState,
         columns: Option<Vec<Column>>,
-    ) -> Result<Self>;
+    ) -> SourceResult<Self>;
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, EnumAsInner, PartialEq, Hash)]
@@ -171,7 +171,7 @@ pub struct SourceMessage {
 pub trait SplitMetaData: Sized {
     fn id(&self) -> String;
     fn encode_to_bytes(&self) -> Bytes;
-    fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
+    fn restore_from_bytes(bytes: &[u8]) -> SourceResult<Self>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
@@ -187,7 +187,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_split_impl_get_fn() -> Result<()> {
+    fn test_split_impl_get_fn() -> SourceResult<()> {
         let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
         let split_impl = SplitImpl::Kafka(split.clone());
         let get_value = split_impl.into_kafka().unwrap();

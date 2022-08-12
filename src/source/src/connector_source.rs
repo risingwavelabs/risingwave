@@ -21,7 +21,8 @@ use futures::future::{try_join_all, Either};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::error::Result;
+use risingwave_connector::source::error::{SourceError, SourceResult};
 use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitMetaData, SplitReaderImpl,
 };
@@ -75,10 +76,10 @@ pub struct ConnectorSourceReader {
     pub columns: Vec<SourceColumnDesc>,
 
     handles: Option<HashMap<String, InnerConnectorSourceReaderHandle>>,
-    message_rx: Receiver<Either<Vec<SourceMessage>, RwError>>,
+    message_rx: Receiver<Either<Vec<SourceMessage>, SourceError>>,
     // We need to keep this tx, otherwise the channel will return none with 0 inner readers, and we
     // need to clone this tx when adding new inner readers in the future.
-    message_tx: Sender<Either<Vec<SourceMessage>, RwError>>,
+    message_tx: Sender<Either<Vec<SourceMessage>, SourceError>>,
 
     metrics: Arc<SourceMetrics>,
     context: SourceContext,
@@ -91,7 +92,7 @@ impl InnerConnectorSourceReader {
         columns: Vec<SourceColumnDesc>,
         metrics: Arc<SourceMetrics>,
         context: SourceContext,
-    ) -> Result<Self> {
+    ) -> SourceResult<Self> {
         tracing::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
             prop,
@@ -113,8 +114,7 @@ impl InnerConnectorSourceReader {
                     .collect_vec(),
             ),
         )
-        .await
-        .to_rw_result()?;
+        .await?;
 
         Ok(InnerConnectorSourceReader {
             reader,
@@ -127,7 +127,7 @@ impl InnerConnectorSourceReader {
     async fn run(
         &mut self,
         mut stop: oneshot::Receiver<()>,
-        output: mpsc::Sender<Either<Vec<SourceMessage>, RwError>>,
+        output: mpsc::Sender<Either<Vec<SourceMessage>, SourceError>>,
     ) {
         let actor_id = self.context.actor_id.to_string();
         let source_id = self.context.source_id.to_string();
@@ -136,7 +136,7 @@ impl InnerConnectorSourceReader {
                 Some(splits) => splits[0].id(),
                 None => "None".to_string(),
             };
-            let chunk: anyhow::Result<Option<Vec<SourceMessage>>>;
+            let chunk: SourceResult<Option<Vec<SourceMessage>>>;
             tokio::select! {
                 biased;
                 // stop chan has high priority
@@ -150,7 +150,7 @@ impl InnerConnectorSourceReader {
                 }
             }
 
-            match chunk.map_err(|e| internal_error(e.to_string())) {
+            match chunk.map_err(|e| SourceError::source_error(e.to_string())) {
                 Err(e) => {
                     tracing::error!("connector reader {} error happened {}", id, e.to_string());
                     output.send(Either::Right(e)).await.ok();
@@ -181,7 +181,7 @@ impl StreamSourceReader for ConnectorSourceReader {
 
         let batch = match batch {
             Either::Left(batch) => batch,
-            Either::Right(e) => return Err(e),
+            Either::Right(e) => return Err(anyhow::anyhow!(e).into()),
         };
 
         let mut events = Vec::with_capacity(batch.len());
@@ -211,7 +211,8 @@ impl StreamSourceReader for ConnectorSourceReader {
         Ok(StreamChunkWithState {
             chunk: StreamChunk::new(
                 ops,
-                Self::build_columns(&self.columns, rows.as_ref())?,
+                Self::build_columns(&self.columns, rows.as_ref())
+                    .map_err(|e| anyhow::anyhow!(e))?,
                 None,
             ),
             split_offset_mapping: Some(split_offset_mapping),
@@ -230,7 +231,7 @@ impl Drop for ConnectorSourceReader {
 }
 
 impl ConnectorSourceReader {
-    pub async fn add_split(&mut self, split: ConnectorState) -> Result<()> {
+    pub async fn add_split(&mut self, split: ConnectorState) -> SourceResult<()> {
         if let Some(append_splits) = split {
             for split in append_splits {
                 let split_id = split.id();
@@ -262,18 +263,18 @@ impl ConnectorSourceReader {
         Ok(())
     }
 
-    pub async fn drop_split(&mut self, split_id: String) -> Result<()> {
+    pub async fn drop_split(&mut self, split_id: String) -> SourceResult<()> {
         let handle = self
             .handles
             .as_mut()
             .and_then(|handles| handles.remove(&split_id))
-            .ok_or_else(|| internal_error(format!("could not find split {}", split_id)))
+            .ok_or_else(|| SourceError::source_error(format!("could not find split {}", split_id)))
             .unwrap();
         handle.stop_tx.send(()).unwrap();
         handle
             .join_handle
             .await
-            .map_err(|e| internal_error(e.to_string()))
+            .map_err(|e| SourceError::source_error(e.to_string()))
     }
 }
 
@@ -285,7 +286,7 @@ pub struct ConnectorSource {
 }
 
 impl ConnectorSource {
-    fn get_target_columns(&self, column_ids: Vec<ColumnId>) -> Result<Vec<SourceColumnDesc>> {
+    fn get_target_columns(&self, column_ids: Vec<ColumnId>) -> SourceResult<Vec<SourceColumnDesc>> {
         column_ids
             .iter()
             .map(|id| {
@@ -293,14 +294,14 @@ impl ConnectorSource {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {
-                        internal_error(format!(
+                        SourceError::source_error(format!(
                             "Failed to find column id: {} in source: {:?}",
                             id, self
                         ))
                     })
                     .map(|col| col.clone())
             })
-            .collect::<Result<Vec<SourceColumnDesc>>>()
+            .collect::<SourceResult<Vec<SourceColumnDesc>>>()
     }
 
     pub async fn stream_reader(
@@ -317,7 +318,9 @@ impl ConnectorSource {
             1
         });
         let config = self.config.clone();
-        let columns = self.get_target_columns(column_ids)?;
+        let columns = self
+            .get_target_columns(column_ids)
+            .map_err(|e| anyhow::anyhow!(e))?;
         let source_metrics = metrics.clone();
 
         let to_reader_splits = match splits {
@@ -338,7 +341,8 @@ impl ConnectorSource {
                     InnerConnectorSourceReader::new(props, split, columns, metrics, context).await
                 }
             }))
-            .await?;
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         for mut reader in readers {
             let split_id = match &reader.split {
