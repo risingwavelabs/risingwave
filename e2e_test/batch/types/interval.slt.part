@@ -34,6 +34,16 @@ SELECT interval '6 second';
 00:00:06
 
 query T
+SELECT '6'::interval;
+----
+00:00:06
+
+query T
+SELECT concat(5, 'minute')::interval;
+----
+00:05:00
+
+query T
 SELECT interval '1' month = interval '30' day;
 ----
 t
