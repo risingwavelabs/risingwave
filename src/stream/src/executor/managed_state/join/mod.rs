@@ -33,6 +33,7 @@ use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::ActorId;
 
 type DegreeType = u64;
 /// This is a row with a match degree
@@ -125,7 +126,7 @@ pub struct JoinHashMapMetrics {
 }
 
 impl JoinHashMapMetrics {
-    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: u64, side: &'static str) -> Self {
+    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: ActorId, side: &'static str) -> Self {
         Self {
             metrics,
             actor_id: actor_id.to_string(),
@@ -164,7 +165,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Current epoch
     current_epoch: u64,
     /// State table
-    state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: RowBasedStateTable<S>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -179,7 +180,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         mut data_types: Vec<DataType>,
         state_table: RowBasedStateTable<S>,
         metrics: Arc<StreamingMetrics>,
-        actor_id: u64,
+        actor_id: ActorId,
         side: &'static str,
     ) -> Self {
         let join_key_data_types = join_key_indices

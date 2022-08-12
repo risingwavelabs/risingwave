@@ -97,12 +97,12 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     }
 
     /// Update the vnode bitmap of this state table, used for fragment scaling or migration.
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
-        self.storage_table.update_vnode_bitmap(new_vnodes);
+        self.storage_table.update_vnode_bitmap(vnode_bitmap);
     }
 
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.

@@ -330,7 +330,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     }
 
     /// Update the vnode bitmap of this storage table, used for fragment scaling or migration.
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+    pub(super) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
         assert!(
             !self.dist_key_indices.is_empty(),
             "should not update vnode bitmap for singleton table"
