@@ -350,12 +350,12 @@ impl ListValue {
     ) -> memcomparable::Result<Self> {
         // This is a bit dirty, but idk how to correctly deserialize bytes in memcomparable
         // format without this...
-        struct Visitor;
-        impl<'a> serde::de::Visitor<'a> for Visitor {
+        struct Visitor<'a>(&'a DataType);
+        impl<'a> serde::de::Visitor<'a> for Visitor<'a> {
             type Value = Vec<u8>;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                write!(formatter, "")
+                write!(formatter, "a list of {}", self.0)
             }
 
             fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
@@ -365,7 +365,7 @@ impl ListValue {
                 Ok(v)
             }
         }
-        let visitor = Visitor;
+        let visitor = Visitor(datatype);
         let bytes = deserializer.deserialize_byte_buf(visitor)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
         let mut values = Vec::new();
