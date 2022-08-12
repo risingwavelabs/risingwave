@@ -30,12 +30,12 @@ use crate::hummock::{
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 pub struct SstableBlocks {
-    pub blocks: LinkedList<(usize, Arc<Block>)>,
+    pub blocks: LinkedList<(usize, Box<Block>)>,
     _tracker: MemoryTracker,
 }
 
 impl SstableBlocks {
-    pub fn next(&mut self) -> Option<(usize, Arc<Block>)> {
+    pub fn next(&mut self) -> Option<(usize, Box<Block>)> {
         self.blocks.pop_front()
     }
 }
@@ -105,7 +105,7 @@ impl CompactorSstableStore {
             let end_offset = start_offset + sst.meta.block_metas[idx].len as usize;
             let block = Block::decode(&block_data[start_offset..end_offset])?;
             charge += block.raw_data().len();
-            blocks.push_back((idx, Arc::new(block)));
+            blocks.push_back((idx, Box::new(block)));
         }
         drop(block_data);
         tracker.increase_memory(charge as u64).await;
