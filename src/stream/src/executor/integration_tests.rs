@@ -54,6 +54,7 @@ async fn test_merger_sum_aggr() {
             ActorContext::create(),
             0,
             0,
+            0,
             metrics,
         );
         let append_only = false;
@@ -127,6 +128,7 @@ async fn test_merger_sum_aggr() {
         vec![],
         LocalInput::for_test(rx),
         ActorContext::create(),
+        0,
         0,
         0,
         Arc::new(StreamingMetrics::unused()),
