@@ -22,8 +22,8 @@ use crate::source::nexmark::source::event::EventType;
 use crate::source::nexmark::source::generator::NexmarkEventGenerator;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    spawn_data_generation, Column, ConnectorState, DataGenerationReceiver, SourceMessage, SplitId,
-    SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation_stream, Column, ConnectorState, DataGenerationReceiver, SourceMessage,
+    SplitId, SplitImpl, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug)]
@@ -103,8 +103,8 @@ impl SplitReader for NexmarkSplitReader {
             }
         }
 
-        // Spawn a thread for data generation since it's CPU intensive.
-        let generation_rx = spawn_data_generation(move || generator.next());
+        // Spawn a new runtime for data generation since it's CPU intensive.
+        let generation_rx = spawn_data_generation_stream(generator.into_stream());
 
         Ok(Self {
             generation_rx,

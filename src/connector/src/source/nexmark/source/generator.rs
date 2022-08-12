@@ -15,6 +15,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Ok, Result};
+use futures_async_stream::try_stream;
 use risingwave_common::bail;
 
 use crate::source::nexmark::config::NexmarkConfig;
@@ -39,8 +40,14 @@ pub struct NexmarkEventGenerator {
 }
 
 impl NexmarkEventGenerator {
-    #[expect(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<Vec<SourceMessage>> {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(mut self) {
+        loop {
+            yield self.next().await?
+        }
+    }
+
+    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
         if self.split_num == 0 {
             bail!("NexmarkEventGenerator is not ready");
         }
@@ -88,9 +95,10 @@ impl NexmarkEventGenerator {
             // When the generated timestamp is larger then current timestamp, if its the first
             // event, sleep and continue. Otherwise, directly return.
             if self.use_real_time && current_timestamp < new_wall_clock_base_time as u64 {
-                std::thread::sleep(std::time::Duration::from_millis(
+                tokio::time::sleep(std::time::Duration::from_millis(
                     new_wall_clock_base_time as u64 - current_timestamp,
-                ));
+                ))
+                .await;
 
                 self.last_event = Some(event);
                 break;
@@ -103,9 +111,10 @@ impl NexmarkEventGenerator {
         }
 
         if !self.use_real_time && self.min_event_gap_in_ns > 0 {
-            std::thread::sleep(std::time::Duration::from_nanos(
+            tokio::time::sleep(std::time::Duration::from_nanos(
                 (self.events_so_far - old_events_so_far) as u64 * self.min_event_gap_in_ns,
-            ));
+            ))
+            .await;
         }
 
         Ok(res)

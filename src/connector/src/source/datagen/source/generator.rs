@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use bytes::Bytes;
+use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::{Map, Value};
 
@@ -53,7 +54,14 @@ impl DatagenEventGenerator {
         })
     }
 
-    pub fn next(&mut self) -> Result<Vec<SourceMessage>> {
+    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_stream(mut self) {
+        loop {
+            yield self.next().await?
+        }
+    }
+
+    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
         let now = Instant::now();
         let mut res = vec![];
         let mut generated_count: u64 = 0;
@@ -83,9 +91,10 @@ impl DatagenEventGenerator {
 
         // if left time < 1s then wait
         if now.elapsed().as_millis() < DEFAULT_DATAGEN_INTERVAL {
-            std::thread::sleep(Duration::from_millis(
+            tokio::time::sleep(Duration::from_millis(
                 (DEFAULT_DATAGEN_INTERVAL - now.elapsed().as_millis()) as u64,
-            ));
+            ))
+            .await;
         }
 
         Ok(res)
@@ -96,7 +105,7 @@ impl DatagenEventGenerator {
 mod tests {
     use super::*;
 
-    fn check_sequence_partition_result(
+    async fn check_sequence_partition_result(
         split_num: u64,
         split_index: u64,
         rows_per_second: u64,
@@ -138,25 +147,25 @@ mod tests {
         )
         .unwrap();
 
-        let chunk = generator.next().unwrap();
+        let chunk = generator.next().await.unwrap();
         assert_eq!(expected_length, chunk.len());
     }
 
-    #[test]
-    fn test_one_partition_sequence() {
-        check_sequence_partition_result(1, 0, 10, 10);
+    #[tokio::test]
+    async fn test_one_partition_sequence() {
+        check_sequence_partition_result(1, 0, 10, 10).await;
     }
 
-    #[test]
-    fn test_two_partition_sequence() {
-        check_sequence_partition_result(2, 0, 10, 5);
-        check_sequence_partition_result(2, 1, 10, 5);
+    #[tokio::test]
+    async fn test_two_partition_sequence() {
+        check_sequence_partition_result(2, 0, 10, 5).await;
+        check_sequence_partition_result(2, 1, 10, 5).await;
     }
 
-    #[test]
-    fn test_three_partition_sequence() {
-        check_sequence_partition_result(3, 0, 10, 4);
-        check_sequence_partition_result(3, 1, 10, 3);
-        check_sequence_partition_result(3, 2, 10, 3);
+    #[tokio::test]
+    async fn test_three_partition_sequence() {
+        check_sequence_partition_result(3, 0, 10, 4).await;
+        check_sequence_partition_result(3, 1, 10, 3).await;
+        check_sequence_partition_result(3, 2, 10, 3).await;
     }
 }

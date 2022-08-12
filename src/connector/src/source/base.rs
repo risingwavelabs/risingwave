@@ -19,6 +19,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode;
@@ -188,22 +189,43 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 /// Used for acquiring the generated data for [`spawn_data_generation`].
 pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
 
-/// Spawn a new **thread** to run the data generator, returns a channel receiver for acquiring the
+/// Spawn a **new runtime** to run the data generator, returns a channel receiver for acquiring the
 /// generated data. This is used for the [`DatagenSplitReader`] and [`NexmarkSplitReader`] in case
 /// that they are CPU intensive and may block the streaming actors.
-pub fn spawn_data_generation(
-    mut generator_next: impl FnMut() -> Result<Vec<SourceMessage>> + Send + 'static,
+pub fn spawn_data_generation_stream(
+    stream: impl Stream<Item = Result<Vec<SourceMessage>>> + Send + 'static,
 ) -> DataGenerationReceiver {
     const GENERATION_BUFFER: usize = 4;
 
     let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
-    std::thread::spawn(move || loop {
-        let result = generator_next();
-        if generation_tx.blocking_send(result).is_err() {
-            tracing::warn!("failed to send next event to reader, exit");
-            break;
+    let future = async move {
+        pin_mut!(stream);
+        loop {
+            match stream.next().await {
+                Some(result) => {
+                    if generation_tx.send(result).await.is_err() {
+                        tracing::warn!("failed to send next event to reader, exit");
+                        break;
+                    }
+                }
+                None => break,
+            }
         }
-    });
+    };
+
+    #[cfg(not(madsim))]
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .thread_name("data-generation")
+        .build()
+        .unwrap()
+        .spawn(future);
+
+    // Note: madsim does not support creating multiple runtime, so we just run it in current
+    // runtime.
+    #[cfg(madsim)]
+    tokio::spawn(future);
+
     generation_rx
 }
 
