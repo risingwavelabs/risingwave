@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::VIRTUAL_NODE_SIZE;
 use risingwave_common::util::ordered::OrderedRowDeserializer;
@@ -200,9 +200,8 @@ impl SchemaFilterKeyExtractor {
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
     id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
-
     // cached state
-    last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
+    // last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
 }
 
 impl MultiFilterKeyExtractor {
@@ -213,14 +212,6 @@ impl MultiFilterKeyExtractor {
 
     pub fn size(&self) -> usize {
         self.id_to_filter_key_extractor.len()
-    }
-
-    #[cfg(test)]
-    fn last_filter_key_extractor_state(&self) -> Option<(u32, Arc<FilterKeyExtractorImpl>)> {
-        self.last_filter_key_extractor_state
-            .try_lock()
-            .unwrap()
-            .clone()
     }
 }
 
@@ -237,33 +228,10 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
         }
 
         let table_id = get_table_id(full_key).unwrap();
-        let mut last_state = self.last_filter_key_extractor_state.try_lock().unwrap();
-
-        match last_state.as_ref() {
-            Some(last_filter_key_extractor_state) => {
-                if table_id != last_filter_key_extractor_state.0 {
-                    last_state.replace((
-                        table_id,
-                        self.id_to_filter_key_extractor
-                            .get(&table_id)
-                            .unwrap()
-                            .clone(),
-                    ));
-                }
-            }
-
-            None => {
-                last_state.replace((
-                    table_id,
-                    self.id_to_filter_key_extractor
-                        .get(&table_id)
-                        .unwrap()
-                        .clone(),
-                ));
-            }
-        }
-
-        last_state.as_ref().unwrap().1.extract(full_key)
+        self.id_to_filter_key_extractor
+            .get(&table_id)
+            .unwrap()
+            .extract(full_key)
     }
 }
 
@@ -573,8 +541,8 @@ mod tests {
     #[test]
     fn test_multi_filter_key_extractor() {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
-        let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-        assert!(last_state.is_none());
+        // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
+        // assert!(last_state.is_none());
 
         {
             // test table_id 1
@@ -619,9 +587,9 @@ mod tests {
                 output_key.len()
             );
 
-            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            assert!(last_state.is_some());
-            assert_eq!(1, last_state.as_ref().unwrap().0);
+            // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
+            // assert!(last_state.is_some());
+            // assert_eq!(1, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -668,9 +636,9 @@ mod tests {
                 output_key.len()
             );
 
-            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            assert!(last_state.is_some());
-            assert_eq!(2, last_state.as_ref().unwrap().0);
+            // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
+            // assert!(last_state.is_some());
+            // assert_eq!(2, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -701,9 +669,9 @@ mod tests {
                 output_key.len()
             );
 
-            let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
-            assert!(last_state.is_some());
-            assert_eq!(3, last_state.as_ref().unwrap().0);
+            // let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
+            // assert!(last_state.is_some());
+            // assert_eq!(3, last_state.as_ref().unwrap().0);
         }
     }
 
