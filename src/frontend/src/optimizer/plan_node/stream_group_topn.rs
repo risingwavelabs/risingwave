@@ -48,7 +48,7 @@ impl StreamGroupTopN {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.pk_indices().to_vec(),
+            input.logical_pk().to_vec(),
             dist,
             false,
         );
@@ -64,7 +64,7 @@ impl StreamGroupTopN {
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         let schema = &self.base.schema;
         let dist_keys = self.base.dist.dist_column_indices().to_vec();
-        let pk_indices = &self.base.pk_indices;
+        let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
         let mut internal_table_catalog_builder = TableCatalogBuilder::new();
