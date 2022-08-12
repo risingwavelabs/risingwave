@@ -301,7 +301,6 @@ impl HummockStorage {
             if level.table_infos.is_empty() {
                 continue;
             }
-            // let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
             let table_info_idx = level
                 .table_infos
                 .partition_point(|table| {
@@ -309,16 +308,18 @@ impl HummockStorage {
                     ord == Ordering::Less || ord == Ordering::Equal
                 })
                 .saturating_sub(1);
-            let table = self
-                .sstable_store
-                .sstable(level.table_infos[table_info_idx].id, &mut stats)
-                .await?;
-            table_counts += 1;
-            if let Some(v) = self
-                .get_from_table(table, &internal_key, key, &mut stats)
-                .await?
-            {
-                return Ok(v);
+            if table_info_idx < level.table_infos.len() {
+                let table = self
+                    .sstable_store
+                    .sstable(level.table_infos[table_info_idx].id, &mut stats)
+                    .await?;
+                table_counts += 1;
+                if let Some(v) = self
+                    .get_from_table(table, &internal_key, key, &mut stats)
+                    .await?
+                {
+                    return Ok(v);
+                }
             }
         }
 
