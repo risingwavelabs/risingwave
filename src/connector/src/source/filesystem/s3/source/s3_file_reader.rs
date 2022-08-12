@@ -264,7 +264,7 @@ impl S3FileReader {
             }
             Err(err) => {
                 error!("S3FileReader get_object error cause by {:?}", err);
-                Err(err.into())
+                Err(err)
             }
         }
     }

@@ -56,7 +56,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             Some("latest") => PulsarEnumeratorOffset::Latest,
             None => PulsarEnumeratorOffset::Earliest,
             _ => {
-                return Err(SourceError::source_error(
+                return Err(SourceError::into_source_error(
                     "properties `startup_mode` only support earliest and latest or leave it empty"
                         .to_string(),
                 ));
@@ -83,7 +83,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
         // note: may check topic exists by get stats
         if topic_metadata.partitions < 0 {
-            SourceError::source_error(format!(
+            SourceError::into_source_error(format!(
                 "illegal metadata {:?} for pulsar topic {}",
                 topic_metadata.partitions,
                 self.topic.to_string()

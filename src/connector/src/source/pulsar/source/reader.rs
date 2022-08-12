@@ -39,7 +39,7 @@ fn parse_message_id(id: &str) -> SourceResult<MessageIdData> {
     let splits = id.split(':').collect_vec();
 
     if splits.len() < 2 || splits.len() > 4 {
-        return Err(SourceError::source_error(format!(
+        return Err(SourceError::into_source_error(format!(
             "illegal message id string {}",
             id
         )));
@@ -47,10 +47,10 @@ fn parse_message_id(id: &str) -> SourceResult<MessageIdData> {
 
     let ledger_id = splits[0]
         .parse::<u64>()
-        .map_err(|e| SourceError::source_error(format!("illegal ledger id {}", e)))?;
+        .map_err(|e| SourceError::into_source_error(format!("illegal ledger id {}", e)))?;
     let entry_id = splits[1]
         .parse::<u64>()
-        .map_err(|e| SourceError::source_error(format!("illegal entry id {}", e)))?;
+        .map_err(|e| SourceError::into_source_error(format!("illegal entry id {}", e)))?;
 
     let mut message_id = MessageIdData {
         ledger_id,
@@ -64,14 +64,14 @@ fn parse_message_id(id: &str) -> SourceResult<MessageIdData> {
     if splits.len() > 2 {
         let partition = splits[2]
             .parse::<i32>()
-            .map_err(|e| SourceError::source_error(format!("illegal partition {}", e)))?;
+            .map_err(|e| SourceError::into_source_error(format!("illegal partition {}", e)))?;
         message_id.partition = Some(partition);
     }
 
     if splits.len() == 4 {
         let batch_index = splits[3]
             .parse::<i32>()
-            .map_err(|e| SourceError::source_error(format!("illegal batch index {}", e)))?;
+            .map_err(|e| SourceError::into_source_error(format!("illegal batch index {}", e)))?;
         message_id.batch_index = Some(batch_index);
     }
 
@@ -92,10 +92,11 @@ impl SplitReader for PulsarSplitReader {
     where
         Self: Sized,
     {
-        let splits = state
-            .ok_or_else(|| SourceError::source_error(format!("no default state for reader")))?;
+        let splits = state.ok_or_else(|| {
+            SourceError::into_source_error("no default state for reader".to_string())
+        })?;
         if splits.len() != 1 {
-            return Err(SourceError::source_error(
+            return Err(SourceError::into_source_error(
                 "only support single split".to_string(),
             ));
         }

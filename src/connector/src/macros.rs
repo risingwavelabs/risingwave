@@ -20,7 +20,7 @@ macro_rules! impl_split_enumerator {
              pub async fn create(properties: ConnectorProperties) -> SourceResult<Self> {
                 match properties {
                     $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(props).await.map(Self::$variant_name).map_err(SourceError::from), )*
-                    other => Err(SourceError::source_error(format!(
+                    other => Err(SourceError::into_source_error(format!(
                         "split enumerator type for config {:?} is not supported",
                         other
                     ))),
@@ -37,7 +37,7 @@ macro_rules! impl_split_enumerator {
                                 .map(SplitImpl::$variant_name)
                                 .collect_vec()
                         })
-                        .map_err(|e| SourceError::source_error(e.to_string())),
+                        .map_err(|e| SourceError::into_source_error(e.to_string())),
                     )*
                 }
              }
@@ -63,7 +63,7 @@ macro_rules! impl_split {
                 match split.split_type.to_lowercase().as_str() {
                     $( $connector_name => <$split>::restore_from_bytes(split.encoded_split.as_ref()).map(SplitImpl::$variant_name).map_err(SourceError::from), )*
                         other => {
-                    Err(SourceError::source_error(format!("connector '{}' is not supported", other)))
+                    Err(SourceError::into_source_error(format!("connector '{}' is not supported", other)))
                     }
                 }
             }
@@ -138,16 +138,16 @@ macro_rules! impl_connector_properties {
         impl ConnectorProperties {
             pub fn extract(mut props: HashMap<String, String>) -> SourceResult<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";
-                let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| SourceError::source_error("Must specify 'connector' in WITH clause".to_string()))?;
+                let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| SourceError::into_source_error("Must specify 'connector' in WITH clause".to_string()))?;
                 let json_value = serde_json::to_value(props).map_err(SourceError::from)?;
                 match connector.to_lowercase().as_str() {
                     $(
                         $connector_name => {
-                            serde_json::from_value(json_value).map_err(|e| SourceError::source_error(e.to_string())).map(Self::$variant_name)
+                            serde_json::from_value(json_value).map_err(|e| SourceError::into_source_error(e.to_string())).map(Self::$variant_name)
                         },
                     )*
                     _ => {
-                        Err(SourceError::source_error(format!("connector '{}' is not supported", connector,)))
+                        Err(SourceError::into_source_error(format!("connector '{}' is not supported", connector,)))
                     }
                 }
             }

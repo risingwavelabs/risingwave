@@ -84,7 +84,7 @@ impl std::fmt::Debug for SourceError {
 }
 
 impl SourceError {
-    pub fn source_error(s: String) -> Self {
+    pub fn into_source_error(s: String) -> Self {
         SourceErrorInner::SourceError(s).into()
     }
 
@@ -151,7 +151,7 @@ impl From<globset::Error> for SourceError {
 
 impl From<pulsar::Error> for SourceError {
     fn from(a: pulsar::Error) -> Self {
-        SourceErrorInner::PulsarError(a.into()).into()
+        SourceErrorInner::PulsarError(a).into()
     }
 }
 

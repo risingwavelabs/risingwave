@@ -57,7 +57,7 @@ impl SplitReader for NexmarkSplitReader {
             "Auction" => EventType::Auction,
             "Bid" => EventType::Bid,
             _ => {
-                return Err(SourceError::source_error(format!(
+                return Err(SourceError::into_source_error(format!(
                     "Unknown table type {} found",
                     event_type_string
                 )))

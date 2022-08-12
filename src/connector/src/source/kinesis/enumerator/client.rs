@@ -58,7 +58,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
             match list_shard_output.shards {
                 Some(shard) => shard_collect.extend(shard),
                 None => {
-                    return Err(SourceError::source_error(format!(
+                    return Err(SourceError::into_source_error(format!(
                         "no shards in stream {}",
                         &self.stream_name
                     )));

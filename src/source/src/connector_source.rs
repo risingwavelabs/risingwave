@@ -155,7 +155,7 @@ impl InnerConnectorSourceReader {
                 }
             }
 
-            match chunk.map_err(|e| SourceError::source_error(e.to_string())) {
+            match chunk.map_err(|e| SourceError::into_source_error(e.to_string())) {
                 Err(e) => {
                     tracing::error!("connector reader {} error happened {}", id, e.to_string());
                     output.send(Err(e)).await.ok();
@@ -271,13 +271,15 @@ impl ConnectorSourceReader {
             .handles
             .as_mut()
             .and_then(|handles| handles.remove(&split_id))
-            .ok_or_else(|| SourceError::source_error(format!("could not find split {}", split_id)))
+            .ok_or_else(|| {
+                SourceError::into_source_error(format!("could not find split {}", split_id))
+            })
             .unwrap();
         handle.stop_tx.send(()).unwrap();
         handle
             .join_handle
             .await
-            .map_err(|e| SourceError::source_error(e.to_string()))
+            .map_err(|e| SourceError::into_source_error(e.to_string()))
     }
 }
 
@@ -297,7 +299,7 @@ impl ConnectorSource {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {
-                        SourceError::source_error(format!(
+                        SourceError::into_source_error(format!(
                             "Failed to find column id: {} in source: {:?}",
                             id, self
                         ))

@@ -59,7 +59,7 @@ impl Topic {
 
     pub fn sub_topic(&self, partition: i32) -> SourceResult<Topic> {
         if partition < 0 {
-            return Err(SourceError::source_error(
+            return Err(SourceError::into_source_error(
                 "invalid partition index number".to_string(),
             ));
         }
@@ -112,7 +112,7 @@ pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
             ),
             3 => format!("{}://{}", PERSISTENT_DOMAIN, topic),
             _ => {
-                return Err(SourceError::source_error(format!(
+                return Err(SourceError::into_source_error(format!(
                     "Invalid short topic name '{}', \
                 it should be in the format of <tenant>/<namespace>/<topic> or <topic>",
                     topic
@@ -126,7 +126,7 @@ pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
     let domain = match parts[0] {
         PERSISTENT_DOMAIN | NON_PERSISTENT_DOMAIN => parts[0],
         _ => {
-            return Err(SourceError::source_error(format!(
+            return Err(SourceError::into_source_error(format!(
                 "The domain only can be specified as 'persistent' or 'non-persistent'. Input domain is '{}'",
                 parts[0]
             )));
@@ -137,7 +137,7 @@ pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
     let parts: Vec<&str> = rest.splitn(3, '/').collect();
 
     if parts.len() != 3 {
-        return Err(SourceError::source_error(format!(
+        return Err(SourceError::into_source_error(format!(
             "invalid topic name '{}', it should be in the format of <tenant>/<namespace>/<topic>",
             rest
         )));
@@ -152,7 +152,7 @@ pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
     };
 
     if parsed_topic.topic.is_empty() {
-        return Err(SourceError::source_error(
+        return Err(SourceError::into_source_error(
             "topic name cannot be empty".to_string(),
         ));
     }

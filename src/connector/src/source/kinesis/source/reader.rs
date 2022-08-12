@@ -188,7 +188,7 @@ impl SplitReader for KinesisMultiSplitReader {
                 .iter()
                 .map(|split| match split {
                     SplitImpl::Kinesis(ks) => Ok(ks.to_owned()),
-                    _ => Err(SourceError::source_error(format!(
+                    _ => Err(SourceError::into_source_error(format!(
                         "expect KinesisSplit, got {:?}",
                         split
                     ))),

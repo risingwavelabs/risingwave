@@ -63,7 +63,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Some("latest") => KafkaEnumeratorOffset::Latest,
             None => KafkaEnumeratorOffset::Earliest,
             _ => {
-                return Err(SourceError::source_error(
+                return Err(SourceError::into_source_error(
                     "properties `scan_startup_mode` only support earliest and latest or leave it empty".to_string()
                 ));
             }
@@ -90,7 +90,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
     async fn list_splits(&mut self) -> SourceResult<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition().map_err(|e| {
-            SourceError::source_error(format!(
+            SourceError::into_source_error(format!(
                 "failed to fetch metadata from kafka ({}): {}",
                 self.broker_address, e
             ))
@@ -217,7 +217,7 @@ impl KafkaSplitEnumerator {
         let topic_meta = match metadata.topics() {
             [meta] => meta,
             _ => {
-                return Err(SourceError::source_error(format!(
+                return Err(SourceError::into_source_error(format!(
                     "topic {} not found",
                     self.topic
                 )))
@@ -225,7 +225,7 @@ impl KafkaSplitEnumerator {
         };
 
         if topic_meta.partitions().is_empty() {
-            return Err(SourceError::source_error(format!(
+            return Err(SourceError::into_source_error(format!(
                 "topic {} not found",
                 self.topic
             )));

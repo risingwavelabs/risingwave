@@ -104,7 +104,7 @@ impl AwsConfigInfo {
         );
         if access_key.is_some() ^ secret_key.is_some() {
             return Err(
-                SourceError::source_error("Both Kinesis credential access key and Kinesis secret key should be provided or not provided at the same time.".to_string())
+                SourceError::into_source_error("Both Kinesis credential access key and Kinesis secret key should be provided or not provided at the same time.".to_string())
             );
         } else if let (Some(access), Some(secret)) = (access_key, secret_key) {
             credentials = Some(AwsCredentials {
