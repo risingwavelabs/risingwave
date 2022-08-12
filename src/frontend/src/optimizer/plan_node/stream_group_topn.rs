@@ -42,6 +42,7 @@ impl StreamGroupTopN {
     ) -> Self {
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
+            Distribution::HashShard(_) => Distribution::HashShard(group_key.clone()),
             _ => panic!(),
         };
 
