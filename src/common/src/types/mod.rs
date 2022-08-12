@@ -242,25 +242,6 @@ impl DataType {
             List { datatype } => datatype.mem_cmp_eq_value_enc(),
         }
     }
-
-    /// Check if the datatype has fixed length.
-    pub fn has_fixed_length(&self) -> bool {
-        match self {
-            DataType::Boolean
-            | DataType::Int16
-            | DataType::Int32
-            | DataType::Int64
-            | DataType::Float32
-            | DataType::Float64
-            | DataType::Date
-            | DataType::Time
-            | DataType::Timestamp
-            | DataType::Timestampz
-            | DataType::Interval => true,
-            DataType::Decimal | DataType::Varchar | DataType::List { .. } => false,
-            DataType::Struct { fields } => fields.iter().all(Self::has_fixed_length),
-        }
-    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation
