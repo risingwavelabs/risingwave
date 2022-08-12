@@ -21,8 +21,8 @@ use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
-    SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockAllEpoch, HummockSnapshot, HummockVersion,
+    HummockVersionDelta, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -85,18 +85,18 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockAllEpoch> {
         self.hummock_manager
             .pin_snapshot(self.context_id)
             .await
-            .map(|e| e.epoch)
+            .map(|e| e.epoch.unwrap())
             .map_err(mock_err)
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
+    async fn get_epoch(&self) -> Result<HummockAllEpoch> {
         self.hummock_manager
             .get_last_epoch()
-            .map(|e| e.epoch)
+            .map(|e| e.epoch.unwrap())
             .map_err(mock_err)
     }
 
@@ -112,7 +112,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             .unpin_snapshot_before(
                 self.context_id,
                 HummockSnapshot {
-                    epoch: pinned_epochs,
+                    epoch: Some(HummockAllEpoch {
+                        committed_epoch: pinned_epochs,
+                        current_epoch: pinned_epochs,
+                    }),
                 },
             )
             .await

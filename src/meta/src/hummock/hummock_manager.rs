@@ -35,9 +35,9 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
-    OverlappingLevel,
+    CompactTask, CompactTaskAssignment, HummockAllEpoch, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
+    LevelType, OverlappingLevel,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -70,6 +70,7 @@ pub struct HummockManager<S: MetaStore> {
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
     max_committed_epoch: AtomicU64,
+    max_current_epoch: AtomicU64,
 
     metrics: Arc<MetaMetrics>,
 
@@ -267,6 +268,7 @@ where
             compaction_scheduler: parking_lot::RwLock::new(None),
             compactor_manager,
             max_committed_epoch: AtomicU64::new(0),
+            max_current_epoch: AtomicU64::new(0),
         };
 
         instance.load_meta_store_state().await?;
@@ -336,8 +338,8 @@ where
             let mut init_version = HummockVersion {
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
-                max_committed_epoch_for_checkpoint: INVALID_EPOCH,
-                max_committed_epoch_for_read: INVALID_EPOCH,
+                max_committed_epoch: INVALID_EPOCH,
+                max_current_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
             // Initialize independent levels via corresponding compaction group' config.
@@ -375,10 +377,10 @@ where
                 redo_state.apply_version_delta(version_delta);
             }
         }
-        self.max_committed_epoch.store(
-            redo_state.max_committed_epoch_for_checkpoint,
-            Ordering::Relaxed,
-        );
+        self.max_committed_epoch
+            .store(redo_state.max_committed_epoch, Ordering::Relaxed);
+        self.max_current_epoch
+            .store(redo_state.max_current_epoch, Ordering::Relaxed);
         versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
@@ -554,6 +556,7 @@ where
     #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
         let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
         let mut guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut guard.pinned_snapshots);
@@ -570,14 +573,21 @@ where
         }
 
         Ok(HummockSnapshot {
-            epoch: max_committed_epoch,
+            epoch: Some(HummockAllEpoch {
+                committed_epoch: max_committed_epoch,
+                current_epoch: max_current_epoch,
+            }),
         })
     }
 
     pub fn get_last_epoch(&self) -> Result<HummockSnapshot> {
         let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
         Ok(HummockSnapshot {
-            epoch: max_committed_epoch,
+            epoch: Some(HummockAllEpoch {
+                committed_epoch: max_committed_epoch,
+                current_epoch: max_current_epoch,
+            }),
         })
     }
 
@@ -612,15 +622,14 @@ where
         let _timer = start_measure_real_process_timer!(self);
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
-        let max_committed_epoch = versioning_guard
-            .current_version
-            .max_committed_epoch_for_checkpoint;
+        let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
         // Ensure the unpin will not clean the latest one.
+        let snapshot_committed_epoch = hummock_snapshot.epoch.unwrap().committed_epoch;
         #[cfg(not(test))]
         {
-            assert!(hummock_snapshot.epoch <= max_committed_epoch);
+            assert!(snapshot_committed_epoch <= max_committed_epoch);
         }
-        let last_read_epoch = std::cmp::min(hummock_snapshot.epoch, max_committed_epoch);
+        let last_read_epoch = std::cmp::min(snapshot_committed_epoch, max_committed_epoch);
 
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
@@ -696,9 +705,7 @@ where
 
                 compact_task.watermark = {
                     let versioning_guard = read_lock!(self, versioning).await;
-                    let max_committed_epoch = versioning_guard
-                        .current_version
-                        .max_committed_epoch_for_checkpoint;
+                    let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
                     versioning_guard
                         .pinned_snapshots
                         .values()
@@ -899,8 +906,9 @@ where
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
             let mut version_delta = HummockVersionDelta {
                 prev_id: old_version.id,
-                max_committed_epoch_for_checkpoint: old_version.max_committed_epoch_for_checkpoint,
+                max_committed_epoch: old_version.max_committed_epoch,
                 trivial_move,
+                max_current_epoch: old_version.max_current_epoch,
                 ..Default::default()
             };
             let level_deltas = &mut version_delta
@@ -1052,10 +1060,10 @@ where
         let mut new_hummock_version = old_version;
         new_hummock_version.id = new_version_id;
         new_version_delta.id = new_version_id;
-        if epoch <= new_hummock_version.max_committed_epoch_for_checkpoint {
+        if epoch <= new_hummock_version.max_committed_epoch {
             return Err(Error::InternalError(format!(
                 "Epoch {} <= max_committed_epoch {}",
-                epoch, new_hummock_version.max_committed_epoch_for_checkpoint
+                epoch, new_hummock_version.max_committed_epoch
             )));
         }
 
@@ -1099,12 +1107,14 @@ where
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        new_version_delta.max_committed_epoch_for_checkpoint = epoch;
-        new_hummock_version.max_committed_epoch_for_checkpoint = epoch;
+        new_version_delta.max_committed_epoch = epoch;
+        new_version_delta.max_current_epoch = epoch;
+        new_hummock_version.max_committed_epoch = epoch;
+        new_hummock_version.max_current_epoch = epoch;
         commit_multi_var!(self, None, new_version_delta)?;
         versioning.current_version = new_hummock_version;
         self.max_committed_epoch.store(epoch, Ordering::Release);
-
+        self.max_current_epoch.store(epoch, Ordering::Release);
         // Update metrics
         trigger_commit_stat(&self.metrics, &versioning.current_version);
 
@@ -1114,7 +1124,12 @@ where
             .notification_manager()
             .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
-                Info::HummockSnapshot(HummockSnapshot { epoch }),
+                Info::HummockSnapshot(HummockSnapshot {
+                    epoch: Some(HummockAllEpoch {
+                        committed_epoch: epoch,
+                        current_epoch: epoch,
+                    }),
+                }),
             );
 
         drop(versioning_guard);
@@ -1123,6 +1138,68 @@ where
         for id in modified_compaction_groups {
             self.try_send_compaction_request(id);
         }
+
+        #[cfg(test)]
+        {
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
+    }
+
+    #[named]
+    pub async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _timer = start_measure_real_process_timer!(self);
+
+        let old_version = versioning_guard.current_version.clone();
+        let new_version_id = old_version.id + 1;
+        let versioning = versioning_guard.deref_mut();
+        let mut hummock_version_deltas =
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+        let mut new_version_delta = hummock_version_deltas.new_entry_insert_txn(
+            new_version_id,
+            HummockVersionDelta {
+                prev_id: old_version.id,
+                safe_epoch: old_version.safe_epoch,
+                trivial_move: false,
+                ..Default::default()
+            },
+        );
+        let mut new_hummock_version = old_version;
+        new_hummock_version.id = new_version_id;
+        new_version_delta.id = new_version_id;
+        //?
+        if epoch <= new_hummock_version.max_committed_epoch {
+            return Err(Error::InternalError(format!(
+                "Epoch {} <= max_committed_epoch {}",
+                epoch, new_hummock_version.max_committed_epoch
+            )));
+        }
+
+        // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
+        new_version_delta.max_current_epoch = epoch;
+        new_hummock_version.max_current_epoch = epoch;
+        commit_multi_var!(self, None, new_version_delta)?;
+        versioning.current_version = new_hummock_version;
+        self.max_committed_epoch.store(epoch, Ordering::Release);
+        self.max_current_epoch.store(epoch, Ordering::Release);
+
+        tracing::trace!("new committed epoch {}", epoch);
+
+        self.env
+            .notification_manager()
+            .notify_frontend_asynchronously(
+                Operation::Update, // Frontends don't care about operation.
+                Info::HummockSnapshot(HummockSnapshot {
+                    epoch: Some(HummockAllEpoch {
+                        committed_epoch: epoch,
+                        current_epoch: epoch,
+                    }),
+                }),
+            );
+
+        drop(versioning_guard);
 
         #[cfg(test)]
         {

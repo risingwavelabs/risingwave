@@ -91,7 +91,7 @@ async fn test_update_pinned_version() {
     // Update version for epochs[0]
     let version = HummockVersion {
         id: initial_version_id + 1,
-        max_committed_epoch_for_checkpoint: epochs[0],
+        max_committed_epoch: epochs[0],
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version)));
@@ -111,7 +111,7 @@ async fn test_update_pinned_version() {
     // Update version for epochs[1]
     let version = HummockVersion {
         id: initial_version_id + 2,
-        max_committed_epoch_for_checkpoint: epochs[1],
+        max_committed_epoch: epochs[1],
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version)));
@@ -279,7 +279,7 @@ async fn test_update_uncommitted_ssts() {
     // Update version for epochs[0]
     let version = HummockVersion {
         id: initial_id + 1,
-        max_committed_epoch_for_checkpoint: epochs[0],
+        max_committed_epoch: epochs[0],
         ..Default::default()
     };
     assert!(local_version_manager
@@ -313,7 +313,7 @@ async fn test_update_uncommitted_ssts() {
     // Update version for epochs[1]
     let version = HummockVersion {
         id: initial_id + 2,
-        max_committed_epoch_for_checkpoint: epochs[1],
+        max_committed_epoch: epochs[1],
         ..Default::default()
     };
     local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version.clone())));

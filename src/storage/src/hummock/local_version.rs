@@ -74,10 +74,10 @@ impl LocalVersion {
     pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
         if self.pinned_version.max_committed_epoch_for_checkpoint()
-            < new_pinned_version.max_committed_epoch_for_checkpoint
+            < new_pinned_version.max_committed_epoch
         {
             self.shared_buffer
-                .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch_for_checkpoint);
+                .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
         }
 
         self.version_ids_in_use.insert(new_pinned_version.id);
@@ -168,11 +168,11 @@ impl PinnedVersion {
     }
 
     pub fn max_committed_epoch_for_checkpoint(&self) -> u64 {
-        self.version.max_committed_epoch_for_checkpoint
+        self.version.max_committed_epoch
     }
 
     pub fn max_committed_epoch_for_read(&self) -> u64 {
-        self.version.max_committed_epoch_for_read
+        self.version.max_current_epoch
     }
 
     pub fn safe_epoch(&self) -> u64 {

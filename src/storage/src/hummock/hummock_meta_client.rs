@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta,
+    CompactTask, CompactionGroup, HummockAllEpoch, HummockVersion, HummockVersionDelta,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
@@ -71,7 +71,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockAllEpoch> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let res = self.meta_client.pin_snapshot().await;
@@ -79,7 +79,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
+    async fn get_epoch(&self) -> Result<HummockAllEpoch> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let res = self.meta_client.get_epoch().await;

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use risingwave_pb::hummock::HummockAllEpoch;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
@@ -25,9 +26,9 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 /// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
-    async fn pin_snapshot(&self) -> Result<u64>;
+    async fn pin_snapshot(&self) -> Result<HummockAllEpoch>;
 
-    async fn get_epoch(&self) -> Result<u64>;
+    async fn get_epoch(&self) -> Result<HummockAllEpoch>;
 
     async fn flush(&self) -> Result<()>;
 
@@ -45,11 +46,11 @@ pub struct FrontendMetaClientImpl(pub MetaClient);
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for FrontendMetaClientImpl {
-    async fn pin_snapshot(&self) -> Result<u64> {
+    async fn pin_snapshot(&self) -> Result<HummockAllEpoch> {
         self.0.pin_snapshot().await
     }
 
-    async fn get_epoch(&self) -> Result<u64> {
+    async fn get_epoch(&self) -> Result<HummockAllEpoch> {
         self.0.get_epoch().await
     }
 

@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use log::error;
+use risingwave_pb::hummock::HummockAllEpoch;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
 
@@ -162,19 +163,22 @@ impl HummockSnapshotManagerCore {
     ) -> u64 {
         let ret = self.meta_client.get_epoch().await;
         match ret {
-            Ok(epoch) => {
-                let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
+            Ok(HummockAllEpoch {
+                committed_epoch, ..
+            }) => {
+                let queries = match self.epoch_to_query_ids.get_mut(&committed_epoch) {
                     None => {
-                        self.epoch_to_query_ids.insert(epoch, HashSet::default());
-                        self.epoch_to_query_ids.get_mut(&epoch).unwrap()
+                        self.epoch_to_query_ids
+                            .insert(committed_epoch, HashSet::default());
+                        self.epoch_to_query_ids.get_mut(&committed_epoch).unwrap()
                     }
                     Some(queries) => queries,
                 };
                 for (id, cb) in batches.drain(..) {
                     queries.insert(id);
-                    let _ = cb.send(Ok(epoch));
+                    let _ = cb.send(Ok(committed_epoch));
                 }
-                epoch
+                committed_epoch
             }
             Err(e) => {
                 for (id, cb) in batches.drain(..) {

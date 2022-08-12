@@ -288,8 +288,7 @@ impl LocalVersionManager {
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-            conflict_detector
-                .set_watermark(newly_pinned_version.max_committed_epoch_for_checkpoint);
+            conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
 
         let mut new_version = old_version.clone();

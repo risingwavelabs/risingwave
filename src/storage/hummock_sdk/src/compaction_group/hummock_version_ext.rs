@@ -181,8 +181,8 @@ impl HummockVersionExt for HummockVersion {
             );
         }
         self.id = version_delta.id;
-        self.max_committed_epoch_for_checkpoint = version_delta.max_committed_epoch_for_checkpoint;
-        self.max_committed_epoch_for_read = version_delta.max_committed_epoch_for_read;
+        self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.max_current_epoch = version_delta.max_current_epoch;
         self.safe_epoch = version_delta.safe_epoch;
     }
 

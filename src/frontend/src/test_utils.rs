@@ -31,6 +31,7 @@ use risingwave_pb::catalog::{
     Table as ProstTable,
 };
 use risingwave_pb::common::ParallelUnitMapping;
+use risingwave_pb::hummock::HummockAllEpoch;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -522,12 +523,18 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn pin_snapshot(&self) -> RpcResult<HummockAllEpoch> {
+        Ok(HummockAllEpoch {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
-    async fn get_epoch(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn get_epoch(&self) -> RpcResult<HummockAllEpoch> {
+        Ok(HummockAllEpoch {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
     async fn flush(&self) -> RpcResult<()> {
