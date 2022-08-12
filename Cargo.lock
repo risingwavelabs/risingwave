@@ -5237,7 +5237,6 @@ dependencies = [
  "itertools",
  "log",
  "matches",
- "risingwave_common",
  "serde",
  "serde_json",
  "workspace-hack",
