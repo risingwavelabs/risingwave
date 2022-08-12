@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{WorkerType};
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
