@@ -17,8 +17,6 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
-use risingwave_common::types::ParallelUnitId;
-use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
 
@@ -83,10 +81,6 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: u32,
 
-    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
-    /// table.
-    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
-
     pub properties: HashMap<String, String>,
 
     pub read_pattern_prefix_column: u32,
@@ -131,7 +125,6 @@ impl TableCatalog {
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
-            vnode_mapping: self.vnode_mapping.clone(),
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
@@ -169,7 +162,6 @@ impl TableCatalog {
                 .collect_vec(),
             appendonly: self.appendonly,
             owner: self.owner,
-            mapping: None,
             properties: self.properties.clone(),
             read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
@@ -200,12 +192,6 @@ impl From<ProstTable> for TableCatalog {
 
         let order_key = tb.order_key.iter().map(FieldOrder::from_protobuf).collect();
 
-        let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
-            decompress_data(&mapping.original_indices, &mapping.data)
-        } else {
-            vec![]
-        };
-
         Self {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
@@ -225,7 +211,6 @@ impl From<ProstTable> for TableCatalog {
             pk: tb.pk.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
-            vnode_mapping: Some(vnode_mapping),
             properties: tb.properties,
             read_pattern_prefix_column: tb.read_pattern_prefix_column,
         }
@@ -246,10 +231,8 @@ mod tests {
     use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_common::util::compress::compress_data;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::common::ParallelUnitMapping;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
     };
@@ -261,8 +244,6 @@ mod tests {
 
     #[test]
     fn test_into_table_catalog() {
-        let mapping = [1, 1, 2, 2, 3, 3, 4, 4].to_vec();
-        let (original_indices, data) = compress_data(&mapping);
         let table: TableCatalog = ProstTable {
             is_index: false,
             index_on_id: 0,
@@ -308,11 +289,6 @@ mod tests {
                 .into(),
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            mapping: Some(ParallelUnitMapping {
-                table_id: 0,
-                original_indices,
-                data,
-            }),
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
@@ -366,7 +342,6 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                vnode_mapping: Some(mapping),
                 properties: HashMap::from([(
                     String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                     String::from("300")

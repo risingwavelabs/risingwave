@@ -61,6 +61,7 @@ use crate::array::{
 
 /// Parallel unit is the minimal scheduling unit.
 pub type ParallelUnitId = u32;
+pub type VnodeMapping = Vec<ParallelUnitId>;
 
 // VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
 // consistent hashing.
