@@ -14,11 +14,11 @@
 
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
+use minitrace::prelude::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use tracing::event;
-use tracing_futures::Instrument;
 
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, Executor};
 
@@ -56,15 +56,15 @@ impl TraceExecutor {
         let input_desc = self.input_desc.as_str();
         let span_name = format!("{input_desc}_next");
         let mut child_stream = self.child.execute();
-        while let Some(chunk) = child_stream
-            .next()
-            .instrument(tracing::trace_span!(
-                "next",
-                otel.name = span_name.as_str(),
-                next = input_desc,
-            ))
-            .await
-        {
+
+        let span = || {
+            let mut span = Span::enter_with_local_parent("next");
+            span.add_property(|| ("otel.name", span_name.to_string()));
+            span.add_property(|| ("next", input_desc.to_string()));
+            span
+        };
+
+        while let Some(chunk) = child_stream.next().in_span(span()).await {
             let chunk = chunk?;
             event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", 
                 chunk);
