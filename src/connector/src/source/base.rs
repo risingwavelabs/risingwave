@@ -189,9 +189,9 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 /// Used for acquiring the generated data for [`spawn_data_generation`].
 pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
 
-/// Spawn a **new runtime** to run the data generator, returns a channel receiver for acquiring the
-/// generated data. This is used for the [`DatagenSplitReader`] and [`NexmarkSplitReader`] in case
-/// that they are CPU intensive and may block the streaming actors.
+/// Spawn a **new runtime** in a new thread to run the data generator, returns a channel receiver
+/// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
+/// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
 pub fn spawn_data_generation_stream(
     stream: impl Stream<Item = Result<Vec<SourceMessage>>> + Send + 'static,
 ) -> DataGenerationReceiver {
@@ -200,26 +200,25 @@ pub fn spawn_data_generation_stream(
     let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
     let future = async move {
         pin_mut!(stream);
-        loop {
-            match stream.next().await {
-                Some(result) => {
-                    if generation_tx.send(result).await.is_err() {
-                        tracing::warn!("failed to send next event to reader, exit");
-                        break;
-                    }
-                }
-                None => break,
+        while let Some(result) = stream.next().await {
+            if generation_tx.send(result).await.is_err() {
+                tracing::warn!("failed to send next event to reader, exit");
+                break;
             }
         }
     };
 
     #[cfg(not(madsim))]
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .thread_name("data-generation")
-        .build()
-        .unwrap()
-        .spawn(future);
+    std::thread::Builder::new()
+        .name("data-generation".to_string())
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(future);
+        })
+        .unwrap();
 
     // Note: madsim does not support creating multiple runtime, so we just run it in current
     // runtime.
