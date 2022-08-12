@@ -14,8 +14,9 @@
 
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ParallelUnitMapping, WorkerType};
+use risingwave_pb::common::{WorkerType};
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
@@ -96,25 +97,10 @@ where
 
         let table_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
-        let mut parallel_unit_mappings = vec![];
-        for (table_id, fragments) in &fragment_guard.table_fragments {
-            if !table_ids.contains(&table_id.table_id) {
-                continue;
-            }
-            for fragment in fragments.fragments.values() {
-                let parallel_unit_mapping = fragment.vnode_mapping.as_ref().unwrap();
-                for internal_table_id in &fragment.state_table_ids {
-                    if !table_ids.contains(internal_table_id) {
-                        continue;
-                    }
-                    parallel_unit_mappings.push(ParallelUnitMapping {
-                        table_id: *internal_table_id,
-                        original_indices: parallel_unit_mapping.original_indices.clone(),
-                        data: parallel_unit_mapping.data.clone(),
-                    })
-                }
-            }
-        }
+        let parallel_unit_mappings = fragment_guard
+            .all_table_mappings()
+            .filter(|mapping| table_ids.contains(&mapping.table_id))
+            .collect_vec();
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {
