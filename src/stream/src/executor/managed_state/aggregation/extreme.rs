@@ -18,12 +18,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
-use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::ordered::OrderedRow;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
@@ -52,16 +52,22 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Contains the column mapping between upstream schema and state table.
     state_table_col_mapping: Arc<StateTableColumnMapping>,
 
+    /// The column to aggregate in state table.
+    state_table_agg_col_idx: usize,
+
+    /// The columns to order by in state table.
+    state_table_order_col_indices: Vec<usize>,
+
+    /// The order types of `state_table_order_col_indices`.
+    state_table_order_types: Vec<OrderType>,
+
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize, // TODO(yuchao): is this really needed?
 
     /// Cache for the top N elements in the state. Note that the cache
     /// won't store group_key so the column indices should be offseted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
-    cache: Cache,
-
-    /// The column to aggregate in the cache.
-    cache_agg_col_idx: usize,
+    cache: Cache<Datum>,
 }
 
 /// A trait over all table-structured states.
@@ -106,15 +112,13 @@ impl<S: StateStore> GenericExtremeState<S> {
         row_count: usize,
         cache_capacity: usize,
     ) -> Self {
-        let group_key_len = group_key.map(|row| row.size()).unwrap_or(0);
-        // map agg column to cache row column index
-        let state_table_col_idx = col_mapping
+        // map agg column to state table column index
+        let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(agg_call.args.val_indices()[0])
             .expect("the column to be aggregate must appear in the state table");
-        let cache_agg_col_idx = state_table_col_idx - group_key_len;
-        // map order by columns to cache row column indices
-        let cache_order_pairs = std::iter::once(OrderPair::new(
-            cache_agg_col_idx,
+        // map order by columns to state table column indices
+        let (state_table_order_col_indices, state_table_order_types) = std::iter::once((
+            state_table_agg_col_idx,
             match agg_call.kind {
                 AggKind::Min => OrderType::Ascending,
                 AggKind::Max => OrderType::Descending,
@@ -122,36 +126,34 @@ impl<S: StateStore> GenericExtremeState<S> {
             },
         ))
         .chain(pk_indices.iter().map(|idx| {
-            let state_table_col_idx = col_mapping
-                .upstream_to_state_table(*idx)
-                .expect("the pk columns must appear in the state table");
-            OrderPair::new(state_table_col_idx - group_key_len, OrderType::Ascending)
+            (
+                col_mapping
+                    .upstream_to_state_table(*idx)
+                    .expect("the pk columns must appear in the state table"),
+                OrderType::Ascending,
+            )
         }))
-        .collect();
+        .unzip();
 
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
             state_table_col_mapping: col_mapping,
+            state_table_agg_col_idx,
+            state_table_order_col_indices,
+            state_table_order_types,
             total_count: row_count,
-            cache: Cache::new(cache_capacity, cache_order_pairs),
-            cache_agg_col_idx,
+            cache: Cache::new(cache_capacity),
         }
     }
 
-    fn group_key_len(&self) -> usize {
-        match &self.group_key {
-            Some(row) => row.size(),
-            None => 0,
-        }
-    }
-
-    fn state_row_to_cache_row(&self, state_row: &Row) -> Row {
-        state_row.by_indices(
-            &(0..self.state_table_col_mapping.len())
-                .skip(self.group_key_len())
-                .collect_vec(),
-        )
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> (OrderedRow, Datum) {
+        let cache_key = OrderedRow::new(
+            state_row.by_indices(&self.state_table_order_col_indices),
+            &self.state_table_order_types,
+        );
+        let cache_data = state_row[self.state_table_agg_col_idx].clone();
+        (cache_key, cache_data)
     }
 
     /// Apply a batch of data to the state.
@@ -177,16 +179,16 @@ impl<S: StateStore> GenericExtremeState<S> {
                     .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
                     .collect(),
             );
-            let cache_row = self.state_row_to_cache_row(&state_row);
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
 
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.cache.insert(cache_row);
+                    self.cache.insert(cache_key, cache_data);
                     state_table.insert(state_row)?;
                     self.total_count += 1;
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    self.cache.remove(cache_row);
+                    self.cache.remove(cache_key);
                     state_table.delete(state_row)?;
                     self.total_count -= 1;
                 }
@@ -196,12 +198,8 @@ impl<S: StateStore> GenericExtremeState<S> {
         Ok(())
     }
 
-    // TODO(yuchao): This is the only part that differs between different managed states.
-    // So we may introduce a trait for this later, and other code can be reused for each
-    // type of state.
     fn get_output_from_cache(&self) -> Option<Datum> {
-        let row = self.cache.first()?;
-        Some(row[self.cache_agg_col_idx].clone())
+        self.cache.first_value().cloned()
     }
 
     async fn get_output_inner(
@@ -222,8 +220,8 @@ impl<S: StateStore> GenericExtremeState<S> {
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity) {
                 let state_row = state_row?;
-                let cache_row = self.state_row_to_cache_row(state_row.as_ref());
-                self.cache.insert(cache_row);
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(state_row.as_ref());
+                self.cache.insert(cache_key, cache_data);
             }
             self.cache.set_synced();
 
@@ -646,13 +644,13 @@ mod tests {
             epoch += 1;
 
             match managed_state_1.get_output(epoch, &state_table_1).await? {
-                Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s, "a".to_string());
-                }
+                None => {} // pass
                 _ => panic!("unexpected output"),
             }
             match managed_state_2.get_output(epoch, &state_table_2).await? {
-                None => {} // pass
+                Some(ScalarImpl::Int32(s)) => {
+                    assert_eq!(s, 9);
+                }
                 _ => panic!("unexpected output"),
             }
         }

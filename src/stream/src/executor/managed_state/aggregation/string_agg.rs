@@ -23,7 +23,8 @@ use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::ordered::OrderedRow;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
@@ -33,6 +34,12 @@ use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::PkIndices;
+
+#[derive(Clone)]
+struct StringAggData {
+    delim: Option<String>,
+    value: Option<String>,
+}
 
 pub struct ManagedStringAggState<S: StateStore> {
     _phantom_data: PhantomData<S>,
@@ -50,8 +57,14 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// The column as delimiter in state table.
     state_table_delim_col_idx: usize,
 
+    /// The columns to order by in state table.
+    state_table_order_col_indices: Vec<usize>,
+
+    /// The order types of `state_table_order_col_indices`.
+    state_table_order_types: Vec<OrderType>,
+
     /// In-memory all-or-nothing cache.
-    cache: Cache,
+    cache: Cache<StringAggData>,
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
@@ -69,11 +82,11 @@ impl<S: StateStore> ManagedStringAggState<S> {
             .upstream_to_state_table(agg_call.args.val_indices()[1])
             .expect("the column as delimiter must appear in the state table");
         // map order by columns to state table column indices
-        let order_pairs = agg_call
+        let (state_table_order_col_indices, state_table_order_types) = agg_call
             .order_pairs
             .iter()
             .map(|o| {
-                OrderPair::new(
+                (
                     col_mapping
                         .upstream_to_state_table(o.column_idx)
                         .expect("the column to be order by must appear in the state table"),
@@ -81,22 +94,40 @@ impl<S: StateStore> ManagedStringAggState<S> {
                 )
             })
             .chain(pk_indices.iter().map(|idx| {
-                OrderPair::new(
+                (
                     col_mapping
                         .upstream_to_state_table(*idx)
                         .expect("the pk columns must appear in the state table"),
                     OrderType::Ascending,
                 )
             }))
-            .collect();
+            .unzip();
         Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
             state_table_col_mapping: col_mapping,
             state_table_agg_col_idx,
             state_table_delim_col_idx,
-            cache: Cache::new(usize::MAX, order_pairs),
+            state_table_order_col_indices,
+            state_table_order_types,
+            cache: Cache::new(usize::MAX),
         }
+    }
+
+    fn state_row_to_cache_entry(&self, state_row: &Row) -> (OrderedRow, StringAggData) {
+        let cache_key = OrderedRow::new(
+            state_row.by_indices(&self.state_table_order_col_indices),
+            &self.state_table_order_types,
+        );
+        let cache_data = StringAggData {
+            delim: state_row[self.state_table_delim_col_idx]
+                .clone()
+                .map(ScalarImpl::into_utf8),
+            value: state_row[self.state_table_agg_col_idx]
+                .clone()
+                .map(ScalarImpl::into_utf8),
+        };
+        (cache_key, cache_data)
     }
 }
 
@@ -125,14 +156,15 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                     .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
                     .collect(),
             );
+            let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
 
             match op {
                 Insert | UpdateInsert => {
-                    self.cache.insert(state_row.clone());
+                    self.cache.insert(cache_key, cache_data);
                     state_table.insert(state_row)?;
                 }
                 Delete | UpdateDelete => {
-                    self.cache.remove(state_row.clone());
+                    self.cache.remove(cache_key);
                     state_table.delete(state_row)?;
                 }
             }
@@ -158,33 +190,26 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             #[for_await]
             for state_row in all_data_iter {
                 let state_row = state_row?;
-                self.cache.insert(state_row.as_ref().to_owned());
+                let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
+                self.cache.insert(cache_key, cache_data.clone());
                 if !first {
-                    let delim = state_row[self.state_table_delim_col_idx]
-                        .clone()
-                        .map(ScalarImpl::into_utf8);
-                    agg_result.push_str(&delim.unwrap_or_default());
+                    agg_result.push_str(&cache_data.delim.unwrap_or_default());
                 }
                 first = false;
-                let value = state_row[self.state_table_agg_col_idx]
-                    .clone()
-                    .map(ScalarImpl::into_utf8);
-                agg_result.push_str(&value.unwrap_or_default());
+                agg_result.push_str(&cache_data.value.unwrap_or_default());
             }
             self.cache.set_synced();
         } else {
-            for row in self.cache.iter_rows() {
+            for cache_data in self.cache.iter_values() {
                 if !first {
-                    let delim = row[self.state_table_delim_col_idx]
-                        .clone()
-                        .map(ScalarImpl::into_utf8);
-                    agg_result.push_str(&delim.unwrap_or_default());
+                    if let Some(delim) = &cache_data.delim {
+                        agg_result.push_str(delim);
+                    }
                 }
                 first = false;
-                let value = row[self.state_table_agg_col_idx]
-                    .clone()
-                    .map(ScalarImpl::into_utf8);
-                agg_result.push_str(&value.unwrap_or_default());
+                if let Some(value) = &cache_data.value {
+                    agg_result.push_str(value);
+                }
             }
         }
 

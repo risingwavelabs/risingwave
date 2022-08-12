@@ -14,7 +14,7 @@
 
 //! Aggregators with state store support
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub use extreme::*;
@@ -22,7 +22,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};
+use risingwave_common::util::ordered::OrderedRow;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
@@ -55,35 +55,32 @@ pub fn verify_batch(
 }
 
 /// Common cache structure for managed table states (non-append-only min/max, string_agg).
-pub struct Cache {
+pub struct Cache<T> {
     /// The cache is not ready to be populated yet.
     is_cold_start: bool,
     /// The cache is synced with the state table.
     synced: bool,
     /// The capacity of the cache.
     capacity: usize,
-    /// Order requirements used to sort cached rows
-    order_pairs: Arc<Vec<OrderPair>>,
-    /// Cached rows in reverse order of `order_pairs`
-    rows: BTreeSet<DescOrderedRow>,
+    /// Ordered cache entries.
+    entries: BTreeMap<OrderedRow, T>,
 }
 
-impl Cache {
+impl<T> Cache<T> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use usize::MAX for `capacity`.
-    pub fn new(capacity: usize, order_pairs: Vec<OrderPair>) -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
             is_cold_start: true,
             synced: false,
             capacity,
-            order_pairs: Arc::new(order_pairs),
-            rows: BTreeSet::new(),
+            entries: Default::default(),
         }
     }
 
     /// Begin to populate the cache.
     pub fn begin_sync(&mut self) {
-        self.rows.clear(); // clear the cache if anything exists
+        self.entries.clear(); // clear the cache if anything exists
         self.is_cold_start = false;
     }
 
@@ -99,40 +96,38 @@ impl Cache {
         self.synced = true;
     }
 
-    /// Insert a row into the cache.
-    pub fn insert(&mut self, row: Row) {
+    /// Insert an entry into the cache.
+    /// Key: `OrderedRow` composed of order by fields.
+    /// Value: The value fields that are to be aggregated.
+    pub fn insert(&mut self, key: OrderedRow, value: T) {
         if !self.is_cold_start {
-            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
-            self.rows.insert(ordered_row);
+            self.entries.insert(key, value);
             // evict if capacity is reached
-            while self.rows.len() > self.capacity {
-                self.rows.pop_first();
+            while self.entries.len() > self.capacity {
+                self.entries.pop_last();
             }
         }
     }
 
-    /// Remove a row from the cache.
-    pub fn remove(&mut self, row: Row) {
+    /// Remove an entry from the cache.
+    pub fn remove(&mut self, key: OrderedRow) {
         if !self.is_cold_start {
-            let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
-            self.rows.remove(&ordered_row);
+            self.entries.remove(&key);
         }
     }
 
-    /// Get the first (smallest) row in the cache.
-    pub fn first(&self) -> Option<&Row> {
+    /// Get the first (smallest) value in the cache.
+    pub fn first_value(&self) -> Option<&T> {
         if self.synced {
-            // get the last because the rows are sorted reversely
-            self.rows.last().map(|row| &row.row)
+            self.entries.first_key_value().map(|(_, v)| v)
         } else {
             None
         }
     }
 
-    /// Iterate over the rows in the cache.
-    pub fn iter_rows(&self) -> impl Iterator<Item = &Row> {
-        // rev() is required because `self.rows` are in reverse order
-        self.rows.iter().rev().map(|row| &row.row)
+    /// Iterate over the values in the cache.
+    pub fn iter_values(&self) -> impl Iterator<Item = &T> {
+        self.entries.iter().map(|(_, v)| v)
     }
 }
 
