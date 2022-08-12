@@ -20,12 +20,11 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
-use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
@@ -218,29 +217,28 @@ where
         debug!("got expired workers {:#?}", expired_workers);
         let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
         // migrate actors in fragments, return updated fragments and pu to pu migrate plan
-        let (new_fragments, migrate_map) = self
+        let new_fragments = self
             .fragment_manager
             .migrate_actors(&migrate_map, &node_map)
             .await?;
-        debug!("got parallel unit migrate plan {:#?}", migrate_map);
-        // update mapping in table and notify frontends
-        let res = self
-            .catalog_manager
-            .update_table_mapping(&new_fragments, &migrate_map)
-            .await;
-        // update hash mapping
-        for fragments in new_fragments {
-            for (fragment_id, fragment) in fragments.fragments {
-                let mapping = fragment.vnode_mapping.as_ref().unwrap();
-                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
-                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+        debug!("notify mapping info to frontends");
+        for table_fragment in new_fragments {
+            for table_id in table_fragment
+                .internal_table_ids()
+                .into_iter()
+                .chain(std::iter::once(table_fragment.table_id().table_id))
+            {
+                let mapping = table_fragment
+                    .get_table_hash_mapping(table_id)
+                    .expect("no data distribution found");
                 self.env
-                    .hash_mapping_manager()
-                    .set_fragment_hash_mapping(fragment_id, vnode_mapping);
+                    .notification_manager()
+                    .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                    .await;
             }
         }
         debug!("migrate actors succeed.");
-        res
+        Ok(true)
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty

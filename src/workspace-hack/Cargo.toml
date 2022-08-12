@@ -66,7 +66,7 @@ regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
-serde = { version = "1", features = ["alloc", "derive", "serde_derive", "std"] }
+serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 serde_json = { version = "1", features = ["raw_value", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
@@ -139,7 +139,7 @@ regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
-serde = { version = "1", features = ["alloc", "derive", "serde_derive", "std"] }
+serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 serde_json = { version = "1", features = ["raw_value", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
