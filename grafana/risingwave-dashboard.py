@@ -448,9 +448,9 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_percentage("Actor Input Blocking Time", [
+            panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
                 panels.target(
-                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{executor_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
@@ -569,6 +569,11 @@ def section_streaming_actors(outer_panels):
                           [90, 99, 999, "max"]),
                 panels.target(
                     "sum by(le, actor_id, wait_side, job, instance)(rate(stream_join_barrier_align_duration_sum[$__rate_interval])) / sum by(le,actor_id,wait_side,job,instance) (rate(stream_join_barrier_align_duration_count[$__rate_interval]))", "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}"
+                ),
+            ]),
+            panels.timeseries_percentage("Join Actor Input Blocking Time Ratio", [
+                panels.target(
+                    "rate(stream_join_actor_input_waiting_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
         ])

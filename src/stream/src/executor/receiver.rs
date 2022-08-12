@@ -39,6 +39,9 @@ pub struct ReceiverExecutor {
     // Actor id,
     actor_id: ActorId,
 
+    // Executor id,
+    executor_id: u64,
+
     /// Metrics
     metrics: Arc<StreamingMetrics>,
 }
@@ -60,6 +63,7 @@ impl ReceiverExecutor {
         actor_context: ActorContextRef,
         receiver_id: u64,
         actor_id: ActorId,
+        executor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
@@ -71,6 +75,7 @@ impl ReceiverExecutor {
             },
             status: OperatorInfoStatus::new(actor_context, receiver_id),
             actor_id,
+            executor_id,
             metrics,
         }
     }
@@ -81,9 +86,18 @@ impl Executor for ReceiverExecutor {
         let mut status = self.status;
         let metrics = self.metrics.clone();
         let actor_id_str = self.actor_id.to_string();
+        let executor_id_str = self.executor_id.to_string();
+        let mut start_time = minstant::Instant::now();
+
         self.input
             .inspect(move |msg| {
                 let Ok(msg) = msg else { return };
+
+                metrics
+                    .actor_input_buffer_blocking_duration_ns
+                    .with_label_values(&[&actor_id_str, &executor_id_str])
+                    .inc_by(start_time.elapsed().as_nanos() as u64);
+
                 match &msg {
                     Message::Chunk(chunk) => {
                         metrics
@@ -94,6 +108,8 @@ impl Executor for ReceiverExecutor {
                     Message::Barrier(_) => {}
                 };
                 status.next_message(msg);
+
+                start_time = minstant::Instant::now();
             })
             .boxed()
     }
