@@ -219,14 +219,14 @@ impl<S: StateStore> GenericExtremeState<S> {
                 iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
-            self.cache.set_synced(); // after the following loop the cache should be synced
-
+            self.cache.begin_sync();
             #[for_await]
             for state_row in all_data_iter.take(self.cache.capacity.unwrap_or(usize::MAX)) {
                 let state_row = state_row?;
                 let cache_row = self.state_row_to_cache_row(state_row.as_ref());
                 self.cache.insert(cache_row);
             }
+            self.cache.set_synced();
 
             // try to get the result from cache again
             if let Some(datum) = self.get_output_from_cache() {

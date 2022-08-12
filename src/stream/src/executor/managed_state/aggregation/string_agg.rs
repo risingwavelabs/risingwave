@@ -149,13 +149,12 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         let mut agg_result = String::new();
         let mut first = true;
 
-        if self.cache.is_cold_start() {
+        if !self.cache.is_synced() {
             let all_data_iter =
                 iter_state_table(state_table, epoch, self.group_key.as_ref()).await?;
             pin_mut!(all_data_iter);
 
-            self.cache.set_synced(); // after the following loop the cache should be fully synced
-
+            self.cache.begin_sync();
             #[for_await]
             for state_row in all_data_iter {
                 let state_row = state_row?;
@@ -172,8 +171,8 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                     .map(ScalarImpl::into_utf8);
                 agg_result.push_str(&value.unwrap_or_default());
             }
+            self.cache.set_synced();
         } else {
-            // rev() is required because cache.rows is in reverse order
             for row in self.cache.iter_rows() {
                 if !first {
                     let delim = row[self.state_table_delim_col_idx]

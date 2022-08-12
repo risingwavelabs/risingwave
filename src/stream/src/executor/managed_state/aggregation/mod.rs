@@ -56,7 +56,9 @@ pub fn verify_batch(
 
 /// Common cache structure for managed table states (non-append-only min/max, string_agg).
 pub struct Cache {
-    /// `false` means not synced with state table (cold start)
+    /// The cache is not ready to be populated yet.
+    is_cold_start: bool,
+    /// The cache is synced with the state table.
     synced: bool,
     /// `None` means unlimited capacity
     capacity: Option<usize>,
@@ -70,6 +72,7 @@ impl Cache {
     /// Create a new cache with specified capacity and order requirements.
     pub fn new(capacity: Option<usize>, order_pairs: Vec<OrderPair>) -> Self {
         Self {
+            is_cold_start: true,
             synced: false,
             capacity,
             order_pairs: Arc::new(order_pairs),
@@ -77,19 +80,27 @@ impl Cache {
         }
     }
 
-    /// Check if cache is not filled yet.
-    pub fn is_cold_start(&self) -> bool {
-        !self.synced
+    /// Begin to populate the cache.
+    pub fn begin_sync(&mut self) {
+        self.rows.clear(); // clear the cache if anything exists
+        self.is_cold_start = false;
     }
 
-    /// Mark the cache as synced/filled.
+    /// Check if cache is synced/populated.
+    pub fn is_synced(&self) -> bool {
+        self.synced
+    }
+
+    /// Mark the cache as synced/populated.
+    /// Must be called after `begin_sync()`.
     pub fn set_synced(&mut self) {
+        assert!(!self.is_cold_start);
         self.synced = true;
     }
 
     /// Insert a row into the cache.
     pub fn insert(&mut self, row: Row) {
-        if self.synced {
+        if !self.is_cold_start {
             let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.insert(ordered_row);
             // evict if capacity is reached
@@ -103,7 +114,7 @@ impl Cache {
 
     /// Remove a row from the cache.
     pub fn remove(&mut self, row: Row) {
-        if self.synced {
+        if !self.is_cold_start {
             let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.remove(&ordered_row);
         }
@@ -121,6 +132,7 @@ impl Cache {
 
     /// Iterate over the rows in the cache.
     pub fn iter_rows(&self) -> impl Iterator<Item = &Row> {
+        // rev() is required because `self.rows` are in reverse order
         self.rows.iter().rev().map(|row| &row.row)
     }
 }
