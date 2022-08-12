@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 
 use super::exchange::input::BoxedInput;
@@ -83,36 +84,37 @@ impl ReceiverExecutor {
 }
 
 impl Executor for ReceiverExecutor {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        let mut status = self.status;
-        let metrics = self.metrics.clone();
+    fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id_str = self.actor_id.to_string();
         let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
-        let mut start_time = minstant::Instant::now();
 
-        self.input
-            .inspect(move |msg| {
-                let Ok(msg) = msg else { return };
-
-                metrics
+        let stream = #[try_stream]
+        async move {
+            let mut start_time = minstant::Instant::now();
+            while let Some(msg) = self.input.next().await {
+                self.metrics
                     .actor_input_buffer_blocking_duration_ns
                     .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
                     .inc_by(start_time.elapsed().as_nanos() as u64);
+                let msg: Message = msg?;
+                self.status.next_message(&msg);
 
                 match &msg {
                     Message::Chunk(chunk) => {
-                        metrics
+                        self.metrics
                             .actor_in_record_cnt
                             .with_label_values(&[&actor_id_str])
                             .inc_by(chunk.cardinality() as _);
                     }
                     Message::Barrier(_) => {}
                 };
-                status.next_message(msg);
 
+                yield msg;
                 start_time = minstant::Instant::now();
-            })
-            .boxed()
+            }
+        };
+
+        stream.boxed()
     }
 
     fn schema(&self) -> &Schema {
