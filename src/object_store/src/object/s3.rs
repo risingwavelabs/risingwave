@@ -98,7 +98,7 @@ impl S3StreamingUploader {
         }
     }
 
-    fn upload_part(&mut self, data: Vec<Bytes>, len: usize) {
+    fn upload_next_part(&mut self, data: Vec<Bytes>, len: usize) {
         debug_assert_eq!(data.iter().map(Bytes::len).sum::<usize>(), len);
 
         let part_id = self.next_part_id;
@@ -134,7 +134,7 @@ impl S3StreamingUploader {
     }
 
     async fn flush_and_complete(&mut self) -> ObjectResult<()> {
-        self.upload_part(
+        self.upload_next_part(
             Vec::from_iter(self.buf.iter().cloned()),
             self.not_uploaded_len,
         );
@@ -221,7 +221,7 @@ impl StreamingUploader for S3StreamingUploader {
         if self.next_part_len >= MIN_PART_SIZE {
             // Take a 16MiB part and upload it. `Bytes` performs shallow clone.
             let part = self.buf.drain(..self.part_end).collect();
-            self.upload_part(part, self.not_uploaded_len - self.next_part_len);
+            self.upload_next_part(part, self.not_uploaded_len - self.next_part_len);
             self.not_uploaded_len = self.next_part_len;
             self.part_end = 0;
             self.next_part_len = 0;
