@@ -198,12 +198,6 @@ async fn data_chunk_stream(
                     .exchange_recv_row_number
                     .with_label_values(&[&upstream_id, &downstream_id])
                     .inc_by(res.cardinality().try_into().unwrap());
-                metrics
-                    .as_ref()
-                    .unwrap()
-                    .exchange_recv_row_number
-                    .with_label_values(&["0", "0"])
-                    .inc_by(res.cardinality().try_into().unwrap());
             }
             yield res;
             continue;

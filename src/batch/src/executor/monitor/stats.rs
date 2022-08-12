@@ -33,7 +33,7 @@ impl BatchMetrics {
         let row_seq_scan_next_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         let exchange_recv_row_number = register_int_counter_vec_with_registry!(
-            "batch_exchange_recv_size",
+            "batch_exchange_recv_row_number",
             "Total number of row that have been received from upstream source",
             &["up_task_id", "down_task_id"],
             registry

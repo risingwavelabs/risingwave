@@ -611,9 +611,9 @@ def section_batch_exchange(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed("Batch Exchange", [
-            panels.timeseries_rowsps("Exchange Recv Throughput", [
+            panels.timeseries_row("Exchange Recv Row Number", [
                 panels.target(
-                    "rate(batch_exchange_recv_size[$__rate_interval])", "{{up_task_id}}->{{down_task_id}}"
+                    "batch_exchange_recv_row_number", "{{up_task_id}}->{{down_task_id}}"
                 ),
             ]),
         ]),
