@@ -42,7 +42,10 @@ impl StreamGroupTopN {
     ) -> Self {
         let dist = match input.distribution() {
             Distribution::HashShard(_) => Distribution::HashShard(group_key.clone()),
-            Distribution::UpstreamHashShard(_) => Distribution::UpstreamHashShard(group_key.clone()),
+            Distribution::UpstreamHashShard(_) => {
+                Distribution::UpstreamHashShard(group_key.clone())
+            }
+
             Distribution::Broadcast => Distribution::Broadcast,
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard => Distribution::SomeShard,
@@ -62,7 +65,6 @@ impl StreamGroupTopN {
             order,
         }
     }
-    
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         let schema = &self.base.schema;
