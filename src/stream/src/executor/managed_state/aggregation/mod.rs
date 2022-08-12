@@ -54,7 +54,7 @@ pub fn verify_batch(
     all_lengths.iter().min() == all_lengths.iter().max()
 }
 
-/// Common cache structure for managed table states (non-append-only min/max, string_agg).
+/// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
 pub struct Cache<T> {
     /// The cache is not ready to be populated yet.
     is_cold_start: bool,
@@ -68,7 +68,7 @@ pub struct Cache<T> {
 
 impl<T> Cache<T> {
     /// Create a new cache with specified capacity and order requirements.
-    /// To create a cache with unlimited capacity, use usize::MAX for `capacity`.
+    /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
         Self {
             is_cold_start: true,
