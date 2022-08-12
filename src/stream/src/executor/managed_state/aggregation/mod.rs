@@ -14,14 +14,15 @@
 
 //! Aggregators with state store support
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
+use risingwave_common::util::ordered::OrderedRow;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
@@ -31,7 +32,7 @@ use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
-use crate::executor::{PkDataTypes, PkIndices};
+use crate::executor::PkIndices;
 
 mod extreme;
 
@@ -51,6 +52,83 @@ pub fn verify_batch(
     }
     all_lengths.extend(data.iter().map(|x| x.len()));
     all_lengths.iter().min() == all_lengths.iter().max()
+}
+
+/// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
+pub struct Cache<T> {
+    /// The cache is not ready to be populated yet.
+    is_cold_start: bool,
+    /// The cache is synced with the state table.
+    synced: bool,
+    /// The capacity of the cache.
+    capacity: usize,
+    /// Ordered cache entries.
+    entries: BTreeMap<OrderedRow, T>,
+}
+
+impl<T> Cache<T> {
+    /// Create a new cache with specified capacity and order requirements.
+    /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            is_cold_start: true,
+            synced: false,
+            capacity,
+            entries: Default::default(),
+        }
+    }
+
+    /// Begin to populate the cache.
+    pub fn begin_sync(&mut self) {
+        self.entries.clear(); // clear the cache if anything exists
+        self.is_cold_start = false;
+    }
+
+    /// Check if cache is synced/populated.
+    pub fn is_synced(&self) -> bool {
+        self.synced
+    }
+
+    /// Mark the cache as synced/populated.
+    /// Must be called after `begin_sync()`.
+    pub fn set_synced(&mut self) {
+        assert!(!self.is_cold_start);
+        self.synced = true;
+    }
+
+    /// Insert an entry into the cache.
+    /// Key: `OrderedRow` composed of order by fields.
+    /// Value: The value fields that are to be aggregated.
+    pub fn insert(&mut self, key: OrderedRow, value: T) {
+        if !self.is_cold_start {
+            self.entries.insert(key, value);
+            // evict if capacity is reached
+            while self.entries.len() > self.capacity {
+                self.entries.pop_last();
+            }
+        }
+    }
+
+    /// Remove an entry from the cache.
+    pub fn remove(&mut self, key: OrderedRow) {
+        if !self.is_cold_start {
+            self.entries.remove(&key);
+        }
+    }
+
+    /// Get the first (smallest) value in the cache.
+    pub fn first_value(&self) -> Option<&T> {
+        if self.synced {
+            self.entries.first_key_value().map(|(_, v)| v)
+        } else {
+            None
+        }
+    }
+
+    /// Iterate over the values in the cache.
+    pub fn iter_values(&self) -> impl Iterator<Item = &T> {
+        self.entries.values()
+    }
 }
 
 /// All managed state for aggregation. The managed state will manage the cache and integrate
@@ -112,14 +190,11 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Create a managed state from `agg_call`.
-    #[allow(clippy::too_many_arguments)]
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
         pk_indices: PkIndices,
-        pk_data_types: PkDataTypes,
         is_row_count: bool,
-        key_hash_code: Option<HashCode>,
         pk: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
@@ -131,21 +206,20 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     "should set row_count for value states other than AggKind::RowCount"
                 );
 
-                // optimization: use single-value state for append-only min/max
                 if agg_call.append_only {
+                    // optimization: use single-value state for append-only min/max
                     Ok(Self::Value(
                         ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
                     ))
                 } else {
-                    Ok(Self::Table(create_streaming_extreme_state(
+                    Ok(Self::Table(Box::new(GenericExtremeState::new(
                         agg_call,
-                        row_count.unwrap(),
-                        // TODO: estimate a good cache size instead of hard-coding
-                        Some(1024),
-                        pk_data_types,
-                        key_hash_code,
                         pk,
-                    )?))
+                        pk_indices,
+                        state_table_col_mapping,
+                        row_count.unwrap(),
+                        1024, // TODO: estimate a good cache size instead of hard-coding
+                    ))))
                 }
             }
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
