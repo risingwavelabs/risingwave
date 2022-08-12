@@ -186,6 +186,7 @@ pub enum Mutation {
     Update {
         dispatchers: HashMap<ActorId, DispatcherUpdate>,
         merges: HashMap<ActorId, MergeUpdate>,
+        vnode_bitmaps: HashMap<ActorId, Bitmap>,
         dropped_actors: HashSet<ActorId>,
     },
     Add {
@@ -321,10 +322,15 @@ impl Mutation {
             Mutation::Update {
                 dispatchers,
                 merges,
+                vnode_bitmaps,
                 dropped_actors,
             } => ProstMutation::Update(UpdateMutation {
                 actor_dispatcher_update: dispatchers.clone(),
                 actor_merge_update: merges.clone(),
+                actor_vnode_bitmap_update: vnode_bitmaps
+                    .iter()
+                    .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
+                    .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
@@ -375,6 +381,11 @@ impl Mutation {
             ProstMutation::Update(update) => Mutation::Update {
                 dispatchers: update.actor_dispatcher_update.clone(),
                 merges: update.actor_merge_update.clone(),
+                vnode_bitmaps: update
+                    .actor_vnode_bitmap_update
+                    .iter()
+                    .map(|(&actor_id, bitmap)| (actor_id, bitmap.into()))
+                    .collect(),
                 dropped_actors: update.dropped_actors.iter().cloned().collect(),
             },
 

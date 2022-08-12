@@ -458,6 +458,7 @@ mod tests {
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
             dispatchers: Default::default(),
             merges: merge_updates,
+            vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
         });
         send!([234, 235], Message::Barrier(b1.clone()));

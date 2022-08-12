@@ -983,6 +983,7 @@ mod tests {
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
             dispatchers: dispatcher_updates,
             merges: Default::default(),
+            vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
