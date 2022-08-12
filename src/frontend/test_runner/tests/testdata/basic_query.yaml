@@ -148,5 +148,13 @@
     LogicalProject { exprs: [] }
       LogicalScan { table: t, columns: [t._row_id] }
 - sql: |
+    /* disallow subquery in values */
     values(1, (select 1));
-  binder_error: 'Bind error: VALUES is disallowed to have subqueries.'
+  binder_error: 'Feature is not yet implemented: VALUES is disallowed to have subqueries.,
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md'
+- sql: |
+    /* disallow correlated_input_ref in values */
+    create table t(v1 int);
+    select v1 from t where exists (values(v1));
+  binder_error: 'Feature is not yet implemented: VALUES is disallowed to have CorrelatedInputRef.,
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md'

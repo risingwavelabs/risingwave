@@ -209,7 +209,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction}
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, CorrelatedInputRef}
 
 impl ExprImpl {
     /// Used to check whether the expression has [`CorrelatedInputRef`].

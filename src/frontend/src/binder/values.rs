@@ -77,16 +77,34 @@ impl Binder {
         self.context.clause = None;
 
         let num_columns = bound[0].len();
-        if bound.iter().any(|row| row.len() != num_columns) {
-            return Err(
-                ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
-            );
+        // syntax check.
+        {
+            if bound.iter().any(|row| row.len() != num_columns) {
+                return Err(ErrorCode::BindError(
+                    "VALUES lists must all be the same length".into(),
+                )
+                .into());
+            }
+            if bound.iter().flatten().any(|expr| expr.has_subquery()) {
+                return Err(ErrorCode::NotImplemented(
+                    "VALUES is disallowed to have subqueries.".into(),
+                    None.into(),
+                )
+                .into());
+            }
+            if bound
+                .iter()
+                .flatten()
+                .any(|expr| expr.has_correlated_input_ref_by_depth())
+            {
+                return Err(ErrorCode::NotImplemented(
+                    "VALUES is disallowed to have CorrelatedInputRef.".into(),
+                    None.into(),
+                )
+                .into());
+            }
         }
-        if bound.iter().flatten().any(|expr| expr.has_subquery()) {
-            return Err(
-                ErrorCode::BindError("VALUES is disallowed to have subqueries.".into()).into(),
-            );
-        }
+
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {
