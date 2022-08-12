@@ -26,6 +26,7 @@ use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 use smallvec::SmallVec;
 
 use super::*;
+use crate::error::{ErrorCode, Result, RwError};
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.
@@ -271,7 +272,7 @@ impl IntervalUnit {
 }
 
 impl Serialize for IntervalUnit {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -286,7 +287,7 @@ impl Serialize for IntervalUnit {
 }
 
 impl<'de> Deserialize<'de> for IntervalUnit {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -443,6 +444,155 @@ impl Display for IntervalUnit {
         }
         v.push(format_time);
         Display::fmt(&v.join(" "), f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DateTimeField {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+}
+
+impl FromStr for DateTimeField {
+    type Err = RwError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_str() {
+            "years" | "year" | "yrs" | "yr" | "y" => Ok(Self::Year),
+            "days" | "day" | "d" => Ok(Self::Day),
+            "hours" | "hour" | "hrs" | "hr" | "h" => Ok(Self::Hour),
+            "minutes" | "minute" | "mins" | "min" | "m" => Ok(Self::Minute),
+            "months" | "month" | "mons" | "mon" => Ok(Self::Month),
+            "seconds" | "second" | "secs" | "sec" | "s" => Ok(Self::Second),
+            _ => Err(ErrorCode::InvalidInputSyntax(format!("unknown unit {}", s)).into()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum TimeStrToken {
+    Num(i64),
+    TimeUnit(DateTimeField),
+}
+
+fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
+    let s = s.trim();
+    let mut tokens = Vec::new();
+    let mut num_buf = "".to_string();
+    let mut char_buf = "".to_string();
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '-' => {
+                num_buf.push(c);
+            }
+            c if c.is_ascii_digit() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                num_buf.push(c);
+            }
+            c if c.is_ascii_alphabetic() => {
+                convert_digit(&mut num_buf, &mut tokens)?;
+                char_buf.push(c);
+            }
+            chr if chr.is_ascii_whitespace() => {
+                convert_unit(&mut char_buf, &mut tokens)?;
+                convert_digit(&mut num_buf, &mut tokens)?;
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
+                    i, s, c
+                )).into());
+            }
+        }
+    }
+    convert_digit(&mut num_buf, &mut tokens)?;
+    convert_unit(&mut char_buf, &mut tokens)?;
+
+    Ok(tokens)
+}
+
+fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        match c.parse::<i64>() {
+            Ok(num) => {
+                t.push(TimeStrToken::Num(num));
+            }
+            Err(_) => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", c)).into(),
+                );
+            }
+        }
+        c.clear();
+    }
+    Ok(())
+}
+
+fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
+    if !c.is_empty() {
+        t.push(TimeStrToken::TimeUnit(c.parse()?));
+        c.clear();
+    }
+    Ok(())
+}
+
+impl IntervalUnit {
+    pub fn parse_with_fields(s: &str, leading_field: Option<DateTimeField>) -> Result<Self> {
+        // > INTERVAL '1' means 1 second.
+        // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
+        let unit = leading_field.unwrap_or(DateTimeField::Second);
+        use DateTimeField::*;
+        let tokens = parse_interval(s)?;
+        // Todo: support more syntax
+        if tokens.len() > 2 {
+            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+        }
+        let num = match tokens.get(0) {
+            Some(TimeStrToken::Num(num)) => *num,
+            _ => {
+                return Err(
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
+                );
+            }
+        };
+        let interval_unit = match tokens.get(1) {
+            Some(TimeStrToken::TimeUnit(unit)) => unit,
+            _ => &unit,
+        };
+
+        (|| match interval_unit {
+            Year => {
+                let months = num.checked_mul(12)?;
+                Some(IntervalUnit::from_month(months as i32))
+            }
+            Month => Some(IntervalUnit::from_month(num as i32)),
+            Day => Some(IntervalUnit::from_days(num as i32)),
+            Hour => {
+                let ms = num.checked_mul(3600 * 1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+            Minute => {
+                let ms = num.checked_mul(60 * 1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+            Second => {
+                let ms = num.checked_mul(1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+        })()
+        .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)).into())
+    }
+}
+
+impl FromStr for IntervalUnit {
+    type Err = RwError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::parse_with_fields(s, None)
     }
 }
 
