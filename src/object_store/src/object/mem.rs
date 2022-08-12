@@ -50,7 +50,7 @@ impl StreamingUploader for InMemStreamingUploader {
         ));
         let obj = self.buf.freeze();
         if obj.is_empty() {
-            Ok(())
+            Err(ObjectError::internal("upload empty object"))
         } else {
             let metadata = get_obj_meta(&self.path, &obj)?;
             self.objects.lock().await.insert(self.path, (metadata, obj));
@@ -72,7 +72,7 @@ impl ObjectStore for InMemObjectStore {
             "mem upload error"
         )));
         if obj.is_empty() {
-            Ok(())
+            Err(ObjectError::internal("upload empty object"))
         } else {
             let metadata = get_obj_meta(path, &obj)?;
             self.objects

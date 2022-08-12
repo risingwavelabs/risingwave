@@ -240,7 +240,7 @@ impl StreamingUploader for S3StreamingUploader {
         if self.join_handles.is_empty() {
             self.abort().await?;
             return if self.buf.is_empty() {
-                Ok(())
+                Err(ObjectError::internal("upload empty object"))
             } else {
                 self.client
                     .put_object()
@@ -281,7 +281,7 @@ impl ObjectStore for S3ObjectStore {
             "s3 upload error"
         )));
         if obj.is_empty() {
-            Ok(())
+            Err(ObjectError::internal("upload empty object"))
         } else {
             self.client
                 .put_object()

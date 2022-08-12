@@ -176,7 +176,7 @@ impl DiskObjectStore {
 impl ObjectStore for DiskObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         if obj.is_empty() {
-            Ok(())
+            Err(ObjectError::internal("upload empty object"))
         } else {
             let mut file =
                 utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
