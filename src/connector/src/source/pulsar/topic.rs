@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
+
+use crate::source::error::{SourceError, SourceResult};
 
 const PERSISTENT_DOMAIN: &str = "persistent";
 const NON_PERSISTENT_DOMAIN: &str = "non-persistent";
@@ -56,9 +57,11 @@ impl Topic {
         )
     }
 
-    pub fn sub_topic(&self, partition: i32) -> Result<Topic> {
+    pub fn sub_topic(&self, partition: i32) -> SourceResult<Topic> {
         if partition < 0 {
-            return Err(anyhow!("invalid partition index number"));
+            return Err(SourceError::source_error(
+                "invalid partition index number".to_string(),
+            ));
         }
 
         if self.topic.contains(PARTITIONED_TOPIC_SUFFIX) {
@@ -76,14 +79,14 @@ impl Topic {
 }
 
 /// `get_partition_index` returns the partition index of the topic.
-pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
+pub fn get_partition_index(topic: &str) -> SourceResult<Option<i32>> {
     if topic.contains(PARTITIONED_TOPIC_SUFFIX) {
         let partition = topic
             .split('-')
             .last()
             .unwrap()
             .parse::<i32>()
-            .map_err(|e| anyhow!(e))?;
+            .map_err(SourceError::from)?;
 
         Ok(Some(partition))
     } else {
@@ -97,7 +100,7 @@ pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
 /// - <tenant>/<namespace>/<topic>
 /// The fully qualified topic name can be:
 /// <domain>://<tenant>/<namespace>/<topic>
-pub fn parse_topic(topic: &str) -> Result<Topic> {
+pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
     let mut complete_topic = topic.to_string();
 
     if !topic.contains("://") {
@@ -109,11 +112,11 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
             ),
             3 => format!("{}://{}", PERSISTENT_DOMAIN, topic),
             _ => {
-                return Err(anyhow!(
+                return Err(SourceError::source_error(format!(
                     "Invalid short topic name '{}', \
                 it should be in the format of <tenant>/<namespace>/<topic> or <topic>",
                     topic
-                ));
+                )));
             }
         };
     }
@@ -123,10 +126,10 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     let domain = match parts[0] {
         PERSISTENT_DOMAIN | NON_PERSISTENT_DOMAIN => parts[0],
         _ => {
-            return Err(anyhow!(
+            return Err(SourceError::source_error(format!(
                 "The domain only can be specified as 'persistent' or 'non-persistent'. Input domain is '{}'",
                 parts[0]
-            ));
+            )));
         }
     };
 
@@ -134,10 +137,10 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     let parts: Vec<&str> = rest.splitn(3, '/').collect();
 
     if parts.len() != 3 {
-        return Err(anyhow!(
+        return Err(SourceError::source_error(format!(
             "invalid topic name '{}', it should be in the format of <tenant>/<namespace>/<topic>",
             rest
-        ));
+        )));
     }
 
     let parsed_topic = Topic {
@@ -149,7 +152,9 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     };
 
     if parsed_topic.topic.is_empty() {
-        return Err(anyhow!("topic name cannot be empty".to_string(),));
+        return Err(SourceError::source_error(
+            "topic name cannot be empty".to_string(),
+        ));
     }
 
     Ok(parsed_topic)

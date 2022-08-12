@@ -28,6 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
+use risingwave_connector::source::error::SourceResult;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -416,7 +417,8 @@ impl Mutation {
                                     .splits
                                     .iter()
                                     .map(SplitImpl::try_from)
-                                    .collect::<anyhow::Result<Vec<SplitImpl>>>()
+                                    .collect::<SourceResult<Vec<SplitImpl>>>()
+                                    .map_err(|e| anyhow::anyhow!(e))
                                     .to_rw_result()?,
                             ),
                         ));

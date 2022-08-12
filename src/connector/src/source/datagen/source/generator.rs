@@ -14,7 +14,6 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
@@ -22,6 +21,7 @@ use serde_json::{Map, Value};
 
 use super::DEFAULT_DATAGEN_INTERVAL;
 use crate::source::{SourceMessage, SplitId};
+use crate::source::error::{SourceResult, SourceError};
 
 pub struct DatagenEventGenerator {
     pub fields_map: HashMap<String, FieldGeneratorImpl>,
@@ -39,7 +39,7 @@ impl DatagenEventGenerator {
         split_id: SplitId,
         split_num: u64,
         split_index: u64,
-    ) -> Result<Self> {
+    ) -> SourceResult<Self> {
         let partition_size = if rows_per_second % split_num > split_index {
             rows_per_second / split_num + 1
         } else {
@@ -54,14 +54,14 @@ impl DatagenEventGenerator {
         })
     }
 
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = SourceError)]
     pub async fn into_stream(mut self) {
         loop {
             yield self.next().await?
         }
     }
 
-    pub async fn next(&mut self) -> Result<Vec<SourceMessage>> {
+    pub async fn next(&mut self) -> SourceResult<Vec<SourceMessage>> {
         let now = Instant::now();
         let mut res = vec![];
         let mut generated_count: u64 = 0;

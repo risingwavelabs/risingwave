@@ -15,7 +15,6 @@
 use std::borrow::BorrowMut;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, ensure, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools;
@@ -24,6 +23,7 @@ use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::try_match_expand;
 
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{Column, ConnectorState, SourceMessage, SplitImpl, SplitReader};
@@ -35,19 +35,22 @@ pub struct PulsarSplitReader {
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
-fn parse_message_id(id: &str) -> Result<MessageIdData> {
+fn parse_message_id(id: &str) -> SourceResult<MessageIdData> {
     let splits = id.split(':').collect_vec();
 
     if splits.len() < 2 || splits.len() > 4 {
-        return Err(anyhow!("illegal message id string {}", id));
+        return Err(SourceError::source_error(format!(
+            "illegal message id string {}",
+            id
+        )));
     }
 
     let ledger_id = splits[0]
         .parse::<u64>()
-        .map_err(|e| anyhow!("illegal ledger id {}", e))?;
+        .map_err(|e| SourceError::source_error(format!("illegal ledger id {}", e)))?;
     let entry_id = splits[1]
         .parse::<u64>()
-        .map_err(|e| anyhow!("illegal entry id {}", e))?;
+        .map_err(|e| SourceError::source_error(format!("illegal entry id {}", e)))?;
 
     let mut message_id = MessageIdData {
         ledger_id,
@@ -61,14 +64,14 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
     if splits.len() > 2 {
         let partition = splits[2]
             .parse::<i32>()
-            .map_err(|e| anyhow!("illegal partition {}", e))?;
+            .map_err(|e| SourceError::source_error(format!("illegal partition {}", e)))?;
         message_id.partition = Some(partition);
     }
 
     if splits.len() == 4 {
         let batch_index = splits[3]
             .parse::<i32>()
-            .map_err(|e| anyhow!("illegal batch index {}", e))?;
+            .map_err(|e| SourceError::source_error(format!("illegal batch index {}", e)))?;
         message_id.batch_index = Some(batch_index);
     }
 
@@ -85,14 +88,19 @@ impl SplitReader for PulsarSplitReader {
         props: PulsarProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
+    ) -> SourceResult<Self>
     where
         Self: Sized,
     {
-        let splits = state.ok_or_else(|| anyhow!("no default state for reader"))?;
-        ensure!(splits.len() == 1, "only support single split");
+        let splits = state
+            .ok_or_else(|| SourceError::source_error(format!("no default state for reader")))?;
+        if splits.len() != 1 {
+            return Err(SourceError::source_error(
+                "only support single split".to_string(),
+            ));
+        }
         let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)
-            .map_err(|e| anyhow!(e))?;
+            .map_err(SourceError::from)?;
 
         let service_url = &props.service_url;
         let topic = split.topic.to_string();
@@ -102,7 +110,7 @@ impl SplitReader for PulsarSplitReader {
         let pulsar: Pulsar<_> = Pulsar::builder(service_url, TokioExecutor)
             .build()
             .await
-            .map_err(|e| anyhow!(e))?;
+            .map_err(SourceError::from)?;
 
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
@@ -132,7 +140,7 @@ impl SplitReader for PulsarSplitReader {
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
 
-        let consumer: Consumer<Vec<u8>, _> = builder.build().await.map_err(|e| anyhow!(e))?;
+        let consumer: Consumer<Vec<u8>, _> = builder.build().await.map_err(SourceError::from)?;
         if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
             // FIXME: Here we need pulsar-rs to support the send + sync consumer
             // consumer
@@ -148,7 +156,7 @@ impl SplitReader for PulsarSplitReader {
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         let mut stream = self
             .consumer
             .borrow_mut()
@@ -162,7 +170,7 @@ impl SplitReader for PulsarSplitReader {
         let mut ret = Vec::with_capacity(chunk.len());
 
         for msg in chunk {
-            let msg = msg.map_err(|e| anyhow!(e))?;
+            let msg = msg.map_err(SourceError::from)?;
             ret.push(SourceMessage::from(msg));
         }
 

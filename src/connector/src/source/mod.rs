@@ -15,6 +15,7 @@
 pub mod base;
 pub mod datagen;
 pub mod dummy_connector;
+pub mod error;
 pub mod filesystem;
 pub mod kafka;
 pub mod kinesis;

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::pulsar::admin::PulsarAdminClient;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::topic::{parse_topic, Topic};
@@ -42,7 +42,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
     type Properties = PulsarProperties;
     type Split = PulsarSplit;
 
-    async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
+    async fn new(properties: PulsarProperties) -> SourceResult<PulsarSplitEnumerator> {
         let topic = properties.topic;
         let admin_url = properties.admin_url;
         let parsed_topic = parse_topic(&topic)?;
@@ -56,14 +56,15 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             Some("latest") => PulsarEnumeratorOffset::Latest,
             None => PulsarEnumeratorOffset::Earliest,
             _ => {
-                bail!(
+                return Err(SourceError::source_error(
                     "properties `startup_mode` only support earliest and latest or leave it empty"
-                );
+                        .to_string(),
+                ));
             }
         };
 
         if let Some(s) = properties.time_offset {
-            let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
+            let time_offset = s.parse::<i64>().map_err(SourceError::from)?;
             scan_start_offset = PulsarEnumeratorOffset::Timestamp(time_offset)
         }
 
@@ -74,7 +75,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
+    async fn list_splits(&mut self) -> SourceResult<Vec<PulsarSplit>> {
         let offset = self.start_offset.clone();
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
@@ -82,11 +83,11 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
         // note: may check topic exists by get stats
         if topic_metadata.partitions < 0 {
-            bail!(
+            SourceError::source_error(format!(
                 "illegal metadata {:?} for pulsar topic {}",
                 topic_metadata.partitions,
                 self.topic.to_string()
-            );
+            ));
         }
 
         let splits = if topic_metadata.partitions > 0 {

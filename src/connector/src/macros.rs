@@ -17,17 +17,17 @@ macro_rules! impl_split_enumerator {
     ([], $({ $variant_name:ident, $split_enumerator_name:ident} ),*) => {
         impl SplitEnumeratorImpl {
 
-             pub async fn create(properties: ConnectorProperties) -> Result<Self> {
+             pub async fn create(properties: ConnectorProperties) -> SourceResult<Self> {
                 match properties {
-                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(props).await.map(Self::$variant_name), )*
-                    other => Err(anyhow!(
+                    $( ConnectorProperties::$variant_name(props) => $split_enumerator_name::new(props).await.map(Self::$variant_name).map_err(SourceError::from), )*
+                    other => Err(SourceError::source_error(format!(
                         "split enumerator type for config {:?} is not supported",
                         other
-                    )),
+                    ))),
                 }
              }
 
-             pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
+             pub async fn list_splits(&mut self) -> SourceResult<Vec<SplitImpl>> {
                 match self {
                     $( Self::$variant_name(inner) => inner
                         .list_splits()
@@ -37,7 +37,7 @@ macro_rules! impl_split_enumerator {
                                 .map(SplitImpl::$variant_name)
                                 .collect_vec()
                         })
-                        .map_err(|e| ErrorCode::ConnectorError(e.into()).into()),
+                        .map_err(|e| SourceError::source_error(e.to_string())),
                     )*
                 }
              }
@@ -57,13 +57,13 @@ macro_rules! impl_split {
         }
 
         impl TryFrom<&ConnectorSplit> for SplitImpl {
-            type Error = anyhow::Error;
+            type Error = SourceError;
 
-            fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
+            fn try_from(split: &ConnectorSplit) -> SourceResult<Self> {
                 match split.split_type.to_lowercase().as_str() {
-                    $( $connector_name => <$split>::restore_from_bytes(split.encoded_split.as_ref()).map(SplitImpl::$variant_name), )*
+                    $( $connector_name => <$split>::restore_from_bytes(split.encoded_split.as_ref()).map(SplitImpl::$variant_name).map_err(SourceError::from), )*
                         other => {
-                    Err(anyhow!("connector '{}' is not supported", other))
+                    Err(SourceError::source_error(format!("connector '{}' is not supported", other)))
                     }
                 }
             }
@@ -80,7 +80,7 @@ macro_rules! impl_split {
                 Bytes::from(ConnectorSplit::from(self).encode_to_vec())
             }
 
-            fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+            fn restore_from_bytes(bytes: &[u8]) -> SourceResult<Self> {
                 SplitImpl::try_from(&ConnectorSplit::decode(bytes)?)
             }
         }
@@ -106,7 +106,7 @@ macro_rules! impl_split {
 macro_rules! impl_split_reader {
     ([], $({ $variant_name:ident, $split_reader_name:ident} ),*) => {
         impl SplitReaderImpl {
-            pub async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+            pub async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
                 match self {
                     $( Self::$variant_name(inner) => inner.next().await, )*
                 }
@@ -116,7 +116,7 @@ macro_rules! impl_split_reader {
                 config: ConnectorProperties,
                 state: ConnectorState,
                 columns: Option<Vec<Column>>,
-            ) -> Result<Self> {
+            ) -> SourceResult<Self> {
                 if state.is_none() {
                     return Ok(Self::Dummy(Box::new(DummySplitReader {})));
                 }
@@ -136,18 +136,18 @@ macro_rules! impl_split_reader {
 macro_rules! impl_connector_properties {
     ([], $({ $variant_name:ident, $connector_name:ident } ),*) => {
         impl ConnectorProperties {
-            pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
+            pub fn extract(mut props: HashMap<String, String>) -> SourceResult<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";
-                let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-                let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
+                let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| SourceError::source_error("Must specify 'connector' in WITH clause".to_string()))?;
+                let json_value = serde_json::to_value(props).map_err(SourceError::from)?;
                 match connector.to_lowercase().as_str() {
                     $(
                         $connector_name => {
-                            serde_json::from_value(json_value).map_err(|e| anyhow!(e.to_string())).map(Self::$variant_name)
+                            serde_json::from_value(json_value).map_err(|e| SourceError::source_error(e.to_string())).map(Self::$variant_name)
                         },
                     )*
                     _ => {
-                        Err(anyhow!("connector '{}' is not supported", connector,))
+                        Err(SourceError::source_error(format!("connector '{}' is not supported", connector,)))
                     }
                 }
             }

@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_sdk_kinesis::Client;
@@ -24,6 +23,7 @@ use http::Uri;
 use maplit::hashmap;
 use serde::{Deserialize, Serialize};
 
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::kinesis::KinesisProperties;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -49,7 +49,7 @@ pub struct AwsCredentials {
 }
 
 impl AwsConfigInfo {
-    pub async fn load(&self) -> Result<aws_types::SdkConfig> {
+    pub async fn load(&self) -> SourceResult<aws_types::SdkConfig> {
         let region = self
             .region
             .as_ref()
@@ -91,7 +91,7 @@ impl AwsConfigInfo {
         Ok(config_loader.load().await)
     }
 
-    pub fn build(properties: KinesisProperties) -> Result<Self> {
+    pub fn build(properties: KinesisProperties) -> SourceResult<Self> {
         let stream_name = properties.stream_name;
         let region = properties.stream_region;
 
@@ -104,7 +104,7 @@ impl AwsConfigInfo {
         );
         if access_key.is_some() ^ secret_key.is_some() {
             return Err(
-                anyhow!("Both Kinesis credential access key and Kinesis secret key should be provided or not provided at the same time.")
+                SourceError::source_error("Both Kinesis credential access key and Kinesis secret key should be provided or not provided at the same time.".to_string())
             );
         } else if let (Some(access), Some(secret)) = (access_key, secret_key) {
             credentials = Some(AwsCredentials {
@@ -141,7 +141,7 @@ pub fn kinesis_demo_properties() -> HashMap<String, String> {
     properties
 }
 
-pub async fn build_client(properties: KinesisProperties) -> Result<Client> {
+pub async fn build_client(properties: KinesisProperties) -> SourceResult<Client> {
     let config = AwsConfigInfo::build(properties)?;
     let aws_config = config.load().await?;
     let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);

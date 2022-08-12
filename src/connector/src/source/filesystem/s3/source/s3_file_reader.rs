@@ -15,7 +15,6 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_smithy_http::byte_stream::ByteStream;
@@ -34,6 +33,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2, AwsCredentialV2};
 use crate::source::base::{SourceMessage, SplitReader};
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::filesystem::file_common::{EntryStat, StatusWatch};
 use crate::source::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
 use crate::source::filesystem::s3::s3_dir::{
@@ -87,7 +87,7 @@ impl Default for S3FileSplit {
 
 impl S3FileSplit {
     // path s3://bucket_name/path
-    fn from_path(path_string: String) -> Result<Self> {
+    fn from_path(path_string: String) -> SourceResult<Self> {
         let mut s3_file = S3File::default();
         s3_file.object.path = path_string.clone();
         let path = std::path::Path::new(path_string.as_str());
@@ -103,7 +103,9 @@ impl S3FileSplit {
                 s3_file,
             })
         } else {
-            Err(IllegalS3FilePath(path_string).into())
+            Err(SourceError::filesystem_opt_error(
+                IllegalS3FilePath(path_string).to_string(),
+            ))
         }
     }
 
@@ -125,8 +127,8 @@ impl SplitMetaData for S3FileSplit {
         Bytes::from(serde_json::to_string(self).unwrap())
     }
 
-    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
-        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    fn restore_from_bytes(bytes: &[u8]) -> SourceResult<Self> {
+        serde_json::from_slice(bytes).map_err(|e| e.into())
     }
 }
 
@@ -192,7 +194,7 @@ impl S3FileReader {
         client_for_s3: s3_client::Client,
         s3_file_split: S3FileSplit,
         s3_msg_sender: Sender<S3InnerMessage>,
-    ) -> Result<()> {
+    ) -> SourceResult<()> {
         let bucket = s3_file_split.bucket.clone();
         let s3_file = s3_file_split.s3_file.clone();
         let obj_val =
@@ -229,7 +231,7 @@ impl S3FileReader {
                         }
                     }
                     Err(err) => {
-                        return Err(anyhow::Error::from(err));
+                        return Err(err.into());
                     }
                 };
                 let mut stream = ReaderStream::with_capacity(reader, STREAM_READER_CAPACITY);
@@ -247,14 +249,14 @@ impl S3FileReader {
                                 payload: read_bytes,
                             };
                             if s3_msg_sender.send(s3_inner_msg).await.is_err() {
-                                return Err(anyhow::Error::from(crate::source::filesystem::s3::s3_dir::FileSystemOptError::GetS3ObjectError(
+                                return Err(SourceError::filesystem_opt_error(crate::source::filesystem::s3::s3_dir::FileSystemOptError::GetS3ObjectError(
                                     bucket.clone(),
                                     s3_file.clone().object.path,
-                                )));
+                                ).to_string()));
                             }
                         }
                         Err(read_bytes_err) => {
-                            return Err(anyhow::Error::from(read_bytes_err));
+                            return Err(read_bytes_err.into());
                         }
                     }
                 }
@@ -262,7 +264,7 @@ impl S3FileReader {
             }
             Err(err) => {
                 error!("S3FileReader get_object error cause by {:?}", err);
-                Err(err)
+                Err(err.into())
             }
         }
     }
@@ -271,7 +273,7 @@ impl S3FileReader {
         client_for_s3: &s3_client::Client,
         s3_file: &S3File,
         bucket: &str,
-    ) -> anyhow::Result<ByteStream> {
+    ) -> SourceResult<ByteStream> {
         let path = s3_file.clone().object.path;
         let s3_object_key = std::path::Path::new(path.as_str())
             .file_name()
@@ -288,11 +290,12 @@ impl S3FileReader {
             .await;
         match get_object {
             Ok(get_object_out) => Ok(get_object_out.body),
-            Err(sdk_err) => Err(anyhow::Error::from(
+            Err(sdk_err) => Err(SourceError::filesystem_opt_error(
                 crate::source::filesystem::s3::s3_dir::FileSystemOptError::AwsSdkInnerError(
                     format!("S3 GetObject from {} error:", bucket),
                     sdk_err.to_string(),
-                ),
+                )
+                .to_string(),
             )),
         }
     }
@@ -310,7 +313,7 @@ impl SplitReader for S3FileReader {
         props: S3Properties,
         _state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
+    ) -> SourceResult<Self>
     where
         Self: Sized,
     {
@@ -343,7 +346,7 @@ impl SplitReader for S3FileReader {
         Ok(s3_file_reader)
     }
 
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         let mut read_chunk = self
             .s3_receive_stream
             .borrow_mut()

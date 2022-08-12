@@ -17,9 +17,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
+use risingwave_connector::source::error::SourceResult;
 
 use crate::SourceColumnDesc;
 
@@ -27,7 +27,7 @@ pub(crate) trait SourceChunkBuilder {
     fn build_columns<'a>(
         column_descs: &[SourceColumnDesc],
         rows: impl IntoIterator<Item = &'a Vec<Datum>>,
-    ) -> Result<Vec<Column>> {
+    ) -> SourceResult<Vec<Column>> {
         let mut builders: Vec<_> = column_descs
             .iter()
             .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
@@ -46,7 +46,10 @@ pub(crate) trait SourceChunkBuilder {
             .map_err(Into::into)
     }
 
-    fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
+    fn build_datachunk(
+        column_desc: &[SourceColumnDesc],
+        rows: &[Vec<Datum>],
+    ) -> SourceResult<DataChunk> {
         let columns = Self::build_columns(column_desc, rows)?;
         Ok(DataChunk::new(columns, rows.len()))
     }

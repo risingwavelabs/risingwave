@@ -18,6 +18,7 @@ use anyhow::{Ok, Result};
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
 
+use crate::source::error::SourceError;
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::{Event, EventType};
 use crate::source::nexmark::source::message::NexmarkMessage;
@@ -40,7 +41,7 @@ pub struct NexmarkEventGenerator {
 }
 
 impl NexmarkEventGenerator {
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
+    #[try_stream(ok = Vec<SourceMessage>, error = SourceError)]
     pub async fn into_stream(mut self) {
         loop {
             yield self.next().await?

@@ -14,13 +14,13 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
 
 use crate::source::base::SplitEnumerator;
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{KafkaProperties, KAFKA_SYNC_CALL_TIMEOUT};
 
@@ -50,7 +50,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     type Properties = KafkaProperties;
     type Split = KafkaSplit;
 
-    async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
+    async fn new(properties: KafkaProperties) -> SourceResult<KafkaSplitEnumerator> {
         let broker_address = properties.brokers;
         let topic = properties.topic;
 
@@ -63,21 +63,21 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Some("latest") => KafkaEnumeratorOffset::Latest,
             None => KafkaEnumeratorOffset::Earliest,
             _ => {
-                return Err(anyhow!(
-                    "properties `scan_startup_mode` only support earliest and latest or leave it empty"
+                return Err(SourceError::source_error(
+                    "properties `scan_startup_mode` only support earliest and latest or leave it empty".to_string()
                 ));
             }
         };
 
         if let Some(s) = properties.time_offset {
-            let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
+            let time_offset = s.parse::<i64>().map_err(SourceError::from)?;
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
         let client: BaseConsumer = rdkafka::ClientConfig::new()
             .set("bootstrap.servers", &broker_address)
             .create_with_context(DefaultConsumerContext)
-            .map_err(|e| anyhow!(e))?;
+            .map_err(SourceError::from)?;
 
         Ok(Self {
             broker_address,
@@ -88,22 +88,21 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         })
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
+    async fn list_splits(&mut self) -> SourceResult<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition().map_err(|e| {
-            anyhow!(
+            SourceError::source_error(format!(
                 "failed to fetch metadata from kafka ({}): {}",
-                self.broker_address,
-                e
-            )
+                self.broker_address, e
+            ))
         })?;
 
         let mut start_offsets = self
             .fetch_start_offset(topic_partitions.as_ref())
-            .map_err(|e| anyhow!("{}", e))?;
+            .map_err(SourceError::from)?;
 
         let mut stop_offsets = self
             .fetch_stop_offset(topic_partitions.as_ref())
-            .map_err(|e| anyhow!("{}", e))?;
+            .map_err(SourceError::from)?;
 
         let ret = topic_partitions
             .into_iter()
@@ -209,7 +208,7 @@ impl KafkaSplitEnumerator {
         Ok(result)
     }
 
-    fn fetch_topic_partition(&mut self) -> anyhow::Result<Vec<i32>> {
+    fn fetch_topic_partition(&mut self) -> SourceResult<Vec<i32>> {
         // for now, we only support one topic
         let metadata = self
             .admin_client
@@ -217,11 +216,19 @@ impl KafkaSplitEnumerator {
 
         let topic_meta = match metadata.topics() {
             [meta] => meta,
-            _ => return Err(anyhow!("topic {} not found", self.topic)),
+            _ => {
+                return Err(SourceError::source_error(format!(
+                    "topic {} not found",
+                    self.topic
+                )))
+            }
         };
 
         if topic_meta.partitions().is_empty() {
-            return Err(anyhow!("topic {} not found", self.topic));
+            return Err(SourceError::source_error(format!(
+                "topic {} not found",
+                self.topic
+            )));
         }
 
         Ok(topic_meta

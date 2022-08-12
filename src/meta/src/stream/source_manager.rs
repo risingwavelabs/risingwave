@@ -136,8 +136,11 @@ impl ConnectorSourceWorker {
             .clone()
             .ok_or_else(|| anyhow!("source info is empty"))?;
         let stream_source_info = try_match_expand!(info, Info::StreamSource)?;
-        let properties = ConnectorProperties::extract(stream_source_info.properties)?;
-        let enumerator = SplitEnumeratorImpl::create(properties).await?;
+        let properties =
+            ConnectorProperties::extract(stream_source_info.properties).map_err(|e| anyhow!(e))?;
+        let enumerator = SplitEnumeratorImpl::create(properties)
+            .await
+            .map_err(|e| anyhow!(e))?;
         let current_splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id,
@@ -171,7 +174,11 @@ impl ConnectorSourceWorker {
     }
 
     async fn tick(&mut self) -> MetaResult<()> {
-        let splits = self.enumerator.list_splits().await?;
+        let splits = self
+            .enumerator
+            .list_splits()
+            .await
+            .map_err(|e| anyhow!(e))?;
         let mut current_splits = self.current_splits.lock().await;
         current_splits.splits.replace(
             splits

@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
@@ -24,6 +23,7 @@ use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 
 use crate::source::base::{SourceMessage, SplitReader};
+use crate::source::error::{SourceError, SourceResult};
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::KafkaProperties;
 use crate::source::{Column, ConnectorState, SplitImpl};
@@ -43,7 +43,7 @@ impl SplitReader for KafkaSplitReader {
         properties: KafkaProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
-    ) -> Result<Self>
+    ) -> SourceResult<Self>
     where
         Self: Sized,
     {
@@ -73,7 +73,7 @@ impl SplitReader for KafkaSplitReader {
         let consumer: StreamConsumer = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
-            .map_err(|e| anyhow!("consumer creation failed {}", e))?;
+            .map_err(|e| SourceError::source_error(format!("consumer creation failed {}", e)))?;
 
         if let Some(splits) = state {
             log::debug!("Splits for kafka found! {:?}", splits);
@@ -87,14 +87,14 @@ impl SplitReader for KafkaSplitReader {
                             k.partition,
                             Offset::Offset(offset),
                         )
-                        .map_err(|e| anyhow!(e.to_string()))?;
+                        .map_err(SourceError::from)?;
                     } else {
                         tpl.add_partition(k.topic.as_str(), k.partition);
                     }
                 }
             }
 
-            consumer.assign(&tpl).map_err(|e| anyhow!(e.to_string()))?;
+            consumer.assign(&tpl).map_err(SourceError::from)?;
         }
 
         Ok(Self {
@@ -103,7 +103,7 @@ impl SplitReader for KafkaSplitReader {
         })
     }
 
-    async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
+    async fn next(&mut self) -> SourceResult<Option<Vec<SourceMessage>>> {
         let mut stream = self
             .consumer
             .stream()
@@ -116,8 +116,8 @@ impl SplitReader for KafkaSplitReader {
 
         chunk
             .into_iter()
-            .map(|msg| msg.map_err(|e| anyhow!(e)).map(SourceMessage::from))
-            .collect::<Result<Vec<SourceMessage>>>()
+            .map(|msg| msg.map_err(|e| e.into()).map(SourceMessage::from))
+            .collect::<SourceResult<Vec<SourceMessage>>>()
             .map(Some)
     }
 }
