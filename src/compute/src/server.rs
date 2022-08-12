@@ -32,8 +32,7 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
-use risingwave_storage::hummock::compactor::Compactor;
+use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
@@ -150,16 +149,19 @@ pub async fn compute_node_serve(
         {
             tracing::info!("start embedded compactor");
             // todo: set shutdown_sender in HummockStorage.
-            let (handle, shutdown_sender) = Compactor::start_compactor(
-                storage_config,
-                hummock_meta_client,
-                storage.sstable_store(),
-                state_store_metrics.clone(),
-                Some(Arc::new(CompactionExecutor::new(Some(1)))),
-                filter_key_extractor_manager.clone(),
-                memory_limiter.clone(),
-                storage.sstable_id_manager(),
-            );
+            let compactor_context = Arc::new(CompactorContext {
+                options: storage_config,
+                hummock_meta_client: hummock_meta_client.clone(),
+                sstable_store: storage.sstable_store(),
+                stats: state_store_metrics.clone(),
+                is_share_buffer_compact: false,
+                compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+                filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+                memory_limiter: memory_limiter.clone(),
+                sstable_id_manager: storage.sstable_id_manager(),
+            });
+            let (handle, shutdown_sender) =
+                Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
         monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();

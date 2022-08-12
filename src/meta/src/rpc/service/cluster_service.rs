@@ -20,8 +20,8 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::ClusterManagerRef;
 use crate::error::meta_error_to_tonic;
+use crate::manager::ClusterManagerRef;
 use crate::storage::MetaStore;
 
 #[derive(Clone)]

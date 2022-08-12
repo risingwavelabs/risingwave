@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -48,14 +49,13 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
-                // Follows upstream distribution from TableCatalog
-                Distribution::HashShard(distribution_key)
+                Distribution::UpstreamHashShard(distribution_key)
             }
         };
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.clone(),
+            logical.base.logical_pk.clone(),
             distribution,
             logical.table_desc().appendonly,
         );
@@ -78,7 +78,7 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &[usize],
+        primary_to_secondary_mapping: &HashMap<usize, usize>,
     ) -> StreamIndexScan {
         StreamIndexScan::new(self.logical.to_index_scan(
             index_name,
@@ -113,7 +113,7 @@ impl fmt::Display for StreamTableScan {
             builder.field(
                 "pk",
                 &IndicesDisplay {
-                    indices: self.pk_indices(),
+                    indices: self.logical_pk(),
                     input_schema: &self.base.schema,
                 },
             );
@@ -151,7 +151,7 @@ impl StreamTableScan {
                 .collect(),
         };
 
-        let pk_indices = self.pk_indices().iter().map(|x| *x as u32).collect_vec();
+        let pk_indices = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),

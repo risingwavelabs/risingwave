@@ -75,6 +75,7 @@ macro_rules! gen_cast {
 
             { varchar, date, str_to_date },
             { varchar, time, str_to_time },
+            { varchar, interval, str_parse },
             { varchar, timestamp, str_to_timestamp },
             { varchar, timestampz, str_to_timestampz },
             { varchar, int16, str_parse },
@@ -92,6 +93,11 @@ macro_rules! gen_cast {
             { float32, varchar, general_to_string },
             { float64, varchar, general_to_string },
             { decimal, varchar, general_to_string },
+            { time, varchar, general_to_string },
+            { interval, varchar, general_to_string },
+            { date, varchar, general_to_string },
+            { timestamp, varchar, general_to_string },
+            { timestampz, varchar, timestampz_to_utc_string },
 
             { boolean, int32, general_cast },
             { int32, boolean, int32_to_bool },
@@ -131,6 +137,9 @@ macro_rules! gen_cast {
 
             { date, timestamp, general_cast },
             { time, interval, general_cast },
+            { timestamp, date, timestamp_to_date },
+            { timestamp, time, timestamp_to_time },
+            { interval, time, interval_to_time },
         }
     };
 }

@@ -271,7 +271,7 @@ impl QueryRunner {
                         self.query.query_id, id, reason
                     );
 
-                    // Consume sender here.
+                    // Consume sender here and send error to root stage.
                     let root_stage_sender = mem::take(&mut self.root_stage_sender);
                     // It's possible we receive stage failed event message multi times and the
                     // sender has been consumed in first failed event.
@@ -285,7 +285,15 @@ impl QueryRunner {
                             );
                         }
                     }
-                    // TODO: We should can cancel all scheduled stages here.
+
+                    // Stop all running stages.
+                    for (_stage_id, stage_execution) in self.stage_executions.iter() {
+                        // The stop is return immediately so no need to spawn tasks.
+                        stage_execution.stop().await;
+                    }
+
+                    // One stage failed, not necessary to execute schedule stages.
+                    break;
                 }
                 rest => {
                     return Err(SchedulerError::NotImplemented(
@@ -297,6 +305,8 @@ impl QueryRunner {
         }
 
         info!("Query runner {:?} finished.", self.query.query_id);
+        // FIXME: This is a little confusing, it's possible to return Ok even if tell query stage
+        // runner Err.
         Ok(())
     }
 

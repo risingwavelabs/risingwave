@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use crate::session::OptimizerContext;
 
-pub(super) fn handle_set(
+pub fn handle_set(
     context: OptimizerContext,
     name: Ident,
     value: Vec<SetVariableValue>,

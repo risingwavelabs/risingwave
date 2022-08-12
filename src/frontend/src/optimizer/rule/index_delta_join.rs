@@ -19,6 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
@@ -61,17 +62,7 @@ impl Rule for IndexDeltaJoinRule {
                     continue;
                 }
 
-                let p2s_mapping = {
-                    let primary_to_secondary_mapping = index.primary_to_secondary_mapping();
-                    let len = primary_to_secondary_mapping.len();
-                    assert_eq!(len, index.primary_table.columns.len());
-                    let mut p2s_mapping = Vec::with_capacity(len);
-                    for i in 0..len {
-                        p2s_mapping.push(*primary_to_secondary_mapping.get(&i).unwrap());
-                    }
-
-                    p2s_mapping
-                };
+                let p2s_mapping = index.primary_to_secondary_mapping();
 
                 // 1. Check if distribution keys are the same.
                 // We don't assume the hash function we are using satisfies commutativity
@@ -80,7 +71,7 @@ impl Rule for IndexDeltaJoinRule {
                 let join_indices_ref_to_index_table = join_indices
                     .iter()
                     .map(|&i| *table_scan.logical().output_col_idx().get(i).unwrap())
-                    .map(|x| p2s_mapping[x])
+                    .map(|x| *p2s_mapping.get(&x).unwrap())
                     .collect_vec();
 
                 if index.index_table.distribution_key != join_indices_ref_to_index_table {
@@ -118,6 +109,18 @@ impl Rule for IndexDeltaJoinRule {
             if let Some(right) = match_indexes(&right_indices, input_right) {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
+
+                fn upstream_hash_shard_to_hash_shard(plan: PlanRef) -> PlanRef {
+                    if let Distribution::UpstreamHashShard(key) = plan.distribution() {
+                        RequiredDist::hash_shard(key)
+                            .enforce_if_not_satisfies(plan, &Order::any())
+                            .unwrap()
+                    } else {
+                        plan
+                    }
+                }
+                let left = upstream_hash_shard_to_hash_shard(left);
+                let right = upstream_hash_shard_to_hash_shard(right);
 
                 Some(
                     join.to_delta_join()
