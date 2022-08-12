@@ -82,6 +82,11 @@ impl Binder {
                 ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
             );
         }
+        if bound.iter().flatten().any(|expr| expr.has_subquery()) {
+            return Err(
+                ErrorCode::BindError("VALUES is disallowed to have subqueries.".into()).into(),
+            );
+        }
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {

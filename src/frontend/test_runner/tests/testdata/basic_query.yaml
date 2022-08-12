@@ -147,3 +147,6 @@
   logical_plan: |
     LogicalProject { exprs: [] }
       LogicalScan { table: t, columns: [t._row_id] }
+- sql: |
+    values(1, (select 1));
+  binder_error: 'Bind error: VALUES is disallowed to have subqueries.'
