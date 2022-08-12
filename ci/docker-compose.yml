@@ -44,10 +44,11 @@ services:
     container_name: mysql
     ports:
       - '23306:3306'
-    volumes:
-      - ./init:/docker-entrypoint-initdb.d
+    # volumes:
+    #   - ./init:/docker-entrypoint-initdb.d
     environment:
       - MYSQL_ALLOW_EMPTY_PASSWORD=true
+      - MYSQL_ROOT_HOST=%
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
