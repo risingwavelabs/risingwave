@@ -127,7 +127,7 @@ impl<T> Cache<T> {
 
     /// Iterate over the values in the cache.
     pub fn iter_values(&self) -> impl Iterator<Item = &T> {
-        self.entries.iter().map(|(_, v)| v)
+        self.entries.values()
     }
 }
 
