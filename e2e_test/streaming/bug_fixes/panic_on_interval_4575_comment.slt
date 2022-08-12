@@ -1,0 +1,14 @@
+statement ok
+create table t (v1 interval);
+
+statement ok
+insert into t values (interval '24 h'), (interval '1 d');
+
+statement ok
+create materialized view mv1 as select distinct v1 from t;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t;
