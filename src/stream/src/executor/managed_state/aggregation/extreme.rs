@@ -113,15 +113,14 @@ impl<S: StateStore> GenericExtremeState<S> {
             .expect("the column to be aggregate must appear in the state table");
         let cache_agg_col_idx = state_table_col_idx - group_key_len;
         // map order by columns to cache row column indices
-        let cache_order_pairs = [OrderPair::new(
+        let cache_order_pairs = std::iter::once(OrderPair::new(
             cache_agg_col_idx,
             match agg_call.kind {
                 AggKind::Min => OrderType::Ascending,
                 AggKind::Max => OrderType::Descending,
                 _ => unreachable!(),
             },
-        )]
-        .into_iter()
+        ))
         .chain(pk_indices.iter().map(|idx| {
             let state_table_col_idx = col_mapping
                 .upstream_to_state_table(*idx)
