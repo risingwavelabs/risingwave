@@ -76,6 +76,7 @@ message ExecuteRequest {
 
 service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
+  // Abort an already-died (self execution-failure, previous aborted, completed) task will still succeed.
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }

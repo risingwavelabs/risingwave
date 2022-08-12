@@ -40,6 +40,7 @@ pub use row_count::*;
 use static_assertions::const_assert_eq;
 
 use super::PkIndices;
+use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -358,7 +359,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     epoch: u64,
     key_hash_code: Option<HashCode>,
     state_tables: &[RowBasedStateTable<S>],
-    state_table_col_mappings: &[Vec<usize>],
+    state_table_col_mappings: &[Arc<StateTableColumnMapping>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 

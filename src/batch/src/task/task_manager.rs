@@ -107,12 +107,14 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &ProstTaskId) -> Result<()> {
+    pub fn abort_task(&self, sid: &ProstTaskId) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().get(&sid) {
             Some(task) => task.abort_task(),
-            None => Err(TaskNotFound.into()),
-        }
+            None => {
+                warn!("Task id not found for abort task")
+            }
+        };
     }
 
     pub fn remove_task(
@@ -301,7 +303,7 @@ mod tests {
             .fire_task(&task_id, plan.clone(), 0, context.clone())
             .await
             .unwrap();
-        manager.abort_task(&task_id).unwrap();
+        manager.abort_task(&task_id);
         let task_id = TaskId::from(&task_id);
         let res = manager.wait_until_task_aborted(&task_id).await;
         assert_eq!(res, Ok(()));

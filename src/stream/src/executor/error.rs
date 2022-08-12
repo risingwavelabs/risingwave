@@ -17,6 +17,7 @@ use std::backtrace::Backtrace;
 use either::Either;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
+use risingwave_connector::error::ConnectorError;
 use risingwave_expr::ExprError;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
@@ -40,10 +41,6 @@ enum StreamExecutorErrorInner {
     SerdeError(BoxedError),
 
     // TODO: remove this
-    #[error("Source error: {0}")]
-    SourceError(RwError),
-
-    // TODO: remove this
     #[error("Sink error: {0}")]
     SinkError(RwError),
 
@@ -55,6 +52,9 @@ enum StreamExecutorErrorInner {
 
     #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
     AlignBarrier(Box<Barrier>, Box<Barrier>),
+
+    #[error("Connector error: {0}")]
+    ConnectorError(BoxedError),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
@@ -68,10 +68,6 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
 
-    pub fn source_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::SourceError(error.into()).into()
-    }
-
     pub fn sink_error(error: impl Into<RwError>) -> Self {
         StreamExecutorErrorInner::SinkError(error.into()).into()
     }
@@ -82,6 +78,10 @@ impl StreamExecutorError {
 
     pub fn align_barrier(expected: Barrier, received: Barrier) -> Self {
         StreamExecutorErrorInner::AlignBarrier(expected.into(), received.into()).into()
+    }
+
+    pub fn connector_error(error: impl Error) -> Self {
+        StreamExecutorErrorInner::ConnectorError(error.into()).into()
     }
 
     pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
@@ -159,6 +159,13 @@ impl From<RpcError> for StreamExecutorError {
 impl From<StreamExecutorError> for RwError {
     fn from(h: StreamExecutorError) -> Self {
         ErrorCode::StreamError(h.into()).into()
+    }
+}
+
+/// Connector error.
+impl From<ConnectorError> for StreamExecutorError {
+    fn from(s: ConnectorError) -> Self {
+        Self::connector_error(s)
     }
 }
 
