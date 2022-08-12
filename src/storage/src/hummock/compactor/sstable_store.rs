@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::LinkedList;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
 
@@ -30,13 +30,29 @@ use crate::hummock::{
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 pub struct SstableBlocks {
-    pub blocks: LinkedList<(usize, Box<Block>)>,
+    block_data: Bytes,
+    offset: usize,
+    offset_index: usize,
+    start_index: usize,
+    end_index: usize,
+    block_size: Vec<usize>,
     _tracker: MemoryTracker,
 }
 
 impl SstableBlocks {
     pub fn next(&mut self) -> Option<(usize, Box<Block>)> {
-        self.blocks.pop_front()
+        if self.offset_index >= self.end_index {
+            return None;
+        }
+        let idx = self.offset_index;
+        let next_offset = self.offset + self.block_size[idx - self.start_index];
+        let block = match Block::decode(&self.block_data[self.offset..next_offset]) {
+            Ok(block) => Box::new(block),
+            Err(_) => return None,
+        };
+        self.offset = next_offset;
+        self.offset_index += 1;
+        Some((idx, block))
     }
 }
 
@@ -88,7 +104,7 @@ impl CompactorSstableStore {
         for block_meta in &sst.meta.block_metas[start_index..end_index] {
             block_loc.size += block_meta.len as usize;
         }
-        let mut tracker = self
+        let tracker = self
             .memory_limiter
             .require_memory(block_loc.size as u64)
             .await
@@ -98,21 +114,18 @@ impl CompactorSstableStore {
             .read(&data_path, Some(block_loc))
             .await
             .map_err(HummockError::object_io_error)?;
-        let mut blocks = LinkedList::new();
-        let mut charge = 0;
-        for idx in start_index..end_index {
-            let start_offset = sst.meta.block_metas[idx].offset as usize - start_offset;
-            let end_offset = start_offset + sst.meta.block_metas[idx].len as usize;
-            let block = Block::decode(&block_data[start_offset..end_offset])?;
-            charge += block.raw_data().len();
-            blocks.push_back((idx, Box::new(block)));
-        }
-        drop(block_data);
-        tracker.increase_memory(charge as u64).await;
         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
         stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
         Ok(SstableBlocks {
-            blocks,
+            block_data,
+            offset: 0,
+            offset_index: start_index,
+            start_index,
+            end_index,
+            block_size: sst.meta.block_metas[start_index..end_index]
+                .iter()
+                .map(|meta| meta.len as usize)
+                .collect_vec(),
             _tracker: tracker,
         })
     }
