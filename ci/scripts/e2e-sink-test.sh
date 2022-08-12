@@ -40,7 +40,6 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "debug"
-ip a
 cat /etc/hosts
 mysqladmin ping -h 127.0.0.1 -P 23306 -uroot
 
