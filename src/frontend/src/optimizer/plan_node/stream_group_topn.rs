@@ -40,7 +40,6 @@ impl StreamGroupTopN {
         offset: usize,
         order: Order,
     ) -> Self {
-
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
