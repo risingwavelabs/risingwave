@@ -199,7 +199,7 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
-    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
+    use risingwave_source::{MemSourceManager, SourceManager};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -283,12 +283,12 @@ mod tests {
         let chunk = reader.next().await?;
 
         assert_eq!(
-            chunk.chunk.ops().chunks(2).collect_vec(),
+            chunk.ops().chunks(2).collect_vec(),
             vec![&[Op::UpdateDelete, Op::UpdateInsert]; 5]
         );
 
         assert_eq!(
-            chunk.chunk.columns()[0]
+            chunk.columns()[0]
                 .array()
                 .as_int32()
                 .iter()
@@ -300,7 +300,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.chunk.columns()[1]
+            chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()

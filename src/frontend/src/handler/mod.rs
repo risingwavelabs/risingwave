@@ -48,7 +48,7 @@ pub mod privilege;
 pub mod query;
 mod show;
 pub mod util;
-mod variable;
+pub mod variable;
 
 pub async fn handle(
     session: Arc<SessionImpl>,
