@@ -20,7 +20,9 @@ use std::hash::{Hash, Hasher};
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use prost::Message;
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
+use risingwave_pb::data::{
+    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
+};
 use risingwave_pb::expr::ListValue as ProstListValue;
 
 use super::{
@@ -29,7 +31,7 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
-    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl,
 };
 
 /// This is a naive implementation of list array.
@@ -339,6 +341,23 @@ impl ListValue {
                 .collect_vec(),
         };
         value.encode_to_vec()
+    }
+
+    pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
+        let list_value: ProstListValue = Message::decode(b.as_slice())?;
+        let d = &data_type.field_type[0];
+        let fields: Vec<Datum> = list_value
+            .fields
+            .iter()
+            .map(|b| {
+                if b.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
+                }
+            })
+            .collect::<ArrayResult<Vec<Datum>>>()?;
+        Ok(ListValue::new(fields))
     }
 }
 

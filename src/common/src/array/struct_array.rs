@@ -20,7 +20,9 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use prost::Message;
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
+use risingwave_pb::data::{
+    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
+};
 use risingwave_pb::expr::StructValue as ProstStructValue;
 
 use super::{
@@ -30,7 +32,7 @@ use super::{
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
-    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl,
 };
 
 #[derive(Debug)]
@@ -348,6 +350,23 @@ impl StructValue {
                 .collect_vec(),
         };
         value.encode_to_vec()
+    }
+
+    pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
+        let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
+        let fields: Vec<Datum> = struct_value
+            .fields
+            .iter()
+            .zip_eq(data_type.field_type.iter())
+            .map(|(b, d)| {
+                if b.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
+                }
+            })
+            .collect::<ArrayResult<Vec<Datum>>>()?;
+        Ok(StructValue::new(fields))
     }
 }
 
