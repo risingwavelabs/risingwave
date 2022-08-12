@@ -186,7 +186,7 @@ pub trait SplitMetaData: Sized {
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
-/// Used for acquiring the generated data for [`spawn_data_generation`].
+/// Used for acquiring the generated data for [`spawn_data_generation_stream`].
 pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
 
 /// Spawn a **new runtime** in a new thread to run the data generator, returns a channel receiver
