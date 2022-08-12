@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
+use zstd::zstd_safe::WriteBuf;
 
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
@@ -146,8 +147,11 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                 table_ids,
             };
             let policy = self.policy;
-            let tracker = self.tracker.take();
+            let mut tracker = self.tracker.take().unwrap();
             let upload_join_handle = tokio::spawn(async move {
+                tracker
+                    .increase_memory(data.capacity() as u64 + meta.encoded_size() as u64)
+                    .await;
                 let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
                 drop(tracker);
                 ret

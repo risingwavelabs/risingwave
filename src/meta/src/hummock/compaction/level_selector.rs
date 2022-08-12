@@ -253,7 +253,8 @@ impl DynamicLevelSelector {
             self.config.target_file_size_base
         } else {
             assert!(input.target_level >= base_level);
-            self.config.target_file_size_base << (input.target_level - base_level)
+            let step = (input.target_level - base_level) / 2;
+            self.config.target_file_size_base << step
         };
         let compression_algorithm = if input.target_level == 0 {
             self.config.compression_algorithm[0].clone()

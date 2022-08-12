@@ -139,7 +139,7 @@ impl MemoryLimiterInner {
 
     pub async fn require_memory(&self, quota: u64) {
         let current_quota = self.total_size.load(AtomicOrdering::Acquire);
-        if current_quota < self.quota
+        if current_quota + quota <= self.quota
             && self
                 .total_size
                 .compare_exchange(
@@ -156,7 +156,7 @@ impl MemoryLimiterInner {
         loop {
             let notified = self.notify.notified();
             let current_quota = self.total_size.load(AtomicOrdering::Acquire);
-            if current_quota < self.quota {
+            if current_quota + quota <= self.quota {
                 match self.total_size.compare_exchange(
                     current_quota,
                     current_quota + quota,
@@ -167,7 +167,7 @@ impl MemoryLimiterInner {
                     Err(old_quota) => {
                         // The quota is enough but just changed by other threads. So just try to
                         // update again without waiting notify.
-                        if old_quota < self.quota {
+                        if old_quota + quota <= self.quota {
                             continue;
                         }
                     }
