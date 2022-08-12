@@ -232,7 +232,9 @@ impl Debug for MultiFilterKeyExtractor {
 
 impl FilterKeyExtractor for MultiFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        // assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
+        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
+            return full_key;
+        }
 
         let table_id = get_table_id(full_key).unwrap();
         let mut last_state = self.last_filter_key_extractor_state.try_lock().unwrap();
