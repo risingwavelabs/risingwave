@@ -321,7 +321,7 @@ where
         &self,
         request: Request<CreateIndexRequest>,
     ) -> Result<Response<CreateIndexResponse>, Status> {
-        self.ddl_lock.read().await;
+        let _ddl_lock = self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -347,7 +347,7 @@ where
         &self,
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
-        self.ddl_lock.read().await;
+        let _ddl_lock = self.ddl_lock.read().await;
         use risingwave_common::catalog::TableId;
 
         self.env.idle_manager().record_activity();
