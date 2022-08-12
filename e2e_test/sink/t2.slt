@@ -7,7 +7,7 @@ CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM t2;
 statement ok
 CREATE SINK s2 FROM mv2 WITH (
     connector = 'mysql',
-    endpoint = '127.0.0.1:3306',
+    endpoint = '127.0.0.1:23306',
     user = 'root',
     database = 'test',
     table = 't2'

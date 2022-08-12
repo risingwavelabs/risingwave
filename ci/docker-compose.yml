@@ -35,15 +35,15 @@ services:
         condition: service_healthy
     volumes:
       - ..:/risingwave
-    networks:
-      nw:
-        ipv4_address: 172.24.2.1
+    # networks:
+    #   nw:
+    #     ipv4_address: 172.24.2.1
 
   mysql:
     image: mysql/mysql-server:8.0
     container_name: mysql
     ports:
-      - '3306:3306'
+      - '23306:3306'
     volumes:
       - ./init:/docker-entrypoint-initdb.d
     environment:
@@ -52,14 +52,14 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
-    networks:
-      nw:
-        ipv4_address: 172.24.2.2
+    # networks:
+    #   nw:
+    #     ipv4_address: 172.24.2.2
 
-networks:
-  nw:
-    driver: bridge
-    ipam:
-        driver: default
-        config:
-            - subnet: "172.24.2.0/16"
+# networks:
+#   nw:
+#     driver: bridge
+#     ipam:
+#         driver: default
+#         config:
+#             - subnet: "172.24.2.0/16"
