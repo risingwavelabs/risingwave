@@ -35,9 +35,6 @@ pub struct MergeExecutor {
     /// Belonged actor id.
     actor_id: ActorId,
 
-    /// Belonged executor id.
-    executor_id: u64,
-
     /// Belonged fragment id.
     fragment_id: FragmentId,
 
@@ -62,7 +59,6 @@ impl MergeExecutor {
         schema: Schema,
         pk_indices: PkIndices,
         actor_id: ActorId,
-        executor_id: u64,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         inputs: Vec<BoxedInput>,
@@ -74,7 +70,6 @@ impl MergeExecutor {
         Self {
             upstreams: inputs,
             actor_id,
-            executor_id,
             fragment_id,
             upstream_fragment_id,
             info: ExecutorInfo {
@@ -96,7 +91,6 @@ impl MergeExecutor {
             Schema::default(),
             vec![],
             114,
-            1,
             514,
             1919,
             inputs.into_iter().map(LocalInput::for_test).collect(),
@@ -112,7 +106,7 @@ impl MergeExecutor {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_id, self.upstreams);
         let actor_id_str = self.actor_id.to_string();
-        let executor_id_str = self.executor_id.to_string();
+        let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         // Channels that're blocked by the barrier to align.
         let mut start_time = minstant::Instant::now();
@@ -120,7 +114,7 @@ impl MergeExecutor {
         while let Some(msg) = select_all.next().await {
             self.metrics
                 .actor_input_buffer_blocking_duration_ns
-                .with_label_values(&[&actor_id_str, &executor_id_str])
+                .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let msg: Message = msg?;
             self.status.next_message(&msg);
@@ -423,7 +417,6 @@ mod tests {
             schema,
             vec![],
             actor_id,
-            0,
             0,
             0,
             inputs,

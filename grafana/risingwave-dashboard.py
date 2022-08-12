@@ -450,7 +450,7 @@ def section_streaming_actors(outer_panels):
             ]),
             panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
                 panels.target(
-                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{executor_id}}"
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upsteam_fragment_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
