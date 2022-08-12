@@ -40,17 +40,12 @@ impl StreamGroupTopN {
         offset: usize,
         order: Order,
     ) -> Self {
-        let dist = match input.distribution() {
-            Distribution::Single => Distribution::Single,
-            Distribution::HashShard(_) => Distribution::HashShard(group_key.clone()),
-            _ => panic!(),
-        };
 
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.logical_pk().to_vec(),
-            dist,
+            Distribution::HashShard(group_key.clone()),
             false,
         );
         StreamGroupTopN {
