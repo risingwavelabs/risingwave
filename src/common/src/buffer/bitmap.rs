@@ -414,6 +414,18 @@ mod tests {
     }
 
     #[test]
+    fn test_bitmap_all_high() {
+        let num_bits = 3;
+        let bitmap = Bitmap::all_high_bits(num_bits);
+        assert_eq!(bitmap.len(), num_bits);
+        for i in 0..num_bits {
+            assert!(bitmap.is_set(i).unwrap());
+        }
+        // Test to and from protobuf is OK.
+        assert_eq!(bitmap, Bitmap::from(&bitmap.to_protobuf()));
+    }
+
+    #[test]
     fn test_bitwise_and() {
         let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
         let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
