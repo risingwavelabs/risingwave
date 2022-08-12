@@ -54,15 +54,20 @@ pub fn verify_batch(
     all_lengths.iter().min() == all_lengths.iter().max()
 }
 
-#[derive(Debug)]
+/// Common cache structure for managed table states (non-append-only min/max, string_agg).
 pub struct Cache {
-    synced: bool,            // `false` means not synced with state table (cold start)
-    capacity: Option<usize>, // `None` means unlimited capacity
-    order_pairs: Arc<Vec<OrderPair>>, // order requirements used to sort cached rows
-    rows: BTreeSet<DescOrderedRow>, // in reverse order of `order_pairs`
+    /// `false` means not synced with state table (cold start)
+    synced: bool,
+    /// `None` means unlimited capacity
+    capacity: Option<usize>,
+    /// Order requirements used to sort cached rows
+    order_pairs: Arc<Vec<OrderPair>>,
+    /// Cached rows in reverse order of `order_pairs`
+    rows: BTreeSet<DescOrderedRow>,
 }
 
 impl Cache {
+    /// Create a new cache with specified capacity and order requirements.
     pub fn new(capacity: Option<usize>, order_pairs: Vec<OrderPair>) -> Self {
         Self {
             synced: false,
@@ -72,14 +77,17 @@ impl Cache {
         }
     }
 
+    /// Check if cache is not filled yet.
     pub fn is_cold_start(&self) -> bool {
         !self.synced
     }
 
+    /// Mark the cache as synced/filled.
     pub fn set_synced(&mut self) {
         self.synced = true;
     }
 
+    /// Insert a row into the cache.
     pub fn insert(&mut self, row: Row) {
         if self.synced {
             let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
@@ -93,6 +101,7 @@ impl Cache {
         }
     }
 
+    /// Remove a row from the cache.
     pub fn remove(&mut self, row: Row) {
         if self.synced {
             let ordered_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
@@ -100,6 +109,7 @@ impl Cache {
         }
     }
 
+    /// Get the first (smallest) row in the cache.
     pub fn first(&self) -> Option<&Row> {
         if self.synced {
             // get the last because the rows are sorted reversely
@@ -109,6 +119,7 @@ impl Cache {
         }
     }
 
+    /// Iterate over the rows in the cache.
     pub fn iter_rows(&self) -> impl Iterator<Item = &Row> {
         self.rows.iter().rev().map(|row| &row.row)
     }

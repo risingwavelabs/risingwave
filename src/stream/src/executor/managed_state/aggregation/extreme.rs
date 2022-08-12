@@ -43,7 +43,6 @@ use crate::executor::PkIndices;
 /// It maintains a top N cache internally, using `HashSet`, and the sort key
 /// is composed of (agg input value, upstream pk).
 pub struct GenericExtremeState<S: StateStore> {
-    // TODO: Remove the phantoms.
     _phantom_data: PhantomData<S>,
 
     /// Group key to aggregate with group.
@@ -56,10 +55,9 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize, // TODO(yuchao): is this really needed?
 
-    /// Cache for the top N elements in the state.
-    /// Note that the cache won't store group_key so the column indices
-    /// should be offseted by group_key.len(), which is handled by
-    /// `state_row_to_cache_row`.
+    /// Cache for the top N elements in the state. Note that the cache
+    /// won't store group_key so the column indices should be offseted
+    /// by group_key.len(), which is handled by `state_row_to_cache_row`.
     cache: Cache,
 
     /// The column to aggregate in the cache.
@@ -262,11 +260,12 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
     }
 
     /// Check if this state needs a flush.
-    /// TODO: Remove this.
+    /// TODO: Remove this. #4035
     fn is_dirty(&self) -> bool {
         unreachable!("Should not call this function anymore, check state table for dirty data");
     }
 
+    /// TODO: Remove this. #4035
     fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         Ok(())
     }
