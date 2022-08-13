@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
@@ -26,10 +25,11 @@ use crate::hummock::level_handler::LevelHandler;
 
 pub struct MinOverlappingPicker {
     compact_task_id: u64,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
+    max_select_bytes: u64,
+    max_write_amplification: u64,
     level: usize,
     target_level: usize,
-    max_select_bytes: u64,
+    overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
 impl MinOverlappingPicker {
@@ -38,14 +38,16 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
+        max_write_amplification: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
             compact_task_id,
-            overlap_strategy,
+            max_select_bytes,
+            max_write_amplification,
             level,
             target_level,
-            max_select_bytes,
+            overlap_strategy,
         }
     }
 
@@ -113,6 +115,13 @@ impl CompactionPicker for MinOverlappingPicker {
         );
         if select_input_ssts.is_empty() {
             return None;
+        }
+        if self.level > 0 {
+            let target_file_size = target_input_ssts.iter().map(|table|table.file_size).sum::<u64>();
+            let select_file_size = select_input_ssts.iter().map(|table|table.file_size).sum::<u64>();
+            if target_file_size / select_file_size >= self.max_write_amplification {
+                return None;
+            }
         }
         level_handlers[self.level].add_pending_task(
             self.compact_task_id,

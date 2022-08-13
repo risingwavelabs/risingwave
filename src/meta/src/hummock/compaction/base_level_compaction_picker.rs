@@ -181,6 +181,7 @@ impl LevelCompactionPicker {
             0,
             self.target_level,
             self.config.sub_level_max_compaction_bytes,
+            u64::MAX,
             self.overlap_strategy.clone(),
         );
 

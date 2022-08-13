@@ -120,6 +120,7 @@ impl DynamicLevelSelector {
                 select_level,
                 select_level + 1,
                 self.config.max_bytes_for_level_base,
+                self.config.max_bytes_for_level_multiplier / 2,
                 self.overlap_strategy.clone(),
             ))
         }
@@ -254,7 +255,8 @@ impl DynamicLevelSelector {
             self.config.target_file_size_base
         } else {
             assert!(input.target_level >= base_level);
-            self.config.target_file_size_base << (input.target_level - base_level)
+            let step = (input.target_level - base_level) / 2;
+            self.config.target_file_size_base << step
         };
         let compression_algorithm = if input.target_level == 0 {
             self.config.compression_algorithm[0].clone()
@@ -626,7 +628,7 @@ pub mod tests {
         assert_eq!(compaction.input.input_levels[1].table_infos.len(), 1);
         assert_eq!(
             compaction.target_file_size,
-            config.target_file_size_base * 4
+            config.target_file_size_base * 2
         );
         assert_eq!(compaction.compression_algorithm.as_str(), "Lz4",);
         // no compaction need to be scheduled because we do not calculate the size of pending files
