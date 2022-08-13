@@ -591,8 +591,8 @@ impl Hash for ScalarImpl {
                     Self::Bool(b) => b.hash(state),
                     Self::Utf8(s) => state.write(s.as_bytes()),
                     Self::Decimal(decimal) => decimal.normalize().hash(state),
-                    Self::Struct(v) => v.hash(state), // TODO: check if this is consistent with `StructArray::hash_at`
-                    Self::List(v) => v.hash(state),   // TODO: check if this is consistent with `ListArray::hash_at`
+                    Self::Struct(v) => v.hash(state),
+                    Self::List(v) => v.hash(state),
                 }
             };
         }
@@ -642,7 +642,7 @@ impl Display for ScalarRefImpl<'_> {
     }
 }
 
-pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
+pub fn display_datum_ref(d: DatumRef<'_>) -> String {
     match d {
         Some(s) => format!("{}", s),
         None => "NULL".to_string(),

@@ -33,8 +33,8 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_into, serialize_datum_ref_into,
-    to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl,
+    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
+    Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 
 /// This is a naive implementation of list array.
@@ -331,19 +331,7 @@ impl ListValue {
     }
 
     pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        let value = ProstListValue {
-            fields: self
-                .values
-                .iter()
-                .map(|f| match f {
-                    None => {
-                        vec![]
-                    }
-                    Some(s) => s.to_protobuf(),
-                })
-                .collect_vec(),
-        };
-        value.encode_to_vec()
+        self.as_scalar_ref().to_protobuf_owned()
     }
 
     pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
@@ -381,11 +369,40 @@ pub enum ListRef<'a> {
     ValueRef { val: &'a ListValue },
 }
 
+macro_rules! iter_elems_ref {
+    ($self:ident, $it:ident, { $($body:tt)* }) => {
+        match $self {
+            ListRef::Indexed { arr, idx } => {
+                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o));
+                $($body)*
+            }
+            ListRef::ValueRef { val } => {
+                let $it = val.values.iter().map(to_datum_ref);
+                $($body)*
+            }
+        }
+    };
+}
+
+macro_rules! iter_elems {
+    ($self:ident, $it:ident, { $($body:tt)* }) => {
+        match $self {
+            ListRef::Indexed { arr, idx } => {
+                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o).clone().to_owned_datum());
+                $($body)*
+            }
+            ListRef::ValueRef { val } => {
+                let $it = val.values.iter();
+                $($body)*
+            }
+        }
+    };
+}
+
 impl<'a> ListRef<'a> {
     pub fn flatten(&self) -> Vec<DatumRef<'a>> {
-        self.values_ref()
-            .into_iter()
-            .flat_map(|datum_ref| {
+        iter_elems_ref!(self, it, {
+            it.flat_map(|datum_ref| {
                 if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
                     list_ref.flatten()
                 } else {
@@ -394,15 +411,11 @@ impl<'a> ListRef<'a> {
                 .into_iter()
             })
             .collect()
+        })
     }
 
     pub fn values_ref(&self) -> Vec<DatumRef<'a>> {
-        match self {
-            ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
-                .map(|o| arr.value.value_at(o))
-                .collect(),
-            ListRef::ValueRef { val } => val.values.iter().map(to_datum_ref).collect(),
-        }
+        iter_elems_ref!(self, it, { it.collect() })
     }
 
     pub fn value_at(&self, index: usize) -> ArrayResult<DatumRef<'a>> {
@@ -425,45 +438,29 @@ impl<'a> ListRef<'a> {
     }
 
     pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        match self {
-            ListRef::ValueRef { val } => val.to_protobuf_owned(),
-            ListRef::Indexed { arr, idx } => {
-                let value = ProstListValue {
-                    fields: (arr.offsets[*idx]..arr.offsets[*idx + 1])
-                        .map(|o| {
-                            let datum_ref = arr.value.value_at(o);
-                            match datum_ref {
-                                None => vec![],
-                                Some(s) => s.into_scalar_impl().to_protobuf(),
-                            }
-                        })
-                        .collect_vec(),
-                };
-                value.encode_to_vec()
-            }
-        }
+        let elems = iter_elems!(self, it, {
+            it.map(|f| match f {
+                None => {
+                    vec![]
+                }
+                Some(s) => s.to_protobuf(),
+            })
+            .collect_vec()
+        });
+        ProstListValue { fields: elems }.encode_to_vec()
     }
 
     pub fn serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
-        match self {
-            ListRef::Indexed { arr, idx } => {
-                let offsets = arr.offsets[*idx]..arr.offsets[*idx + 1];
-                serializer.serialize_u32(offsets.len() as u32)?;
-                offsets
-                    .map(|o| arr.value.value_at(o))
-                    .try_for_each(|datum_ref| serialize_datum_ref_into(&datum_ref, serializer))?
+        iter_elems_ref!(self, it, {
+            serializer.serialize_u32(it.len() as u32)?;
+            for datum_ref in it {
+                serialize_datum_ref_into(&datum_ref, serializer)?
             }
-            ListRef::ValueRef { val } => {
-                serializer.serialize_u32(val.values.len() as u32)?;
-                val.values
-                    .iter()
-                    .try_for_each(|datum| serialize_datum_into(datum, serializer))?
-            }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -515,19 +512,21 @@ fn cmp_list_value(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Order
 
 impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
-                .try_for_each(|idx| arr.value.value_at(idx).fmt(f)),
-            ListRef::ValueRef { val } => write!(f, "{:?}", val),
-        }
+        iter_elems_ref!(self, it, {
+            for v in it {
+                v.fmt(f)?;
+            }
+            Ok(())
+        })
     }
 }
 
 impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let values = self.values_ref().iter().map(display_datum_ref).join(",");
-        write!(f, "{{{}}}", values)
+        iter_elems_ref!(self, it, {
+            write!(f, "{{{}}}", it.map(display_datum_ref).join(","))
+        })
     }
 }
 
