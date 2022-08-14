@@ -173,9 +173,13 @@ where
     /// `Vacuum::full_scan_inner` in storage crate. 3. Meta node decides which SSTs to delete.
     /// See `HummockManager::extend_ssts_to_delete_from_scan`.
     pub async fn run_full_gc(&self, sst_retention_time: Duration) -> Result<()> {
-        let compactor = match self.compactor_manager.next_compactor() {
+        let compactor = match self
+            .compactor_manager
+            .next_idle_compactor(&self.hummock_manager)
+            .await
+        {
             None => {
-                tracing::warn!("Try full GC but no available worker.");
+                tracing::warn!("Try full GC but no available idle worker.");
                 return Ok(());
             }
             Some(compactor) => compactor,
@@ -220,7 +224,7 @@ mod tests {
             hummock_manager.clone(),
             compactor_manager.clone(),
         ));
-        let _receiver = compactor_manager.add_compactor(0);
+        let _receiver = compactor_manager.add_compactor(0, u64::MAX);
 
         assert_eq!(VacuumTrigger::vacuum_metadata(&vacuum).await.unwrap(), 0);
 

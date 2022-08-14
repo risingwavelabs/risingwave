@@ -124,7 +124,9 @@ pub async fn compactor_serve(
         sstable_store,
         stats: state_store_stats,
         is_share_buffer_compact: false,
-        compaction_executor: Arc::new(CompactionExecutor::new(None)),
+        compaction_executor: Arc::new(CompactionExecutor::new(
+            opts.compaction_worker_threads_number,
+        )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
@@ -139,6 +141,7 @@ pub async fn compactor_serve(
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             compactor_context,
             hummock_meta_client,
+            opts.max_concurrent_task_number,
         ),
     ];
 

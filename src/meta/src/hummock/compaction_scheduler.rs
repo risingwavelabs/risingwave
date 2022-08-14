@@ -72,6 +72,7 @@ where
 {
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
+    compactor_selection_retry_interval_sec: u64,
 }
 
 impl<S> CompactionScheduler<S>
@@ -81,10 +82,12 @@ where
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
+        compactor_selection_retry_interval_sec: u64,
     ) -> Self {
         Self {
             hummock_manager,
             compactor_manager,
+            compactor_selection_retry_interval_sec,
         }
     }
 
@@ -161,15 +164,21 @@ where
         // 2. Assign the compaction task to a compactor.
         'send_task: loop {
             // 2.1 Select a compactor.
-            let compactor = match self.compactor_manager.next_compactor() {
+            let compactor = match self
+                .compactor_manager
+                .next_idle_compactor(&self.hummock_manager)
+                .await
+            {
                 None => {
-                    tracing::warn!("No compactor is available.");
-                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    tracing::warn!("No idle compactor available.");
+                    tokio::time::sleep(Duration::from_secs(
+                        self.compactor_selection_retry_interval_sec,
+                    ))
+                    .await;
                     continue 'send_task;
                 }
                 Some(compactor) => compactor,
             };
-            // TODO: skip busy compactor
 
             // 2.2 Send the compaction task to the compactor.
             let send_task = async {
