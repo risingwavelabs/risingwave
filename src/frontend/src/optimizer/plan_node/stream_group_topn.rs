@@ -54,6 +54,7 @@ impl StreamGroupTopN {
             input.ctx(),
             input.schema().clone(),
             input.logical_pk().to_vec(),
+            input.functional_dependency().clone(),
             dist,
             false,
         );
