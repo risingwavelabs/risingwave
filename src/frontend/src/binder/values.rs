@@ -35,6 +35,10 @@ impl BoundValues {
     }
 }
 
+fn values_column_name(values_id: usize, col_id: usize) -> String {
+    format!("*VALUES*_{}.column_{}", values_id, col_id)
+}
+
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
@@ -74,7 +78,14 @@ impl Binder {
                 .try_collect()?,
         };
 
-        let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
+        let values_id = self.next_values_id();
+        let schema = Schema::new(
+            types
+                .into_iter()
+                .zip_eq(0..num_columns)
+                .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
+                .collect(),
+        );
         Ok(BoundValues {
             rows: bound,
             schema,
@@ -92,8 +103,8 @@ mod tests {
     use crate::binder::test_utils::mock_binder;
     use crate::expr::Expr as _;
 
-    #[test]
-    fn test_bind_values() {
+    #[tokio::test]
+    async fn test_bind_values() {
         let mut binder = mock_binder();
 
         // Test i32 -> decimal.
@@ -103,7 +114,14 @@ mod tests {
         let res = binder.bind_values(values, None).unwrap();
 
         let types = vec![DataType::Decimal];
-        let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
+        let n_cols = types.len();
+        let schema = Schema::new(
+            types
+                .into_iter()
+                .zip_eq(0..n_cols)
+                .map(|(ty, col_id)| Field::with_name(ty, values_column_name(0, col_id)))
+                .collect(),
+        );
 
         assert_eq!(res.schema, schema);
         for vec in res.rows {

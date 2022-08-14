@@ -372,6 +372,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_simple_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -390,6 +391,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_multi_level_dir_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -408,6 +410,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_all() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -424,6 +427,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_partial() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -449,6 +453,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_multi_block() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -481,6 +486,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_delete() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -498,6 +504,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_not_exists() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -507,6 +514,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_out_of_range() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -569,6 +577,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_list() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();

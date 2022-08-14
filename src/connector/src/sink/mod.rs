@@ -28,7 +28,7 @@ use thiserror::Error;
 pub use tracing;
 
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
-use crate::sink::mysql::{MySQLConfig, MySQLSink};
+pub use crate::sink::mysql::{MySQLConfig, MySQLSink, MYSQL_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 
 #[async_trait]
@@ -63,7 +63,7 @@ pub enum SinkState {
 
 impl SinkConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> RwResult<Self> {
-        const SINK_TYPE_KEY: &str = "sink_type";
+        const SINK_TYPE_KEY: &str = "connector";
         let sink_type = properties.get(SINK_TYPE_KEY).ok_or_else(|| {
             RwError::from(ErrorCode::InvalidConfigValue {
                 config_entry: SINK_TYPE_KEY.to_string(),
@@ -72,7 +72,16 @@ impl SinkConfig {
         })?;
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
+            MYSQL_SINK => Ok(SinkConfig::Mysql(MySQLConfig::from_hashmap(properties)?)),
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn get_connector(&self) -> &'static str {
+        match self {
+            SinkConfig::Mysql(_) => "mysql",
+            SinkConfig::Kafka(_) => "kafka",
+            SinkConfig::Redis(_) => "redis",
         }
     }
 }
@@ -97,6 +106,21 @@ impl SinkImpl {
                 SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).map_err(RwError::from)?))
             }
         })
+    }
+
+    pub fn needs_preparation(&self) -> bool {
+        match self {
+            SinkImpl::MySQL(_) => true,
+            SinkImpl::Redis(_) => false,
+            SinkImpl::Kafka(_) => false,
+        }
+    }
+
+    pub async fn prepare(&mut self, schema: &Schema) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.prepare(schema).await,
+            _ => unreachable!(),
+        }
     }
 }
 

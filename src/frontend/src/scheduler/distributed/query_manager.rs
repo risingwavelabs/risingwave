@@ -15,12 +15,12 @@
 use std::fmt::{Debug, Formatter};
 
 use futures::StreamExt;
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use log::debug;
 use rand::seq::SliceRandom;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::types::VnodeMapping;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{
     ExchangeInfo, PlanFragment, PlanNode as BatchPlanProst, TaskId, TaskOutputId,
@@ -74,9 +74,9 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         plan: BatchPlanProst,
-        vnodes: Option<Vec<ParallelUnitId>>,
+        vnode_mapping: Option<VnodeMapping>,
     ) -> SchedulerResult<impl DataChunkStream> {
-        let worker_node_addr = match vnodes {
+        let worker_node_addr = match vnode_mapping {
             Some(mut parallel_unit_ids) => {
                 parallel_unit_ids.dedup();
                 let candidates = self
@@ -94,7 +94,7 @@ impl QueryManager {
 
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr((&worker_node_addr).into())
+            .get_by_addr((&worker_node_addr).into())
             .await?;
 
         let query_id = QueryId {
@@ -131,7 +131,12 @@ impl QueryManager {
         self.hummock_snapshot_manager
             .unpin_snapshot(epoch, &query_id)
             .await?;
-        creat_task_resp?;
+        let dml_stream = creat_task_resp?;
+        #[for_await]
+        for _status in dml_stream {
+            // TODO: Handle task status of dml.
+            // Now simply consume it.
+        }
 
         let query_result_fetcher = QueryResultFetcher::new(
             epoch,
@@ -202,7 +207,7 @@ impl QueryResultFetcher {
         );
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr((&self.task_host).into())
+            .get_by_addr((&self.task_host).into())
             .await?;
         let mut stream = compute_client.get_data(self.task_output_id.clone()).await?;
         while let Some(response) = stream.next().await {

@@ -13,37 +13,33 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
 use crate::source::nexmark::source::event::Event;
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SplitId};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct NexmarkMessage {
-    pub shard_id: String,
+    pub split_id: SplitId,
     pub sequence_number: String,
-    pub payload: Option<Vec<u8>>,
+    pub payload: Bytes,
 }
 
 impl From<NexmarkMessage> for SourceMessage {
     fn from(msg: NexmarkMessage) -> Self {
         SourceMessage {
-            payload: msg
-                .payload
-                .as_ref()
-                .map(|payload| Bytes::copy_from_slice(payload)),
+            payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
-            split_id: msg.shard_id,
+            split_id: msg.split_id,
         }
     }
 }
 
 impl NexmarkMessage {
-    pub fn new(shard_id: String, offset: u64, event: Event) -> Self {
+    pub fn new(split_id: SplitId, offset: u64, event: Event) -> Self {
         NexmarkMessage {
-            shard_id,
+            split_id,
             sequence_number: offset.to_string(),
-            payload: Some(event.to_json().as_bytes().to_vec()),
+            payload: event.to_json().into(),
         }
     }
 }

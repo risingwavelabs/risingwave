@@ -27,6 +27,7 @@ pub struct StreamingMetrics {
     pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
+    pub actor_input_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -45,6 +46,7 @@ pub struct StreamingMetrics {
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -52,6 +54,8 @@ pub struct StreamingMetrics {
     pub barrier_inflight_latency: Histogram,
     /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
+
+    pub sink_commit_duration: HistogramVec,
 }
 
 impl StreamingMetrics {
@@ -100,6 +104,14 @@ impl StreamingMetrics {
             "stream_actor_output_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of output buffer",
             &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let actor_input_buffer_blocking_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_actor_input_buffer_blocking_duration_ns",
+            "Total blocking duration (ns) of input buffer",
+            &["actor_id", "upstream_fragment_id"],
             registry
         )
         .unwrap();
@@ -240,6 +252,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_actor_input_waiting_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_join_actor_input_waiting_duration_ns",
+            "Total waiting duration (ns) of input buffer of join actor",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_join_barrier_align_duration",
             "Duration of join align barrier",
@@ -262,6 +282,13 @@ impl StreamingMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_sync_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let sink_commit_duration = register_histogram_vec_with_registry!(
+            "sink_commit_duration",
+            "Duration of commit op in sink",
+            &["executor_id", "connector"],
+            registry
+        )
+        .unwrap();
 
         Self {
             registry,
@@ -270,6 +297,7 @@ impl StreamingMetrics {
             actor_barrier_time,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,
+            actor_input_buffer_blocking_duration_ns,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -288,9 +316,11 @@ impl StreamingMetrics {
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
+            join_actor_input_waiting_duration_ns,
             join_barrier_align_duration,
             barrier_inflight_latency,
             barrier_sync_latency,
+            sink_commit_duration,
         }
     }
 

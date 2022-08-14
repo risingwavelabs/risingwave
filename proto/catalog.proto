@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package catalog;
 
-import "common.proto";
+import "expr.proto";
 import "plan_common.proto";
 
 option optimize_for = SPEED;
@@ -44,6 +44,19 @@ message Sink {
   repeated uint32 dependent_relations = 8;
 }
 
+message Index {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  uint32 owner = 5;
+  uint32 index_table_id = 6;
+  uint32 primary_table_id = 7;
+  // Only `InputRef` type index is supported Now.
+  // The index of `InputRef` is the column index of the primary table.
+  repeated expr.ExprNode index_item = 8;
+}
+
 // See `TableCatalog` struct in frontend crate for more information.
 message Table {
   uint32 id = 1;
@@ -62,10 +75,9 @@ message Table {
   repeated int32 pk = 13;
   bool appendonly = 14;
   uint32 owner = 15;
-  common.ParallelUnitMapping mapping = 16;
-  map<string, string> properties = 17;
+  map<string, string> properties = 16;
   // the count of column for prefix in storage_pk
-  uint32 read_pattern_prefix_column = 18;
+  uint32 read_pattern_prefix_column = 17;
 }
 
 message Schema {

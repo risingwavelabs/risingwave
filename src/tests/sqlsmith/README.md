@@ -12,7 +12,7 @@ SqlSmith has two modes. The first one focuses on testing the frontend, i.e, test
 This test will be run as a unit test:
 
 ``` sh
-./risedev test run_sqlsmith_on_frontend --features enable_sqlsmith_unit_test
+./risedev test -E "package(risingwave_sqlsmith)" --features enable_sqlsmith_unit_test
 ```
 
 ## E2E
@@ -29,6 +29,7 @@ Additionally, in some cases where you may want to debug whether we have defined 
 you can try:
 
 ```sh
+cargo build
 ./target/debug/sqlsmith print-function-table > ft.txt
 ```
 

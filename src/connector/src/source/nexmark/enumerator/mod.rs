@@ -60,10 +60,10 @@ mod tests {
         let list_splits_resp = enumerator.list_splits().await?;
 
         assert_eq!(list_splits_resp.len(), 4);
-        assert_eq!(list_splits_resp[0].id(), "4-0".to_string());
-        assert_eq!(list_splits_resp[1].id(), "4-1".to_string());
-        assert_eq!(list_splits_resp[2].id(), "4-2".to_string());
-        assert_eq!(list_splits_resp[3].id(), "4-3".to_string());
+        assert_eq!(&*list_splits_resp[0].id(), "4-0");
+        assert_eq!(&*list_splits_resp[1].id(), "4-1");
+        assert_eq!(&*list_splits_resp[2].id(), "4-2");
+        assert_eq!(&*list_splits_resp[3].id(), "4-3");
         Ok(())
     }
 }

@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::vec;
 
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
-use risingwave_common::error::Result;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -34,10 +33,11 @@ use risingwave_pb::stream_plan::{
     MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
-use crate::manager::MetaSrvEnv;
+use crate::manager::{FragmentManager, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{CreateMaterializedViewContext, FragmentManager};
+use crate::stream::CreateMaterializedViewContext;
+use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
     ExprNode {
@@ -344,10 +344,8 @@ fn make_stream_graph() -> StreamFragmentGraph {
 }
 
 // TODO: enable this test with madsim
-// NOTE: frontend is not yet available with madsim
-#[cfg(not(madsim))]
 #[tokio::test]
-async fn test_fragmenter() -> Result<()> {
+async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
@@ -361,16 +359,11 @@ async fn test_fragmenter() -> Result<()> {
         .generate_graph(env.id_gen_manager_ref(), fragment_manager, &mut ctx)
         .await?;
 
-    let internal_table_id_set = ctx
-        .internal_table_id_map
-        .iter()
-        .map(|(table_id, _)| *table_id)
-        .collect::<HashSet<u32>>();
-    let table_fragments = TableFragments::new(TableId::default(), graph, internal_table_id_set);
+    let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    let internal_table_ids = table_fragments.internal_table_ids();
+    let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);

@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::ops::Range;
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use risingwave_hummock_sdk::VersionedComparator;
 use {lz4, zstd};
 
@@ -28,15 +28,18 @@ pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 16;
 
+#[derive(Clone)]
 pub struct Block {
-    /// Uncompressed entries data.
-    data: Bytes,
+    /// Uncompressed entries data, with restart encoded restart points info.
+    data: Vec<u8>,
+    /// Uncompressed entried data length.
+    data_len: usize,
     /// Restart points.
     restart_points: Vec<u32>,
 }
 
 impl Block {
-    pub fn decode(buf: Bytes) -> HummockResult<Self> {
+    pub fn decode(buf: &[u8]) -> HummockResult<Self> {
         // Verify checksum.
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
@@ -45,7 +48,7 @@ impl Block {
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         let compressed_data = &buf[..buf.len() - 9];
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(..buf.len() - 9),
+            CompressionAlgorithm::None => buf[..buf.len() - 9].to_vec(),
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
@@ -53,7 +56,7 @@ impl Block {
                 decoder
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-                Bytes::from(decoded)
+                decoded
             }
             CompressionAlgorithm::Zstd => {
                 let mut decoder = zstd::Decoder::new(compressed_data.reader())
@@ -62,10 +65,14 @@ impl Block {
                 decoder
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
-                Bytes::from(decoded)
+                decoded
             }
         };
 
+        Ok(Self::decode_from_raw(buf))
+    }
+
+    pub fn decode_from_raw(buf: Vec<u8>) -> Self {
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -75,17 +82,18 @@ impl Block {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
-        Ok(Block {
-            data: buf.slice(..data_len),
+        Block {
+            data: buf,
+            data_len,
             restart_points,
-        })
+        }
     }
 
     /// Entries data len.
     #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         assert!(!self.data.is_empty());
-        self.data.len()
+        self.data_len
     }
 
     /// Gets restart point by index.
@@ -114,8 +122,12 @@ impl Block {
         self.restart_points.partition_point(pred)
     }
 
-    pub fn data(&self) -> &Bytes {
-        &self.data
+    pub fn data(&self) -> &[u8] {
+        &self.data[..self.data_len]
+    }
+
+    pub fn raw_data(&self) -> &[u8] {
+        &self.data[..]
     }
 }
 
@@ -212,7 +224,8 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.capacity),
+            // add more space to avoid re-allocate space.
+            buf: BytesMut::with_capacity(options.capacity + 256),
             restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
@@ -247,7 +260,6 @@ impl BlockBuilder {
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
             self.restart_points.push(self.buf.len() as u32);
-            self.last_key = key.to_vec();
             key
         } else {
             bytes_diff(&self.last_key, key)
@@ -264,8 +276,24 @@ impl BlockBuilder {
         self.buf.put_slice(diff_key);
         self.buf.put_slice(value);
 
-        self.last_key = key.to_vec();
+        self.last_key.clear();
+        self.last_key.extend_from_slice(key);
         self.entry_count += 1;
+    }
+
+    pub fn get_last_key(&self) -> &[u8] {
+        &self.last_key
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.restart_points.clear();
+        self.last_key.clear();
+        self.entry_count = 0;
     }
 
     /// Finishes building block.
@@ -280,14 +308,14 @@ impl BlockBuilder {
     /// # Panics
     ///
     /// Panic if there is compression error.
-    pub fn build(mut self) -> Bytes {
+    pub fn build(&mut self) -> &[u8] {
         assert!(self.entry_count > 0);
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
         self.buf.put_u32_le(self.restart_points.len() as u32);
-        let mut buf = match self.compression_algorithm {
-            CompressionAlgorithm::None => self.buf,
+        match self.compression_algorithm {
+            CompressionAlgorithm::None => (),
             CompressionAlgorithm::Lz4 => {
                 let mut encoder = lz4::EncoderBuilder::new()
                     .level(4)
@@ -300,7 +328,7 @@ impl BlockBuilder {
                     .unwrap();
                 let (writer, result) = encoder.finish();
                 result.map_err(HummockError::encode_error).unwrap();
-                writer.into_inner()
+                self.buf = writer.into_inner();
             }
             CompressionAlgorithm::Zstd => {
                 let mut encoder =
@@ -315,23 +343,26 @@ impl BlockBuilder {
                     .finish()
                     .map_err(HummockError::encode_error)
                     .unwrap();
-                writer.into_inner()
+                self.buf = writer.into_inner();
             }
         };
-        self.compression_algorithm.encode(&mut buf);
-        let checksum = xxhash64_checksum(&buf);
-        buf.put_u64_le(checksum);
-        buf.freeze()
+        self.compression_algorithm.encode(&mut self.buf);
+        let checksum = xxhash64_checksum(&self.buf);
+        self.buf.put_u64_le(checksum);
+        self.buf.as_ref()
     }
 
     /// Approximate block len (uncompressed).
     pub fn approximate_len(&self) -> usize {
-        self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 4
+        // block + restart_points + restart_points.len + compression_algorithm + checksum
+        self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 8
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};
 
@@ -343,8 +374,8 @@ mod tests {
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
-        let buf = builder.build();
-        let block = Box::new(Block::decode(buf).unwrap());
+        let buf = builder.build().to_vec();
+        let block = Box::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
@@ -387,8 +418,8 @@ mod tests {
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
-        let buf = builder.build();
-        let block = Box::new(Block::decode(buf).unwrap());
+        let buf = builder.build().to_vec();
+        let block = Box::new(Block::decode(&buf).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();

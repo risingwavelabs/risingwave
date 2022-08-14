@@ -5,13 +5,21 @@ package meta;
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
 
 option optimize_for = SPEED;
 
 message HeartbeatRequest {
+  message ExtraInfo {
+    oneof info {
+      uint64 hummock_gc_watermark = 1;
+    }
+  }
   uint32 node_id = 1;
+  // Lightweight info piggybacked by heartbeat request.
+  repeated ExtraInfo info = 2;
 }
 
 message HeartbeatResponse {
@@ -51,11 +59,11 @@ message TableFragments {
     repeated stream_plan.StreamActor actors = 4;
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
     common.ParallelUnitMapping vnode_mapping = 5;
+    repeated uint32 state_table_ids = 6;
   }
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
-  repeated uint32 internal_table_ids = 4;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -150,12 +158,15 @@ message SubscribeRequest {
 
 message MetaSnapshot {
   repeated common.WorkerNode nodes = 1;
-  repeated catalog.Database database = 2;
-  repeated catalog.Schema schema = 3;
-  repeated catalog.Source source = 4;
-  repeated catalog.Sink sink = 5;
-  repeated catalog.Table table = 6;
-  repeated user.UserInfo users = 7;
+  repeated catalog.Database databases = 2;
+  repeated catalog.Schema schemas = 3;
+  repeated catalog.Source sources = 4;
+  repeated catalog.Sink sinks = 5;
+  repeated catalog.Table tables = 6;
+  repeated catalog.Index indexes = 7;
+  repeated user.UserInfo users = 8;
+  hummock.HummockVersion hummock_version = 9;
+  repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
 }
 
 message SubscribeResponse {
@@ -175,10 +186,12 @@ message SubscribeResponse {
     catalog.Schema schema = 6;
     catalog.Table table = 7;
     catalog.Source source = 8;
-    catalog.Sink sink = 12;
+    catalog.Sink sink = 9;
+    catalog.Index index = 10;
     user.UserInfo user = 11;
-    MetaSnapshot snapshot = 9;
-    hummock.HummockSnapshot hummock_snapshot = 10;
+    hummock.HummockSnapshot hummock_snapshot = 12;
+    common.ParallelUnitMapping parallel_unit_mapping = 13;
+    MetaSnapshot snapshot = 20;
   }
 }
 
@@ -210,6 +223,8 @@ message GetClusterInfoRequest {}
 message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
+  map<uint32, source.ConnectorSplits> actor_splits = 3;
+  map<uint32, catalog.StreamSourceInfo> stream_source_infos = 4;
 }
 
 service ScaleService {

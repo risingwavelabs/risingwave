@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    SstIdRange,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
@@ -119,9 +120,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
         self.hummock_manager
-            .get_new_table_id()
+            .get_new_sst_ids(number)
             .await
             .map_err(mock_err)
     }
@@ -168,6 +169,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         _level: u32,
     ) -> Result<()> {
         todo!()
+    }
+
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
+        self.hummock_manager
+            .extend_ssts_to_delete_from_scan(&sst_ids)
+            .await;
+        Ok(())
     }
 }
 

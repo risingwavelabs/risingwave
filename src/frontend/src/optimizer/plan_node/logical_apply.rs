@@ -19,10 +19,11 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -83,12 +84,19 @@ impl LogicalApply {
         let pk_indices = LogicalJoin::derive_pk(
             left.schema().len(),
             right.schema().len(),
-            left.pk_indices(),
-            right.pk_indices(),
+            left.logical_pk(),
+            right.logical_pk(),
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let (functional_dependency, pk_indices) = match pk_indices {
+            Some(pk_indices) => (
+                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
+                pk_indices,
+            ),
+            None => (FunctionalDependencySet::new(schema.len()), vec![]),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,
             left,
@@ -146,6 +154,75 @@ impl LogicalApply {
 
     pub fn correlated_id(&self) -> CorrelatedId {
         self.correlated_id
+    }
+
+    pub fn correlated_indices(&self) -> Vec<usize> {
+        self.correlated_indices.to_owned()
+    }
+
+    /// Translate Apply.
+    ///
+    /// Used to convert other kinds of Apply to cross Apply.
+    pub fn translate_apply(self, new_apply_left: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
+        let (apply_left, apply_right, on, apply_type, correlated_id, correlated_indices) =
+            self.decompose();
+        let apply_left_len = apply_left.schema().len();
+        let correlated_indices_len = correlated_indices.len();
+
+        let new_apply = LogicalApply::create(
+            new_apply_left,
+            apply_right,
+            JoinType::Inner,
+            Condition::true_cond(),
+            correlated_id,
+            correlated_indices,
+        );
+
+        let on = Self::rewrite_on(on, correlated_indices_len, apply_left_len).and(Condition {
+            conjunctions: eq_predicates,
+        });
+        let new_join = LogicalJoin::new(apply_left, new_apply, apply_type, on);
+
+        if new_join.join_type() != JoinType::LeftSemi {
+            // `new_join`'s schema is different from original apply's schema, so `LogicalProject` is
+            // used to ensure they are the same.
+            let mut exprs: Vec<ExprImpl> = vec![];
+            new_join
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .for_each(|(index, data_type)| {
+                    if index < apply_left_len || index >= apply_left_len + correlated_indices_len {
+                        exprs.push(InputRef::new(index, data_type).into());
+                    }
+                });
+            LogicalProject::create(new_join.into(), exprs)
+        } else {
+            new_join.into()
+        }
+    }
+
+    fn rewrite_on(on: Condition, offset: usize, apply_left_len: usize) -> Condition {
+        struct Rewriter {
+            offset: usize,
+            apply_left_len: usize,
+        }
+        impl ExprRewriter for Rewriter {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                let index = input_ref.index();
+                if index >= self.apply_left_len {
+                    InputRef::new(index + self.offset, input_ref.return_type()).into()
+                } else {
+                    input_ref.into()
+                }
+            }
+        }
+        let mut rewriter = Rewriter {
+            offset,
+            apply_left_len,
+        };
+        on.rewrite_expr(&mut rewriter)
     }
 }
 

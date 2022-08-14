@@ -23,7 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -35,7 +35,7 @@ use crate::executor::{
 pub struct MaterializeExecutor<S: StateStore> {
     input: BoxedExecutor,
 
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -59,7 +59,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
         let schema = input.schema().clone();
 
-        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
+        let state_table = RowBasedStateTable::from_table_catalog(table_catalog, store, vnodes);
 
         Self {
             input,
@@ -91,7 +91,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
-        let state_table = StateTable::new_without_distribution(
+        let state_table = RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             columns,
@@ -197,7 +197,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::storage_table::StorageTable;
+    use risingwave_storage::table::storage_table::RowBasedStorageTable;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -245,7 +245,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::new_for_test(
+        let table = RowBasedStorageTable::new_for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,

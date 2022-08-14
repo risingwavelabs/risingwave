@@ -25,6 +25,7 @@ use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
 use super::*;
+use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
@@ -62,13 +63,11 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
-    /// Relational state tables used by this executor.
-    /// One-to-one map with AggCall.
+    /// Relational state tables for each aggregation calls.
     state_tables: Vec<RowBasedStateTable<S>>,
 
     /// State table column mappings for each aggregation calls,
-    /// Index: state table column index, Elem: agg call column index.
-    state_table_col_mappings: Vec<Vec<usize>>,
+    state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -118,7 +117,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             states: None,
             agg_calls,
             state_tables,
-            state_table_col_mappings,
+            state_table_col_mappings: state_table_col_mappings
+                .into_iter()
+                .map(StateTableColumnMapping::new)
+                .map(Arc::new)
+                .collect(),
         })
     }
 
@@ -126,12 +129,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     async fn apply_chunk(
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
-        input_schema: &Schema,
+        _input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         epoch: u64,
         state_tables: &mut [RowBasedStateTable<S>],
-        state_table_col_mappings: &[Vec<usize>],
+        state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
@@ -139,10 +142,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_array_refs(agg_calls, &columns);
         let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
-        let input_pk_data_types = input_pk_indices
-            .iter()
-            .map(|idx| input_schema.fields[*idx].data_type.clone())
-            .collect();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
@@ -160,9 +159,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 None,
                 agg_calls,
                 input_pk_indices.to_vec(),
-                input_pk_data_types,
                 epoch,
-                None,
                 state_tables,
                 state_table_col_mappings,
             )
@@ -183,7 +180,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .zip_eq(state_tables.iter_mut())
         {
             let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
-            if agg_call.kind == AggKind::StringAgg {
+            // TODO(yuchao): make this work for all agg kinds in later PR
+            if matches!(agg_call.kind, AggKind::StringAgg)
+                || (matches!(agg_call.kind, AggKind::Min | AggKind::Max) && !agg_call.append_only)
+            {
                 let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
                 agg_state
                     .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
@@ -303,7 +303,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::*;
@@ -311,6 +310,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
     use crate::executor::test_utils::*;
     use crate::executor::*;
 
@@ -383,7 +383,7 @@ mod tests {
             },
         ];
 
-        let simple_agg = test_utils::global_simple_agg::new_boxed_simple_agg_executor(
+        let simple_agg = new_boxed_simple_agg_executor(
             keyspace.clone(),
             Box::new(source),
             agg_calls,
