@@ -190,6 +190,13 @@ impl TestCase {
             }
         }
 
+        let test_case_copy = self.clone();
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |e| {
+            println!("Panic on {:?}\n{}", test_case_copy, e);
+            std::process::abort();
+        }));
+
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.

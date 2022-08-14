@@ -18,9 +18,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
 use risingwave_common::types::ParallelUnitId;
-use risingwave_common::util::compress::decompress_data;
+use risingwave_common::util::compress::{compress_data, decompress_data};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::common::ParallelUnitMapping;
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
@@ -148,6 +149,16 @@ impl TableCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
+        let mapping = if let Some(mapping) = &self.vnode_mapping {
+            let (original_indices, data) = compress_data(mapping);
+            Some(ParallelUnitMapping {
+                table_id: self.id.table_id as u32,
+                original_indices,
+                data,
+            })
+        } else {
+            None
+        };
         ProstTable {
             id: self.id.table_id as u32,
             schema_id,
@@ -169,7 +180,7 @@ impl TableCatalog {
                 .collect_vec(),
             appendonly: self.appendonly,
             owner: self.owner,
-            mapping: None,
+            mapping,
             properties: self.properties.clone(),
             read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
@@ -187,11 +198,9 @@ impl From<ProstTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
-            for col_desc in catalog.column_desc.flatten() {
-                let col_name = col_desc.name.clone();
-                if !col_names.insert(col_name.clone()) {
-                    panic!("duplicated column name {} in table {} ", col_name, tb.name)
-                }
+            let col_name = catalog.name();
+            if !col_names.insert(col_name.to_string()) {
+                panic!("duplicated column name {} in table {} ", col_name, tb.name)
             }
 
             let col_id = catalog.column_desc.column_id.get_id();
@@ -333,7 +342,8 @@ mod tests {
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar, DataType::Varchar].into()
+                                fields: vec![DataType::Varchar, DataType::Varchar].into(),
+                                field_names: vec![].into(),
                             },
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
@@ -374,5 +384,6 @@ mod tests {
                 read_pattern_prefix_column: 0,
             }
         );
+        assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
     }
 }

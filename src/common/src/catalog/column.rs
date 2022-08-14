@@ -102,20 +102,6 @@ impl ColumnDesc {
         }
     }
 
-    /// Flatten a nested column to a list of columns (including itself).
-    /// If the type is atomic, it returns simply itself.
-    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
-    /// and returns every tree node.
-    pub fn flatten(&self) -> Vec<ColumnDesc> {
-        let mut descs = vec![self.clone()];
-        descs.extend(self.field_descs.iter().flat_map(|d| {
-            let mut desc = d.clone();
-            desc.name = self.name.clone() + "." + &desc.name;
-            desc.flatten()
-        }));
-        descs
-    }
-
     /// Find `column_desc` in `field_descs` by name.
     pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
         if let DataType::Struct { .. } = self.data_type {
@@ -156,6 +142,7 @@ impl ColumnDesc {
                 .map(|f| f.data_type.clone())
                 .collect_vec()
                 .into(),
+            field_names: fields.iter().map(|f| f.name.clone()).collect_vec().into(),
         };
         Self {
             data_type,

@@ -175,6 +175,7 @@ mod tests {
         // Make struct field
         let struct_field = Field::unnamed(DataType::Struct {
             fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+            field_names: vec![].into(),
         });
 
         // Schema for mock executor.

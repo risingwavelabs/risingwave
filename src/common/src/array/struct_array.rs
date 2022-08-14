@@ -687,14 +687,17 @@ mod tests {
                     DataType::Varchar,
                     DataType::Struct {
                         fields: Arc::new([]),
+                        field_names: Arc::new([]),
                     },
                 ]),
+                field_names: Arc::new([]),
             },
             DataType::Int64,
             DataType::Varchar,
             DataType::Int16,
             DataType::Struct {
                 fields: Arc::new([]),
+                field_names: Arc::new([]),
             },
             DataType::Int32,
         ];
@@ -773,6 +776,7 @@ mod tests {
                     DataType::Varchar,
                     DataType::Struct {
                         fields: Arc::new([DataType::Varchar]),
+                        field_names: Arc::new([]),
                     },
                 ],
                 Ordering::Greater,
@@ -796,6 +800,7 @@ mod tests {
                     DataType::Varchar,
                     DataType::Struct {
                         fields: Arc::new([DataType::Varchar]),
+                        field_names: Arc::new([]),
                     },
                 ],
                 Ordering::Equal,

@@ -220,7 +220,7 @@ impl FunctionCall {
             .into())
         } else {
             Err(ErrorCode::BindError(format!(
-                "cannot cast type {:?} to {:?} in {:?} context",
+                "cannot cast type \"{}\" to \"{}\" in {:?} context",
                 source, target, allows
             ))
             .into())
@@ -230,8 +230,12 @@ impl FunctionCall {
     /// Cast a `ROW` expression to the target type.
     fn cast_nested(expr: ExprImpl, target_type: DataType, allows: CastContext) -> Result<ExprImpl> {
         let func = *expr.into_function_call().unwrap();
-        let fields = if let DataType::Struct { fields } = target_type.clone() {
-            fields.to_vec()
+        let (fields, field_names) = if let DataType::Struct {
+            fields,
+            field_names,
+        } = target_type.clone()
+        {
+            (fields, field_names)
         } else {
             return Err(ErrorCode::BindError(format!(
                 "column is of type '{}' but expression is of type record",
@@ -244,11 +248,12 @@ impl FunctionCall {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq(fields)
+                    .zip_eq(fields.to_vec())
                     .map(|(e, t)| Self::new_cast(e, t, allows))
                     .collect::<Result<Vec<_>>>()?;
                 let return_type = DataType::Struct {
                     fields: inputs.iter().map(|i| i.return_type()).collect_vec().into(),
+                    field_names,
                 };
                 return Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into());
             }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::zip_eq;
+use itertools::{zip_eq, Itertools};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -440,6 +440,11 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .iter()
                 .map(|f| bind_data_type(&f.data_type))
                 .collect::<Result<Vec<_>>>()?
+                .into(),
+            field_names: types
+                .iter()
+                .map(|f| f.name.real_value())
+                .collect_vec()
                 .into(),
         },
         AstDataType::Text => {

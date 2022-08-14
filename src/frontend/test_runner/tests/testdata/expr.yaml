@@ -261,7 +261,7 @@
 - sql: |
     create table t (v1 int);
     select concat_ws(v1, 1.2) from t;
-  binder_error: 'Bind error: cannot cast type Int32 to Varchar in Implicit context'
+  binder_error: 'Bind error: cannot cast type "integer" to "varchar" in Implicit context'
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;
@@ -321,7 +321,7 @@
 - sql: |
     select pg_typeof(row(true, 1, 'hello'));
   batch_plan: |
-    BatchProject { exprs: ['record':Varchar] }
+    BatchProject { exprs: ['struct<boolean,integer,varchar>':Varchar] }
       BatchValues { rows: [[]] }
 - sql: |
     select pg_typeof(array[1, 2]);

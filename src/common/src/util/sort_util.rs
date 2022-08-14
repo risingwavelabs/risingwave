@@ -436,6 +436,7 @@ mod tests {
                 DataType::Time,
                 DataType::Struct {
                     fields: Arc::new([DataType::Int32, DataType::Float32]),
+                    field_names: Arc::new([]),
                 },
                 DataType::List {
                     datatype: Box::new(DataType::Int32),

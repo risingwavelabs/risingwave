@@ -169,6 +169,7 @@ mod tests {
             Box::new(LiteralExpression::new(
                 DataType::Struct {
                     fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+                    field_names: vec![].into(),
                 },
                 Some(ScalarImpl::Struct(value)),
             )) as BoxedExpression,
@@ -193,7 +194,8 @@ mod tests {
         assert_eq!(
             fields[3].data_type,
             DataType::Struct {
-                fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into()
+                fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
+                field_names: vec![].into(),
             }
         );
 

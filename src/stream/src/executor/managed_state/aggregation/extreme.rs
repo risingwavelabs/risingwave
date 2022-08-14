@@ -463,8 +463,8 @@ pub fn create_streaming_extreme_state<S: StateStore>(
         { Time, NaiveTimeArray },
         { Timestamp, NaiveDateTimeArray },
         { Interval, IntervalArray },
-        { Struct { fields: _ }, StructArray },
-        { List { datatype: _ }, ListArray },
+        { Struct { .. }, StructArray },
+        { List { .. }, ListArray },
     )
 }
 

@@ -105,6 +105,7 @@ mod tests {
                 prost.get_body(),
                 &DataType::Struct {
                     fields: vec![DataType::Varchar, DataType::Int32, DataType::Int32].into(),
+                    field_names: vec![].into(),
                 }
                 .to_protobuf(),
             )

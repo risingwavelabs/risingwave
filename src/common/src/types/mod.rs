@@ -85,8 +85,13 @@ pub enum DataType {
     Timestamp,
     Timestampz,
     Interval,
-    Struct { fields: Arc<[DataType]> },
-    List { datatype: Box<DataType> },
+    Struct {
+        fields: Arc<[DataType]>,
+        field_names: Arc<[String]>,
+    },
+    List {
+        datatype: Box<DataType>,
+    },
 }
 
 pub fn unnested_list_type(datatype: DataType) -> DataType {
@@ -116,6 +121,7 @@ impl From<&ProstDataType> for DataType {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 DataType::Struct {
                     fields: fields.into(),
+                    field_names: proto.field_names.iter().cloned().collect_vec().into(),
                 }
             }
             TypeName::List => DataType::List {
@@ -138,12 +144,33 @@ impl Display for DataType {
             DataType::Float64 => f.write_str("double precision"),
             DataType::Decimal => f.write_str("numeric"),
             DataType::Date => f.write_str("date"),
-            DataType::Varchar => f.write_str("character varying"),
+            DataType::Varchar => f.write_str("varchar"),
             DataType::Time => f.write_str("time without time zone"),
             DataType::Timestamp => f.write_str("timestamp without time zone"),
             DataType::Timestampz => f.write_str("timestamp with time zone"),
             DataType::Interval => f.write_str("interval"),
-            DataType::Struct { .. } => f.write_str("record"),
+            DataType::Struct {
+                fields,
+                field_names,
+            } => {
+                if field_names.is_empty() {
+                    write!(
+                        f,
+                        "struct<{}>",
+                        fields.iter().map(|d| format!("{}", d)).join(",")
+                    )
+                } else {
+                    write!(
+                        f,
+                        "struct<{}>",
+                        fields
+                            .iter()
+                            .zip_eq(field_names.iter())
+                            .map(|(d, s)| format!("{} {}", s, d))
+                            .join(",")
+                    )
+                }
+            }
             DataType::List { datatype } => write!(f, "{}[]", datatype),
         }
     }
@@ -166,7 +193,7 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
-            DataType::Struct { fields } => StructArrayBuilder::with_meta(
+            DataType::Struct { fields, .. } => StructArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::Struct {
                     children: fields.clone(),
@@ -205,14 +232,20 @@ impl DataType {
 
     pub fn to_protobuf(&self) -> ProstDataType {
         let field_type = match self {
-            DataType::Struct { fields } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
+            DataType::Struct { fields, .. } => fields.iter().map(|f| f.to_protobuf()).collect_vec(),
             DataType::List { datatype } => vec![datatype.to_protobuf()],
             _ => vec![],
+        };
+        let field_names = if let DataType::Struct { field_names, .. } = self {
+            field_names.to_vec()
+        } else {
+            vec![]
         };
         ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
             field_type,
+            field_names,
             ..Default::default()
         }
     }
@@ -236,7 +269,7 @@ impl DataType {
             Boolean | Int16 | Int32 | Int64 => true,
             Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
             | Interval => false,
-            Struct { fields } => fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
+            Struct { fields, .. } => fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
             List { datatype } => datatype.mem_cmp_eq_value_enc(),
         }
     }
@@ -789,7 +822,7 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            Ty::Struct { fields } => StructValue::deserialize(&fields, de)?.to_scalar_value(),
+            Ty::Struct { fields, .. } => StructValue::deserialize(&fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::deserialize(&datatype, de)?.to_scalar_value(),
         })
     }
@@ -831,7 +864,7 @@ impl ScalarImpl {
                             .map(|_| Self::encoding_data_size(datatype, deserializer))
                             .try_fold(size_of::<u32>(), |a, b| b.map(|b| a + b))?
                     }
-                    DataType::Struct { fields } => fields
+                    DataType::Struct { fields, .. } => fields
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
@@ -1074,5 +1107,14 @@ mod tests {
         let actual =
             ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
         assert_eq!(v, actual);
+    }
+
+    #[test]
+    fn test_data_type_display() {
+        let d = DataType::Struct {
+            fields: vec![DataType::Int32, DataType::Varchar].into(),
+            field_names: vec!["i".to_string(), "j".to_string()].into(),
+        };
+        assert_eq!(format!("{}", d), "struct<i integer,j varchar>".to_string());
     }
 }

@@ -122,7 +122,6 @@ pub async fn handle_create_mv(
 pub mod tests {
     use std::collections::HashMap;
 
-    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
@@ -163,20 +162,15 @@ pub mod tests {
             .clone();
         assert_eq!(table.name(), "mv1");
 
-        // Get all column descs
         let columns = table
             .columns
             .iter()
-            .flat_map(|c| c.column_desc.flatten())
-            .collect_vec();
-
-        let columns = columns
-            .iter()
-            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
         let city_type = DataType::Struct {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
+            field_names: vec![].into(),
         };
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
@@ -186,7 +180,10 @@ pub mod tests {
             "country.address" => DataType::Varchar,
             "country.city" => city_type.clone(),
             "country.city.zipcode" => DataType::Varchar,
-            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+            "country" => DataType::Struct {
+                fields: vec![DataType::Varchar,city_type,DataType::Varchar].into(),
+                field_names: vec![].into(),
+            },
         };
         assert_eq!(columns, expected_columns);
     }

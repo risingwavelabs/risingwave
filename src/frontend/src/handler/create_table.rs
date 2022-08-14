@@ -182,7 +182,6 @@ pub async fn handle_create_table(
 mod tests {
     use std::collections::HashMap;
 
-    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
@@ -215,22 +214,20 @@ mod tests {
             .clone();
         assert_eq!(table.name(), "t");
 
-        // Get all column descs.
         let columns = table
             .columns
             .iter()
-            .flat_map(|c| c.column_desc.flatten())
-            .collect_vec();
-        let columns = columns
-            .iter()
-            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,
-            "v2" => DataType::Struct {fields:vec![DataType::Int64,DataType::Float64,DataType::Float64].into()},
+            "v2" => DataType::Struct {
+                fields: vec![DataType::Int64,DataType::Float64,DataType::Float64].into(),
+                field_names: vec![].into(),
+            },
             "v2.v3" => DataType::Int64,
             "v2.v4" => DataType::Float64,
             "v2.v5" => DataType::Float64,
