@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn test_json_parser() {
         let parser = JSONParser {};
-        let payload = r#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269"}"#.as_bytes();
+        let payload = r#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","abundant_field": 1}"#.as_bytes();
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
@@ -128,6 +128,13 @@ mod tests {
                 name: "timestamp".to_string(),
                 data_type: DataType::Timestamp,
                 column_id: ColumnId::from(9),
+                skip_parse: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "empty_column".to_string(),
+                data_type: DataType::Int32,
+                column_id: ColumnId::from(10),
                 skip_parse: false,
                 fields: vec![],
             },
