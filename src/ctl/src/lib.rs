@@ -44,12 +44,11 @@ enum Commands {
     /// Commands for Meta
     #[clap(subcommand)]
     Meta(MetaCommands),
-    /// Commands for Stream
-    #[clap(subcommand)]
-    Stream(StreamCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
+    /// Commands for tracing the compute nodes
+    Trace,
 }
 
 #[derive(Subcommand)]
@@ -104,15 +103,6 @@ enum MetaCommands {
     ClusterInfo,
 }
 
-#[derive(Subcommand)]
-enum StreamCommands {
-    /// get traces of all actors or some specific actor
-    Trace {
-        #[clap(short, long = "actor-id")]
-        actor_id: Option<u32>,
-    },
-}
-
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
         Commands::Hummock(HummockCommands::ListVersion) => {
@@ -139,9 +129,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
-        Commands::Stream(StreamCommands::Trace { actor_id }) => {
-            cmd_impl::stream::trace(actor_id).await?
-        }
+        Commands::Trace => cmd_impl::trace::trace().await?,
     }
     Ok(())
 }
