@@ -218,7 +218,7 @@ where
                     .report_compact_task(compactor.context_id(), &compact_task)
                     .await
                 {
-                    tracing::warn!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
+                    tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
                     // TODO #3677: handle cancellation via compaction heartbeat after #4496
                     return false;
                 }
