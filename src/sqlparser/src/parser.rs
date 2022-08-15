@@ -2059,7 +2059,6 @@ impl Parser {
             } else {
                 return self.expected("struct field name", self.peek_token());
             }
-            let comma = self.consume_token(&Token::Comma);
             if self.angle_brackets_num == 0 {
                 break;
             } else if self.consume_token(&Token::Gt) {
@@ -2072,7 +2071,7 @@ impl Parser {
                 } else {
                     return parser_err!("too much '>'");
                 }
-            } else if !comma {
+            } else if !self.consume_token(&Token::Comma) {
                 return self.expected("',' or '>' after column definition", self.peek_token());
             }
         }

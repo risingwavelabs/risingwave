@@ -279,12 +279,12 @@
                 BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
                   BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp._row_id(hidden), part._row_id(hidden), supplier._row_id(hidden), part.p_partkey(hidden), nation._row_id(hidden), region._row_id(hidden)], pk_columns: [partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id, region._row_id], order_descs: [s_acctbal, n_name, s_name, p_partkey, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id, region._row_id] }
+    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp._row_id(hidden), part._row_id(hidden), supplier._row_id(hidden), nation._row_id(hidden), region._row_id(hidden)], pk_columns: [partsupp._row_id, part._row_id, supplier._row_id, nation._row_id, region._row_id], order_descs: [s_acctbal, n_name, s_name, p_partkey, partsupp._row_id, part._row_id, supplier._row_id, nation._row_id, region._row_id] }
       StreamTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
         StreamExchange { dist: Single }
-          StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id, region._row_id] }
+          StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id, nation._row_id, region._row_id] }
             StreamExchange { dist: HashShard(nation.n_regionkey) }
-              StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id] }
+              StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp._row_id, part._row_id, supplier._row_id, nation._row_id] }
                 StreamExchange { dist: HashShard(supplier.s_nationkey) }
                   StreamHashJoin { type: Inner, predicate: part.p_partkey = part.p_partkey AND partsupp.ps_supplycost = min(min(partsupp.ps_supplycost)), output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey] }
                     StreamExchange { dist: HashShard(part.p_partkey) }
@@ -1621,9 +1621,9 @@
                           BatchFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
                             BatchScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, supplier._row_id(hidden), lineitem.l_suppkey(hidden)], pk_columns: [supplier._row_id, lineitem.l_suppkey], order_descs: [s_suppkey, supplier._row_id, lineitem.l_suppkey] }
-      StreamExchange { dist: HashShard(supplier._row_id, lineitem.l_suppkey) }
-        StreamHashJoin { type: Inner, predicate: sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))) = max(max(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), supplier._row_id, lineitem.l_suppkey] }
+    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, supplier._row_id(hidden)], pk_columns: [supplier._row_id], order_descs: [s_suppkey, supplier._row_id] }
+      StreamExchange { dist: HashShard(supplier._row_id) }
+        StreamHashJoin { type: Inner, predicate: sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))) = max(max(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), supplier._row_id] }
           StreamExchange { dist: HashShard(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))) }
             StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), supplier._row_id, lineitem.l_suppkey] }
               StreamExchange { dist: HashShard(supplier.s_suppkey) }
