@@ -24,6 +24,8 @@ use super::{
     Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
 };
+use crate::executor::actor::on_compute_error;
+use crate::executor::infallible_expr::InfallibleExpression;
 
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 
@@ -80,7 +82,9 @@ impl SimpleExecutor for SimpleFilterExecutor {
 
         let (data_chunk, ops) = chunk.into_parts();
 
-        let pred_output = self.expr.eval(&data_chunk)?;
+        let pred_output = self
+            .expr
+            .eval_infallible(&data_chunk, |err| on_compute_error(err, self.identity()));
 
         let (columns, vis) = data_chunk.into_parts();
 

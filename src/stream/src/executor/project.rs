@@ -20,6 +20,8 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
+use super::actor::on_compute_error;
+use super::infallible_expr::InfallibleExpression;
 use super::{
     Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
@@ -95,8 +97,12 @@ impl SimpleExecutor for SimpleProjectExecutor {
         let projected_columns = self
             .exprs
             .iter_mut()
-            .map(|expr| expr.eval(&data_chunk).map(Column::new))
-            .collect::<Result<Vec<Column>, _>>()?;
+            .map(|expr| {
+                Column::new(expr.eval_infallible(&data_chunk, |err| {
+                    on_compute_error(err, &self.info.identity)
+                }))
+            })
+            .collect();
 
         let new_chunk = StreamChunk::new(ops, projected_columns, None);
         Ok(Some(new_chunk))

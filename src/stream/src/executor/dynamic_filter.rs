@@ -36,6 +36,8 @@ use super::managed_state::dynamic_filter::RangeCache;
 use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
+use crate::executor::actor::on_compute_error;
+use crate::executor::infallible_expr::InfallibleExpression;
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
@@ -100,11 +102,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         let mut last_res = false;
 
-        let eval_results = if let Some(cond) = condition {
-            Some(cond.eval(data_chunk)?)
-        } else {
-            None
-        };
+        let eval_results = condition.map(|cond| {
+            cond.eval_infallible(data_chunk, |err| on_compute_error(err, self.identity()))
+        });
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
             let left_val = row.value_at(self.key_l).to_owned_datum();

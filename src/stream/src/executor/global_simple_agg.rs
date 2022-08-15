@@ -127,6 +127,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
     #[allow(clippy::too_many_arguments)]
     async fn apply_chunk(
+        identity: &str,
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
         _input_schema: &Schema,
@@ -179,7 +180,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .zip_eq(all_agg_data.iter())
             .zip_eq(state_tables.iter_mut())
         {
-            let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
+            let vis_map =
+                agg_call_filter_res(identity, agg_call, &columns, visibility.as_ref(), capacity)?;
             // TODO(yuchao): make this work for all agg kinds in later PR
             if matches!(agg_call.kind, AggKind::StringAgg)
                 || (matches!(agg_call.kind, AggKind::Min | AggKind::Max) && !agg_call.append_only)
@@ -272,6 +274,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             match msg {
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
+                        &info.identity,
                         &agg_calls,
                         &input_pk_indices,
                         &input_schema,

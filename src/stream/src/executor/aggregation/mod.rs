@@ -38,6 +38,8 @@ use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
+use super::actor::on_compute_error;
+use super::infallible_expr::InfallibleExpression;
 use super::PkIndices;
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
@@ -410,6 +412,7 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
 }
 
 pub fn agg_call_filter_res(
+    identity: &str,
     agg_call: &AggCall,
     columns: &Vec<Column>,
     vis_map: Option<&Bitmap>,
@@ -422,7 +425,10 @@ pub fn agg_call_filter_res(
                 .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
         );
         let data_chunk = DataChunk::new(columns.to_owned(), vis);
-        if let Bool(filter_res) = filter.eval(&data_chunk)?.as_ref() {
+        if let Bool(filter_res) = filter
+            .eval_infallible(&data_chunk, |err| on_compute_error(err, identity))
+            .as_ref()
+        {
             Ok(Some(filter_res.to_bitmap()))
         } else {
             Err(StreamExecutorError::from(anyhow!(

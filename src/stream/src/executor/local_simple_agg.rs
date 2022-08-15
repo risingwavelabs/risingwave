@@ -54,6 +54,7 @@ impl Executor for LocalSimpleAggExecutor {
 
 impl LocalSimpleAggExecutor {
     fn apply_chunk(
+        identity: &str,
         agg_calls: &[AggCall],
         states: &mut [Box<dyn StreamingAggStateImpl>],
         chunk: StreamChunk,
@@ -64,8 +65,13 @@ impl LocalSimpleAggExecutor {
             .iter()
             .zip_eq(states.iter_mut())
             .try_for_each(|(agg_call, state)| {
-                let vis_map =
-                    agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
+                let vis_map = agg_call_filter_res(
+                    identity,
+                    agg_call,
+                    &columns,
+                    visibility.as_ref(),
+                    capacity,
+                )?;
                 let cols = agg_call
                     .args
                     .val_indices()
@@ -103,7 +109,7 @@ impl LocalSimpleAggExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&agg_calls, &mut states, chunk)?;
+                    Self::apply_chunk(&info.identity, &agg_calls, &mut states, chunk)?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {

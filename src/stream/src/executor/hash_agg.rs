@@ -197,15 +197,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn apply_chunk(
-        &mut HashAggExecutorExtra::<S> {
+        HashAggExecutorExtra::<S> {
+            ref identity,
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
             ref _input_schema,
             ref schema,
-            ref mut state_tables,
+            state_tables,
             ref state_table_col_mappings,
-            ..
+            pk_indices: _,
         }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         chunk: StreamChunk,
@@ -298,7 +299,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
-                let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
+                let vis_map =
+                    agg_call_filter_res(identity, agg_call, &columns, Some(vis_map), capacity)?;
                 // TODO(yuchao): make this work for all agg kinds in later PR
                 if matches!(agg_call.kind, AggKind::StringAgg)
                     || (matches!(agg_call.kind, AggKind::Min | AggKind::Max)

@@ -27,6 +27,8 @@ use risingwave_pb::expr::expr_node;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
+use crate::executor::actor::on_compute_error;
+use crate::executor::infallible_expr::InfallibleExpression;
 
 pub struct HopWindowExecutor {
     pub input: BoxedExecutor,
@@ -85,6 +87,7 @@ impl HopWindowExecutor {
             window_slide,
             window_size,
             output_indices,
+            info,
             ..
         } = *self;
         let units = window_size
@@ -193,7 +196,8 @@ impl HopWindowExecutor {
                 // TODO: compact may be not necessary here.
                 let chunk = chunk.compact()?;
                 let (data_chunk, ops) = chunk.into_parts();
-                let hop_start = hop_start.eval(&data_chunk)?;
+                let hop_start = hop_start
+                    .eval_infallible(&data_chunk, |err| on_compute_error(err, &info.identity));
                 let len = hop_start.len();
                 let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
                 let (origin_cols, vis) = data_chunk.into_parts();
@@ -201,12 +205,20 @@ impl HopWindowExecutor {
                 assert!(matches!(vis, Vis::Compact(_)));
                 for i in 0..units {
                     let window_start_col = if output_indices.contains(&window_start_col_index) {
-                        Some(window_start_exprs[i].eval(&hop_start_chunk)?)
+                        Some(
+                            window_start_exprs[i].eval_infallible(&hop_start_chunk, |err| {
+                                on_compute_error(err, &info.identity)
+                            }),
+                        )
                     } else {
                         None
                     };
                     let window_end_col = if output_indices.contains(&window_end_col_index) {
-                        Some(window_end_exprs[i].eval(&hop_start_chunk)?)
+                        Some(
+                            window_end_exprs[i].eval_infallible(&hop_start_chunk, |err| {
+                                on_compute_error(err, &info.identity)
+                            }),
+                        )
                     } else {
                         None
                     };

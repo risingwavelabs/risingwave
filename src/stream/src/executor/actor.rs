@@ -12,7 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+// FIXME: This is a false-positive clippy test, remove this while bumping toolchain.
+// https://github.com/tokio-rs/tokio/issues/4836
+// https://github.com/rust-lang/rust-clippy/issues/8493
+#![expect(clippy::declare_interior_mutable_const)]
+
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,6 +27,7 @@ use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
+use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
@@ -87,7 +94,7 @@ impl OperatorInfoStatus {
     }
 }
 
-/// Shared by all operators in the stream.
+/// Shared by all operators of an actor.
 #[derive(Default)]
 pub struct ActorContext {
     pub info: Vec<OperatorInfo>,
@@ -99,6 +106,22 @@ impl ActorContext {
     pub fn create() -> ActorContextRef {
         Arc::new(Mutex::new(Self::default()))
     }
+}
+
+tokio::task_local! {
+    /// TODO: report errors and prompt the user.
+    static ACTOR_ERRORS: RefCell<HashMap<String,Vec<ExprError>>>;
+}
+
+pub fn on_compute_error(err: ExprError, identity: &str) {
+    ACTOR_ERRORS.with(|errors| {
+        log::error!("Compute error: {}, executor: {identity}", err);
+        errors
+            .borrow_mut()
+            .entry(identity.to_owned())
+            .or_default()
+            .push(err);
+    })
 }
 
 /// `Actor` is the basic execution unit in the streaming framework.

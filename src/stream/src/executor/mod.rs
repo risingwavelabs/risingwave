@@ -44,15 +44,18 @@ use smallvec::SmallVec;
 use crate::task::ActorId;
 
 mod actor;
-pub mod aggregation;
 mod barrier_align;
+pub mod exchange;
+mod infallible_expr;
+pub mod monitor;
+
+pub mod aggregation;
 mod batch_query;
 mod chain;
 mod debug;
 mod dispatch;
 mod dynamic_filter;
 mod error;
-pub mod exchange;
 mod expand;
 mod filter;
 mod global_simple_agg;
@@ -65,7 +68,6 @@ mod lookup;
 mod lookup_union;
 mod managed_state;
 mod merge;
-pub mod monitor;
 mod mview;
 mod project;
 mod project_set;
