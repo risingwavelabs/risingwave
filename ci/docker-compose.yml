@@ -35,9 +35,9 @@ services:
         condition: service_healthy
     volumes:
       - ..:/risingwave
-    networks:
-      nw:
-        ipv4_address: 172.24.2.1
+    # networks:
+    #   nw:
+    #     ipv4_address: 172.24.2.1
 
   mysql:
     image: mysql/mysql-server:8.0
@@ -53,14 +53,15 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
-    networks:
-      nw:
-        ipv4_address: 172.24.2.2
+    # network_mode: host
+    # networks:
+    #   nw:
+    #     ipv4_address: 172.24.2.2
 
-networks:
-  nw:
-    driver: bridge
-    ipam:
-        driver: default
-        config:
-            - subnet: "172.24.2.0/16"
+# networks:
+#   nw:
+#     driver: bridge
+#     ipam:
+#         driver: default
+#         config:
+#             - subnet: "172.24.2.0/16"
