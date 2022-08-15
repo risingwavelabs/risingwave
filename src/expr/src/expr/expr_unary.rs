@@ -75,6 +75,7 @@ macro_rules! gen_cast {
 
             { varchar, date, str_to_date },
             { varchar, time, str_to_time },
+            { varchar, interval, str_parse },
             { varchar, timestamp, str_to_timestamp },
             { varchar, timestampz, str_to_timestampz },
             { varchar, int16, str_parse },

@@ -199,13 +199,7 @@ impl Bitmap {
     }
 
     fn num_bytes(num_bits: usize) -> usize {
-        let num_bytes = num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 };
-        let r = num_bytes % 64;
-        if r == 0 {
-            num_bytes
-        } else {
-            num_bytes + 64 - r
-        }
+        num_bits / 8 + if num_bits % 8 > 0 { 1 } else { 0 }
     }
 
     /// Returns the number of valid bits in the bitmap,
@@ -417,6 +411,18 @@ mod tests {
         let byte1 = 0b0101_0110_u8;
         let expected = Bitmap::from_bytes(Bytes::copy_from_slice(&[byte1]));
         assert_eq!(bitmap2, expected);
+    }
+
+    #[test]
+    fn test_bitmap_all_high() {
+        let num_bits = 3;
+        let bitmap = Bitmap::all_high_bits(num_bits);
+        assert_eq!(bitmap.len(), num_bits);
+        for i in 0..num_bits {
+            assert!(bitmap.is_set(i).unwrap());
+        }
+        // Test to and from protobuf is OK.
+        assert_eq!(bitmap, Bitmap::from(&bitmap.to_protobuf()));
     }
 
     #[test]

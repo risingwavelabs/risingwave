@@ -25,7 +25,7 @@ use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_source, create_table, drop_table,
+    create_index, create_mv, create_source, create_table, drop_table, variable,
 };
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
@@ -313,6 +313,13 @@ impl TestCase {
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
+                }
+                Statement::SetVariable {
+                    local: _,
+                    variable,
+                    value,
+                } => {
+                    variable::handle_set(context, variable, value).unwrap();
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }

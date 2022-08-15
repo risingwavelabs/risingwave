@@ -56,6 +56,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 actor_context,
                 x_node.operator_id,
                 params.actor_id,
+                upstream_fragment_id,
                 stream.streaming_metrics.clone(),
             )
             .boxed())

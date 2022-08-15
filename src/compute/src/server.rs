@@ -26,6 +26,7 @@ use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
@@ -47,6 +48,9 @@ use tokio::task::JoinHandle;
 use crate::compute_observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
+use crate::rpc::service::monitor_service::{
+    GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
+};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
 
@@ -182,6 +186,7 @@ pub async fn compute_node_serve(
         config.streaming.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
+    let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
@@ -218,15 +223,18 @@ pub async fn compute_node_serve(
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone(), exchange_srv_metrics);
-    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
+    let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
+    let monitor_srv = MonitorServiceImpl::new(stream_mgr, grpc_stack_trace_mgr.clone());
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .layer(StackTraceMiddlewareLayer::new(grpc_stack_trace_mgr))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
+            .add_service(MonitorServiceServer::new(monitor_srv))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

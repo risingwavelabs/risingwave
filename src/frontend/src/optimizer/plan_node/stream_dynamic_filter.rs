@@ -45,6 +45,7 @@ impl StreamDynamicFilter {
             left.ctx(),
             left.schema().clone(),
             left.logical_pk().to_vec(),
+            left.functional_dependency().clone(),
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
