@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use futures::{pin_mut, StreamExt};
@@ -107,8 +106,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         self.total_count
     }
 
-    fn get_topn_row(&self, iter_res: Cow<Row>) -> TopNStateRow {
-        let row = iter_res.into_owned();
+    fn get_topn_row(&self, row: Row) -> TopNStateRow {
         let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
         for pk_index in self.state_table.pk_indices() {
             datums.push(row[*pk_index].clone());
@@ -147,7 +145,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
             )
         };
         while let Some(item) = stream.next().await {
-            rows.push(self.get_topn_row(item?));
+            rows.push(self.get_topn_row(item?.into_owned()));
         }
         Ok(rows)
     }
@@ -163,7 +161,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
-            let topn_row = self.get_topn_row(item?);
+            let topn_row = self.get_topn_row(item?.into_owned());
             if topn_row.ordered_key <= *start_key {
                 continue;
             }

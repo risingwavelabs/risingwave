@@ -114,6 +114,7 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
