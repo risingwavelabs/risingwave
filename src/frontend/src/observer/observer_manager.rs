@@ -17,6 +17,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::compress::decompress_data;
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -24,6 +25,7 @@ use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
+use crate::catalog::TableId;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
@@ -58,6 +60,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             Info::User(_) => {
                 self.handle_user_notification(resp);
             }
+            Info::ParallelUnitMapping(_) => self.handle_table_mapping_notification(resp),
             Info::Snapshot(_) => {
                 panic!(
                     "receiving a snapshot in the middle is unsupported now {:?}",
@@ -77,25 +80,37 @@ impl ObserverNodeImpl for FrontendObserverNode {
         user_guard.clear();
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
-                for db in snapshot.database {
+                for db in snapshot.databases {
                     catalog_guard.create_database(db)
                 }
-                for schema in snapshot.schema {
+                for schema in snapshot.schemas {
                     catalog_guard.create_schema(schema)
                 }
-                for table in snapshot.table {
+                for table in snapshot.tables {
                     catalog_guard.create_table(&table)
                 }
-                for source in snapshot.source {
+                for source in snapshot.sources {
                     catalog_guard.create_source(source)
                 }
                 for user in snapshot.users {
                     user_guard.create_user(user)
                 }
-                for index in snapshot.index {
+                for index in snapshot.indexes {
                     catalog_guard.create_index(&index)
                 }
-                self.worker_node_manager.refresh_worker_node(snapshot.nodes);
+                self.worker_node_manager.refresh(
+                    snapshot.nodes,
+                    snapshot
+                        .parallel_unit_mappings
+                        .iter()
+                        .map(|mapping| {
+                            (
+                                TableId::new(mapping.table_id),
+                                decompress_data(&mapping.original_indices, &mapping.data),
+                            )
+                        })
+                        .collect(),
+                );
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
@@ -138,7 +153,7 @@ impl FrontendObserverNode {
             Info::Database(database) => match resp.operation() {
                 Operation::Add => catalog_guard.create_database(database.clone()),
                 Operation::Delete => catalog_guard.drop_database(database.id),
-                _ => panic!("receive an unsupported notify {:?}", resp.clone()),
+                _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
                 Operation::Add => catalog_guard.create_schema(schema.clone()),
@@ -209,6 +224,40 @@ impl FrontendObserverNode {
         );
         user_guard.set_version(resp.version);
         self.user_info_updated_tx.send(resp.version).unwrap();
+    }
+
+    fn handle_table_mapping_notification(&mut self, resp: SubscribeResponse) {
+        let Some(info) = resp.info.as_ref() else {
+            return;
+        };
+        match info {
+            Info::ParallelUnitMapping(parallel_unit_mapping) => match resp.operation() {
+                Operation::Add => {
+                    let table_id = TableId::new(parallel_unit_mapping.table_id);
+                    let mapping = decompress_data(
+                        &parallel_unit_mapping.original_indices,
+                        &parallel_unit_mapping.data,
+                    );
+                    self.worker_node_manager
+                        .insert_table_mapping(table_id, mapping);
+                }
+                Operation::Delete => {
+                    let table_id = TableId::new(parallel_unit_mapping.table_id);
+                    self.worker_node_manager.remove_table_mapping(&table_id);
+                }
+                Operation::Update => {
+                    let table_id = TableId::new(parallel_unit_mapping.table_id);
+                    let mapping = decompress_data(
+                        &parallel_unit_mapping.original_indices,
+                        &parallel_unit_mapping.data,
+                    );
+                    self.worker_node_manager
+                        .update_table_mapping(table_id, mapping);
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            _ => unreachable!(),
+        }
     }
 
     /// `update_worker_node_manager` is called in `start` method.

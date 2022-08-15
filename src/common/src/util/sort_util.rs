@@ -126,6 +126,7 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
+// TODO(yuchao): We may deprecate this struct to use `OrderedRow` instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DescOrderedRow {
     pub row: Row,

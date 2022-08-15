@@ -31,7 +31,12 @@ impl StateStore for PanicStateStore {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, _key: &'a [u8], _read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        _key: &'a [u8],
+        _check_bloom_filter: bool,
+        _read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
         async move {
             panic!("should not read from the state store!");
         }
