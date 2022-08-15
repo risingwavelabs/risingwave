@@ -41,6 +41,7 @@ cargo make link-all-in-one-binaries
 
 echo "debug"
 cat /etc/hosts
+apt install ufw
 ufw status verbose
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
