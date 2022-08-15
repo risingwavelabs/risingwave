@@ -25,3 +25,28 @@ DROP USER ddl_user;
 # Drop it again with if exists.
 statement ok
 DROP USER IF EXISTS ddl_user;
+
+# Test quoting
+statement ok
+CREATE USER "n-m";
+
+statement ok
+DROP USER "n-m";
+
+statement ok
+CREATE USER "aBc";
+
+statement ok
+CREATE USER aBc;
+
+statement error
+CREATE USER Abc;
+
+statement ok
+DROP USER abc;
+
+statement error
+DROP USER aBc;
+
+statement ok
+DROP USER "aBc";

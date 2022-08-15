@@ -28,11 +28,9 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table};
-use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -41,7 +39,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, Relation};
-use crate::model::{MetadataModel, TableFragments, Transactional};
+use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
@@ -121,29 +119,6 @@ where
                 .generate::<{ IdCategory::Database }>()
                 .await? as u32;
             self.create_database(&database).await?;
-        }
-        let databases = Database::list(self.env.meta_store())
-            .await?
-            .into_iter()
-            .filter(|db| db.name == DEFAULT_DATABASE_NAME)
-            .collect::<Vec<Database>>();
-        assert_eq!(1, databases.len());
-
-        for name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
-            let mut schema = Schema {
-                name: name.to_string(),
-                database_id: databases[0].id,
-                owner: DEFAULT_SUPER_USER_ID,
-                ..Default::default()
-            };
-            if !self.core.lock().await.database.has_schema(&schema) {
-                schema.id = self
-                    .env
-                    .id_gen_manager()
-                    .generate::<{ IdCategory::Schema }>()
-                    .await? as u32;
-                self.create_schema(&schema).await?;
-            }
         }
         Ok(())
     }
@@ -515,47 +490,6 @@ where
         }
     }
 
-    pub async fn update_table_mapping(
-        &self,
-        fragments: &Vec<TableFragments>,
-        migrate_map: &HashMap<ParallelUnitId, ParallelUnit>,
-    ) -> MetaResult<()> {
-        let core = &mut self.core.lock().await.database;
-        let mut transaction = Transaction::default();
-        let mut tables = Vec::new();
-        for fragment in fragments {
-            let table_id = fragment.table_id().table_id();
-            let internal_tables = fragment.internal_table_ids();
-            let mut table_to_updates = vec![table_id];
-            table_to_updates.extend(internal_tables);
-            for table_id in table_to_updates {
-                let table = Table::select(self.env.meta_store(), &table_id).await?;
-                if let Some(mut table) = table {
-                    if let Some(ref mut mapping) = table.mapping {
-                        let mut migrated = false;
-                        mapping.data.iter_mut().for_each(|id| {
-                            if migrate_map.contains_key(id) {
-                                migrated = true;
-                                *id = migrate_map.get(id).unwrap().id;
-                            }
-                        });
-                        if migrated {
-                            table.upsert_in_transaction(&mut transaction)?;
-                            tables.push(table);
-                        }
-                    }
-                }
-            }
-        }
-        self.env.meta_store().txn(transaction).await?;
-        for table in &tables {
-            self.broadcast_info_op(Operation::Update, Info::Table(table.to_owned()))
-                .await;
-            core.add_table(table);
-        }
-        Ok(())
-    }
-
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
         let source = Source::select(self.env.meta_store(), &source_id).await?;
@@ -772,7 +706,7 @@ where
         table: &Table,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.database;
-        let key = (table.database_id, table.schema_id, table.name.clone());
+        let key = (table.database_id, table.schema_id, index.name.clone());
         if !core.has_index(index) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
             let mut transaction = Transaction::default();
