@@ -85,7 +85,6 @@ impl LogicalScan {
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>();
-
         let schema = Schema { fields };
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (

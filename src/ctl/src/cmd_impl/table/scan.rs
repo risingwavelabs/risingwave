@@ -45,9 +45,7 @@ pub async fn get_table_catalog_by_id(meta: MetaClient, table_id: u32) -> Result<
 }
 
 pub fn print_table_catalog(table: &TableCatalog) {
-    let mut catalog = table.clone();
-    catalog.vnode_mapping = None;
-    println!("{:#?}", catalog);
+    println!("{:#?}", table);
 }
 
 pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> RowBasedStateTable<S> {
