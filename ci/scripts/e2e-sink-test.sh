@@ -41,6 +41,7 @@ cargo make link-all-in-one-binaries
 
 echo "debug"
 cat /etc/hosts
+docker ps
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
