@@ -340,6 +340,18 @@ impl HummockStorage {
                     if table_info_idx == 0 {
                         continue;
                     }
+                    let ord = user_key(
+                        &level.table_infos[table_info_idx]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .right,
+                    )
+                    .cmp(key.as_ref());
+                    // the case that the key falls into the gap between two ssts
+                    if ord == Ordering::Less {
+                        continue;
+                    }
                     table_info_idx = table_info_idx.saturating_sub(1);
                     let table = self
                         .sstable_store
