@@ -28,7 +28,6 @@ use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
 use risingwave_expr::ExprError;
-use tokio::task::futures::TaskLocalFuture;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
@@ -125,8 +124,10 @@ pub fn on_compute_error(err: ExprError, identity: &str) {
     })
 }
 
+type TaskLocalFuture<T: Future> = impl Future<Output = T::Output>;
+
 trait CollectErrors: Future + Sized {
-    fn collect_errors(self) -> TaskLocalFuture<RefCell<HashMap<String, Vec<ExprError>>>, Self> {
+    fn collect_errors(self) -> TaskLocalFuture<Self> {
         ACTOR_ERRORS.scope(RefCell::new(HashMap::new()), self)
     }
 }
