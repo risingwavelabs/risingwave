@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
 
 use crate::binder::Binder;
-use crate::handler::util::col_descs_to_row;
+use crate::handler::util::col_descs_to_rows;
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub fn get_columns_from_table(
@@ -91,7 +91,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
             .collect(),
         ShowObject::Columns { table } => {
             let columns = get_columns_from_table(&session, table)?;
-            let rows = vec![col_descs_to_row(columns)];
+            let rows = col_descs_to_rows(columns);
 
             return Ok(PgResponse::new(
                 StatementType::SHOW_COMMAND,

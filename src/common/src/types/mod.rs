@@ -59,6 +59,7 @@ use crate::array::{
 
 /// Parallel unit is the minimal scheduling unit.
 pub type ParallelUnitId = u32;
+pub type VnodeMapping = Vec<ParallelUnitId>;
 
 // VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
 // consistent hashing.
@@ -858,12 +859,7 @@ impl ScalarImpl {
                     DataType::Decimal => deserializer.read_decimal_len()?,
                     // these two types is var-length and should only be determine at runtime.
                     // TODO: need some test for this case (e.g. e2e test)
-                    DataType::List { datatype } => {
-                        let len = u32::deserialize(&mut *deserializer)?;
-                        (0..len)
-                            .map(|_| Self::encoding_data_size(datatype, deserializer))
-                            .try_fold(size_of::<u32>(), |a, b| b.map(|b| a + b))?
-                    }
+                    DataType::List { .. } => deserializer.read_bytes_len()?,
                     DataType::Struct { fields, .. } => fields
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))

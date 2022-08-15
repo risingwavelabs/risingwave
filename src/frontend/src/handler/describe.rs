@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use crate::binder::Binder;
 use crate::catalog::IndexCatalog;
-use crate::handler::util::col_descs_to_row;
+use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
 pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
@@ -66,7 +66,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     };
 
     // Convert all column descs to rows
-    let mut rows = vec![col_descs_to_row(columns)];
+    let mut rows = col_descs_to_rows(columns);
 
     // Convert all indexes to rows
     rows.extend(indices.iter().map(|index| {

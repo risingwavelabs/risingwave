@@ -34,6 +34,7 @@ impl StreamExpand {
             logical.base.ctx.clone(),
             logical.schema().clone(),
             logical.base.logical_pk.to_vec(),
+            logical.functional_dependency().clone(),
             Distribution::SomeShard,
             logical.input().append_only(),
         );

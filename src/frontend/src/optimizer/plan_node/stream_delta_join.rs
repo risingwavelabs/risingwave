@@ -60,6 +60,7 @@ impl StreamDeltaJoin {
             ctx,
             logical.schema().clone(),
             logical.base.logical_pk.to_vec(),
+            logical.functional_dependency().clone(),
             dist,
             append_only,
         );

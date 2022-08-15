@@ -17,11 +17,8 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
-use risingwave_common::types::ParallelUnitId;
-use risingwave_common::util::compress::{compress_data, decompress_data};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::common::ParallelUnitMapping;
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
@@ -84,13 +81,7 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: u32,
 
-    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
-    /// table.
-    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
-
     pub properties: HashMap<String, String>,
-
-    pub read_pattern_prefix_column: u32,
 }
 
 impl TableCatalog {
@@ -132,7 +123,6 @@ impl TableCatalog {
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
-            vnode_mapping: self.vnode_mapping.clone(),
             retention_seconds: table_options
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETAINTION_SECOND),
@@ -149,16 +139,6 @@ impl TableCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        let mapping = if let Some(mapping) = &self.vnode_mapping {
-            let (original_indices, data) = compress_data(mapping);
-            Some(ParallelUnitMapping {
-                table_id: self.id.table_id as u32,
-                original_indices,
-                data,
-            })
-        } else {
-            None
-        };
         ProstTable {
             id: self.id.table_id as u32,
             schema_id,
@@ -180,9 +160,7 @@ impl TableCatalog {
                 .collect_vec(),
             appendonly: self.appendonly,
             owner: self.owner,
-            mapping,
             properties: self.properties.clone(),
-            read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
     }
 }
@@ -209,12 +187,6 @@ impl From<ProstTable> for TableCatalog {
 
         let order_key = tb.order_key.iter().map(FieldOrder::from_protobuf).collect();
 
-        let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
-            decompress_data(&mapping.original_indices, &mapping.data)
-        } else {
-            vec![]
-        };
-
         Self {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
@@ -234,9 +206,7 @@ impl From<ProstTable> for TableCatalog {
             pk: tb.pk.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
-            vnode_mapping: Some(vnode_mapping),
             properties: tb.properties,
-            read_pattern_prefix_column: tb.read_pattern_prefix_column,
         }
     }
 }
@@ -255,10 +225,8 @@ mod tests {
     use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_common::util::compress::compress_data;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::common::ParallelUnitMapping;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
     };
@@ -270,8 +238,6 @@ mod tests {
 
     #[test]
     fn test_into_table_catalog() {
-        let mapping = [1, 1, 2, 2, 3, 3, 4, 4].to_vec();
-        let (original_indices, data) = compress_data(&mapping);
         let table: TableCatalog = ProstTable {
             is_index: false,
             index_on_id: 0,
@@ -292,12 +258,12 @@ mod tests {
                         vec![
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.address",
+                                "address",
                                 2,
                             ),
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.zipcode",
+                                "zipcode",
                                 3,
                             ),
                         ],
@@ -317,16 +283,10 @@ mod tests {
                 .into(),
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            mapping: Some(ParallelUnitMapping {
-                table_id: 0,
-                original_indices,
-                data,
-            }),
             properties: HashMap::from([(
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
             )]),
-            read_pattern_prefix_column: 0,
         }
         .into();
 
@@ -343,7 +303,8 @@ mod tests {
                         column_desc: ColumnDesc {
                             data_type: DataType::Struct {
                                 fields: vec![DataType::Varchar, DataType::Varchar].into(),
-                                field_names: vec![].into(),
+                                field_names: vec!["address".to_string(), "zipcode".to_string()]
+                                    .into(),
                             },
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
@@ -351,14 +312,14 @@ mod tests {
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(2),
-                                    name: "country.address".to_string(),
+                                    name: "address".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 },
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(3),
-                                    name: "country.zipcode".to_string(),
+                                    name: "zipcode".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 }
@@ -376,12 +337,10 @@ mod tests {
                 distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-                vnode_mapping: Some(mapping),
                 properties: HashMap::from([(
                     String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                     String::from("300")
                 )]),
-                read_pattern_prefix_column: 0,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

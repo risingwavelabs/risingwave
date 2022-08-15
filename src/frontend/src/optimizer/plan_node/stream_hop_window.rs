@@ -39,6 +39,7 @@ impl StreamHopWindow {
             ctx,
             logical.schema().clone(),
             pk_indices,
+            logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
         );

@@ -24,7 +24,6 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{SqlOption, Value};
-use serde_json::json;
 
 use crate::binder::{BoundSetExpr, BoundStatement};
 
@@ -56,13 +55,23 @@ pub fn to_pg_rows(chunk: DataChunk, format: bool) -> Vec<Row> {
 }
 
 /// Convert column descs to rows which conclude name and type
-pub fn col_descs_to_row(columns: Vec<ColumnDesc>) -> Row {
-    let val = json!({
-        "columns": columns.iter().map(|c| c.to_json()).collect_vec()
-    });
-    Row::new(vec![Some(
-        serde_json::to_string_pretty(&val).unwrap().into(),
-    )])
+pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
+    columns
+        .iter()
+        .flat_map(|col| {
+            col.flatten()
+                .into_iter()
+                .map(|c| {
+                    let type_name = if let DataType::Struct { .. } = c.data_type {
+                        c.type_name.clone()
+                    } else {
+                        format!("{:?}", &c.data_type)
+                    };
+                    Row::new(vec![Some(c.name.into()), Some(type_name.into())])
+                })
+                .collect_vec()
+        })
+        .collect_vec()
 }
 
 /// Convert from [`Field`] to [`PgFieldDescriptor`].

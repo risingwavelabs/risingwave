@@ -38,6 +38,7 @@ pub struct BoundBaseTable {
 pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
+    pub associated_mview_id: TableId,
     pub columns: Vec<ColumnDesc>,
     pub append_only: bool,
     pub owner: UserId,
@@ -183,6 +184,11 @@ impl Binder {
 
     pub(crate) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
         let (schema_name, source_name) = Self::resolve_table_name(name)?;
+        let associate_table_id = self
+            .catalog
+            .get_table_by_name(&self.db_name, &schema_name, &source_name)?
+            .id();
+
         let source = self
             .catalog
             .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
@@ -204,6 +210,7 @@ impl Binder {
         Ok(BoundTableSource {
             name: source_name,
             source_id,
+            associated_mview_id: associate_table_id,
             columns,
             append_only,
             owner,

@@ -19,6 +19,7 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 
+use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 pub use scheduler::*;
@@ -26,15 +27,12 @@ pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
 
-use crate::manager::HashMappingManagerRef;
-use crate::model::FragmentId;
 use crate::MetaResult;
 
 /// Record vnode mapping for stateful operators in meta.
 pub fn record_table_vnode_mappings(
-    hash_mapping_manager: &HashMappingManagerRef,
     stream_node: &StreamNode,
-    fragment_id: FragmentId,
+    fragment: &mut Fragment,
 ) -> MetaResult<()> {
     // We only consider stateful operators with multiple parallel degrees here. Singleton stateful
     // operators will not have vnode mappings, so that compactors could omit the unnecessary probing
@@ -42,44 +40,47 @@ pub fn record_table_vnode_mappings(
     match stream_node.get_node_body()? {
         NodeBody::Materialize(node) => {
             let table_id = node.get_table_id();
-            hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
+            fragment.state_table_ids.push(table_id);
         }
         NodeBody::Arrange(node) => {
             let table_id = node.table.as_ref().unwrap().id;
-            hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
+            fragment.state_table_ids.push(table_id);
         }
         NodeBody::HashAgg(node) => {
             for table in &node.internal_tables {
-                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
+                fragment.state_table_ids.push(table.id);
             }
         }
-        NodeBody::LocalSimpleAgg(node) => {
+        NodeBody::LocalSimpleAgg(node) | NodeBody::GlobalSimpleAgg(node) => {
             for table in &node.internal_tables {
-                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
-            }
-        }
-        NodeBody::GlobalSimpleAgg(node) => {
-            for table in &node.internal_tables {
-                hash_mapping_manager.set_fragment_state_table(fragment_id, table.id);
+                fragment.state_table_ids.push(table.id);
             }
         }
         NodeBody::HashJoin(node) => {
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.left_table.as_ref().unwrap().id);
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.right_table.as_ref().unwrap().id);
+            fragment
+                .state_table_ids
+                .push(node.left_table.as_ref().unwrap().id);
+            fragment
+                .state_table_ids
+                .push(node.right_table.as_ref().unwrap().id);
         }
         NodeBody::DynamicFilter(node) => {
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.left_table.as_ref().unwrap().id);
-            hash_mapping_manager
-                .set_fragment_state_table(fragment_id, node.right_table.as_ref().unwrap().id);
+            fragment
+                .state_table_ids
+                .push(node.left_table.as_ref().unwrap().id);
+            fragment
+                .state_table_ids
+                .push(node.right_table.as_ref().unwrap().id);
+        }
+        NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
+            fragment.state_table_ids.push(node.table_id_l);
+            fragment.state_table_ids.push(node.table_id_h);
         }
         _ => {}
     }
     let input_nodes = stream_node.get_input();
     for input_node in input_nodes {
-        record_table_vnode_mappings(hash_mapping_manager, input_node, fragment_id)?;
+        record_table_vnode_mappings(input_node, fragment)?;
     }
     Ok(())
 }

@@ -129,7 +129,7 @@ struct JoinSide<K: HashKey, S: StateStore> {
     key_indices: Vec<usize>,
     /// The primary key indices of this side, used for state store
     pk_indices: Vec<usize>,
-    /// The date type of each columns to join on
+    /// The date type of each columns to join on.
     col_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
@@ -245,7 +245,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn with_match_on_insert(
         &mut self,
         row: &RowRef,
-        matched_row: &mut JoinRow,
+        matched_row: &JoinRow,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -291,7 +291,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn with_match_on_delete(
         &mut self,
         row: &RowRef,
-        matched_row: &mut JoinRow,
+        matched_row: &JoinRow,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         Ok(
             // Left/Right Anti sides
@@ -681,17 +681,21 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut degree = 0;
                     let mut append_only_matched_rows = Vec::with_capacity(1);
                     if let Some(mut matched_rows) = matched_rows {
-                        for matched_row in matched_rows.values_mut() {
+                        for (matched_row_ref, matched_row) in
+                            matched_rows.values_mut(&side_match.col_types)
+                        {
+                            let mut matched_row = matched_row?;
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
-                                        .with_match_on_insert(&row, matched_row)?
+                                        .with_match_on_insert(&row, &matched_row)?
                                     {
                                         yield Message::Chunk(chunk);
                                     }
                                 }
-                                side_match.ht.inc_degree(matched_row)?;
+                                side_match.ht.inc_degree(matched_row_ref)?;
+                                matched_row.inc_degree();
                             }
                             // If the stream is append-only and the join key covers pk in both side,
                             // then we can remove matched rows since pk is unique and will not be
@@ -741,13 +745,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 Op::Delete | Op::UpdateDelete => {
                     let mut degree = 0;
                     if let Some(mut matched_rows) = matched_rows {
-                        for matched_row in matched_rows.values_mut() {
+                        for (matched_row_ref, matched_row) in
+                            matched_rows.values_mut(&side_match.col_types)
+                        {
+                            let mut matched_row = matched_row?;
                             if check_join_condition(&row, &matched_row.row)? {
                                 degree += 1;
-                                side_match.ht.dec_degree(matched_row)?;
+                                side_match.ht.dec_degree(matched_row_ref)?;
+                                matched_row.dec_degree()?;
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
-                                        .with_match_on_delete(&row, matched_row)?
+                                        .with_match_on_delete(&row, &matched_row)?
                                     {
                                         yield Message::Chunk(chunk);
                                     }

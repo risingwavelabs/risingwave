@@ -226,11 +226,8 @@ mod tests {
             "v1" => DataType::Int16,
             "v2" => DataType::Struct {
                 fields: vec![DataType::Int64,DataType::Float64,DataType::Float64].into(),
-                field_names: vec![].into(),
+                field_names: vec!["v3".to_string(), "v4".to_string(), "v5".to_string()].into(),
             },
-            "v2.v3" => DataType::Int64,
-            "v2.v4" => DataType::Float64,
-            "v2.v5" => DataType::Float64,
         };
 
         assert_eq!(columns, expected_columns);
