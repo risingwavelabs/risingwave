@@ -250,7 +250,8 @@ impl Row {
     }
 
     /// Serialize the row into value encoding bytes.
-    /// WARNING: If you want to serialize to a memcomparable format, use [`OrderedRow`]
+    /// WARNING: If you want to serialize to a memcomparable format, use
+    /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
     pub fn serialize(&self) -> Result<Vec<u8>> {
