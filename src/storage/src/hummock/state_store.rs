@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
@@ -34,13 +33,12 @@ use crate::hummock::iterator::{
     HummockIteratorUnion,
 };
 use crate::hummock::local_version::PinnedVersion;
-use crate::hummock::local_version::SyncUncommittedData::{Synced, Syncing};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::utils::{filter_single_sst, prune_ssts, range_overlap};
+use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 use crate::storage_value::StorageValue;
@@ -98,7 +96,7 @@ impl HummockStorage {
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
 
-        let (shared_buffer_data, pinned_version, mut sync_uncommitted_datas) =
+        let (shared_buffer_data, pinned_version, sync_uncommitted_datas) =
             self.read_filter(&read_options, &key_range)?;
 
         let mut stats = StoreLocalStatistic::default();
@@ -118,7 +116,7 @@ impl HummockStorage {
                 .await?,
             ));
         }
-        while let Some(sync_uncommitted_data) = sync_uncommitted_datas.pop() {
+        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
@@ -128,7 +126,7 @@ impl HummockStorage {
                     iter_read_options.clone(),
                 )
                 .await?,
-            ));
+            ))
         }
         self.stats
             .iter_merge_sstable_counts
@@ -261,7 +259,7 @@ impl HummockStorage {
             Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
         };
         let mut stats = StoreLocalStatistic::default();
-        let (shared_buffer_data, pinned_version, mut sync_uncommitted_datas) =
+        let (shared_buffer_data, pinned_version, sync_uncommitted_datas) =
             self.read_filter(&read_options, &(key..=key))?;
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -307,7 +305,7 @@ impl HummockStorage {
                 }
             }
         }
-        while let Some(sync_uncommitted_data) = sync_uncommitted_datas.pop() {
+        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
             for data_list in sync_uncommitted_data {
                 for data in data_list {
                     match data {
@@ -392,40 +390,7 @@ impl HummockStorage {
         let sync_uncommitted_data: Vec<OrderSortedUncommittedData> = read_version
             .sync_uncommitted_datas
             .iter()
-            .map(|sync_uncommitted_data| match sync_uncommitted_data {
-                Syncing(task) => {
-                    let local_data_iter = task
-                        .iter()
-                        .filter(|(_, data)| match data {
-                            UncommittedData::Batch(batch) => range_overlap(
-                                key_range,
-                                batch.start_user_key(),
-                                batch.end_user_key(),
-                            ),
-                            UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
-                        })
-                        .map(|((_, order_index), data)| (*order_index, data.clone()));
-
-                    let mut uncommitted_data = BTreeMap::new();
-                    for (order_index, data) in local_data_iter {
-                        uncommitted_data
-                            .entry(order_index)
-                            .or_insert_with(Vec::new)
-                            .push(data);
-                    }
-                    uncommitted_data.into_values().rev().collect()
-                }
-                Synced(ssts) => vec![ssts
-                    .iter()
-                    .filter(|data| match data {
-                        UncommittedData::Batch(_) => {
-                            panic!("sync uncommitted states can't save batch")
-                        }
-                        UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
-                    })
-                    .cloned()
-                    .collect()],
-            })
+            .map(|sync_uncommitted_data| sync_uncommitted_data.get_overlap_data(key_range))
             .collect();
         Ok((
             shared_buffer_data,

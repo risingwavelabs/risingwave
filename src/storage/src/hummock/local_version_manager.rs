@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -145,7 +145,7 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
-    max_sync_epoch: RwLock<u64>,
+    max_sync_epoch: AtomicU64,
     sstable_id_manager: SstableIdManagerRef,
     sync_epoch_notify: Arc<Notify>,
 }
@@ -204,7 +204,7 @@ impl LocalVersionManager {
                 sstable_id_manager.clone(),
                 filter_key_extractor_manager.clone(),
             )),
-            max_sync_epoch: RwLock::new(0),
+            max_sync_epoch: AtomicU64::new(0),
             sstable_id_manager,
             sync_epoch_notify: Arc::new(Notify::new()),
         });
@@ -508,30 +508,30 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        let notify1 = self.sync_epoch_notify.clone();
+        let sync_epoch_notify_clone = self.sync_epoch_notify.clone();
         // TODO(xuxinhao): modify it after supporting uploading multiple shared buffers.#4442
         loop {
-            let epoch1 = self
+            let min_unsynced_epoch = self
                 .local_version
                 .read()
                 .iter_shared_buffer()
-                .find(|(key, _)| key > &&self.max_sync_epoch.read().clone())
+                .find(|(key, _)| key > &&self.max_sync_epoch.load(Relaxed))
                 .map(|(key, _)| key)
                 .cloned();
-            if epoch1.is_none() || epoch1.unwrap() == epoch {
+            if min_unsynced_epoch.unwrap() == epoch {
                 break;
             } else {
-                notify1.notified().await;
+                sync_epoch_notify_clone.notified().await;
             }
         }
         let (uncommitted_data, task_write_batch_size) = {
             // We keep the lock on max_sync_epoch until the task is saved in the sync task vec.
             let mut local_version_guard = self.local_version.write();
-            *self.max_sync_epoch.write() = epoch;
+            self.max_sync_epoch.store(epoch, Relaxed);
             let (uncommitted_data, task_write_batch_size) = match local_version_guard
                 .get_mut_shared_buffer(epoch)
                 .unwrap()
-                .get_uncommitted_data()
+                .take_uncommitted_data()
             {
                 Some(task) => task,
                 None => {
@@ -545,32 +545,30 @@ impl LocalVersionManager {
 
         self.sync_epoch_notify.notify_waiters();
 
-        let (size, ssts) = self
-            .sync_shared_buffer_epoch(epoch, uncommitted_data, task_write_batch_size)
+        tracing::trace!(
+            "sync epoch {} finished. Task size {}",
+            epoch,
+            task_write_batch_size
+        );
+        let ssts = self
+            .sync_shared_buffer_epoch(epoch, uncommitted_data)
             .await?;
-        Ok((size, ssts))
+        Ok((task_write_batch_size, ssts))
     }
 
     pub async fn sync_shared_buffer_epoch(
         &self,
         epoch: HummockEpoch,
         uncommitted_data: KeyIndexedUncommittedData,
-        task_write_batch_size: usize,
-    ) -> HummockResult<(usize, Vec<LocalSstableInfo>)> {
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
         let task_payload = to_order_sorted(&uncommitted_data);
-
         let ssts = self.run_sync_upload_task(epoch, task_payload).await?;
-        tracing::trace!(
-            "sync epoch {} finished. Task size {}",
-            epoch,
-            task_write_batch_size
-        );
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.archive_epoch(epoch);
         }
         self.buffer_tracker
             .send_event(SharedBufferEvent::EpochSynced(epoch));
-        Ok((task_write_batch_size, ssts))
+        Ok(ssts)
     }
 
     pub async fn run_sync_upload_task(

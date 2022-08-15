@@ -317,7 +317,7 @@ impl SharedBuffer {
         self.replicate_batches_size = 0;
     }
 
-    pub fn get_uncommitted_data(&mut self) -> Option<(KeyIndexedUncommittedData, usize)> {
+    pub fn take_uncommitted_data(&mut self) -> Option<(KeyIndexedUncommittedData, usize)> {
         assert!(
             self.uploading_tasks.is_empty(),
             "when sync an epoch, there should not be any uploading task"

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -24,7 +25,10 @@ use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::{KeyIndexedUncommittedData, UncommittedData};
+use crate::hummock::shared_buffer::{
+    KeyIndexedUncommittedData, OrderSortedUncommittedData, UncommittedData,
+};
+use crate::hummock::utils::{filter_single_sst, range_overlap};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
@@ -43,6 +47,47 @@ pub enum SyncUncommittedData {
     Syncing(KeyIndexedUncommittedData),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
     Synced(Vec<UncommittedData>),
+}
+
+impl SyncUncommittedData {
+    pub fn get_overlap_data<R, B>(&self, key_range: &R) -> OrderSortedUncommittedData
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        match self {
+            SyncUncommittedData::Syncing(task) => {
+                let local_data_iter = task
+                    .iter()
+                    .filter(|(_, data)| match data {
+                        UncommittedData::Batch(batch) => {
+                            range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
+                        }
+                        UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                    })
+                    .map(|((_, order_index), data)| (*order_index, data.clone()));
+
+                let mut uncommitted_data = BTreeMap::new();
+                for (order_index, data) in local_data_iter {
+                    uncommitted_data
+                        .entry(order_index)
+                        .or_insert_with(Vec::new)
+                        .push(data);
+                }
+                uncommitted_data.into_values().rev().collect()
+            }
+            SyncUncommittedData::Synced(ssts) => vec![ssts
+                .iter()
+                .filter(|data| match data {
+                    UncommittedData::Batch(_) => {
+                        panic!("sync uncommitted states can't save batch")
+                    }
+                    UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                })
+                .cloned()
+                .collect()],
+        }
+    }
 }
 
 impl LocalVersion {

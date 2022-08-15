@@ -170,7 +170,7 @@ async fn test_update_uncommitted_ssts() {
             let (payload, task_size) = local_version_guard
                 .get_mut_shared_buffer(epochs[0])
                 .unwrap()
-                .get_uncommitted_data()
+                .take_uncommitted_data()
                 .unwrap();
 
             local_version_guard
@@ -219,7 +219,7 @@ async fn test_update_uncommitted_ssts() {
             let (payload, task_size) = local_version_guard
                 .get_mut_shared_buffer(epochs[1])
                 .unwrap()
-                .get_uncommitted_data()
+                .take_uncommitted_data()
                 .unwrap();
             local_version_guard
                 .add_sync_state(epochs[1], SyncUncommittedData::Syncing(payload.clone()));
