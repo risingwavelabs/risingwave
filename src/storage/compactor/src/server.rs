@@ -53,7 +53,11 @@ pub async fn compactor_serve(
             CompactorConfig::init(config_path).unwrap()
         }
     };
-    tracing::info!("Starting compactor with config {:?}", config);
+    tracing::info!(
+        "Starting compactor with config {:?} and opts {:?}",
+        config,
+        opts
+    );
 
     // Register to the cluster.
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();

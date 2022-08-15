@@ -73,7 +73,7 @@ pub struct CompactorOpts {
     pub config_path: String,
 
     /// It's a hint used by meta node.
-    #[clap(long, default_value = "8")]
+    #[clap(long, default_value = "16")]
     pub max_concurrent_task_number: u64,
 
     #[clap(long)]
