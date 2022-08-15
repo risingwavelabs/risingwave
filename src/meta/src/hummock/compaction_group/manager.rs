@@ -373,6 +373,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
     use crate::hummock::compaction_group::manager::{
@@ -406,7 +407,10 @@ mod tests {
         assert!(inner.read().await.index.is_empty());
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
         let table_option = TableOption::build_table_option(&table_properties);
 
         // Test register
@@ -471,7 +475,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
                 .unwrap();
-            assert_eq!(300, table_option.ttl.unwrap());
+            assert_eq!(300, table_option.retention_seconds.unwrap());
         }
 
         {
@@ -481,7 +485,7 @@ mod tests {
                 .await
                 .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
             assert!(table_option_default.is_ok());
-            assert_eq!(None, table_option_default.unwrap().ttl);
+            assert_eq!(None, table_option_default.unwrap().retention_seconds);
         }
     }
 
@@ -489,10 +493,8 @@ mod tests {
     async fn test_manager() {
         let (env, ..) = setup_compute_env(8080).await;
         let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
-        let table_fragment_1 =
-            TableFragments::new(TableId::new(10), Default::default(), [11, 12, 13].into());
-        let table_fragment_2 =
-            TableFragments::new(TableId::new(20), Default::default(), [21, 22, 23].into());
+        let table_fragment_1 = TableFragments::new(TableId::new(10), Default::default());
+        let table_fragment_2 = TableFragments::new(TableId::new(20), Default::default());
         let source_1 = 100;
         let source_2 = 200;
         let source_3 = 300;
@@ -507,32 +509,35 @@ mod tests {
                 .sum::<usize>()
         };
         assert_eq!(registered_number().await, 0);
-        let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
+        let table_properties = HashMap::from([(
+            String::from(PROPERTIES_RETAINTION_SECOND_KEY),
+            String::from("300"),
+        )]);
 
         compaction_group_manager
             .register_table_fragments(&table_fragment_1, &table_properties)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 4);
+        assert_eq!(registered_number().await, 1);
         compaction_group_manager
             .register_table_fragments(&table_fragment_2, &table_properties)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 8);
+        assert_eq!(registered_number().await, 2);
 
         // Test unregister_table_fragments
         compaction_group_manager
             .unregister_table_fragments(&table_fragment_1)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 4);
+        assert_eq!(registered_number().await, 1);
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge_stale_members(&[table_fragment_2], &[], &[])
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 4);
+        assert_eq!(registered_number().await, 1);
         compaction_group_manager
             .purge_stale_members(&[], &[], &[])
             .await

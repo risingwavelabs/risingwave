@@ -36,6 +36,13 @@ impl ObserverNodeImpl for ComputeObserverNode {
             return;
         };
 
+        assert!(
+            resp.version > self.version,
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            self.version
+        );
+
         match info.to_owned() {
             Info::Table(table_catalog) => {
                 self.handle_catalog_notification(resp.operation(), table_catalog);
@@ -49,19 +56,14 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 panic!("error type notification");
             }
         }
-        assert!(
-            resp.version > self.version,
-            "resp version={:?}, current version={:?}",
-            resp.version,
-            self.version
-        );
+
         self.version = resp.version;
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
-                self.handle_catalog_snapshot(snapshot.table);
+                self.handle_catalog_snapshot(snapshot.tables);
                 self.version = resp.version;
             }
             _ => {

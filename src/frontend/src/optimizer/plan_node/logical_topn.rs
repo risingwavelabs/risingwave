@@ -42,8 +42,9 @@ impl LogicalTopN {
     pub fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices().to_vec();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let pk_indices = input.logical_pk().to_vec();
+        let functional_dependency = input.functional_dependency().clone();
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalTopN {
             base,
             input,

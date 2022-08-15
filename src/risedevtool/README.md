@@ -44,7 +44,7 @@ And you will see:
 ✅ tmux: session risedev
 ✅ minio: api http://127.0.0.1:9301/, console http://127.0.0.1:9400/
 .. compute-node-5688: waiting for user-managed service online... (you should start it!)
-.. playground: starting 5 services for dev-compute-node...
+.. dev cluster: starting 5 services for dev-compute-node...
 ```
 
 Then, you need simply start compute-node by yourself -- either in command line by cargo run or use debuggers such as CLion to start this component.
@@ -69,7 +69,7 @@ risedev:
     - use: frontend
 ```
 
-The RiseDev playground will start these 5 services in sequence. The service type is set with `use`. `port: 5687` overrides the default config for compute-node.
+The RiseDev development cluster will start these 5 services in sequence. The service type is set with `use`. `port: 5687` overrides the default config for compute-node.
 If you don't want one service, or want them to start in different order, simply remove or switch them. For example, if we only need two compute nodes:
 
 ```yaml
@@ -280,6 +280,6 @@ risingwave.meta.node=127.0.0.1:5690
 
 ### RiseDev Service
 
-The RiseDev playground will read the config and start all the services in sequence. The tasks will be started in tmux. All commands run by playground can be found in `risedev.log` in `.risingwave/log`. After starting each service, it will check liveness and return code of the program, so as to ensure a service is running.
+The RiseDev development cluster will read the config and start all the services in sequence. The tasks will be started in tmux. All commands run by RiseDev can be found in `risedev.log` in `.risingwave/log`. After starting each service, it will check liveness and return code of the program, so as to ensure a service is running.
 
 These components conclude the internal implementation of RiseDev.

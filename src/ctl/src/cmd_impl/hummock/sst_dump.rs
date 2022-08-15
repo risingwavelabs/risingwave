@@ -17,11 +17,11 @@ use std::collections::HashMap;
 use bytes::{Buf, Bytes};
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_frontend::catalog::TableCatalog;
+use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_object_store::object::{BlockLocation, ObjectStore};
+use risingwave_object_store::object::BlockLocation;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -150,7 +150,7 @@ async fn print_blocks(
 fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
-    let block = Box::new(Block::decode(block_data).unwrap());
+    let block = Box::new(Block::decode(&block_data).unwrap());
     let holder = BlockHolder::from_owned_block(block);
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();

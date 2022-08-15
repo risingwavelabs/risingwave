@@ -32,7 +32,7 @@ use tokio::runtime::Runtime;
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
-    let input_data = gen_data(chunk_size, chunk_num);
+    let input_data = gen_data(chunk_size, chunk_num, &[DataType::Int64]);
 
     let mut mock_executor = MockExecutor::new(field_n::<1>(DataType::Int64));
     input_data.into_iter().for_each(|c| mock_executor.add(c));

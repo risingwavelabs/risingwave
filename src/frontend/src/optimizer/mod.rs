@@ -100,7 +100,7 @@ impl PlanRoot {
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
     /// (`out_fields`).
-    pub fn as_subplan(self) -> PlanRef {
+    pub fn into_subplan(self) -> PlanRef {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
@@ -282,13 +282,33 @@ impl PlanRoot {
         plan
     }
 
+    /// Batch specific logical optimization
+    fn batch_logical_optimize(&self, plan: PlanRef) -> PlanRef {
+        self.optimize_by_rules(
+            plan,
+            "Index Selection".to_string(),
+            vec![IndexSelectionRule::create()],
+            ApplyOrder::BottomUp,
+        )
+    }
+
     /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
+        // Batch specific logical optimization
+        plan = self.batch_logical_optimize(plan);
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
+
+        let ctx = plan.ctx();
+        let explain_trace = ctx.is_explain_trace();
+        if explain_trace {
+            ctx.trace("To Batch Physical Plan:".to_string());
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
 
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
@@ -299,8 +319,6 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
         if explain_trace {
             ctx.trace("To Batch Distributed Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -314,8 +332,18 @@ impl PlanRoot {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
+        // Batch specific logical optimization
+        plan = self.batch_logical_optimize(plan);
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
+
+        let ctx = plan.ctx();
+        let explain_trace = ctx.is_explain_trace();
+        if explain_trace {
+            ctx.trace("To Batch Physical Plan:".to_string());
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
 
         // Convert to physical plan node
         plan = plan.to_local_with_order_required(&self.required_order)?;
@@ -333,8 +361,6 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
         if explain_trace {
             ctx.trace("To Batch Local Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
@@ -448,7 +474,7 @@ mod tests {
             out_fields,
             out_names,
         );
-        let subplan = root.as_subplan();
+        let subplan = root.into_subplan();
         assert_eq!(
             subplan.schema(),
             &Schema::new(vec![Field::with_name(DataType::Int32, "v1"),])

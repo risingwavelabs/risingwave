@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 
 use crate::executor::error::StreamExecutorError;
@@ -26,8 +27,8 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
     // Epoch number recorded from last barrier message.
     let mut last_epoch = None;
 
-    #[for_await]
-    for message in input {
+    pin_mut!(input);
+    while let Some(message) = input.next().await {
         let message = message?;
 
         if let Message::Barrier(b) = &message {
@@ -46,8 +47,15 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                 );
             }
 
-            if let Some(last_epoch) = last_epoch {
-                assert!(b.epoch.prev == last_epoch, "missing barrier: last barrier's epoch = {}, while current barrier prev={} curr={}", last_epoch, b.epoch.prev, b.epoch.curr);
+            if let Some(last_epoch) = last_epoch && !b.is_with_stop_mutation() {
+                assert_eq!(
+                    b.epoch.prev,
+                    last_epoch,
+                    "missing barrier: last barrier's epoch = {}, while current barrier prev={} curr={}",
+                    last_epoch,
+                    b.epoch.prev,
+                    b.epoch.curr
+                );
             }
 
             last_epoch = Some(new_epoch);

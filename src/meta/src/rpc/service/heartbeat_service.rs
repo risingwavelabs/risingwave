@@ -17,7 +17,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::cluster::ClusterManagerRef;
+use crate::manager::ClusterManagerRef;
 use crate::storage::MetaStore;
 
 #[derive(Clone)]

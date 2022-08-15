@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
 use risingwave_connector::source::{
-    ConnectorProperties, SplitEnumeratorImpl, SplitImpl, SplitMetaData,
+    ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
@@ -49,14 +49,14 @@ use tokio::{select, time};
 use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
+use crate::manager::{
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, SourceId,
+};
 use crate::model::{
     ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::FragmentManagerRef;
 use crate::MetaResult;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
@@ -74,7 +74,7 @@ pub struct SourceManager<S: MetaStore> {
 }
 
 pub struct SharedSplitMap {
-    splits: Option<BTreeMap<String, SplitImpl>>,
+    splits: Option<BTreeMap<SplitId, SplitImpl>>,
 }
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
@@ -362,7 +362,7 @@ pub(crate) fn fetch_source_fragments(
 // todo use min heap to optimize
 fn diff_splits(
     mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    discovered_splits: &BTreeMap<String, SplitImpl>,
+    discovered_splits: &BTreeMap<SplitId, SplitImpl>,
 ) -> Option<HashMap<ActorId, Vec<SplitImpl>>> {
     let prev_split_ids: HashSet<_> = prev_actor_splits
         .values()
@@ -423,8 +423,7 @@ where
     ) -> MetaResult<Self> {
         let mut managed_sources = HashMap::new();
         {
-            let catalog_guard = catalog_manager.get_catalog_core_guard().await;
-            let sources = catalog_guard.list_sources().await?;
+            let sources = catalog_manager.list_sources().await?;
 
             for source in sources {
                 if let Some(StreamSource(_)) = source.info {
@@ -610,16 +609,12 @@ where
                 tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
             }
         }));
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeCreateSourceRequest {
-                    source: Some(source.clone()),
-                };
-                async move { client.create_source(request).await }
-            });
+        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
+            let request = ComputeNodeCreateSourceRequest {
+                source: Some(source.clone()),
+            };
+            async move { client.create_source(request).await }
+        });
 
         // ignore response body, always none
         let _ = try_join_all(futures).await?;
@@ -663,14 +658,10 @@ where
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<()> {
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeDropSourceRequest { source_id };
-                async move { client.drop_source(request).await }
-            });
+        let futures = self.all_stream_clients().await?.into_iter().map(|client| {
+            let request = ComputeNodeDropSourceRequest { source_id };
+            async move { client.drop_source(request).await }
+        });
         let _responses: Vec<_> = try_join_all(futures).await?;
 
         let mut core = self.core.lock().await;

@@ -18,6 +18,7 @@ use std::future::Future;
 use std::iter::repeat_with;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -261,7 +262,14 @@ impl StreamConsumer for DispatchExecutor {
             for msg in input {
                 let msg: Message = msg?;
                 let barrier = msg.as_barrier().cloned();
-                self.inner.dispatch(msg).await?;
+                self.inner
+                    .dispatch(msg)
+                    .stack_trace(if barrier.is_some() {
+                        "dispatch_barrier"
+                    } else {
+                        "dispatch_chunk"
+                    })
+                    .await?;
                 if let Some(barrier) = barrier {
                     yield barrier;
                 }
@@ -903,6 +911,7 @@ mod tests {
             vec![],
             LocalInput::for_test(rx),
             ActorContext::create(),
+            0,
             0,
             0,
             Arc::new(StreamingMetrics::unused()),

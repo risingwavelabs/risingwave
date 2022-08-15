@@ -462,7 +462,7 @@ impl Condition {
         }
     }
 
-    pub fn visit_expr(&self, visitor: &mut impl ExprVisitor) {
+    pub fn visit_expr(&self, visitor: &mut impl ExprVisitor<()>) {
         self.conjunctions
             .iter()
             .for_each(|expr| visitor.visit_expr(expr))

@@ -37,6 +37,7 @@
 extern crate core;
 
 pub mod aws_utils;
+pub mod error;
 mod macros;
 pub mod sink;
 pub mod source;

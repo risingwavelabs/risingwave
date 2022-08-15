@@ -17,11 +17,13 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 
+use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use risingwave_pb::expr::ListValue as ProstListValue;
+use serde::{Deserializer, Serializer};
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
@@ -29,7 +31,8 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{
-    display_datum_ref, to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
+    deserialize_datum_from, display_datum_ref, serialize_datum_into, serialize_datum_ref_into,
+    to_datum_ref, DataType, Datum, DatumRef, Scalar, ScalarRefImpl,
 };
 
 /// This is a naive implementation of list array.
@@ -340,6 +343,37 @@ impl ListValue {
         };
         value.encode_to_vec()
     }
+
+    pub fn deserialize(
+        datatype: &DataType,
+        deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<Self> {
+        // This is a bit dirty, but idk how to correctly deserialize bytes in memcomparable
+        // format without this...
+        struct Visitor<'a>(&'a DataType);
+        impl<'a> serde::de::Visitor<'a> for Visitor<'a> {
+            type Value = Vec<u8>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "a list of {}", self.0)
+            }
+
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(v)
+            }
+        }
+        let visitor = Visitor(datatype);
+        let bytes = deserializer.deserialize_byte_buf(visitor)?;
+        let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
+        let mut values = Vec::new();
+        while inner_deserializer.has_remaining() {
+            values.push(deserialize_datum_from(datatype, &mut inner_deserializer)?)
+        }
+        Ok(Self::new(values))
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -389,6 +423,45 @@ impl<'a> ListRef<'a> {
                 }
             }
         }
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        match self {
+            ListRef::ValueRef { val } => val.to_protobuf_owned(),
+            ListRef::Indexed { arr, idx } => {
+                let value = ProstListValue {
+                    fields: (arr.offsets[*idx]..arr.offsets[*idx + 1])
+                        .map(|o| {
+                            let datum_ref = arr.value.value_at(o);
+                            match datum_ref {
+                                None => vec![],
+                                Some(s) => s.into_scalar_impl().to_protobuf(),
+                            }
+                        })
+                        .collect_vec(),
+                };
+                value.encode_to_vec()
+            }
+        }
+    }
+
+    pub fn serialize(
+        &self,
+        serializer: &mut memcomparable::Serializer<impl BufMut>,
+    ) -> memcomparable::Result<()> {
+        let mut inner_serializer = memcomparable::Serializer::new(vec![]);
+        match self {
+            ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
+                .map(|o| arr.value.value_at(o))
+                .try_for_each(|datum_ref| {
+                    serialize_datum_ref_into(&datum_ref, &mut inner_serializer)
+                })?,
+            ListRef::ValueRef { val } => val
+                .values
+                .iter()
+                .try_for_each(|datum| serialize_datum_into(datum, &mut inner_serializer))?,
+        }
+        serializer.serialize_bytes(&inner_serializer.into_inner())
     }
 }
 
@@ -718,5 +791,169 @@ mod tests {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
         assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+    }
+
+    #[test]
+    fn test_to_protobuf_owned() {
+        use crate::array::*;
+        let arr = ListArray::from_slices(
+            &[true, true],
+            vec![
+                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
+                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
+            ],
+            DataType::Int32,
+        )
+        .unwrap();
+        let list_ref = arr.value_at(0).unwrap();
+        let output = list_ref.to_protobuf_owned();
+        let expect = ListValue::new(vec![
+            Some(1i32.to_scalar_value()),
+            Some(2i32.to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
+
+        let list_ref = arr.value_at(1).unwrap();
+        let output = list_ref.to_protobuf_owned();
+        let expect = ListValue::new(vec![
+            Some(3i32.to_scalar_value()),
+            Some(4i32.to_scalar_value()),
+        ])
+        .to_protobuf_owned();
+        assert_eq!(output, expect);
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let value = ListValue::new(vec![
+            Some("abcd".to_string().to_scalar_value()),
+            Some("".to_string().to_scalar_value()),
+            None,
+            Some("a".to_string().to_scalar_value()),
+        ]);
+        let list_ref = ListRef::ValueRef { val: &value };
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+        serializer.set_reverse(true);
+        list_ref.serialize(&mut serializer).unwrap();
+        let buf = serializer.into_inner();
+        let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
+        deserializer.set_reverse(true);
+        assert_eq!(
+            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            value
+        );
+
+        let mut builder = ListArrayBuilder::with_meta(
+            0,
+            ArrayMeta::List {
+                datatype: Box::new(DataType::Varchar),
+            },
+        );
+        builder.append(Some(list_ref)).unwrap();
+        let array = builder.finish().unwrap();
+        let list_ref = array.value_at(0).unwrap();
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+        list_ref.serialize(&mut serializer).unwrap();
+        let buf = serializer.into_inner();
+        let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
+        assert_eq!(
+            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            value
+        );
+    }
+
+    #[test]
+    fn test_memcomparable() {
+        let cases = [
+            (
+                ListValue::new(vec![
+                    Some(123.to_scalar_value()),
+                    Some(456.to_scalar_value()),
+                ]),
+                ListValue::new(vec![
+                    Some(123.to_scalar_value()),
+                    Some(789.to_scalar_value()),
+                ]),
+                DataType::Int32,
+                Ordering::Less,
+            ),
+            (
+                ListValue::new(vec![
+                    Some(123.to_scalar_value()),
+                    Some(456.to_scalar_value()),
+                ]),
+                ListValue::new(vec![Some(123.to_scalar_value())]),
+                DataType::Int32,
+                Ordering::Greater,
+            ),
+            (
+                ListValue::new(vec![None, Some("".to_string().to_scalar_value())]),
+                ListValue::new(vec![None, None]),
+                DataType::Varchar,
+                Ordering::Less,
+            ),
+            (
+                ListValue::new(vec![Some(2.to_scalar_value())]),
+                ListValue::new(vec![
+                    Some(1.to_scalar_value()),
+                    None,
+                    Some(3.to_scalar_value()),
+                ]),
+                DataType::Int32,
+                Ordering::Greater,
+            ),
+        ];
+
+        for (lhs, rhs, datatype, order) in cases {
+            let lhs_serialized = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                ListRef::ValueRef { val: &lhs }
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let rhs_serialized = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                ListRef::ValueRef { val: &rhs }
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
+
+            let mut builder = ListArrayBuilder::with_meta(
+                0,
+                ArrayMeta::List {
+                    datatype: Box::new(datatype),
+                },
+            );
+            builder
+                .append(Some(ListRef::ValueRef { val: &lhs }))
+                .unwrap();
+            builder
+                .append(Some(ListRef::ValueRef { val: &rhs }))
+                .unwrap();
+            let array = builder.finish().unwrap();
+            let lhs_serialized = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                array
+                    .value_at(0)
+                    .unwrap()
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            let rhs_serialized = {
+                let mut serializer = memcomparable::Serializer::new(vec![]);
+                array
+                    .value_at(1)
+                    .unwrap()
+                    .serialize(&mut serializer)
+                    .unwrap();
+                serializer.into_inner()
+            };
+            assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
+        }
     }
 }

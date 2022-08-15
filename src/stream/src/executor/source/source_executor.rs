@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
@@ -68,7 +68,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     split_state_store: SourceStateHandler<S>,
 
-    state_cache: HashMap<String, SplitImpl>,
+    state_cache: HashMap<SplitId, SplitImpl>,
 
     #[expect(dead_code)]
     /// Expected barrier latency
@@ -203,7 +203,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
-            self.split_state_store.take_snapshot(cache, epoch).await?;
+            self.split_state_store.take_snapshot(cache, epoch).await?
         }
 
         Ok(())
@@ -228,7 +228,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }
-        .map_err(StreamExecutorError::source_error)?;
+        .map_err(StreamExecutorError::connector_error)?;
 
         Ok(Box::new(reader))
     }
@@ -236,7 +236,11 @@ impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
-        let barrier = barrier_receiver.recv().await.unwrap();
+        let barrier = barrier_receiver
+            .recv()
+            .stack_trace("source_recv_first_barrier")
+            .await
+            .unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
@@ -262,7 +266,10 @@ impl<S: StateStore> SourceExecutor<S> {
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
 
         // todo: use epoch from msg to restore state from state store
-        let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
+        let source_chunk_reader = self
+            .build_stream_source_reader(recover_state)
+            .stack_trace("source_build_reader")
+            .await?;
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
@@ -315,13 +322,13 @@ impl<S: StateStore> SourceExecutor<S> {
                     } = chunk_with_state?;
 
                     if let Some(mapping) = split_offset_mapping {
-                        let state: HashMap<String, SplitImpl> = mapping
+                        let state: HashMap<_, _> = mapping
                             .iter()
                             .map(|(split, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_splits
                                     .iter()
-                                    .filter(|origin_split| origin_split.id().as_str() == split)
+                                    .filter(|origin_split| &origin_split.id() == split)
                                     .collect_vec();
 
                                 if origin_split_impl.is_empty() {

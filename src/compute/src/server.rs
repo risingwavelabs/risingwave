@@ -19,21 +19,21 @@ use std::time::Duration;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::config::{ComputeNodeConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
-use risingwave_storage::hummock::compactor::Compactor;
+use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
@@ -48,6 +48,9 @@ use tokio::task::JoinHandle;
 use crate::compute_observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
+use crate::rpc::service::monitor_service::{
+    GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
+};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
 
@@ -126,6 +129,7 @@ pub async fn compute_node_serve(
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
+        &opts.file_cache_dir,
         storage_config.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -149,16 +153,19 @@ pub async fn compute_node_serve(
         {
             tracing::info!("start embedded compactor");
             // todo: set shutdown_sender in HummockStorage.
-            let (handle, shutdown_sender) = Compactor::start_compactor(
-                storage_config,
-                hummock_meta_client,
-                storage.sstable_store(),
-                state_store_metrics.clone(),
-                Some(Arc::new(CompactionExecutor::new(Some(1)))),
-                filter_key_extractor_manager.clone(),
-                memory_limiter.clone(),
-                storage.sstable_id_manager(),
-            );
+            let compactor_context = Arc::new(CompactorContext {
+                options: storage_config,
+                hummock_meta_client: hummock_meta_client.clone(),
+                sstable_store: storage.sstable_store(),
+                stats: state_store_metrics.clone(),
+                is_share_buffer_compact: false,
+                compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+                filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+                memory_limiter: memory_limiter.clone(),
+                sstable_id_manager: storage.sstable_id_manager(),
+            });
+            let (handle, shutdown_sender) =
+                Compactor::start_compactor(compactor_context, hummock_meta_client);
             sub_tasks.push((handle, shutdown_sender));
         }
         monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
@@ -179,6 +186,7 @@ pub async fn compute_node_serve(
         config.streaming.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
+    let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
@@ -202,18 +210,31 @@ pub async fn compute_node_serve(
         state_store,
     );
 
+    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
+    // if this is not the case, we can use the following command to get it printed into the logs
+    // periodically.
+    //
+    // Comment out the following line to enable.
+    // TODO: may optionally enable based on the features
+    #[cfg(any())]
+    stream_mgr.clone().spawn_print_trace();
+
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone(), exchange_srv_metrics);
-    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
+    let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
+    let monitor_srv = MonitorServiceImpl::new(stream_mgr, grpc_stack_trace_mgr.clone());
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .layer(StackTraceMiddlewareLayer::new(grpc_stack_trace_mgr))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
+            .add_service(MonitorServiceServer::new(monitor_srv))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

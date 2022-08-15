@@ -24,9 +24,9 @@ use crate::error::meta_error_to_tonic;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
+use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 
 pub struct HummockServiceImpl<S>
 where
@@ -296,5 +296,15 @@ where
             status: None,
             snapshot: Some(hummock_snapshot),
         }))
+    }
+
+    async fn report_full_scan_task(
+        &self,
+        request: Request<ReportFullScanTaskRequest>,
+    ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
+        self.hummock_manager
+            .extend_ssts_to_delete_from_scan(&request.into_inner().sst_ids)
+            .await;
+        Ok(Response::new(ReportFullScanTaskResponse { status: None }))
     }
 }

@@ -1,0 +1,38 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a struct<v1 int, v2 int>);
+
+statement ok
+insert into t values ((1, 2)), ((1, 3)), ((1, NULL)), ((2, 1)), ((2, 2)), ((NULL, NULL));
+
+query II
+select * from t order by 1;
+----
+(1,2)
+(1,3)
+(1,NULL)
+(2,1)
+(2,2)
+(NULL,NULL)
+
+statement ok
+drop table t;
+
+statement ok
+create table t (v1 struct<v1 varchar, v2 struct<v1 varchar, v2 int> >, v2 int);
+
+statement ok
+insert into t values (('abc',('bcd',2)),1), (('abc',('bcd',2)),2), (('a',('bcbcd',2)),2), (('b',('a',2)),2);
+
+query TTII
+select * from t order by 1 DESC, 2 ASC;
+----
+(b,(a,2)) 2
+(abc,(bcd,2)) 1
+(abc,(bcd,2)) 2
+(a,(bcbcd,2)) 2
+
+statement ok
+drop table t;
