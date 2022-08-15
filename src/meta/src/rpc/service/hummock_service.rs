@@ -72,16 +72,14 @@ where
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let (is_delta_response, version_deltas, pinned_version) = self
+        let payload = self
             .hummock_manager
             .pin_version(req.context_id, req.last_pinned)
             .await
             .map_err(meta_error_to_tonic)?;
         Ok(Response::new(PinVersionResponse {
             status: None,
-            is_delta_response,
-            version_deltas,
-            pinned_version,
+            payload: Some(payload),
         }))
     }
 
