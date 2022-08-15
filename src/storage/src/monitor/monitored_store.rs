@@ -92,12 +92,17 @@ where
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
         async move {
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
-                .get(key, read_options)
+                .get(key, check_bloom_filter, read_options)
                 .stack_trace("store_get")
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
