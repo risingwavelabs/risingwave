@@ -62,14 +62,6 @@ impl Debug for TaskOutputId {
     }
 }
 
-pub(crate) enum TaskState {
-    Pending,
-    Running,
-    Blocking,
-    Finished,
-    Failed,
-}
-
 impl From<&ProstTaskId> for TaskId {
     fn from(prost: &ProstTaskId) -> Self {
         TaskId {
@@ -386,7 +378,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn abort_task(&self) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
-            self.change_state(TaskStatus::Aborting);
+            // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
             if sender.send(0).is_err() {
                 warn!("The task has already died before this request, so the abort did no-op")

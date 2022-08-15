@@ -56,6 +56,7 @@ impl StreamMaterialize {
             ctx,
             schema,
             pk_indices.to_vec(),
+            input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
         ))
@@ -177,7 +178,6 @@ impl StreamMaterialize {
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
-            read_pattern_prefix_column: 0,
         };
 
         Ok(Self { base, input, table })

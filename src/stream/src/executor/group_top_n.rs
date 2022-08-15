@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -198,6 +199,21 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 group_key.push(row[col_id].clone());
             }
 
+            // If 'self.caches' does not already have a cache for the current group, create a new
+            // cache for it and insert it into `self.caches`
+            let pk_prefix = Row::new(group_key.clone());
+            let entry = self.caches.entry(group_key);
+            match entry {
+                Occupied(_) => {}
+                Vacant(entry) => {
+                    let mut topn_cache = TopNCache::new(self.offset, self.limit.unwrap_or(1024));
+                    self.managed_state
+                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache, epoch)
+                        .await?;
+                    entry.insert(topn_cache);
+                }
+            }
+
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
@@ -211,14 +227,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 }
             }
 
-            // If 'self.caches' does not already have a cache for the current group, create a new
-            // cache for it and insert it into `self.caches`
-            self.caches
-                .entry(group_key.clone())
-                .or_insert_with(|| TopNCache::new(self.offset, self.limit.unwrap_or(1024)));
-
             // update the corresponding rows in the group cache.
-            let pk_prefix = Row::new(group_key);
             self.caches
                 .get_mut(&pk_prefix.0)
                 .unwrap()
@@ -252,6 +261,10 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    async fn init(&mut self, _epoch: u64) -> StreamExecutorResult<()> {
+        Ok(())
     }
 }
 

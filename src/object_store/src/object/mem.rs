@@ -16,14 +16,48 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use super::{ObjectError, ObjectResult};
-use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
+use super::{
+    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+    StreamingUploader,
+};
+
+/// Store multiple parts in a map, and concatenate them on finish.
+pub struct InMemStreamingUploader {
+    path: String,
+    buf: BytesMut,
+    objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
+}
+
+#[async_trait::async_trait]
+impl StreamingUploader for InMemStreamingUploader {
+    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        fail_point!("mem_write_bytes_err", |_| Err(ObjectError::internal(
+            "mem write bytes error"
+        )));
+        self.buf.put(data);
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> ObjectResult<()> {
+        fail_point!("mem_finish_streaming_upload_err", |_| Err(
+            ObjectError::internal("mem finish streaming upload error")
+        ));
+        let obj = self.buf.freeze();
+        if obj.is_empty() {
+            Err(ObjectError::internal("upload empty object"))
+        } else {
+            let metadata = get_obj_meta(&self.path, &obj)?;
+            self.objects.lock().await.insert(self.path, (metadata, obj));
+            Ok(())
+        }
+    }
+}
 
 /// In-memory object storage, useful for testing.
 #[derive(Default, Clone)]
@@ -40,20 +74,21 @@ impl ObjectStore for InMemObjectStore {
         if obj.is_empty() {
             Err(ObjectError::internal("upload empty object"))
         } else {
-            let metadata = ObjectMetadata {
-                key: path.to_owned(),
-                last_modified: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map_err(ObjectError::internal)?
-                    .as_secs_f64(),
-                total_size: obj.len(),
-            };
+            let metadata = get_obj_meta(path, &obj)?;
             self.objects
                 .lock()
                 .await
                 .insert(path.into(), (metadata, obj));
             Ok(())
         }
+    }
+
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+        Ok(Box::new(InMemStreamingUploader {
+            path: path.to_string(),
+            buf: BytesMut::new(),
+            objects: self.objects.clone(),
+        }))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -150,6 +185,17 @@ fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
     }
 }
 
+fn get_obj_meta(path: &str, obj: &Bytes) -> ObjectResult<ObjectMetadata> {
+    Ok(ObjectMetadata {
+        key: path.to_owned(),
+        last_modified: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(ObjectError::internal)?
+            .as_secs_f64(),
+        total_size: obj.len(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
@@ -186,6 +232,34 @@ mod tests {
         s3.read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
             .await
             .unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_streaming_upload() {
+        let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
+        let obj = Bytes::from("123456789");
+
+        let store = InMemObjectStore::new();
+        let mut uploader = store.streaming_upload("/abc").await.unwrap();
+
+        blocks.into_iter().for_each(|b| {
+            uploader.write_bytes(b).unwrap();
+        });
+        uploader.finish().await.unwrap();
+
+        // Read whole object.
+        let read_obj = store.read("/abc", None).await.unwrap();
+        assert!(read_obj.eq(&obj));
+
+        // Read part of the object.
+        let read_obj = store
+            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(read_obj.to_vec()).unwrap(),
+            "56".to_string()
+        );
     }
 
     #[tokio::test]

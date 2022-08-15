@@ -130,12 +130,13 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let pk_indices = match pk_indices {
+            Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
+                functional_dependency.minimize_key(&pk_indices)
+            }
+            _ => pk_indices.unwrap_or_default(),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalJoin {
             base,
             left,

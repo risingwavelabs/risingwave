@@ -37,7 +37,7 @@ pub struct StackTraceReport {
 impl Default for StackTraceReport {
     fn default() -> Self {
         Self {
-            report: "<not reported>".to_string(),
+            report: "<not reported>\n".to_string(),
             capture_time: std::time::Instant::now(),
         }
     }
@@ -97,12 +97,30 @@ impl TraceReporter {
                     };
 
                     tokio::select! {
+                        biased; // always prefer reporting
+                        _ = reporter => unreachable!(),
                         output = future => output,
-                        _ = reporter => unreachable!()
                     }
                 },
             )
             .await
+    }
+
+    /// Optionally provide a stack tracing context. Check [`TraceReporter::trace`] for more details.
+    pub async fn optional_trace<F: Future>(
+        self,
+        future: F,
+        root_span: impl Into<SpanValue>,
+        report_detached: bool,
+        interval: Duration,
+        enabled: bool,
+    ) -> F::Output {
+        if enabled {
+            self.trace(future, root_span, report_detached, interval)
+                .await
+        } else {
+            future.await
+        }
     }
 }
 
