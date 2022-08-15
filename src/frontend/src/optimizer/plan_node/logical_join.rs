@@ -18,7 +18,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::QueryMode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -49,6 +48,8 @@ pub struct LogicalJoin {
     on: Condition,
     join_type: JoinType,
     output_indices: Vec<usize>,
+    // a hint to help decide join algorithm
+    index_lookup_join: bool,
 }
 
 impl fmt::Display for LogicalJoin {
@@ -101,7 +102,33 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let out_column_num =
             Self::out_column_num(left.schema().len(), right.schema().len(), join_type);
-        Self::new_with_output_indices(left, right, join_type, on, (0..out_column_num).collect())
+        Self::new_with_output_indices(
+            left,
+            right,
+            join_type,
+            on,
+            false,
+            (0..out_column_num).collect(),
+        )
+    }
+
+    pub(crate) fn new_with_hint(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on: Condition,
+        index_lookup_join: bool,
+    ) -> Self {
+        let out_column_num =
+            Self::out_column_num(left.schema().len(), right.schema().len(), join_type);
+        Self::new_with_output_indices(
+            left,
+            right,
+            join_type,
+            on,
+            index_lookup_join,
+            (0..out_column_num).collect(),
+        )
     }
 
     pub(crate) fn new_with_output_indices(
@@ -109,6 +136,7 @@ impl LogicalJoin {
         right: PlanRef,
         join_type: JoinType,
         on: Condition,
+        index_lookup_join: bool,
         output_indices: Vec<usize>,
     ) -> Self {
         let ctx = left.ctx();
@@ -144,6 +172,7 @@ impl LogicalJoin {
             on,
             join_type,
             output_indices,
+            index_lookup_join,
         }
     }
 
@@ -394,6 +423,7 @@ impl LogicalJoin {
             self.right.clone(),
             self.join_type,
             self.on.clone(),
+            self.index_lookup_join,
             output_indices,
         )
     }
@@ -405,6 +435,7 @@ impl LogicalJoin {
             self.right.clone(),
             self.join_type,
             cond,
+            self.index_lookup_join,
             self.output_indices.clone(),
         )
     }
@@ -604,14 +635,23 @@ impl LogicalJoin {
         Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
     }
 
-    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
+    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>, bool) {
         (
             self.left,
             self.right,
             self.on,
             self.join_type,
             self.output_indices,
+            self.index_lookup_join,
         )
+    }
+
+    pub fn set_index_lookup_join(&mut self, index_lookup_join: bool) {
+        self.index_lookup_join = index_lookup_join;
+    }
+
+    pub fn index_lookup_join(&self) -> bool {
+        self.index_lookup_join
     }
 }
 
@@ -630,6 +670,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             right,
             self.join_type,
             self.on.clone(),
+            self.index_lookup_join,
             self.output_indices.clone(),
         )
     }
@@ -665,6 +706,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
             right,
             self.join_type,
             new_on,
+            self.index_lookup_join,
             new_output_indices.clone(),
         );
 
@@ -753,6 +795,7 @@ impl ColPrunable for LogicalJoin {
             self.right.prune_col(&right_required_cols),
             self.join_type,
             on,
+            self.index_lookup_join,
             new_output_indices,
         )
         .into()
@@ -821,7 +864,13 @@ impl PredicatePushdown for LogicalJoin {
 
         let new_left = self.left.predicate_pushdown(left_predicate);
         let new_right = self.right.predicate_pushdown(right_predicate);
-        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
+        let new_join = LogicalJoin::new_with_hint(
+            new_left,
+            new_right,
+            join_type,
+            new_on,
+            self.index_lookup_join,
+        );
         LogicalFilter::create(new_join.into(), predicate)
     }
 }
@@ -841,18 +890,12 @@ impl ToBatch for LogicalJoin {
         let config = self.base.ctx.inner().session_ctx.config();
 
         if predicate.has_eq() {
-            if config.get_batch_enable_lookup_join() {
-                if config.get_query_mode() == QueryMode::Local {
-                    if let Some(lookup_join) =
-                        self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
-                    {
-                        return Ok(lookup_join);
-                    }
-                } else {
-                    log::warn!(
-                        "Lookup Join can only be done in local mode. A different join will \
-                    be used instead."
-                    );
+            // always covert logical join to a lookup join, if it comes from index selection
+            if self.index_lookup_join || config.get_batch_enable_lookup_join() {
+                if let Some(lookup_join) =
+                    self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
+                {
+                    return Ok(lookup_join);
                 }
             }
 

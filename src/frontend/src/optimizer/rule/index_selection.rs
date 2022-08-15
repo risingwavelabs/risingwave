@@ -16,7 +16,6 @@ use std::cmp::min;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
@@ -104,17 +103,11 @@ impl Rule for IndexSelectionRule {
                 }
             } else {
                 // non-covering index selection
-                // only enable non-covering index selection when lookup join is enabled
-                let config = logical_scan.base.ctx.inner().session_ctx.config();
-                if config.get_batch_enable_lookup_join()
-                    && config.get_query_mode() == QueryMode::Local
-                {
-                    let (index_lookup, lookup_cost) =
-                        self.gen_index_lookup(logical_scan, index, p2s_mapping);
-                    if lookup_cost.le(&min_cost) {
-                        min_cost = lookup_cost;
-                        final_plan = index_lookup;
-                    }
+                let (index_lookup, lookup_cost) =
+                    self.gen_index_lookup(logical_scan, index, p2s_mapping);
+                if lookup_cost.le(&min_cost) {
+                    min_cost = lookup_cost;
+                    final_plan = index_lookup;
                 }
             }
         }
@@ -205,11 +198,12 @@ impl IndexSelectionRule {
             .chain(new_predicate.into_iter())
             .collect_vec();
         let on = Condition { conjunctions };
-        let join = LogicalJoin::new(
+        let join = LogicalJoin::new_with_hint(
             index_scan.into(),
             primary_table_scan.into(),
             JoinType::Inner,
             on,
+            true,
         );
 
         // 2. push down predicate, so we can calculate the cost of index lookup

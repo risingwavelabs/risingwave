@@ -28,7 +28,8 @@ pub struct PushCalculationOfJoinRule {}
 impl Rule for PushCalculationOfJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join: &LogicalJoin = plan.as_logical_join()?;
-        let (mut left, mut right, mut on, join_type, mut output_indices) = join.clone().decompose();
+        let (mut left, mut right, mut on, join_type, mut output_indices, index_lookup_join) =
+            join.clone().decompose();
         let left_col_num = left.schema().len();
         let right_col_num = right.schema().len();
 
@@ -95,7 +96,15 @@ impl Rule for PushCalculationOfJoinRule {
         }
 
         Some(
-            LogicalJoin::new_with_output_indices(left, right, join_type, on, output_indices).into(),
+            LogicalJoin::new_with_output_indices(
+                left,
+                right,
+                join_type,
+                on,
+                index_lookup_join,
+                output_indices,
+            )
+            .into(),
         )
     }
 }
