@@ -261,13 +261,6 @@ impl HummockStorage {
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version, sync_uncommitted_datas) =
             self.read_filter(&read_options, &(key..=key))?;
-        // Return `Some(None)` means the key is deleted.
-        let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
-            batch.get(key).map(|v| {
-                self.stats.get_shared_buffer_hit_counts.inc();
-                v.into_user_value().map(|v| v.into())
-            })
-        };
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
@@ -275,60 +268,36 @@ impl HummockStorage {
         // Query shared buffer. Return the value without iterating SSTs if found
         for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
-                if let Some(v) = get_from_batch(&batch) {
+                if let Some(v) = self.get_from_batch(&batch, key) {
                     return Ok(v);
                 }
             }
             // iterate over uncommitted data in order index in descending order
-            for data_list in uncommitted_data {
-                for data in data_list {
-                    match data {
-                        UncommittedData::Batch(batch) => {
-                            if let Some(v) = get_from_batch(&batch) {
-                                return Ok(v);
-                            }
-                        }
-                        UncommittedData::Sst((_, table_info)) => {
-                            let table = self
-                                .sstable_store
-                                .sstable(table_info.id, &mut stats)
-                                .await?;
-                            table_counts += 1;
-                            if let Some(v) = self
-                                .get_from_table(table, &internal_key, key, &mut stats)
-                                .await?
-                            {
-                                return Ok(v);
-                            }
-                        }
-                    }
-                }
+            let find_value = self
+                .find_value_from_order_sorted_uncommitted_data(
+                    uncommitted_data,
+                    &internal_key,
+                    &mut stats,
+                    key,
+                )
+                .await?;
+            table_counts += find_value.1;
+            if let Some(v) = find_value.0 {
+                return Ok(v);
             }
         }
         for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
-            for data_list in sync_uncommitted_data {
-                for data in data_list {
-                    match data {
-                        UncommittedData::Batch(batch) => {
-                            if let Some(v) = get_from_batch(&batch) {
-                                return Ok(v);
-                            }
-                        }
-                        UncommittedData::Sst((_, table_info)) => {
-                            let table = self
-                                .sstable_store
-                                .sstable(table_info.id, &mut stats)
-                                .await?;
-                            table_counts += 1;
-                            if let Some(v) = self
-                                .get_from_table(table, &internal_key, key, &mut stats)
-                                .await?
-                            {
-                                return Ok(v);
-                            }
-                        }
-                    }
-                }
+            let find_value = self
+                .find_value_from_order_sorted_uncommitted_data(
+                    sync_uncommitted_data,
+                    &internal_key,
+                    &mut stats,
+                    key,
+                )
+                .await?;
+            table_counts += find_value.1;
+            if let Some(v) = find_value.0 {
+                return Ok(v);
             }
         }
 
@@ -360,6 +329,45 @@ impl HummockStorage {
             .with_label_values(&["sub-iter"])
             .observe(table_counts as f64);
         Ok(None)
+    }
+
+    async fn find_value_from_order_sorted_uncommitted_data(
+        &self,
+        order_sorted_uncommitted_data: OrderSortedUncommittedData,
+        internal_key: &[u8],
+        stats: &mut StoreLocalStatistic,
+        key: &[u8],
+    ) -> StorageResult<(Option<Option<Bytes>>, i32)> {
+        let mut table_counts = 0;
+        for data_list in order_sorted_uncommitted_data {
+            for data in data_list {
+                match data {
+                    UncommittedData::Batch(batch) => {
+                        let data = self.get_from_batch(&batch, key);
+                        if data.is_some() {
+                            return Ok((data, table_counts));
+                        }
+                    }
+                    UncommittedData::Sst((_, table_info)) => {
+                        let table = self.sstable_store.sstable(table_info.id, stats).await?;
+                        table_counts += 1;
+
+                        let data = self.get_from_table(table, internal_key, key, stats).await?;
+                        if data.is_some() {
+                            return Ok((data, table_counts));
+                        }
+                    }
+                }
+            }
+        }
+        Ok((None, table_counts))
+    }
+    /// Return `Some(None)` means the key is deleted.
+    fn get_from_batch(&self, batch: &SharedBufferBatch, key: &[u8]) -> Option<Option<Bytes>> {
+        batch.get(key).map(|v| {
+            self.stats.get_shared_buffer_hit_counts.inc();
+            v.into_user_value().map(|v| v.into())
+        })
     }
 
     #[expect(clippy::type_complexity)]

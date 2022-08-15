@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Weak};
@@ -47,8 +47,8 @@ use crate::hummock::local_version::SyncUncommittedData::{Synced, Syncing};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{
-    get_sst_key_range, to_order_sorted, KeyIndexedUncommittedData, OrderIndex, SharedBufferEvent,
-    UncommittedData, WriteRequest,
+    to_order_sorted, KeyIndexedUncommittedData, OrderIndex, SharedBufferEvent, UncommittedData,
+    WriteRequest,
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
@@ -147,7 +147,7 @@ pub struct LocalVersionManager {
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     max_sync_epoch: AtomicU64,
     sstable_id_manager: SstableIdManagerRef,
-    sync_epoch_notify: Arc<Notify>,
+    sync_epoch_notify: Notify,
 }
 
 impl LocalVersionManager {
@@ -206,7 +206,7 @@ impl LocalVersionManager {
             )),
             max_sync_epoch: AtomicU64::new(0),
             sstable_id_manager,
-            sync_epoch_notify: Arc::new(Notify::new()),
+            sync_epoch_notify: Notify::new(),
         });
 
         // Pin and get the latest version.
@@ -508,9 +508,9 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        let sync_epoch_notify_clone = self.sync_epoch_notify.clone();
         // TODO(xuxinhao): modify it after supporting uploading multiple shared buffers.#4442
         loop {
+            let sync_epoch_notified = self.sync_epoch_notify.notified();
             let min_unsynced_epoch = self
                 .local_version
                 .read()
@@ -521,7 +521,7 @@ impl LocalVersionManager {
             if min_unsynced_epoch.unwrap() == epoch {
                 break;
             } else {
-                sync_epoch_notify_clone.notified().await;
+                sync_epoch_notified.await;
             }
         }
         let (uncommitted_data, task_write_batch_size) = {
@@ -579,15 +579,12 @@ impl LocalVersionManager {
         let task_result = self.shared_buffer_uploader.flush(epoch, task_payload).await;
         let mut local_version_guard = self.local_version.write();
         let ssts = task_result?;
-
-        let mut new_sst = BTreeMap::default();
-        for sst in ssts.clone() {
-            new_sst.insert(
-                get_sst_key_range(&sst.1).right.as_slice().to_vec(),
-                UncommittedData::Sst(sst),
-            );
-        }
-        local_version_guard.add_sync_state(epoch, Synced(new_sst.into_values().collect()));
+        let new_sst = ssts
+            .clone()
+            .into_iter()
+            .map(UncommittedData::Sst)
+            .collect_vec();
+        local_version_guard.add_sync_state(epoch, Synced(new_sst));
 
         self.buffer_tracker.send_event(SharedBufferEvent::MayFlush);
         Ok(ssts)
