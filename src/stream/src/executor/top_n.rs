@@ -25,7 +25,7 @@ use risingwave_storage::StateStore;
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNStateNew;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -355,28 +355,6 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
             key_indices,
         })
     }
-
-    async fn flush_inner(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.managed_state.flush(epoch).await
-    }
-}
-
-impl<S: StateStore> Executor for InnerTopNExecutorNew<S> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        panic!("Should execute by wrapper");
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
 }
 
 #[async_trait]
@@ -426,7 +404,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     }
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.flush_inner(epoch).await
+        self.managed_state.flush(epoch).await
     }
 
     fn schema(&self) -> &Schema {

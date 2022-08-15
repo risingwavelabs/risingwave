@@ -29,7 +29,7 @@ use crate::executor::PkIndices;
 
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
-    state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: RowBasedStateTable<S>,
     /// The total number of rows in state table.
     total_count: usize,
     /// For deserializing `OrderedRow`.
