@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::collections::BinaryHeap;
+use std::sync::Arc;
 use std::vec::Vec;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -107,7 +108,8 @@ impl Executor for TopNExecutor {
 
 struct HeapElem {
     encoded_row: Vec<u8>,
-    row: Row,
+    chunk: Arc<DataChunk>,
+    row_id: usize,
 }
 
 impl PartialEq for HeapElem {
@@ -138,32 +140,32 @@ impl TopNExecutor {
 
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = chunk?.compact()?;
+            let chunk = Arc::new(chunk?.compact()?);
             for (row_id, encoded_row) in encode_chunk(&chunk, &self.order_pairs)
                 .into_iter()
                 .enumerate()
             {
                 if heap.len() < heap_size {
-                    let row = chunk.row_at_unchecked_vis(row_id).to_owned_row();
-                    heap.push(HeapElem { encoded_row, row });
+                    heap.push(HeapElem { encoded_row, chunk: chunk.clone(), row_id });
                 }
                 // handle the case `heap_size == 0` 
                 else if let Some(peek) = heap.peek() && encoded_row < peek.encoded_row {
-                    let row = chunk.row_at_unchecked_vis(row_id).to_owned_row();
-                    heap.push(HeapElem { encoded_row, row });
+                    heap.push(HeapElem { encoded_row, chunk: chunk.clone(), row_id });
                     heap.pop();
                 }
             }
         }
 
         let mut chunk_builder = DataChunkBuilder::with_default_size(self.schema.data_types());
-        for HeapElem { row, .. } in heap
+        for HeapElem { chunk, row_id, .. } in heap
             .drain()
             .sorted_unstable()
             .skip(self.offset)
             .take(self.limit)
         {
-            if let Some(spilled) = chunk_builder.append_one_row_from_datums(row.values())? {
+            if let Some(spilled) =
+                chunk_builder.append_one_row_ref(chunk.row_at_unchecked_vis(row_id))?
+            {
                 yield spilled
             }
         }
