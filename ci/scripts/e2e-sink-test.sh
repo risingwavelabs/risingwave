@@ -42,10 +42,6 @@ cargo make link-all-in-one-binaries
 echo "debug"
 cat /etc/hosts
 whoami
-apt install sudo -y
-apt install ufw -y
-sudo ufw status verbose
-
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
