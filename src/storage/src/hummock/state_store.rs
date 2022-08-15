@@ -318,7 +318,13 @@ impl HummockStorage {
                             .await?;
                         table_counts += 1;
                         if let Some(v) = self
-                            .get_from_table(table, &internal_key, key, &mut stats)
+                            .get_from_table(
+                                table,
+                                &internal_key,
+                                key,
+                                check_bloom_filter,
+                                &mut stats,
+                            )
                             .await?
                         {
                             return Ok(v);
@@ -341,7 +347,7 @@ impl HummockStorage {
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
-                        .get_from_table(table, &internal_key, key, &mut stats)
+                        .get_from_table(table, &internal_key, key, check_bloom_filter, &mut stats)
                         .await?
                     {
                         return Ok(v);
