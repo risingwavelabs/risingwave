@@ -952,7 +952,7 @@ mod tests {
         compact_task.current_epoch_time = epoch;
 
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .assign_compaction_task(&compact_task, worker_node.id)
             .await
             .unwrap();
 
