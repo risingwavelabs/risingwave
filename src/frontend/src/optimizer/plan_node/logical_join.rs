@@ -890,7 +890,7 @@ impl ToBatch for LogicalJoin {
         let config = self.base.ctx.inner().session_ctx.config();
 
         if predicate.has_eq() {
-            // always covert logical join to a lookup join, if it comes from index selection
+            // always convert logical join to a lookup join, if it comes from index selection
             if self.index_lookup_join || config.get_batch_enable_lookup_join() {
                 if let Some(lookup_join) =
                     self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
