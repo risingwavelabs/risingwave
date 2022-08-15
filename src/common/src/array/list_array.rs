@@ -408,7 +408,7 @@ macro_rules! iter_elems {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
             ListRef::Indexed { arr, idx } => {
-                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o).clone().to_owned_datum());
+                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o).to_owned_datum());
                 $($body)*
             }
             ListRef::ValueRef { val } => {
