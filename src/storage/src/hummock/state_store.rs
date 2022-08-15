@@ -301,24 +301,45 @@ impl HummockStorage {
             if level.table_infos.is_empty() {
                 continue;
             }
-            let table_info_idx = level
-                .table_infos
-                .partition_point(|table| {
-                    let ord = user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
-                    ord == Ordering::Less || ord == Ordering::Equal
-                })
-                .saturating_sub(1);
-            if table_info_idx < level.table_infos.len() {
-                let table = self
-                    .sstable_store
-                    .sstable(level.table_infos[table_info_idx].id, &mut stats)
-                    .await?;
-                table_counts += 1;
-                if let Some(v) = self
-                    .get_from_table(table, &internal_key, key, &mut stats)
-                    .await?
-                {
-                    return Ok(v);
+            match level.level_type() {
+                LevelType::Overlapping | LevelType::Unspecified => {
+                    let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    for table_info in table_infos {
+                        let table = self
+                            .sstable_store
+                            .sstable(table_info.id, &mut stats)
+                            .await?;
+                        table_counts += 1;
+                        if let Some(v) = self
+                            .get_from_table(table, &internal_key, key, &mut stats)
+                            .await?
+                        {
+                            return Ok(v);
+                        }
+                    }
+                }
+                LevelType::Nonoverlapping => {
+                    let table_info_idx = level
+                        .table_infos
+                        .partition_point(|table| {
+                            let ord =
+                                user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                            ord == Ordering::Less || ord == Ordering::Equal
+                        })
+                        .saturating_sub(1);
+                    if table_info_idx < level.table_infos.len() {
+                        let table = self
+                            .sstable_store
+                            .sstable(level.table_infos[table_info_idx].id, &mut stats)
+                            .await?;
+                        table_counts += 1;
+                        if let Some(v) = self
+                            .get_from_table(table, &internal_key, key, &mut stats)
+                            .await?
+                        {
+                            return Ok(v);
+                        }
+                    }
                 }
             }
         }
