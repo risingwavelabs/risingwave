@@ -43,7 +43,7 @@ echo "debug"
 cat /etc/hosts
 whoami
 apt install sudo -y
-usermod -aG sudo username
+usermod -aG sudo root
 # apt install ufw -y
 # sudo ufw status verbose
 
