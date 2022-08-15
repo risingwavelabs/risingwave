@@ -21,7 +21,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
         let message_id = msg.message_id.id;
 
         SourceMessage {
-            payload: Some(bytes::Bytes::from(msg.payload.data)),
+            payload: Some(msg.payload.data.into()),
             offset: format!(
                 "{}:{}:{}:{}",
                 message_id.ledger_id,
@@ -29,7 +29,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
                 message_id.partition.unwrap_or(-1),
                 message_id.batch_index.unwrap_or(-1)
             ),
-            split_id: msg.topic,
+            split_id: msg.topic.into(),
         }
     }
 }
