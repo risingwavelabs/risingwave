@@ -31,7 +31,10 @@ const UNPIN_INTERVAL_SECS: u64 = 10;
 
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
+    /// Send epoch-related operations to `HummockSnapshotManagerCore`.
     sender: Sender<EpochOperation>,
+    /// The value is pushed from meta node to reduce rpc number.
+    max_committed_epoch: Arc<AtomicU64>,
 }
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 
@@ -52,8 +55,11 @@ impl HummockSnapshotManager {
         // do not use unbounded_channel because it may cause OOM when the RPC `get_epoch` blocks a
         // long time.
         let (sender, mut receiver) = channel(MAX_WAIT_EPOCH_REQUEST_NUM);
+        let max_committed_epoch = Arc::new(AtomicU64::new(0));
+        let max_committed_epoch_cloned = max_committed_epoch.clone();
         tokio::spawn(async move {
-            let mut manager = HummockSnapshotManagerCore::new(meta_client);
+            let mut manager =
+                HummockSnapshotManagerCore::new(meta_client, max_committed_epoch_cloned);
             let mut unpin_batches = vec![];
             let mut pin_batches = vec![];
             let mut unpin_interval =
@@ -93,7 +99,7 @@ impl HummockSnapshotManager {
 
                 let need_unpin = last_unpin_time.elapsed().as_secs() >= UNPIN_INTERVAL_SECS;
                 if !pin_batches.is_empty() || need_unpin {
-                    let epoch = manager.get_epoch_for_query(&mut pin_batches).await;
+                    let epoch = manager.get_epoch_for_query(&mut pin_batches);
                     if need_unpin && epoch > 0 {
                         manager.unpin_snapshot_before(epoch);
                         last_unpin_time = Instant::now();
@@ -101,7 +107,10 @@ impl HummockSnapshotManager {
                 }
             }
         });
-        Self { sender }
+        Self {
+            sender,
+            max_committed_epoch,
+        }
     }
 
     pub async fn get_epoch(&self, query_id: QueryId) -> SchedulerResult<u64> {
@@ -120,6 +129,10 @@ impl HummockSnapshotManager {
                 e
             )))
         })
+    }
+
+    pub fn update_epoch(&self, epoch: u64) {
+        self.max_committed_epoch.fetch_max(epoch, Ordering::Relaxed);
     }
 
     pub async fn unpin_snapshot(&self, epoch: u64, query_id: &QueryId) -> SchedulerResult<()> {
@@ -144,49 +157,37 @@ struct HummockSnapshotManagerCore {
     epoch_to_query_ids: BTreeMap<u64, HashSet<QueryId>>,
     meta_client: Arc<dyn FrontendMetaClient>,
     last_unpin_snapshot: Arc<AtomicU64>,
+    max_committed_epoch: Arc<AtomicU64>,
 }
 
 impl HummockSnapshotManagerCore {
-    fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
+    fn new(meta_client: Arc<dyn FrontendMetaClient>, max_committed_epoch: Arc<AtomicU64>) -> Self {
         Self {
             // Initialize by setting `is_outdated` to `true`.
             meta_client,
             epoch_to_query_ids: BTreeMap::default(),
             last_unpin_snapshot: Arc::new(AtomicU64::new(0)),
+            max_committed_epoch,
         }
     }
 
-    async fn get_epoch_for_query(
+    fn get_epoch_for_query(
         &mut self,
         batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
     ) -> u64 {
-        let ret = self.meta_client.get_epoch().await;
-        match ret {
-            Ok(epoch) => {
-                let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
-                    None => {
-                        self.epoch_to_query_ids.insert(epoch, HashSet::default());
-                        self.epoch_to_query_ids.get_mut(&epoch).unwrap()
-                    }
-                    Some(queries) => queries,
-                };
-                for (id, cb) in batches.drain(..) {
-                    queries.insert(id);
-                    let _ = cb.send(Ok(epoch));
-                }
-                epoch
+        let epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
+            None => {
+                self.epoch_to_query_ids.insert(epoch, HashSet::default());
+                self.epoch_to_query_ids.get_mut(&epoch).unwrap()
             }
-            Err(e) => {
-                for (id, cb) in batches.drain(..) {
-                    let _ = cb.send(Err(SchedulerError::Internal(anyhow!(
-                        "Failed to get epoch for query: {:?} because of RPC Error: {:?}",
-                        id,
-                        e
-                    ))));
-                }
-                0
-            }
+            Some(queries) => queries,
+        };
+        for (id, cb) in batches.drain(..) {
+            queries.insert(id);
+            let _ = cb.send(Ok(epoch));
         }
+        epoch
     }
 
     pub fn release_epoch(&mut self, queries: &mut Vec<(QueryId, u64)>) {

@@ -1009,7 +1009,7 @@ where
         self.env
             .notification_manager()
             .notify_frontend_asynchronously(
-                Operation::Update, // Frontends don't care about operation.
+                Operation::Update,
                 Info::HummockSnapshot(HummockSnapshot { epoch }),
             );
 
