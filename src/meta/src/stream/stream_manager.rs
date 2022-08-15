@@ -961,13 +961,6 @@ mod tests {
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse::default()))
         }
-
-        async fn actor_trace(
-            &self,
-            _request: Request<ActorTraceRequest>,
-        ) -> std::result::Result<Response<ActorTraceResponse>, Status> {
-            Ok(Response::new(ActorTraceResponse::default()))
-        }
     }
 
     struct MockServices {

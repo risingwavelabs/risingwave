@@ -4712,6 +4712,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
+ "async_stack_trace",
  "byteorder",
  "bytes",
  "chrono",
