@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;

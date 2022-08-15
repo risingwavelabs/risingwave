@@ -140,9 +140,6 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
         extra_info_sources.push(storage.sstable_id_manager());
-        let memory_limiter = Arc::new(MemoryLimiter::new(
-            storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
-        ));
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
         if opts.state_store == "hummock+memory"
@@ -150,8 +147,12 @@ pub async fn compute_node_serve(
             || storage_config.disable_remote_compactor
         {
             tracing::info!("start embedded compactor");
+            let memory_limiter = Arc::new(MemoryLimiter::new(
+                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
+            ));
             // todo: set shutdown_sender in HummockStorage.
-            let data_cache_capacity = (storage_config.block_cache_capacity_mb as u64) << 19;
+            let data_cache_capacity =
+                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2;
             let context = Arc::new(Context {
                 options: storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),

@@ -152,7 +152,7 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 2),
+            block_cache: BlockCache::new(block_cache_capacity, 0),
             meta_cache,
             tiered_cache,
         }

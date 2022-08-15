@@ -137,8 +137,6 @@ impl Compactor {
         compactor_context: Arc<CompactorContext>,
         mut compact_task: CompactTask,
     ) -> bool {
-        use risingwave_common::catalog::TableOption;
-
         let context = compactor_context.context.clone();
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
         // write op. The watermark is invalidated when this method exits.
@@ -243,7 +241,9 @@ impl Compactor {
                 compact_task.clone(),
             );
             let rx = match Compactor::request_execution(compaction_executor, async move {
-                compactor_runner.run(filter, multi_filter_key_extractor).await
+                compactor_runner
+                    .run(filter, multi_filter_key_extractor)
+                    .await
             }) {
                 Ok(rx) => rx,
                 Err(err) => {

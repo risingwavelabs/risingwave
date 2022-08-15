@@ -92,7 +92,7 @@ pub async fn compactor_serve(
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
         storage_config.data_directory.to_string(),
-        storage_config.block_cache_capacity_mb * (1 << 20),
+        1 << 20, // set 1MB memory to avoid panic.
         storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
 
@@ -108,13 +108,12 @@ pub async fn compactor_serve(
     .await;
 
     let observer_join_handle = observer_manager.start().await.unwrap();
-    let memory_limiter = Arc::new(MemoryLimiter::new(
-        (storage_config.compactor_memory_limit_mb as u64) << 20,
-    ));
-    let block_cache_capacity = (storage_config.block_cache_capacity_mb as u64) << 20;
+    let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
+    let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
+    let input_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
     let compact_sstable_store = Arc::new(CompactorSstableStore::new(
         sstable_store.clone(),
-        Arc::new(MemoryLimiter::new(block_cache_capacity)),
+        Arc::new(MemoryLimiter::new(input_limit_mb << 20)),
     ));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),
