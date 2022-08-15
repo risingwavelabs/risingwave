@@ -22,14 +22,16 @@ use super::generator::DatagenEventGenerator;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::{
-    Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader,
+    spawn_data_generation_stream, Column, ConnectorState, DataGenerationReceiver, DataType,
+    SourceMessage, SplitId, SplitImpl, SplitMetaData, SplitReader,
 };
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
 pub struct DatagenSplitReader {
-    pub generator: DatagenEventGenerator,
-    pub assigned_split: DatagenSplit,
+    generation_rx: DataGenerationReceiver,
+
+    assigned_split: DatagenSplit,
 }
 
 #[async_trait]
@@ -45,7 +47,7 @@ impl SplitReader for DatagenSplitReader {
         Self: Sized,
     {
         let mut assigned_split = DatagenSplit::default();
-        let mut split_id = String::new();
+        let mut split_id = SplitId::default();
         let mut events_so_far = u64::default();
         if let Some(splits) = state {
             log::debug!("Splits for datagen found! {:?}", splits);
@@ -195,14 +197,17 @@ impl SplitReader for DatagenSplitReader {
             split_index,
         )?;
 
+        // Spawn a new runtime for data generation since it's CPU intensive.
+        let generation_rx = spawn_data_generation_stream(generator.into_stream());
+
         Ok(DatagenSplitReader {
-            generator,
+            generation_rx,
             assigned_split,
         })
     }
 
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>> {
-        self.generator.next().await
+        self.generation_rx.recv().await.transpose()
     }
 }
 
