@@ -178,6 +178,9 @@ impl StageExecution {
                 let mut holder = self.shutdown_rx.write().await;
                 *holder = Some(sender);
 
+                // Change state before spawn runner.
+                *s = StageState::Started;
+
                 spawn(async move {
                     if let Err(e) = runner.run(receiver).await {
                         error!("Stage failed: {:?}", e);
@@ -187,8 +190,6 @@ impl StageExecution {
                     }
                 });
 
-                // TODO: Should change state before spawn task.
-                *s = StageState::Started;
                 Ok(())
             }
             _ => {
@@ -393,19 +394,21 @@ impl StageRunner {
                                     break;
                                 }
 
-                                TaskStatusProst::Finished => {
-                                    // no-op
+                                TaskStatusProst::Finished | TaskStatusProst::Aborted => {
+                                    // if Finished, no-op
+                                    // if Aborted, still no-op cuz it means there must already have failed schedule.
                                 }
 
                                 status => {
+                                    // The remain possible variant is Pending, but now it won't be pushed from CN.
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }
                          } else {
-                        // After processing all stream status, we must have sent signal (Either Scheduled or
-                        // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
-                        assert!(sent_signal_to_next);
-                        break;
+                            // After processing all stream status, we must have sent signal (Either Scheduled or
+                            // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
+                            assert!(sent_signal_to_next);
+                            break;
                     }
                 }
             }

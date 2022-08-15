@@ -20,9 +20,8 @@ use anyhow::anyhow;
 use risingwave_common::bail;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::{oneshot, RwLock};
-use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use super::{QueryResultFetcher, StageEvent};
@@ -36,9 +35,6 @@ use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResul
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
 pub enum QueryMessage {
-    /// Commands to stop execution..
-    Stop,
-
     /// Events passed running execution.
     Stage(StageEvent),
 }
@@ -49,19 +45,11 @@ enum QueryState {
     /// In this state, some data structures for starting executions are created to avoid holding
     /// them `QueryExecution`
     Pending {
-        /// We create this runner before start execution to avoid hold unuseful fields in
-        /// `QueryExecution`
-        runner: QueryRunner,
-
-        /// Receiver of root stage info.
-        root_stage_receiver: oneshot::Receiver<SchedulerResult<QueryResultFetcher>>,
+        msg_receiver: Receiver<QueryMessage>,
     },
 
     /// Running
-    Running {
-        _msg_sender: Sender<QueryMessage>,
-        _task_handle: JoinHandle<SchedulerResult<()>>,
-    },
+    Running,
 
     /// Failed
     Failed,
@@ -73,7 +61,12 @@ enum QueryState {
 pub struct QueryExecution {
     query: Arc<Query>,
     state: Arc<RwLock<QueryState>>,
-    _stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
+
+    /// These fields are just used for passing to Query Runner.
+    epoch: u64,
+    stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
+    compute_client_pool: ComputeClientPoolRef,
 }
 
 struct QueryRunner {
@@ -82,8 +75,6 @@ struct QueryRunner {
     scheduled_stages_count: usize,
     /// Query messages receiver. For example, stage state change events, query commands.
     msg_receiver: Receiver<QueryMessage>,
-    // Sender of above message receiver. We need to keep it so that we can pass it to stages.
-    msg_sender: Sender<QueryMessage>,
 
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
@@ -129,30 +120,17 @@ impl QueryExecution {
             Arc::new(stage_executions)
         };
 
-        let (root_stage_sender, root_stage_receiver) =
-            oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
-
-        let runner = QueryRunner {
-            query: query.clone(),
-            stage_executions: stage_executions.clone(),
-            msg_receiver: receiver,
-            root_stage_sender: Some(root_stage_sender),
-            msg_sender: sender,
-            scheduled_stages_count: 0,
-            epoch,
-            hummock_snapshot_manager,
-            compute_client_pool,
-        };
-
         let state = QueryState::Pending {
-            runner,
-            root_stage_receiver,
+            msg_receiver: receiver,
         };
 
         Self {
             query,
             state: Arc::new(RwLock::new(state)),
-            _stage_executions: stage_executions,
+            stage_executions,
+            epoch,
+            compute_client_pool,
+            hummock_snapshot_manager,
         }
     }
 
@@ -162,12 +140,24 @@ impl QueryExecution {
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
         match cur_state {
-            QueryState::Pending {
-                runner,
-                root_stage_receiver,
-            } => {
-                let msg_sender = runner.msg_sender.clone();
-                let task_handle = tokio::spawn(async move {
+            QueryState::Pending { msg_receiver } => {
+                *state = QueryState::Running;
+
+                let (root_stage_sender, root_stage_receiver) =
+                    oneshot::channel::<SchedulerResult<QueryResultFetcher>>();
+
+                let runner = QueryRunner {
+                    query: self.query.clone(),
+                    stage_executions: self.stage_executions.clone(),
+                    msg_receiver,
+                    root_stage_sender: Some(root_stage_sender),
+                    scheduled_stages_count: 0,
+                    epoch: self.epoch,
+                    hummock_snapshot_manager: self.hummock_snapshot_manager.clone(),
+                    compute_client_pool: self.compute_client_pool.clone(),
+                };
+
+                tokio::spawn(async move {
                     let query_id = runner.query.query_id.clone();
                     runner.run().await.map_err(|e| {
                         error!("Query {:?} failed, reason: {:?}", query_id, e);
@@ -184,11 +174,6 @@ impl QueryExecution {
                     root_stage,
                     self.query.query_id
                 );
-
-                *state = QueryState::Running {
-                    _msg_sender: msg_sender,
-                    _task_handle: task_handle,
-                };
 
                 Ok(root_stage)
             }
@@ -395,9 +380,7 @@ mod tests {
             ))),
             compute_client_pool,
         );
-        let err = query_execution.start().await;
-        println!("err: {:?}", err);
-        // assert!(query_execution.start().await.is_err());
+        assert!(query_execution.start().await.is_err());
     }
 
     async fn create_query() -> Query {
