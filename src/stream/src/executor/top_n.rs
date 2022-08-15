@@ -1012,7 +1012,7 @@ mod tests {
                 1,
                 vec![],
             )
-                .unwrap(),
+            .unwrap(),
         );
         let mut top_n_executor = top_n_executor.execute();
 
@@ -1055,7 +1055,7 @@ mod tests {
                 1,
                 vec![],
             )
-                .unwrap(),
+            .unwrap(),
         );
         let mut top_n_executor = top_n_executor_after_recovery.execute();
 
