@@ -227,7 +227,9 @@ impl FunctionCall {
         }
     }
 
-    /// Cast a `ROW` expression to the target type.
+    /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbirary
+    /// expressions, like `ROW(1)::STRUCT<i INTEGER>` to `STRUCT<VARCHAR>`, although an integer
+    /// is castible to VARCHAR. It's to simply the casting rules.
     fn cast_nested(expr: ExprImpl, target_type: DataType, allows: CastContext) -> Result<ExprImpl> {
         let func = *expr.into_function_call().unwrap();
         let (fields, field_names) = if let DataType::Struct {

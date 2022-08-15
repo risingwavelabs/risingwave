@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_sqlparser::ast::{Expr, Ident};
 
-use crate::binder::bind_context::ColumnBinding;
 use crate::binder::Binder;
 use crate::expr::{Expr as RwExpr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
@@ -25,63 +25,61 @@ impl Binder {
     /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
     /// We will extract ident from `expr` to get the `column_binding`.
     /// Will return `column_binding` and field `idents`.
-    fn extract_binding_and_idents(
-        &mut self,
-        expr: Expr,
-        ids: Vec<Ident>,
-    ) -> Result<(&ColumnBinding, Vec<Ident>)> {
-        match expr {
-            // For CompoundIdentifier, we will use first ident as table name and second ident as
-            // column name to get `column_desc`.
+    fn bind_field_access(&mut self, expr: Expr, ids: Vec<Ident>) -> Result<(ExprImpl, Vec<Ident>)> {
+        let (column_ident, ids) = match &expr {
+            // For CompoundIdentifier, we will use the first ident as table name and the second
+            // ident as column name.
             Expr::CompoundIdentifier(idents) => {
-                let (table_name, column): (String, String) = match &idents[..] {
+                let (table_name, column_name) = match &idents[..] {
                     [table, column] => (table.real_value(), column.real_value()),
                     _ => {
-                        return Err(ErrorCode::InternalError(format!(
-                            "Too many idents: {:?}",
-                            idents
-                        ))
-                        .into());
+                        bail!("Too many idents: {:?}", idents);
                     }
                 };
-                let index = self
-                    .context
-                    .get_column_binding_index(&Some(table_name), &column)?;
-                Ok((&self.context.columns[index], ids))
+                (Some((Some(table_name), column_name)), ids)
             }
-            // For Identifier, we will first use the ident as
-            // column name to get `column_desc`.
-            // If column name not exist, we will use the ident as table name.
-            // The reason is that in pgsql, for table name v3 have a column name v3 which
-            // have a field name v3. Select (v3).v3 from v3 will return the field value instead
+            // For Identifier, we will first use the ident as column name to get `column_desc`.
+            // If column name does not exist, we will use the ident as table name.
+            // The reason is that in pgsql, if table name v3 have a column name v3, which
+            // has a field name v3. `SELECT (v3).v3 FROM v3` will return the field value instead
             // of column value.
             Expr::Identifier(ident) => match self.context.indexs_of.get(&ident.real_value()) {
                 Some(indexs) => {
                     if indexs.len() == 1 {
-                        let index = self
-                            .context
-                            .get_column_binding_index(&None, &ident.real_value())?;
-                        Ok((&self.context.columns[index], ids))
+                        (Some((None, ident.real_value())), ids)
                     } else {
+                        // When there are multiple tables having the same column, the table name
+                        // must be explicitly specified.
                         let column_name = ids[0].real_value();
-                        let index = self
-                            .context
-                            .get_column_binding_index(&Some(ident.real_value()), &column_name)?;
-                        Ok((&self.context.columns[index], ids[1..].to_vec()))
+                        (
+                            Some((Some(ident.real_value()), column_name)),
+                            ids[1..].to_vec(),
+                        )
                     }
                 }
                 None => {
+                    let table_name = ident.real_value();
                     let column_name = ids[0].real_value();
-                    let index = self
-                        .context
-                        .get_column_binding_index(&Some(ident.real_value()), &column_name)?;
-                    Ok((&self.context.columns[index], ids[1..].to_vec()))
+                    (Some((Some(table_name), column_name)), ids[1..].to_vec())
                 }
             },
-            Expr::Cast { .. } => {
-                todo!()
+            _ => (None, ids),
+        };
+        if let Some((table_name, column_name)) = column_ident {
+            let index = self
+                .context
+                .get_column_binding_index(&table_name, &column_name)?;
+            let binding = &self.context.columns[index];
+            let expr = InputRef::new(binding.index, binding.field.data_type.clone()).into();
+            Ok((expr, ids))
+        } else {
+            match expr {
+                Expr::Cast { expr, data_type } => {
+                    let cast = self.bind_cast(*expr, data_type)?;
+                    Ok((cast, ids))
+                }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
     }
 
@@ -92,13 +90,8 @@ impl Binder {
         expr: Expr,
         ids: &[Ident],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
-        let fields = Self::bind_field(
-            binding.field.name.clone(),
-            InputRef::new(binding.index, binding.field.data_type.clone()).into(),
-            &idents,
-            true,
-        )?;
+        let (expr, idents) = self.bind_field_access(expr, ids.to_vec())?;
+        let fields = Self::bind_field("".to_string(), expr, &idents, true)?;
         let exprs = fields.iter().map(|(e, _)| e.clone()).collect_vec();
         let names = fields.into_iter().map(|(_, s)| Some(s)).collect_vec();
         Ok((exprs, names))
@@ -108,13 +101,8 @@ impl Binder {
     /// Will return `Field(expr, int)` expression and the corresponding alias.
     /// `int` in the signagure of `Field` represents the field index.
     pub fn bind_single_field_column(&mut self, expr: Expr, ids: &[Ident]) -> Result<ExprImpl> {
-        let (binding, idents) = self.extract_binding_and_idents(expr, ids.to_vec())?;
-        let exprs = Self::bind_field(
-            binding.field.name.clone(),
-            InputRef::new(binding.index, binding.field.data_type.clone()).into(),
-            &idents,
-            false,
-        )?;
+        let (expr, idents) = self.bind_field_access(expr, ids.to_vec())?;
+        let exprs = Self::bind_field("".to_string(), expr, &idents, false)?;
         Ok(exprs[0].clone().0)
     }
 

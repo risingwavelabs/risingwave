@@ -155,11 +155,7 @@ impl Display for DataType {
                 field_names,
             } => {
                 if field_names.is_empty() {
-                    write!(
-                        f,
-                        "struct<{}>",
-                        fields.iter().map(|d| format!("{}", d)).join(",")
-                    )
+                    write!(f, "record")
                 } else {
                     write!(
                         f,

@@ -1,3 +1,8 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation 
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
 
 # constant casts
 query I
@@ -8,12 +13,12 @@ SELECT ROW(1,2)::STRUCT<i BIGINT, j VARCHAR>;
 query I
 SELECT (NULL, 'hello')::STRUCT<i BIGINT, j VARCHAR>;
 ----
-(NULL, 'hello')
+(NULL,hello)
 
 query I
 SELECT (NULL, NULL)::STRUCT<i BIGINT, j VARCHAR>;
 ----
-(NULL, NULL)
+(NULL,NULL)
 
 query I
 SELECT NULL::STRUCT<i BIGINT, j VARCHAR>;
@@ -22,85 +27,66 @@ NULL
 
 # cast and extract
 query I
-SELECT (NULL, NULL)::ROW(i BIGINT, j VARCHAR));
+SELECT (NULL, NULL)::STRUCT<i BIGINT, j VARCHAR>;
+----
+(NULL,NULL)
+
+query I
+SELECT ((NULL, NULL)::STRUCT<i BIGINT, j VARCHAR>).i;
 ----
 NULL
 
 query I
-SELECT ({'i': NULL, 'j': NULL})['i']
-----
-NULL
-
-query I
-SELECT (NULL::ROW(i BIGINT, j VARCHAR))['i'];
+SELECT (NULL::STRUCT<i BIGINT, j VARCHAR>).i;
 ----
 NULL
 
 # nested struct casts
 query I
-SELECT {'i': 1, 'j': {'a': 2, 'b': 3}}::ROW(i BIGINT, j ROW(a BIGINT, b VARCHAR));
+SELECT (1, (2, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-{'i': 1, 'j': {'a': 2, 'b': 3}}
+(1,(2,3))
 
 query I
-SELECT {'i': 1, 'j': {'a': NULL, 'b': 3}}::ROW(i BIGINT, j ROW(a BIGINT, b VARCHAR));
+SELECT (1, (NULL, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-{'i': 1, 'j': {'a': NULL, 'b': 3}}
+(1,(NULL,3))
 
 query I
-SELECT {'i': 1, 'j': {'a': 2, 'b': NULL}}::ROW(i BIGINT, j ROW(a BIGINT, b VARCHAR));
+SELECT (1, (2, NULL))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-{'i': 1, 'j': {'a': 2, 'b': NULL}}
+(1,(2,NULL))
 
 query I
-SELECT {'i': 1, 'j': NULL}::ROW(i BIGINT, j ROW(a BIGINT, b VARCHAR));
+SELECT (1, NULL)::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
-{'i': 1, 'j': NULL}
+(1,NULL)
 
 # cast and extract
 query I
-SELECT ({'i': 1, 'j': NULL}::ROW(i BIGINT, j ROW(a BIGINT, b VARCHAR)))['j']['a'];
+SELECT ((1, NULL)::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>).j.a;
 ----
 NULL
 
 query I
-SELECT NULL::ROW(i BIGINT, j ROW(a BIGINT, b VARCHAR));
+SELECT NULL::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 ----
 NULL
 
 # now the same but non-constant
 statement ok
-CREATE TABLE structs(s ROW(i INTEGER, j INTEGER))
+CREATE TABLE structs(s STRUCT<i INTEGER, j INTEGER>);
 
 statement ok
-INSERT INTO structs VALUES ({'i': 1, 'j': 2}), ({'i': NULL, 'j': 2}), ({'i': 1, 'j': NULL}), (NULL)
+INSERT INTO structs VALUES ((1,2)), ((null, 2)), ((1, null)), (NULL)
 
-query I
-SELECT s::ROW(i BIGINT, j VARCHAR) FROM structs
+query I rowsort
+SELECT s FROM structs;
 ----
-{'i': 1, 'j': 2}
-{'i': NULL, 'j': 2}
-{'i': 1, 'j': NULL}
+(1,2)
 NULL
-
-# nested struct
-statement ok
-CREATE TABLE nested_structs(s ROW(i INTEGER, j ROW(a INTEGER, b INTEGER)))
+(NULL,2)
+(1,NULL)
 
 statement ok
-INSERT INTO nested_structs VALUES
-({'i': 1, 'j': {'a': 2, 'b': 3}}),
-({'i': 1, 'j': {'a': NULL, 'b': 3}}),
-({'i': 1, 'j': {'a': 2, 'b': NULL}}),
-({'i': 1, 'j': NULL}),
-(NULL)
-
-
-query I
-SELECT s::ROW(i BIGINT, j ROW(a BIGINT, b VARCHAR)) FROM nested_structs
-----
-{'i': 1, 'j': {'a': 2, 'b': 3}}
-{'i': 1, 'j': {'a': NULL, 'b': 3}}
-{'i': 1, 'j': {'a': 2, 'b': NULL}}
-{'i': 1, 'j': NULL}
-NULL
+DROP TABLE structs;
