@@ -38,6 +38,7 @@ use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
@@ -68,6 +69,7 @@ pub struct RemoteBuilderFactory {
     limiter: Arc<MemoryLimiter>,
     options: SstableBuilderOptions,
     remote_rpc_cost: Arc<AtomicU64>,
+    filter_key_extractor: Arc<FilterKeyExtractorImpl>,
 }
 
 #[async_trait::async_trait]
@@ -86,7 +88,11 @@ impl TableBuilderFactory for RemoteBuilderFactory {
         let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
-        let builder = SstableBuilder::new(table_id, self.options.clone());
+        let builder = SstableBuilder::new(
+            table_id,
+            self.options.clone(),
+            self.filter_key_extractor.clone(),
+        );
         Ok((tracker, builder))
     }
 }
@@ -109,8 +115,6 @@ pub struct Compactor {
 pub type CompactOutput = (usize, Vec<SstableInfo>);
 
 impl Compactor {
-    /// Tries to schedule on `compaction_executor` if `compaction_executor` is not None.
-    ///
     /// Tries to schedule on current runtime if `compaction_executor` is None.
     fn request_execution(
         compaction_executor: Arc<CompactionExecutor>,
@@ -213,6 +217,14 @@ impl Compactor {
             need_quota
         );
 
+        let multi_filter = build_multi_compaction_filter(&compact_task);
+
+        let multi_filter_key_extractor = context
+            .filter_key_extractor_manager
+            .acquire(HashSet::from_iter(compact_task.existing_table_ids.clone()))
+            .await;
+        let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
+
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -221,45 +233,17 @@ impl Compactor {
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
 
-        let mut multi_filter = MultiCompactionFilter::default();
-        let compaction_filter_flag =
-            CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask)
-                .unwrap_or_default();
-        if compaction_filter_flag.contains(CompactionFilterFlag::STATE_CLEAN) {
-            let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
-                HashSet::from_iter(compact_task.existing_table_ids.clone()),
-            ));
-
-            multi_filter.register(state_clean_up_filter);
-        }
-
-        if compaction_filter_flag.contains(CompactionFilterFlag::TTL) {
-            let id_to_ttl = compact_task
-                .table_options
-                .iter()
-                .filter(|id_to_option| {
-                    let table_option: TableOption = id_to_option.1.into();
-                    table_option.retention_seconds.is_some()
-                })
-                .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
-                .collect();
-            let ttl_filter = Box::new(TTLCompactionFilter::new(
-                id_to_ttl,
-                compact_task.current_epoch_time,
-            ));
-            multi_filter.register(ttl_filter);
-        }
-
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compaction_executor = context.compaction_executor.clone();
             let filter = multi_filter.clone();
+            let multi_filter_key_extractor = multi_filter_key_extractor.clone();
             let compactor_runner = CompactorRunner::new(
                 split_index,
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
             let rx = match Compactor::request_execution(compaction_executor, async move {
-                compactor_runner.run(filter).await
+                compactor_runner.run(filter, multi_filter_key_extractor).await
             }) {
                 Ok(rx) => rx,
                 Err(err) => {
@@ -560,6 +544,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
         let mut options = self.options.clone();
@@ -575,6 +560,7 @@ impl Compactor {
             limiter: self.context.memory_limiter.clone(),
             options,
             remote_rpc_cost: get_id_time.clone(),
+            filter_key_extractor,
         };
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
@@ -664,4 +650,38 @@ pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
         }
     }
     total_memory_size
+}
+
+fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
+    use risingwave_common::catalog::TableOption;
+    let mut multi_filter = MultiCompactionFilter::default();
+    let compaction_filter_flag =
+        CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask).unwrap_or_default();
+    if compaction_filter_flag.contains(CompactionFilterFlag::STATE_CLEAN) {
+        let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
+            HashSet::from_iter(compact_task.existing_table_ids.clone()),
+        ));
+
+        multi_filter.register(state_clean_up_filter);
+    }
+
+    if compaction_filter_flag.contains(CompactionFilterFlag::TTL) {
+        let id_to_ttl = compact_task
+            .table_options
+            .iter()
+            .filter(|id_to_option| {
+                let table_option: TableOption = id_to_option.1.into();
+                table_option.retention_seconds.is_some()
+            })
+            .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds))
+            .collect();
+
+        let ttl_filter = Box::new(TTLCompactionFilter::new(
+            id_to_ttl,
+            compact_task.current_epoch_time,
+        ));
+        multi_filter.register(ttl_filter);
+    }
+
+    multi_filter
 }

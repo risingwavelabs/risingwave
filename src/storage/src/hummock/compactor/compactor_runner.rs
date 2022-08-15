@@ -14,6 +14,7 @@
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
@@ -74,11 +75,12 @@ impl CompactorRunner {
     pub async fn run(
         &self,
         compaction_filter: impl CompactionFilter,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
         let ssts = self
             .compactor
-            .compact_key_range_impl(iter, compaction_filter)
+            .compact_key_range_impl(iter, compaction_filter, filter_key_extractor)
             .await?;
         Ok((self.split_index, ssts))
     }

@@ -103,7 +103,7 @@ pub fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta, Vec<u32>) {
-    let mut b = SstableBuilder::new(0, opts);
+    let mut b = SstableBuilder::new_for_test(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
