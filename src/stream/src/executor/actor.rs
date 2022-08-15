@@ -23,11 +23,12 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_stack_trace::{SpanValue, StackTrace};
-use futures::pin_mut;
+use futures::{pin_mut, Future};
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
 use risingwave_expr::ExprError;
+use tokio::task::futures::TaskLocalFuture;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
@@ -124,6 +125,14 @@ pub fn on_compute_error(err: ExprError, identity: &str) {
     })
 }
 
+trait CollectErrors: Future + Sized {
+    fn collect_errors(self) -> TaskLocalFuture<RefCell<HashMap<String, Vec<ExprError>>>, Self> {
+        ACTOR_ERRORS.scope(RefCell::new(HashMap::new()), self)
+    }
+}
+
+impl<F: Future + Sized> CollectErrors for F {}
+
 /// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor<C> {
     consumer: C,
@@ -186,6 +195,7 @@ where
             .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
                 format!("Epoch {}", e.curr).into()
             }))
+            .collect_errors()
             .await
             .transpose()?
         {
