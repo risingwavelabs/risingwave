@@ -187,10 +187,6 @@ impl SstableBuilder {
             self.last_bloom_filter_key_length = extract_key.len();
         }
 
-        if self.last_full_key.is_empty() {
-            self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
-        }
-
         self.last_full_key.clear();
         self.last_full_key.extend_from_slice(full_key);
 
@@ -214,11 +210,8 @@ impl SstableBuilder {
     /// ```
     pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
-        let largest_key = if self.block_builder.is_empty() {
-            self.last_full_key.clone()
-        } else {
-            self.block_builder.get_last_key().to_vec()
-        };
+        let largest_key = self.last_full_key.clone();
+
         self.build_block();
         self.buf.put_u32_le(self.block_metas.len() as u32);
         assert!(!smallest_key.is_empty());
@@ -258,9 +251,7 @@ impl SstableBuilder {
         if self.block_builder.is_empty() {
             return;
         }
-        self.last_full_key.clear();
-        self.last_full_key
-            .extend_from_slice(self.block_builder.get_last_key());
+
         let mut block_meta = self.block_metas.last_mut().unwrap();
         let block = self.block_builder.build();
         self.buf.put_slice(block);
