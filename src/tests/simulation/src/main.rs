@@ -17,6 +17,7 @@
 use std::time::Duration;
 
 use clap::Parser;
+use sqllogictest::ParallelTestError;
 
 #[cfg(not(madsim))]
 fn main() {
@@ -137,22 +138,21 @@ async fn main() {
         .ip([192, 168, 100, 1].into())
         .build();
     client_node
-        .spawn(async move { run_slt_task(&args.files, &args, &frontend_ip).await })
+        .spawn(async move {
+            run_slt_task(&args.files, &args, &frontend_ip)
+                .await
+                .unwrap()
+        })
         .await
         .unwrap();
 }
 
-async fn run_slt_task(glob: &str, args: &Args, hosts: &[String]) {
+async fn run_slt_task(glob: &str, args: &Args, hosts: &[String]) -> Result<(), ParallelTestError> {
     let db = Postgres::connect(hosts[0].clone(), "dev".to_string()).await;
-    let mut tester = sqllogictest::ParallelRunner::new(db, hosts.to_vec());
-    let tasks = tester
-        .prepare_async(glob, Postgres::connect)
-        .await
-        .expect("prepare failed");
+    let mut tester = sqllogictest::Runner::new(db);
     tester
-        .run_parallel_async(tasks, args.jobs)
+        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, args.jobs)
         .await
-        .expect("test failed");
 }
 
 struct Postgres {
@@ -222,5 +222,4 @@ impl sqllogictest::AsyncDB for Postgres {
     async fn sleep(dur: Duration) {
         tokio::time::sleep(dur).await
     }
-
 }
