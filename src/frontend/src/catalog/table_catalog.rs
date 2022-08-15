@@ -82,8 +82,6 @@ pub struct TableCatalog {
     pub owner: u32,
 
     pub properties: HashMap<String, String>,
-
-    pub read_pattern_prefix_column: u32,
 }
 
 impl TableCatalog {
@@ -163,7 +161,6 @@ impl TableCatalog {
             appendonly: self.appendonly,
             owner: self.owner,
             properties: self.properties.clone(),
-            read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
     }
 }
@@ -212,7 +209,6 @@ impl From<ProstTable> for TableCatalog {
             appendonly: tb.appendonly,
             owner: tb.owner,
             properties: tb.properties,
-            read_pattern_prefix_column: tb.read_pattern_prefix_column,
         }
     }
 }
@@ -293,7 +289,6 @@ mod tests {
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
             )]),
-            read_pattern_prefix_column: 0,
         }
         .into();
 
@@ -346,7 +341,6 @@ mod tests {
                     String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                     String::from("300")
                 )]),
-                read_pattern_prefix_column: 0,
             }
         );
     }
