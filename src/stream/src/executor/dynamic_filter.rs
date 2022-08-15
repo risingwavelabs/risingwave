@@ -349,8 +349,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     prev_epoch_value = Some(curr);
 
+                    // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
-                        // Only need to update the left table.
                         self.range_cache
                             .state_table
                             .update_vnode_bitmap(vnode_bitmap);

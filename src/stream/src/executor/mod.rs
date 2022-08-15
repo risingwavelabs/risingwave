@@ -300,6 +300,9 @@ impl Barrier {
 
     /// Returns the new vnode bitmap if this barrier is to update the vnode bitmap for the actor
     /// with `actor_id`.
+    ///
+    /// Actually, this vnode bitmap update is only useful for the record accessing validation for
+    /// distributed executors, since the read/write pattern will never be across multiple vnodes.
     pub fn as_update_vnode_bitmap(&self, actor_id: ActorId) -> Option<Arc<Bitmap>> {
         self.mutation
             .as_deref()

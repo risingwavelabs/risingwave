@@ -563,6 +563,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.side_r.ht.update_epoch(epoch);
                     self.epoch = epoch;
 
+                    // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
                         self.side_l
                             .ht
