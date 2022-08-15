@@ -363,31 +363,25 @@ impl MetaClient {
                         return;
                     }
                 }
-                let mut extra_info = Vec::with_capacity(extra_info_sources.len());
-                for extra_info_source in &extra_info_sources {
-                    if let Some(info) = extra_info_source.get_extra_info().await {
-                        // None means the info is not available at the moment, and won't be sent to
-                        // meta.
-                        extra_info.push(info);
-                    }
-                }
+                let extra_info = Vec::with_capacity(extra_info_sources.len());
+                // for extra_info_source in &extra_info_sources {
+                //     if let Some(info) = extra_info_source.get_extra_info().await {
+                //         // None means the info is not available at the moment, and won't be sent
+                // to         // meta.
+                //         extra_info.push(info);
+                //     }
+                // }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
-                match tokio::time::timeout(
-                    // TODO: decide better min_interval for timeout
-                    min_interval * 3,
-                    meta_client.send_heartbeat(meta_client.worker_id(), extra_info),
-                )
-                .await
+                match meta_client
+                    .send_heartbeat(meta_client.worker_id(), extra_info)
+                    .await
                 {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(err)) => {
+                    Ok(_) => {}
+                    Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
                         if err.to_string().contains("unknown worker") {
                             panic!("Already removed by the meta node. Need to restart the worker");
                         }
-                    }
-                    Err(err) => {
-                        tracing::warn!("Failed to send_heartbeat: timeout {}", err);
                     }
                 }
             }

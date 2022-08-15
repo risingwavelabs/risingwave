@@ -116,19 +116,11 @@ pub type CompactOutput = (usize, Vec<SstableInfo>);
 
 impl Compactor {
     /// Tries to schedule on current runtime if `compaction_executor` is None.
-    fn request_execution(
+    fn request_execution<T: Send + 'static>(
         compaction_executor: Arc<CompactionExecutor>,
-        split_task: impl Future<Output = HummockResult<CompactOutput>> + Send + 'static,
-    ) -> HummockResult<JoinHandle<HummockResult<CompactOutput>>> {
-        let rx = compaction_executor
-            .send_request(split_task)
-            .map_err(HummockError::compaction_executor)?;
-        Ok(tokio::spawn(async move {
-            match rx.await {
-                Ok(result) => result,
-                Err(err) => Err(HummockError::compaction_executor(err)),
-            }
-        }))
+        split_task: impl Future<Output = T> + Send + 'static,
+    ) -> JoinHandle<T> {
+        compaction_executor.send_request(split_task)
     }
 
     /// Handles a compaction task and reports its status to hummock manager.
@@ -147,15 +139,6 @@ impl Compactor {
                 return false;
             }
         };
-        let sstable_id_manager_clone = context.sstable_id_manager.clone();
-        let _guard = scopeguard::guard(
-            (tracker_id, sstable_id_manager_clone),
-            |(tracker_id, sstable_id_manager)| {
-                tokio::spawn(async move {
-                    sstable_id_manager.remove_watermark_sst_id(tracker_id).await;
-                });
-            },
-        );
 
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -232,7 +215,6 @@ impl Compactor {
         let mut compaction_futures = vec![];
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
-            let compaction_executor = context.compaction_executor.clone();
             let filter = multi_filter.clone();
             let multi_filter_key_extractor = multi_filter_key_extractor.clone();
             let compactor_runner = CompactorRunner::new(
@@ -240,17 +222,11 @@ impl Compactor {
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
-            let rx = match Compactor::request_execution(compaction_executor, async move {
+            let rx = tokio::spawn(async move {
                 compactor_runner
                     .run(filter, multi_filter_key_extractor)
                     .await
-            }) {
-                Ok(rx) => rx,
-                Err(err) => {
-                    tracing::warn!("Failed to schedule compaction execution: {:#?}", err);
-                    return false;
-                }
-            };
+            });
             compaction_futures.push(rx);
         }
 
@@ -294,6 +270,10 @@ impl Compactor {
                 context.sstable_store.delete_cache(table.id);
             }
         }
+        context
+            .sstable_id_manager
+            .remove_watermark_sst_id(tracker_id)
+            .await;
         compact_success
     }
 
@@ -352,29 +332,6 @@ impl Compactor {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
         let join_handle = tokio::spawn(async move {
-            let process_task = |task, compactor_context, hummock_meta_client| async {
-                match task {
-                    Task::CompactTask(compact_task) => {
-                        Compactor::compact(compactor_context, compact_task).await;
-                    }
-                    Task::VacuumTask(vacuum_task) => {
-                        Vacuum::vacuum(
-                            vacuum_task,
-                            compactor_context.context.sstable_store.clone(),
-                            hummock_meta_client,
-                        )
-                        .await;
-                    }
-                    Task::FullScanTask(full_scan_task) => {
-                        Vacuum::full_scan(
-                            full_scan_task,
-                            compactor_context.context.sstable_store.clone(),
-                            hummock_meta_client,
-                        )
-                        .await;
-                    }
-                }
-            };
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             // This outer loop is to recreate stream.
             'start_stream: loop {
@@ -424,11 +381,35 @@ impl Compactor {
                                 Some(task) => task,
                                 None => continue 'consume_stream,
                             };
-                            tokio::spawn(process_task(
-                                task,
-                                compactor_context.clone(),
-                                hummock_meta_client.clone(),
-                            ));
+
+                            let context = compactor_context.clone();
+                            let meta_client = hummock_meta_client.clone();
+                            Compactor::request_execution(
+                                compactor_context.context.compaction_executor.clone(),
+                                async move {
+                                    match task {
+                                        Task::CompactTask(compact_task) => {
+                                            Compactor::compact(context, compact_task).await;
+                                        }
+                                        Task::VacuumTask(vacuum_task) => {
+                                            Vacuum::vacuum(
+                                                vacuum_task,
+                                                context.context.sstable_store.clone(),
+                                                meta_client,
+                                            )
+                                            .await;
+                                        }
+                                        Task::FullScanTask(full_scan_task) => {
+                                            Vacuum::full_scan(
+                                                full_scan_task,
+                                                context.context.sstable_store.clone(),
+                                                meta_client,
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                },
+                            );
                         }
                         Err(e) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());
