@@ -340,6 +340,7 @@ impl HummockStorage {
                     if table_info_idx == 0 {
                         continue;
                     }
+                    table_info_idx = table_info_idx.saturating_sub(1);
                     let ord = user_key(
                         &level.table_infos[table_info_idx]
                             .key_range
@@ -352,7 +353,7 @@ impl HummockStorage {
                     if ord == Ordering::Less {
                         continue;
                     }
-                    table_info_idx = table_info_idx.saturating_sub(1);
+
                     let table = self
                         .sstable_store
                         .sstable(level.table_infos[table_info_idx].id, &mut stats)
