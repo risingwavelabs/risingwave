@@ -45,7 +45,7 @@ whoami
 apt install sudo -y
 usermod -aG sudo root
 apt install ufw -y
-sudo ufw status verbose
+sudo -i ufw status verbose
 
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
