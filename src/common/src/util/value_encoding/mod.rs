@@ -147,8 +147,8 @@ fn deserialize_value(ty: &DataType, mut data: impl Buf) -> Result<Datum> {
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
         DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
-        DataType::Struct { fields: _ } => deserialize_struct_or_list(ty, data)?,
-        DataType::List { datatype: _ } => deserialize_struct_or_list(ty, data)?,
+        DataType::Struct { .. } => deserialize_struct_or_list(ty, data)?,
+        DataType::List { .. } => deserialize_struct_or_list(ty, data)?,
     }))
 }
 
