@@ -23,12 +23,12 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SstableIterator};
+use crate::hummock::{HummockResult, SstableIterator, SstableStreamIterator};
 use crate::monitor::StoreLocalStatistic;
 
 pub struct ConcatSstableIterator {
     /// The iterator of the current table.
-    sstable_iter: Option<SstableIterator>,
+    sstable_iter: Option<SstableStreamIterator>,
 
     /// Current table index.
     cur_idx: usize,
@@ -70,10 +70,9 @@ impl ConcatSstableIterator {
         } else {
             let table = self
                 .sstable_store
-                .load_table(self.tables[idx].id, true, &mut self.stats)
+                .load_table(self.tables[idx].id, false, &mut self.stats)
                 .await?;
-            let mut sstable_iter =
-                SstableIterator::new(table, self.sstable_store.clone(), self.read_options.clone());
+            let mut sstable_iter = SstableStreamIterator::new(table, self.sstable_store.clone());
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {
@@ -101,7 +100,7 @@ impl HummockIterator for ConcatSstableIterator {
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
             let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next_for_compact()?;
+            sstable_iter.next().await?;
 
             if sstable_iter.is_valid() {
                 Ok(())

@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, ObjectMetadata, ObjectStore, ObjectStoreRef,
+    get_local_path, BlockLocation, ObjectError, ObjectMetadata, ObjectStore, ObjectStoreRef,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -177,7 +177,7 @@ impl BlockStream {
             )));
         }
 
-        let boxed_block = Box::new(Block::decode(Bytes::from(buffer))?);
+        let boxed_block = Box::new(Block::decode(&buffer)?);
         self.block_idx += 1;
 
         Ok(Some(BlockHolder::from_owned_block(boxed_block)))
@@ -632,9 +632,8 @@ mod tests {
                 )
             }),
         );
-        let table = Sstable::new(1, meta.clone());
         sstable_store
-            .put(table, data, CachePolicy::Fill)
+            .put_sst(1, meta.clone(), data, CachePolicy::Fill)
             .await
             .unwrap();
         let mut stream = sstable_store
@@ -679,5 +678,4 @@ mod tests {
             assert_eq!(num_blocks, 100 - start_index);
         }
     }
-
 }

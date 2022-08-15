@@ -430,13 +430,8 @@ mod tests {
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
         let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        let table = Sstable {
-            id: 0,
-            meta,
-            blocks: vec![],
-        };
         sstable_store
-            .put(table, data, CachePolicy::NotFill)
+            .put_sst(0, meta, data, CachePolicy::NotFill)
             .await
             .unwrap();
 
