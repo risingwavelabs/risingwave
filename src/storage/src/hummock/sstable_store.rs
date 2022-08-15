@@ -234,6 +234,7 @@ impl SstableStore {
             return Err(e);
         }
         if let CachePolicy::Fill = uploader.policy {
+            debug_assert!(!uploader.blocks.is_empty());
             let sst = Sstable::new_with_blocks(sst_id, meta, uploader.blocks).unwrap();
             let charge = sst.estimate_size();
             self.meta_cache
