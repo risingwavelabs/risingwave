@@ -28,6 +28,7 @@ pub struct ComputeNodeConfig {
     pub listen_address: String,
     pub exporter_port: u16,
     pub enable_tiered_cache: bool,
+    pub enable_disk_object_store: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
@@ -92,6 +93,7 @@ pub struct CompactorConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub enable_disk_object_store: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,

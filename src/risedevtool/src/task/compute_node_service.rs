@@ -63,8 +63,8 @@ impl ComputeNodeService {
 
         if config.enable_tiered_cache {
             cmd.arg("--file-cache-dir").arg(
-                PathBuf::from(prefix_data)
-                    .join("filecache")
+                PathBuf::from(&prefix_data)
+                    .join("file-cache")
                     .join(config.port.to_string()),
             );
         }
@@ -86,11 +86,23 @@ impl ComputeNodeService {
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
+        let disk_object_store = if config.enable_disk_object_store {
+            Some(
+                PathBuf::from(&prefix_data)
+                    .join("disk-object-store")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        } else {
+            None
+        };
 
         let is_shared_backend = add_storage_backend(
             &config.id,
             provide_minio,
             provide_aws_s3,
+            disk_object_store,
             hummock_in_memory_strategy,
             cmd,
         )?;

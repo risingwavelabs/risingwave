@@ -28,6 +28,7 @@ pub fn compute_risectl_env(services: &HashMap<String, ServiceConfig>) -> Result<
                 "risectl",
                 c.provide_minio.as_ref().unwrap(),
                 c.provide_aws_s3.as_ref().unwrap(),
+                None,
                 HummockInMemoryStrategy::Disallowed,
                 &mut cmd,
             )?;

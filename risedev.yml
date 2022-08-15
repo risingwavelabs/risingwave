@@ -347,7 +347,6 @@ risedev:
     - use: compactor
     - use: redis
 
-
 compose:
   risingwave: "ghcr.io/singularity-data/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -429,6 +428,9 @@ template:
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
+
+    # If `enable-disk-object-store` is ture, hummock will use data directory as object store storage backend.
+    enable-disk-object-store: false
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -556,6 +558,9 @@ template:
 
     # Id of this instance
     id: compactor-${port}
+
+    # If `enable-disk-object-store` is ture, hummock will use data directory as object store storage backend.
+    enable-disk-object-store: false
 
     # Minio instances used by this compute node
     provide-minio: "minio*"

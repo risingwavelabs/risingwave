@@ -56,9 +56,23 @@ pub fn add_storage_backend(
     id: &str,
     provide_minio: &[MinioConfig],
     provide_aws_s3: &[AwsS3Config],
+    disk_object_store: Option<String>,
     hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
 ) -> Result<bool> {
+    if let Some(path) = disk_object_store {
+        if !provide_minio.is_empty() || !provide_aws_s3.is_empty() {
+            return Err(anyhow!(
+                "disk object enabled, but {} minio and {} s3 instance found in config",
+                provide_minio.len(),
+                provide_aws_s3.len()
+            ));
+        }
+        cmd.arg("--state-store")
+            .arg(format!("hummock+disk://{}", path));
+        return Ok(true);
+    }
+
     let is_shared_backend = match (provide_minio, provide_aws_s3) {
         ([], []) => {
             match hummock_in_memory_strategy {

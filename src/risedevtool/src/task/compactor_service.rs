@@ -14,7 +14,7 @@
 
 use std::env;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::Result;
@@ -46,6 +46,8 @@ impl CompactorService {
 
     /// Apply command args accroding to config
     pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
+        let prefix_data = env::var("PREFIX_DATA")?;
+
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
@@ -58,10 +60,23 @@ impl CompactorService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+        let disk_object_store = if config.enable_disk_object_store {
+            Some(
+                PathBuf::from(&prefix_data)
+                    .join("disk-object-store")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+
         add_storage_backend(
             &config.id,
             provide_minio,
             provide_aws_s3,
+            disk_object_store,
             HummockInMemoryStrategy::Shared,
             cmd,
         )?;
