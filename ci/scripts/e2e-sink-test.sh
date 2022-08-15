@@ -44,8 +44,8 @@ cat /etc/hosts
 whoami
 apt install sudo -y
 usermod -aG sudo root
-# apt install ufw -y
-# sudo ufw status verbose
+apt install ufw -y
+sudo ufw status verbose
 
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
