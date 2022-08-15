@@ -19,6 +19,7 @@ use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -108,6 +109,30 @@ async fn compact_shared_buffer(
         }
     }
 
+    let existing_table_ids: HashSet<u32> = payload
+        .iter()
+        .flat_map(|data_list| {
+            data_list
+                .iter()
+                .flat_map(|uncommitted_data| match uncommitted_data {
+                    UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
+
+                    UncommittedData::Batch(shared_buffer_write_batch) => {
+                        vec![shared_buffer_write_batch.table_id]
+                    }
+                })
+        })
+        .dedup()
+        .collect();
+
+    assert!(!existing_table_ids.is_empty());
+
+    let multi_filter_key_extractor = context
+        .filter_key_extractor_manager
+        .acquire(existing_table_ids)
+        .await;
+    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
+
     // Local memory compaction looks at all key ranges.
     let sstable_store = context.sstable_store.clone();
     let stats = context.stats.clone();
@@ -129,8 +154,13 @@ async fn compact_shared_buffer(
         )
         .await?;
         let compaction_executor = context.compaction_executor.clone();
+        let multi_filter_key_extractor = multi_filter_key_extractor.clone();
 
-        let split_task = async move { compactor.run(split_index, iter).await };
+        let split_task = async move {
+            compactor
+                .run(split_index, iter, multi_filter_key_extractor)
+                .await
+        };
         let rx = Compactor::request_execution(compaction_executor, split_task)?;
         compaction_futures.push(rx);
     }
@@ -196,10 +226,16 @@ impl SharedBufferCompactRunner {
         &self,
         split_index: usize,
         iter: impl HummockIterator<Direction = Forward>,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         self.compactor
-            .compact_key_range_impl(split_index, iter, dummy_compaction_filter)
+            .compact_key_range_impl(
+                split_index,
+                iter,
+                dummy_compaction_filter,
+                filter_key_extractor,
+            )
             .await
     }
 }

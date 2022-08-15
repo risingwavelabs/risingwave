@@ -102,7 +102,6 @@ impl TableCatalogBuilder {
             appendonly: append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
-            read_pattern_prefix_column: 0,
         }
     }
 
