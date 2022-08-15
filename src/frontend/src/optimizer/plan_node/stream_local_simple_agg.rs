@@ -44,6 +44,7 @@ impl StreamLocalSimpleAgg {
             ctx,
             logical.schema().clone(),
             pk_indices,
+            logical.functional_dependency().clone(),
             input_dist.clone(),
             input.append_only(),
         );

@@ -52,6 +52,8 @@ pub trait TopNExecutorBase: Send + 'static {
     /// Update the vnode bitmap for the state tables, only used by Group Top-N since it's
     /// distributed.
     fn update_state_table_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {}
+
+    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()>;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -94,6 +96,9 @@ where
 
         let barrier = expect_first_barrier(&mut input).await?;
         let mut epoch = barrier.epoch.curr;
+
+        self.inner.init(epoch).await?;
+
         yield Message::Barrier(barrier);
 
         #[for_await]

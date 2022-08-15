@@ -33,6 +33,7 @@ impl StreamSource {
             logical.ctx(),
             logical.schema().clone(),
             logical.logical_pk().to_vec(),
+            logical.functional_dependency().clone(),
             Distribution::SomeShard,
             logical.source_catalog().append_only,
         );

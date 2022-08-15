@@ -20,7 +20,7 @@ use log::debug;
 use rand::seq::SliceRandom;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::types::VnodeMapping;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{
     ExchangeInfo, PlanFragment, PlanNode as BatchPlanProst, TaskId, TaskOutputId,
@@ -74,9 +74,9 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         plan: BatchPlanProst,
-        vnodes: Option<Vec<ParallelUnitId>>,
+        vnode_mapping: Option<VnodeMapping>,
     ) -> SchedulerResult<impl DataChunkStream> {
-        let worker_node_addr = match vnodes {
+        let worker_node_addr = match vnode_mapping {
             Some(mut parallel_unit_ids) => {
                 parallel_unit_ids.dedup();
                 let candidates = self

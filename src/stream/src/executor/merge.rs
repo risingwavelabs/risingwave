@@ -106,10 +106,16 @@ impl MergeExecutor {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.actor_id, self.upstreams);
         let actor_id_str = self.actor_id.to_string();
+        let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         // Channels that're blocked by the barrier to align.
+        let mut start_time = minstant::Instant::now();
         pin_mut!(select_all);
         while let Some(msg) = select_all.next().await {
+            self.metrics
+                .actor_input_buffer_blocking_duration_ns
+                .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
+                .inc_by(start_time.elapsed().as_nanos() as u64);
             let msg: Message = msg?;
             self.status.next_message(&msg);
 
@@ -157,6 +163,7 @@ impl MergeExecutor {
             }
 
             yield msg;
+            start_time = minstant::Instant::now();
         }
     }
 }

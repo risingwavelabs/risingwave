@@ -913,6 +913,7 @@ mod tests {
             ActorContext::create(),
             0,
             0,
+            0,
             Arc::new(StreamingMetrics::unused()),
         ));
         let actor_id = 233;
