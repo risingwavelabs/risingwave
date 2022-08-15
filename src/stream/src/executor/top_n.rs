@@ -97,7 +97,7 @@ pub struct TopNCache {
     pub low: BTreeMap<OrderedRow, Row>,
     pub middle: BTreeMap<OrderedRow, Row>,
     pub high: BTreeMap<OrderedRow, Row>,
-    high_capacity: usize,
+    pub high_capacity: usize,
     pub offset: usize,
     pub limit: usize,
 }
@@ -439,6 +439,12 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()> {
+        self.managed_state
+            .init_topn_cache(None, &mut self.cache, epoch)
+            .await
     }
 }
 
@@ -841,11 +847,11 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I  I
-                -  8  5 
+                -  8  5
                 + 12 10
-                -  9  4 
+                -  9  4
                 + 13 11
-                - 11  8 
+                - 11  8
                 + 14 12"
             )
         );
