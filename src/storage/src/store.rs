@@ -103,7 +103,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and

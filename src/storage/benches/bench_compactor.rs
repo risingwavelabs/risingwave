@@ -61,7 +61,7 @@ pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
 const MAX_KEY_COUNT: usize = 128 * 1024;
 
 fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, SstableMeta) {
-    let mut builder = SstableBuilder::new(
+    let mut builder = SstableBuilder::new_for_test(
         sstable_id,
         SstableBuilderOptions {
             capacity: 32 * 1024 * 1024,
@@ -149,7 +149,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
         let table_id = self.global_table_id.fetch_add(1, Ordering::SeqCst);
         Ok((
             self.limiter.require_memory(1).await.unwrap(),
-            SstableBuilder::new(table_id, self.options.clone()),
+            SstableBuilder::new_for_test(table_id, self.options.clone()),
         ))
     }
 }

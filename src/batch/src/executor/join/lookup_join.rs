@@ -22,7 +22,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode,
+    DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_common::util::scan_range::ScanRange;
@@ -82,7 +82,7 @@ impl DummyExecutor {
 /// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
     table_desc: StorageTableDesc,
-    vnode_mapping: Vec<ParallelUnitId>,
+    vnode_mapping: VnodeMapping,
     build_side_key_types: Vec<DataType>,
     probe_side_schema: Schema,
     probe_side_column_ids: Vec<i32>,

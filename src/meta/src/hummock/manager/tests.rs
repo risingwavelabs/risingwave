@@ -143,18 +143,9 @@ async fn test_unpin_snapshot_before() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
-
-    // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager.list_parallel_units().await;
-    env.hash_mapping_manager()
-        .build_fragment_hash_mapping(1, &parallel_units);
-    for table_id in 1..sst_num + 2 {
-        env.hash_mapping_manager()
-            .set_fragment_state_table(1, table_id as u32);
-    }
 
     // No compaction task available.
     let task = hummock_manager
@@ -851,18 +842,8 @@ async fn test_invalid_sst_id() {
 
 #[tokio::test]
 async fn test_trigger_manual_compaction() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2;
-
-    // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager.list_parallel_units().await;
-    env.hash_mapping_manager()
-        .build_fragment_hash_mapping(1, &parallel_units);
-    for table_id in 1..sst_num + 2 {
-        env.hash_mapping_manager()
-            .set_fragment_state_table(1, table_id as u32);
-    }
 
     {
         let option = ManualCompactionOption::default();

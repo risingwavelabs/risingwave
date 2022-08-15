@@ -158,7 +158,7 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
+    use risingwave_source::{MemSourceManager, SourceManager};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
@@ -254,14 +254,14 @@ mod tests {
         let chunk = reader.next().await?;
 
         // Row id column
-        assert!(chunk.chunk.columns()[0]
+        assert!(chunk.columns()[0]
             .array()
             .as_int64()
             .iter()
             .all(|x| x.is_none()));
 
         assert_eq!(
-            chunk.chunk.columns()[1]
+            chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()
@@ -270,7 +270,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.chunk.columns()[2]
+            chunk.columns()[2]
                 .array()
                 .as_int32()
                 .iter()
@@ -289,7 +289,7 @@ mod tests {
         )
         .unwrap()
         .into();
-        assert_eq!(*chunk.chunk.columns()[3].array(), array);
+        assert_eq!(*chunk.columns()[3].array(), array);
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.
