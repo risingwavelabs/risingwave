@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockVersion, HummockVersionDelta,
+    pin_version_response, CompactTask, CompactTaskProgress, CompactionGroup, HummockVersion, HummockVersionDelta,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
@@ -44,7 +44,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
+    ) -> Result<pin_version_response::Payload> {
         self.stats.pin_version_counts.inc();
         let timer = self.stats.pin_version_latency.start_timer();
         let res = self.meta_client.pin_version(last_pinned).await;
