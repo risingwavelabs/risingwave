@@ -28,12 +28,12 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
-use super::Distribution;
 use crate::error::{StorageError, StorageResult};
 use crate::row_serde::row_serde_util::{deserialize, serialize};
 use crate::row_serde::ColumnDescMapping;
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
+use crate::table::Distribution;
 use crate::{Keyspace, StateStore};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
