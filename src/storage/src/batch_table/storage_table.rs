@@ -35,12 +35,12 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_pb::catalog::Table;
 
-use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::deserialize;
 use crate::row_serde::{serialize_pk, ColumnDescMapping};
 use crate::store::ReadOptions;
+use crate::table::{Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 mod iter_utils;
@@ -270,7 +270,7 @@ impl<S: StateStore> StorageTable<S> {
     }
 }
 
-/// Get
+/// Point get
 impl<S: StateStore> StorageTable<S> {
     /// Check whether the given `vnode` is set in the `vnodes` of this table.
     fn check_vnode_is_set(&self, vnode: VirtualNode) {

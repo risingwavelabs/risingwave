@@ -30,7 +30,7 @@ use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 // use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
 use risingwave_storage::batch_table::storage_table::{StorageTable, StorageTableIter};
-use risingwave_storage::batch_table::{Distribution, TableIter};
+use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;

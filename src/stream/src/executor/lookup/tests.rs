@@ -21,8 +21,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, T
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::batch_table::storage_table::StorageTable;
-use risingwave_storage::batch_table::Distribution;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;

@@ -39,7 +39,7 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range}
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::RowOp;
-use super::{Distribution, TableIter};
+use super::Distribution;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::{
@@ -545,16 +545,6 @@ pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 pub type StorageTableIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;
 
 pub type BatchDedupPkIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;
-
-#[async_trait::async_trait]
-impl<S: PkAndRowStream + Unpin> TableIter for S {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
-        self.next()
-            .await
-            .transpose()
-            .map(|r| r.map(|(_pk, row)| row))
-    }
-}
 
 /// Iterators
 impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T> {
