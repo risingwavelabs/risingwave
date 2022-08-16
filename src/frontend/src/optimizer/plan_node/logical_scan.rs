@@ -85,7 +85,6 @@ impl LogicalScan {
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>();
-
         let schema = Schema { fields };
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
@@ -225,13 +224,13 @@ impl LogicalScan {
 
     /// The mapped distribution key of the scan operator.
     ///
-    /// The column indices in it is the position in the `required_col_idx`, instead of the position
+    /// The column indices in it is the position in the `output_col_idx`, instead of the position
     /// in all the columns of the table (which is the table's distribution key).
     ///
-    /// Return `None` if the table's distribution key are not all in the `required_col_idx`.
+    /// Return `None` if the table's distribution key are not all in the `output_col_idx`.
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
         let tb_idx_to_op_idx = self
-            .required_col_idx
+            .output_col_idx
             .iter()
             .enumerate()
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))

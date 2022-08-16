@@ -38,6 +38,7 @@ impl StreamTopN {
             ctx,
             logical.schema().clone(),
             logical.input().logical_pk().to_vec(),
+            logical.functional_dependency().clone(),
             dist,
             false,
         );

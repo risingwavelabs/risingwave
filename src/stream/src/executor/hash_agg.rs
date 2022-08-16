@@ -32,10 +32,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
-use super::{
-    expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
-    StreamExecutorResult,
-};
+use super::{expect_first_barrier, pk_input_arrays, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -75,7 +72,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     input_pk_indices: Vec<usize>,
 
     /// Schema from input
-    input_schema: Schema,
+    _input_schema: Schema,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
@@ -134,7 +131,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 pk_indices,
                 identity: format!("HashAggExecutor {:X}", executor_id),
                 input_pk_indices: input_info.pk_indices,
-                input_schema: input_info.schema,
+                _input_schema: input_info.schema,
                 agg_calls,
                 key_indices,
                 state_tables,
@@ -204,7 +201,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
-            ref input_schema,
+            ref _input_schema,
             ref schema,
             ref mut state_tables,
             ref state_table_col_mappings,
@@ -235,11 +232,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let all_agg_input_arrays = agg_input_arrays(agg_calls, &columns);
         let pk_input_arrays = pk_input_arrays(input_pk_indices, &columns);
 
-        let input_pk_data_types: PkDataTypes = input_pk_indices
-            .iter()
-            .map(|idx| input_schema.fields[*idx].data_type.clone())
-            .collect();
-
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
             .into_iter()
@@ -251,7 +243,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let key_data_types = &schema.data_types()[..key_indices.len()];
         let mut futures = vec![];
-        for (key, hash_code, _) in &unique_keys {
+        for (key, _hash_code, _) in &unique_keys {
             // Retrieve previous state from the KeyedState.
             let states = state_map.put(key.to_owned(), None);
 
@@ -269,9 +261,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
                                 input_pk_indices.clone(),
-                                input_pk_data_types.clone(),
                                 epoch,
-                                Some(hash_code.clone()),
                                 state_tables,
                                 state_table_col_mappings,
                             )
@@ -309,7 +299,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(state_tables.iter_mut())
             {
                 let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
-                if agg_call.kind == AggKind::StringAgg {
+                // TODO(yuchao): make this work for all agg kinds in later PR
+                if matches!(agg_call.kind, AggKind::StringAgg)
+                    || (matches!(agg_call.kind, AggKind::Min | AggKind::Max)
+                        && !agg_call.append_only)
+                {
                     let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
                     agg_state
                         .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
@@ -479,8 +473,8 @@ mod tests {
     use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
-    use crate::executor::test_utils::global_simple_agg::generate_state_table;
+    use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::test_utils::agg_executor::create_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 
@@ -525,25 +519,21 @@ mod tests {
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
-        let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables: Vec<_> = keyspace_gen
+        let (state_tables, state_table_col_mappings) = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
-                generate_state_table(
+                create_state_table(
                     ks.0.clone(),
                     ks.1,
                     agg_call,
                     &key_indices,
                     &pk_indices,
-                    &agg_schema,
                     input.as_ref(),
                 )
             })
-            .collect();
-        // TODO(yuchao): We are not using col_mappings in agg calls generated in unittest,
-        // so it's ok to fake it. Later we should generate real column mapping for state tables.
-        let state_table_col_mappings = (0..state_tables.len()).map(|_| vec![]).collect();
+            .unzip();
+
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
@@ -939,7 +929,7 @@ mod tests {
                 "  I I  I
                 U- 1 2 8
                 U+ 1 4 1
-                U- 2 3 5 
+                U- 2 3 5
                 U+ 2 5 5
                 "
             )

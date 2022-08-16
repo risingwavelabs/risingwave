@@ -49,14 +49,14 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
-                // Follows upstream distribution from TableCatalog
-                Distribution::HashShard(distribution_key)
+                Distribution::UpstreamHashShard(distribution_key)
             }
         };
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             logical.base.logical_pk.clone(),
+            logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().appendonly,
         );

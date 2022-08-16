@@ -276,6 +276,10 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    async fn init(&mut self, _epoch: u64) -> StreamExecutorResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
