@@ -121,7 +121,7 @@ impl LocalVersion {
             .cloned()
     }
 
-    pub fn set_min_unsynced_epoch(&mut self, epoch: HummockEpoch) {
+    pub fn set_max_sync_epoch(&mut self, epoch: HummockEpoch) {
         self.max_sync_epoch = epoch;
     }
 
