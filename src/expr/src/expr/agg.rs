@@ -18,7 +18,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::expr::agg_call::Type;
 
 /// Kind of aggregation function
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AggKind {
     Min,
     Max,
