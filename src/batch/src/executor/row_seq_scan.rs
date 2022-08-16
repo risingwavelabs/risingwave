@@ -92,7 +92,7 @@ fn get_scan_bound(
         .iter()
         .map(|v| {
             let ty = pk_types.next().unwrap();
-            let scalar = ScalarImpl::bytes_to_scalar(v, &ty.to_protobuf()).unwrap();
+            let scalar = ScalarImpl::from_proto_bytes(v, &ty.to_protobuf()).unwrap();
             Some(scalar)
         })
         .collect_vec());
@@ -102,7 +102,7 @@ fn get_scan_bound(
 
     let bound_ty = pk_types.next().unwrap();
     let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-        let scalar = ScalarImpl::bytes_to_scalar(&bound.value, &bound_ty.to_protobuf()).unwrap();
+        let scalar = ScalarImpl::from_proto_bytes(&bound.value, &bound_ty.to_protobuf()).unwrap();
 
         let datum = Some(scalar);
         if bound.inclusive {

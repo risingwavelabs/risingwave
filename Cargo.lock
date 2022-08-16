@@ -4660,7 +4660,6 @@ dependencies = [
  "tracing",
  "twox-hash",
  "url",
- "value-encoding",
  "workspace-hack",
 ]
 
@@ -4887,7 +4886,6 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "toml",
- "value-encoding",
  "workspace-hack",
 ]
 
@@ -5343,7 +5341,6 @@ dependencies = [
  "tracing",
  "twox-hash",
  "uuid",
- "value-encoding",
  "workspace-hack",
  "zstd",
 ]
@@ -5409,7 +5406,6 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
- "value-encoding",
  "workspace-hack",
 ]
 
@@ -6682,19 +6678,6 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
-
-[[package]]
-name = "value-encoding"
-version = "0.1.11"
-dependencies = [
- "bytes",
- "memcomparable",
- "rand 0.8.5",
- "rust_decimal",
- "serde",
- "thiserror",
- "workspace-hack",
-]
 
 [[package]]
 name = "vcpkg"
