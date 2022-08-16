@@ -542,6 +542,18 @@ impl LogicalAgg {
     }
 
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        // having group key, is not simple agg.
+        if !self.group_key().is_empty() {
+            return Ok(StreamHashAgg::new(
+                self.clone_with_input(
+                    RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
+                        .enforce_if_not_satisfies(stream_input, &Order::any())?,
+                ),
+            )
+            .into());
+        }
+        // now self is simple agg
+
         let input_dist = stream_input.distribution().clone();
         let input_append_only = stream_input.append_only();
 
@@ -555,10 +567,8 @@ impl LogicalAgg {
             matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
                 || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
         });
-        let is_simple_agg = self.group_key().is_empty();
 
-        if is_simple_agg
-            && input_dist.satisfies(&RequiredDist::AnyShard)
+        if input_dist.satisfies(&RequiredDist::AnyShard)
             && agg_calls_can_use_two_phase
             && agg_calls_are_stateless
         {
@@ -569,20 +579,11 @@ impl LogicalAgg {
             // 2-phase agg
             // can be applied on agg calls not affected by order with input distributed by dist_key
             self.gen_two_phase_streaming_agg_plan(stream_input, input_dist.dist_column_indices())
-        } else if is_simple_agg {
+        } else {
             // simple 1-phase agg
             Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                 RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
             ))
-            .into())
-        } else {
-            // hash 1-phase agg
-            Ok(StreamHashAgg::new(
-                self.clone_with_input(
-                    RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
-                        .enforce_if_not_satisfies(stream_input, &Order::any())?,
-                ),
-            )
             .into())
         }
     }
