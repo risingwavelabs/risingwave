@@ -76,6 +76,8 @@ pub struct MetaOpts {
     pub full_sst_gc_interval_sec: u64,
     /// Threshold used by worker node to filter out new SSTs when scanning object store.
     pub sst_retention_time_sec: u64,
+    /// Compaction scheduler retries compactor selection with this interval.
+    pub compactor_selection_retry_interval_sec: u64,
 }
 
 impl Default for MetaOpts {
@@ -88,6 +90,7 @@ impl Default for MetaOpts {
             vacuum_interval_sec: 30,
             full_sst_gc_interval_sec: 3600 * 24,
             sst_retention_time_sec: 3600 * 24 * 7,
+            compactor_selection_retry_interval_sec: 5,
         }
     }
 }
