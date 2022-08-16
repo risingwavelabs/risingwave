@@ -35,6 +35,7 @@ macro_rules! for_all_metrics {
 
             bloom_filter_true_negative_counts: GenericCounter<AtomicU64>,
             bloom_filter_might_positive_counts: GenericCounter<AtomicU64>,
+            check_bloom_filter_counts: GenericCounter<AtomicU64>,
 
             range_scan_size: Histogram,
             range_scan_duration: Histogram,
@@ -74,6 +75,9 @@ macro_rules! for_all_metrics {
             compact_task_pending_num: IntGauge,
             get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
+
+            sstable_bloom_filter_size: Histogram,
+            sstable_meta_size: Histogram,
         }
     };
 }
@@ -142,6 +146,13 @@ impl StateStoreMetrics {
         let bloom_filter_might_positive_counts = register_int_counter_with_registry!(
             "state_store_bloom_filter_might_positive_counts",
             "Total number of sst tables that have been considered possibly positive by bloom filters",
+            registry
+        )
+        .unwrap();
+
+        let check_bloom_filter_counts = register_int_counter_with_registry!(
+            "state_check_bloom_filter_counts",
+            "Total number of read request to check bloom filters",
             registry
         )
         .unwrap();
@@ -385,13 +396,32 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
+        let opts = histogram_opts!(
+            "state_store_sstable_bloom_filter_size",
+            "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+
+        let sstable_bloom_filter_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_sstable_meta_size",
+            "Total bytes gotten from sstable_meta_size, for observing sstable_meta_size",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+
+        let sstable_meta_size = register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             get_duration,
             get_key_size,
             get_value_size,
             get_shared_buffer_hit_counts,
+
             bloom_filter_true_negative_counts,
             bloom_filter_might_positive_counts,
+            check_bloom_filter_counts,
+
             range_scan_size,
             range_scan_duration,
             range_backward_scan_size,
@@ -426,6 +456,9 @@ impl StateStoreMetrics {
 
             get_table_id_total_time_duration,
             remote_read_time,
+
+            sstable_bloom_filter_size,
+            sstable_meta_size,
         }
     }
 

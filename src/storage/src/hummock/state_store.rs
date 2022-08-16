@@ -103,7 +103,7 @@ impl HummockStorage {
             sync_uncommitted_datas,
         } = self.read_filter(&read_options, &key_range)?;
 
-        let mut stats = StoreLocalStatistic::default();
+        let mut local_stats = StoreLocalStatistic::default();
 
         for (replicated_batches, uncommitted_data) in shared_buffer_datas {
             for batch in replicated_batches {
@@ -114,7 +114,7 @@ impl HummockStorage {
                     &uncommitted_data,
                     self.sstable_store.clone(),
                     self.stats.clone(),
-                    &mut stats,
+                    &mut local_stats,
                     iter_read_options.clone(),
                 )
                 .await?,
@@ -126,7 +126,7 @@ impl HummockStorage {
                     &sync_uncommitted_data,
                     self.sstable_store.clone(),
                     self.stats.clone(),
-                    &mut stats,
+                    &mut local_stats,
                     iter_read_options.clone(),
                 )
                 .await?,
@@ -176,13 +176,18 @@ impl HummockStorage {
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                        local_stats.check_bloom_filter_counts += 1;
+
                         let sstable = self
                             .sstable_store
-                            .sstable(sstable_info.id, &mut stats)
+                            .sstable(sstable_info.id, &mut local_stats)
                             .await?;
 
                         if !sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                            local_stats.bloom_filter_might_positive_count += 1;
                             sstables.push((*sstable_info).clone());
+                        } else {
+                            local_stats.bloom_filter_true_negative_count += 1;
                         }
                     } else {
                         sstables.push((*sstable_info).clone());
@@ -200,12 +205,17 @@ impl HummockStorage {
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
-                        .sstable(table_info.id, &mut stats)
+                        .sstable(table_info.id, &mut local_stats)
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
+                        local_stats.check_bloom_filter_counts += 1;
+
                         if sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                            local_stats.bloom_filter_true_negative_count += 1;
                             continue;
                         }
+
+                        local_stats.bloom_filter_might_positive_count += 1;
                     }
 
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
@@ -241,7 +251,7 @@ impl HummockStorage {
         );
 
         user_iterator.rewind().await?;
-        stats.report(self.stats.as_ref());
+        local_stats.report(self.stats.as_ref());
         Ok(HummockStateStoreIter::new(user_iterator))
     }
 
@@ -263,7 +273,7 @@ impl HummockStorage {
             None => None,
             Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
         };
-        let mut stats = StoreLocalStatistic::default();
+        let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_datas,
             pinned_version,
@@ -285,7 +295,7 @@ impl HummockStorage {
                 .get_from_order_sorted_uncommitted_data(
                     uncommitted_data,
                     &internal_key,
-                    &mut stats,
+                    &mut local_stats,
                     key,
                     check_bloom_filter,
                 )
@@ -300,7 +310,7 @@ impl HummockStorage {
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,
                     &internal_key,
-                    &mut stats,
+                    &mut local_stats,
                     key,
                     check_bloom_filter,
                 )
@@ -323,7 +333,7 @@ impl HummockStorage {
                     for table_info in table_infos {
                         let table = self
                             .sstable_store
-                            .sstable(table_info.id, &mut stats)
+                            .sstable(table_info.id, &mut local_stats)
                             .await?;
                         table_counts += 1;
                         if let Some(v) = self
@@ -332,7 +342,7 @@ impl HummockStorage {
                                 &internal_key,
                                 key,
                                 check_bloom_filter,
-                                &mut stats,
+                                &mut local_stats,
                             )
                             .await?
                         {
@@ -365,11 +375,17 @@ impl HummockStorage {
 
                     let table = self
                         .sstable_store
-                        .sstable(level.table_infos[table_info_idx].id, &mut stats)
+                        .sstable(level.table_infos[table_info_idx].id, &mut local_stats)
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
-                        .get_from_table(table, &internal_key, key, check_bloom_filter, &mut stats)
+                        .get_from_table(
+                            table,
+                            &internal_key,
+                            key,
+                            check_bloom_filter,
+                            &mut local_stats,
+                        )
                         .await?
                     {
                         return Ok(v);
@@ -378,7 +394,7 @@ impl HummockStorage {
             }
         }
 
-        stats.report(self.stats.as_ref());
+        local_stats.report(self.stats.as_ref());
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["sub-iter"])
