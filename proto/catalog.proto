@@ -76,8 +76,6 @@ message Table {
   bool appendonly = 14;
   uint32 owner = 15;
   map<string, string> properties = 16;
-  // the count of column for prefix in storage_pk
-  uint32 read_pattern_prefix_column = 17;
 }
 
 message Schema {
