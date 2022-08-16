@@ -59,7 +59,7 @@ pub struct TaskProgress {
     pub num_blocks_uploaded: u32,
 }
 
-/// Maps task_id to its `TaskProgress`
+/// Maps `task_id` to its `TaskProgress`
 #[derive(Default, Clone)]
 pub struct TaskProgressTracker {
     task_id: u64,

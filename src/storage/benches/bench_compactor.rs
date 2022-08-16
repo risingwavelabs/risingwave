@@ -173,7 +173,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         },
         CachePolicy::NotFill,
         sstable_store.clone(),
-        TaskProgressTracker::default(),
+        None,
     );
 
     Compactor::compact_and_build_sst(

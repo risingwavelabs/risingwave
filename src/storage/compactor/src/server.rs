@@ -26,9 +26,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::compactor::{
-    CompactionExecutor, CompactionShutdowSenderMap, CompactorContext,
-};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
 use risingwave_storage::monitor::{
@@ -136,7 +134,7 @@ pub async fn compactor_serve(
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
-        task_progress: TaskProgressTracker,
+        task_progress: Default::default(),
     });
 
     let sub_tasks = vec![

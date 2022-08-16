@@ -239,7 +239,15 @@ where
             }
 
             // Reschedule it in case there are more tasks from this compaction group.
-            request_channel.try_send(compaction_group);
+            if let Err(e) = request_channel.try_send(compaction_group) {
+                tracing::error!(
+                    "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
+                    compaction_group,
+                    compact_task.task_id,
+                    e
+                );
+                return false;
+            }
 
             return true;
         }

@@ -162,7 +162,7 @@ mod tests {
                 hummock_meta_client.clone(),
                 storage.options().sstable_id_remote_fetch_number,
             )),
-            task_progress: TaskProgressTracker::default(),
+            task_progress: Default::default(),
         }
     }
 
@@ -963,7 +963,8 @@ mod tests {
             .unwrap();
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone(), rx).await;
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;

@@ -33,9 +33,7 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compactor::{
-    CompactionExecutor, CompactionShutdowSenderMap, Compactor, CompactorContext,
-};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
@@ -141,8 +139,6 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
-    let shutdown_map = CompactionShutdowSenderMap::default();
-
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
         extra_info_sources.push(storage.sstable_id_manager());
@@ -157,7 +153,7 @@ pub async fn compute_node_serve(
         {
             tracing::info!("start embedded compactor");
             // todo: set shutdown_sender in HummockStorage.
-            let (handle, shutdown_sender) = Arc::new(CompactorContext {
+            let compactor_context = Arc::new(CompactorContext {
                 options: storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),

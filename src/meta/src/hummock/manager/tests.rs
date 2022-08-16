@@ -928,18 +928,9 @@ async fn test_hummock_compaction_task_heartbeat() {
     let sst_num = 2;
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-    let _tx = compactor_manager.add_compactor(context_id);
+    let _tx = compactor_manager.add_compactor(context_id, 100);
     let (join_handle, shutdown_tx) =
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
-
-    // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager.list_parallel_units().await;
-    env.hash_mapping_manager()
-        .build_fragment_hash_mapping(1, &parallel_units);
-    for table_id in 1..sst_num + 2 {
-        env.hash_mapping_manager()
-            .set_fragment_state_table(1, table_id as u32);
-    }
 
     // No compaction task available.
     let task = hummock_manager
@@ -972,7 +963,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(
@@ -1014,7 +1005,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);

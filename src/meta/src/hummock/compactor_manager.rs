@@ -267,6 +267,7 @@ impl CompactorManager {
                 sender: tx,
                 task_heartbeats: Mutex::new(HashMap::new()),
                 task_heartbeat_interval_seconds: self.task_heartbeat_interval_seconds,
+                max_concurrent_task_number,
             }),
         );
         tracing::info!("Added compactor session {}", context_id);
