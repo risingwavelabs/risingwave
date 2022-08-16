@@ -23,6 +23,7 @@ use crate::array::DataChunk;
 use crate::error::Result;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
+use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 impl DataChunk {

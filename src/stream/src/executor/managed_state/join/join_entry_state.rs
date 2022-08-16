@@ -64,9 +64,8 @@ impl JoinEntryState {
         data_types: &'b [DataType],
     ) -> impl Iterator<Item = (&'a mut EncodedJoinRow, StreamExecutorResult<JoinRow>)> + 'a {
         self.cached.values_mut().map(|encoded| {
-            let decoded = encoded.decode(data_types);
-            // TODO(yuhao): remove the `RwError` in value encoding.
-            (encoded, decoded.map_err(StreamExecutorError::serde_error))
+            let decoded_row = encoded.decode(data_types)?;
+            (encoded, decoded_row)
         })
     }
 }
