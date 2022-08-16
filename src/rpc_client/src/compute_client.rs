@@ -19,6 +19,8 @@ use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
+use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
+use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -35,6 +37,7 @@ use crate::{RpcClient, RpcClientPool};
 pub struct ComputeClient {
     pub exchange_client: ExchangeServiceClient<Channel>,
     pub task_client: TaskServiceClient<Channel>,
+    pub monitor_client: MonitorServiceClient<Channel>,
     pub addr: HostAddr,
 }
 
@@ -50,10 +53,12 @@ impl ComputeClient {
 
     pub fn with_channel(addr: HostAddr, channel: Channel) -> Self {
         let exchange_client = ExchangeServiceClient::new(channel.clone());
-        let task_client = TaskServiceClient::new(channel);
+        let task_client = TaskServiceClient::new(channel.clone());
+        let monitor_client = MonitorServiceClient::new(channel);
         Self {
             exchange_client,
             task_client,
+            monitor_client,
             addr,
         }
     }
@@ -124,6 +129,15 @@ impl ComputeClient {
             .task_client
             .to_owned()
             .abort_task(req)
+            .await?
+            .into_inner())
+    }
+
+    pub async fn stack_trace(&self) -> Result<StackTraceResponse> {
+        Ok(self
+            .monitor_client
+            .to_owned()
+            .stack_trace(StackTraceRequest::default())
             .await?
             .into_inner())
     }

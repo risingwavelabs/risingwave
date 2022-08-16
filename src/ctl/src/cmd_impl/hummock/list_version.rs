@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::common::MetaServiceOpts;
@@ -19,7 +20,12 @@ use crate::common::MetaServiceOpts;
 pub async fn list_version() -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
-    let version = meta_client.pin_version(u64::MAX).await?.2;
+    let version = match meta_client.pin_version(u64::MAX).await? {
+        Payload::VersionDeltas(_) => {
+            unreachable!("should get full version")
+        }
+        Payload::PinnedVersion(version) => version,
+    };
     println!("{:#?}", version);
     meta_client.unpin_version().await?;
     Ok(())

@@ -411,7 +411,7 @@ macro_rules! iter_fields {
                 let $it = arr
                     .children
                     .iter()
-                    .map(|a| a.value_at(*idx).clone().to_owned_datum());
+                    .map(|a| a.value_at(*idx).to_owned_datum());
                 $($body)*
             }
             StructRef::ValueRef { val } => {

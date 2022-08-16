@@ -71,6 +71,13 @@ pub struct CompactorOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// It's a hint used by meta node.
+    #[clap(long, default_value = "16")]
+    pub max_concurrent_task_number: u64,
+
+    #[clap(long)]
+    pub compaction_worker_threads_number: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
