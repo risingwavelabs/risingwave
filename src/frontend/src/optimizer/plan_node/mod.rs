@@ -303,6 +303,7 @@ pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
+pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
@@ -392,6 +393,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, GroupTopN }
         }
     };
 }
@@ -480,6 +482,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, GroupTopN }
         }
     };
 }

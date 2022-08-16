@@ -94,6 +94,7 @@ pub use error::StreamExecutorResult;
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
+pub use group_top_n::GroupTopNExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
