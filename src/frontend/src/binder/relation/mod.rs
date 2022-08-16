@@ -164,6 +164,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "database name")
     }
 
+    /// return the `database_name`
+    pub fn resolve_cte_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "CTE name")
+    }
+
     /// return the `user_name`
     pub fn resolve_user_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "user name")
@@ -248,7 +253,7 @@ impl Binder {
             && let Some(bound_query) = self.cte_to_relation.get(&table_name)
         {
             let (query, mut original_alias) = bound_query.clone();
-            debug_assert_eq!(original_alias.name.value, table_name); // The original CTE alias ought to be its table name.
+            debug_assert_eq!(Self::resolve_cte_name(original_alias.name).unwrap(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
