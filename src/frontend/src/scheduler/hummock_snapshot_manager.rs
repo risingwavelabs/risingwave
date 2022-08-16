@@ -133,7 +133,6 @@ impl HummockSnapshotManager {
     }
 
     pub fn update_epoch(&self, epoch: u64) {
-        println!("received epoch {}", epoch);
         self.max_committed_epoch.fetch_max(epoch, Ordering::Relaxed);
     }
 
@@ -182,17 +181,7 @@ impl HummockSnapshotManagerCore {
         let ret = self.meta_client.get_epoch().await;
         match ret {
             Ok(epoch) => {
-                let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
-                    None => {
-                        self.epoch_to_query_ids.insert(epoch, HashSet::default());
-                        self.epoch_to_query_ids.get_mut(&epoch).unwrap()
-                    }
-                    Some(queries) => queries,
-                };
-                for (id, cb) in batches.drain(..) {
-                    queries.insert(id);
-                    let _ = cb.send(Ok(epoch));
-                }
+                self.notify_epoch_assigned_for_queries(epoch, batches);
                 epoch
             }
             Err(e) => {
@@ -215,6 +204,15 @@ impl HummockSnapshotManagerCore {
         batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
     ) -> u64 {
         let epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        self.notify_epoch_assigned_for_queries(epoch, batches);
+        epoch
+    }
+
+    fn notify_epoch_assigned_for_queries(
+        &mut self,
+        epoch: u64,
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
+    ) {
         let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
             None => {
                 self.epoch_to_query_ids.insert(epoch, HashSet::default());
@@ -226,7 +224,6 @@ impl HummockSnapshotManagerCore {
             queries.insert(id);
             let _ = cb.send(Ok(epoch));
         }
-        epoch
     }
 
     pub fn release_epoch(&mut self, queries: &mut Vec<(QueryId, u64)>) {
