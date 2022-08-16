@@ -26,6 +26,7 @@ use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     KeyIndexedUncommittedData, OrderSortedUncommittedData, UncommittedData,
 };
@@ -210,9 +211,17 @@ impl LocalVersion {
         cleaned_epoch
     }
 
-    pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
+    pub fn read_fliter<R, B>(
+        this: &RwLock<Self>,
+        read_epoch: HummockEpoch,
+        key_range: &R,
+    ) -> ReadVersion
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
         use parking_lot::RwLockReadGuard;
-        let (pinned_version, (shared_buffer, sync_uncommitted_datas)) = {
+        let (pinned_version, (shared_buffer_datas, sync_uncommitted_datas)) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
             let pinned_version = guard.pinned_version.clone();
@@ -223,15 +232,15 @@ impl LocalVersion {
                         .shared_buffer
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
-                        .map(|(_, shared_buffer)| shared_buffer.clone())
+                        .map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
                         .collect();
-                    let result_sync: Vec<SyncUncommittedData> = guard
+                    let result_sync: Vec<OrderSortedUncommittedData> = guard
                         .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
                             node.0 <= read_epoch && node.0 >= smallest_uncommitted_epoch
                         })
-                        .map(|(_, value)| value.clone())
+                        .map(|(_, value)| value.get_overlap_data(key_range))
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
                     (result, result_sync)
@@ -243,7 +252,7 @@ impl LocalVersion {
         };
 
         ReadVersion {
-            shared_buffer: shared_buffer.into_iter().collect(),
+            shared_buffer_datas,
             pinned_version,
             sync_uncommitted_datas,
         }
@@ -314,7 +323,7 @@ impl PinnedVersion {
 
 pub struct ReadVersion {
     /// The shared buffer is sorted by epoch descendingly
-    pub shared_buffer: Vec<SharedBuffer>,
+    pub shared_buffer_datas: Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
     pub pinned_version: Arc<PinnedVersion>,
-    pub sync_uncommitted_datas: Vec<SyncUncommittedData>,
+    pub sync_uncommitted_datas: Vec<OrderSortedUncommittedData>,
 }

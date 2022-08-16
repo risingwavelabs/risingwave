@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use std::sync::{Arc, Weak};
@@ -609,8 +610,16 @@ impl LocalVersionManager {
         ret
     }
 
-    pub fn read_version(self: &Arc<LocalVersionManager>, read_epoch: HummockEpoch) -> ReadVersion {
-        LocalVersion::read_version(&self.local_version, read_epoch)
+    pub fn read_fliter<R, B>(
+        self: &Arc<LocalVersionManager>,
+        read_epoch: HummockEpoch,
+        key_range: &R,
+    ) -> ReadVersion
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        LocalVersion::read_fliter(&self.local_version, read_epoch, key_range)
     }
 
     pub fn get_pinned_version(&self) -> Arc<PinnedVersion> {

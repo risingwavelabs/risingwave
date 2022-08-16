@@ -33,7 +33,7 @@ use crate::hummock::iterator::{
     Backward, DirectedUserIteratorBuilder, DirectionEnum, Forward, HummockIteratorDirection,
     HummockIteratorUnion,
 };
-use crate::hummock::local_version::PinnedVersion;
+use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
@@ -97,12 +97,15 @@ impl HummockStorage {
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
 
-        let (shared_buffer_data, pinned_version, sync_uncommitted_datas) =
-            self.read_filter(&read_options, &key_range)?;
+        let ReadVersion {
+            shared_buffer_datas,
+            pinned_version,
+            sync_uncommitted_datas,
+        } = self.read_filter(&read_options, &key_range)?;
 
         let mut stats = StoreLocalStatistic::default();
 
-        for (replicated_batches, uncommitted_data) in shared_buffer_data {
+        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
             for batch in replicated_batches {
                 overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
             }
@@ -261,14 +264,17 @@ impl HummockStorage {
             Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
         };
         let mut stats = StoreLocalStatistic::default();
-        let (shared_buffer_data, pinned_version, sync_uncommitted_datas) =
-            self.read_filter(&read_options, &(key..=key))?;
+        let ReadVersion {
+            shared_buffer_datas,
+            pinned_version,
+            sync_uncommitted_datas,
+        } = self.read_filter(&read_options, &(key..=key))?;
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
 
         // Query shared buffer. Return the value without iterating SSTs if found
-        for (replicated_batches, uncommitted_data) in shared_buffer_data {
+        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
             for batch in replicated_batches {
                 if let Some(v) = self.get_from_batch(&batch, key) {
                     return Ok(v);
@@ -424,41 +430,22 @@ impl HummockStorage {
         })
     }
 
-    #[expect(clippy::type_complexity)]
     fn read_filter<R, B>(
         &self,
         read_options: &ReadOptions,
         key_range: &R,
-    ) -> HummockResult<(
-        Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
-        Arc<PinnedVersion>,
-        Vec<OrderSortedUncommittedData>,
-    )>
+    ) -> HummockResult<ReadVersion>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         let epoch = read_options.epoch;
-        let read_version = self.local_version_manager.read_version(epoch);
+        let read_version = self.local_version_manager.read_fliter(epoch, key_range);
 
         // Check epoch validity
         validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
 
-        let shared_buffer_data = read_version
-            .shared_buffer
-            .iter()
-            .map(|shared_buffer| shared_buffer.get_overlap_data(key_range))
-            .collect();
-        let sync_uncommitted_data: Vec<OrderSortedUncommittedData> = read_version
-            .sync_uncommitted_datas
-            .iter()
-            .map(|sync_uncommitted_data| sync_uncommitted_data.get_overlap_data(key_range))
-            .collect();
-        Ok((
-            shared_buffer_data,
-            read_version.pinned_version,
-            sync_uncommitted_data,
-        ))
+        Ok(read_version)
     }
 }
 
