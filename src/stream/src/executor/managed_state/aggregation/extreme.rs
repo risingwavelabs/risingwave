@@ -57,7 +57,7 @@ pub struct GenericExtremeState<S: StateStore> {
     /// The order types of `state_table_order_col_indices`.
     state_table_order_types: Vec<OrderType>,
 
-    /// Number of items in the state including those not in top n cache but in state store.
+    /// Number of all items in the state store.
     total_count: usize,
 
     /// Cache for the top N elements in the state. Note that the cache
@@ -65,8 +65,9 @@ pub struct GenericExtremeState<S: StateStore> {
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
     cache: Cache<Datum>,
 
-    /// Whether the cache is synced to state table, i.e. elements in the
-    /// cache are the most smallest ones in the state table.
+    /// Whether the cache is synced to state table. The cache is synced iff:
+    /// - the cache is empty and `total_count` is 0, or
+    /// - the cache is not empty and elements in the cache are the topest ones in the state table.
     cache_synced: bool,
 }
 
