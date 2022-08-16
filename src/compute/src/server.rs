@@ -151,11 +151,11 @@ pub async fn compute_node_serve(
             || storage_config.disable_remote_compactor
         {
             tracing::info!("start embedded compactor");
-            let memory_limiter = Arc::new(MemoryLimiter::new(
+            let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             // todo: set shutdown_sender in HummockStorage.
-            let data_cache_capacity =
+            let write_memory_limit =
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2;
             let context = Arc::new(Context {
                 options: storage_config,
@@ -165,13 +165,13 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
-                memory_limiter,
+                read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
             });
             // TODO: use normal sstable store for single-process mode.
             let compact_sstable_store = CompactorSstableStore::new(
                 storage.sstable_store(),
-                Arc::new(MemoryLimiter::new(data_cache_capacity)),
+                Arc::new(MemoryLimiter::new(write_memory_limit)),
             );
             let compactor_context = Arc::new(CompactorContext {
                 context,

@@ -45,7 +45,7 @@ pub struct Context {
 
     pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
-    pub memory_limiter: Arc<MemoryLimiter>,
+    pub read_memory_limiter: Arc<MemoryLimiter>,
 
     pub sstable_id_manager: SstableIdManagerRef,
 }

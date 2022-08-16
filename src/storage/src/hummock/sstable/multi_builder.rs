@@ -149,9 +149,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             let policy = self.policy;
             let mut tracker = self.tracker.take().unwrap();
             let upload_join_handle = tokio::spawn(async move {
-                tracker
-                    .increase_memory(data.capacity() as u64 + meta.encoded_size() as u64)
-                    .await;
+                tracker.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as u64);
                 let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
                 drop(tracker);
                 ret

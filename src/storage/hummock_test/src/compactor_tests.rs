@@ -161,7 +161,7 @@ mod tests {
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-            memory_limiter: MemoryLimiter::unlimit(),
+            read_memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
@@ -171,7 +171,7 @@ mod tests {
         CompactorContext {
             sstable_store: Arc::new(CompactorSstableStore::new(
                 context.sstable_store.clone(),
-                context.memory_limiter.clone(),
+                context.read_memory_limiter.clone(),
             )),
             context,
         }

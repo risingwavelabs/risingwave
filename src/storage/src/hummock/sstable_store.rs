@@ -185,7 +185,6 @@ impl SstableStore {
         }
     }
 
-
     pub async fn put_sst_stream(
         &self,
         sst_id: HummockSstableId,
@@ -402,7 +401,7 @@ impl SstableStore {
     pub fn clear_meta_cache(&self) {
         self.meta_cache.clear();
     }
-    
+
     pub async fn sstable(
         &self,
         sst_id: HummockSstableId,
@@ -516,9 +515,11 @@ mod tests {
 
     use super::SstableStoreRef;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableStoreWrite, SstableIterator, SstableMeta};
+    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStoreWrite};
     use crate::monitor::StoreLocalStatistic;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
@@ -534,6 +535,21 @@ mod tests {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(id, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
+        let holder = sstable_store.sstable(id, &mut stats).await.unwrap();
+        assert_eq!(holder.value().meta, meta);
+        let mut iter = SstableIterator::new(
+            holder,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+        );
+        iter.rewind().await.unwrap();
+        for i in x_range {
+            let key = iter.key();
+            let value = iter.value();
+            assert_eq!(key, iterator_test_key_of(i).as_slice());
+            assert_eq!(value, get_hummock_value(i).as_slice());
+            iter.next().await.unwrap();
+        }
     }
 
     #[tokio::test]

@@ -19,7 +19,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_object_store::object::{BlockLocation, ObjectStore};
+use risingwave_object_store::object::BlockLocation;
 
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::MemoryTracker;

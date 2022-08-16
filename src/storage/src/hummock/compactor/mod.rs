@@ -561,7 +561,7 @@ impl Compactor {
         }
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
-            limiter: self.context.memory_limiter.clone(),
+            limiter: self.context.read_memory_limiter.clone(),
             options,
             remote_rpc_cost: get_id_time.clone(),
             filter_key_extractor,
