@@ -35,7 +35,7 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, HummockVersionDeltas, Level, LevelDelta,
+    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
     LevelType, OverlappingLevel,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -844,7 +844,9 @@ where
                 .notification_manager()
                 .notify_compute_asynchronously(
                     Operation::Add,
-                    Info::HummockVersionDeltas(HummockVersionDeltas::default()),
+                    Info::HummockVersionDeltas(
+                        risingwave_pb::hummock::HummockVersionDeltas::default(),
+                    ),
                     versioning
                         .hummock_version_deltas
                         .last_key_value()
@@ -1035,7 +1037,7 @@ where
             .notification_manager()
             .notify_compute_asynchronously(
                 Operation::Add,
-                Info::HummockVersionDeltas(HummockVersionDeltas::default()),
+                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas::default()),
                 versioning
                     .hummock_version_deltas
                     .last_key_value()
