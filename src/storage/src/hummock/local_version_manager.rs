@@ -30,7 +30,8 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
+use risingwave_pb::hummock::pin_version_response;
+use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -164,7 +165,7 @@ impl LocalVersionManager {
             tokio::sync::mpsc::unbounded_channel();
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
-        let pinned_version = Self::pin_version_with_retry(
+        let pinned_version = match Self::pin_version_with_retry(
             hummock_meta_client.clone(),
             INVALID_VERSION_ID,
             10,
@@ -174,8 +175,12 @@ impl LocalVersionManager {
         .await
         .expect("should be `Some` since `break_condition` is always false")
         .expect("should be able to pinned the first version")
-        .2
-        .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should fetch the full hummock version in initialization")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
 
         let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
 
@@ -258,7 +263,7 @@ impl LocalVersionManager {
     pub fn try_update_pinned_version(
         &self,
         last_pinned: Option<u64>,
-        pin_resp: (bool, Vec<HummockVersionDelta>, Option<HummockVersion>),
+        pin_resp_payload: pin_version_response::Payload,
     ) -> bool {
         let old_version = self.local_version.upgradable_read();
         if let Some(last_pinned_id) = last_pinned {
@@ -267,27 +272,29 @@ impl LocalVersionManager {
             }
         }
 
-        let new_version_id = if pin_resp.0 {
-            match pin_resp.1.last() {
+        let new_version_id = match &pin_resp_payload {
+            Payload::VersionDeltas(version_deltas) => match version_deltas.delta.last() {
                 Some(version_delta) => version_delta.id,
                 None => old_version.pinned_version().id(),
-            }
-        } else {
-            pin_resp.2.as_ref().unwrap().id
+            },
+            Payload::PinnedVersion(version) => version.id,
         };
+
         if old_version.pinned_version().id() >= new_version_id {
             return false;
         }
 
-        let newly_pinned_version = if pin_resp.0 {
-            let mut version_to_apply = old_version.pinned_version().version();
-            for version_delta in pin_resp.1 {
-                version_to_apply.apply_version_delta(&version_delta);
+        let newly_pinned_version = match pin_resp_payload {
+            Payload::VersionDeltas(version_deltas) => {
+                let mut version_to_apply = old_version.pinned_version().version();
+                for version_delta in version_deltas.delta {
+                    version_to_apply.apply_version_delta(&version_delta);
+                }
+                version_to_apply
             }
-            version_to_apply
-        } else {
-            pin_resp.2.unwrap()
+            Payload::PinnedVersion(version) => version,
         };
+
         for levels in newly_pinned_version.levels.values() {
             if validate_table_key_range(&levels.levels).is_err() {
                 error!("invalid table key range: {:?}", levels.levels);
@@ -637,7 +644,7 @@ impl LocalVersionManager {
         last_pinned: HummockVersionId,
         max_retry: usize,
         break_condition: impl Fn() -> bool,
-    ) -> Option<HummockResult<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)>> {
+    ) -> Option<HummockResult<pin_version_response::Payload>> {
         let max_retry_interval = Duration::from_secs(10);
         let mut retry_backoff = tokio_retry::strategy::ExponentialBackoff::from_millis(10)
             .max_delay(max_retry_interval)
@@ -707,9 +714,9 @@ impl LocalVersionManager {
             )
             .await
             {
-                Some(Ok(pinned_version)) => {
+                Some(Ok(pinned_version_payload)) => {
                     local_version_manager
-                        .try_update_pinned_version(Some(last_pinned), pinned_version);
+                        .try_update_pinned_version(Some(last_pinned), pinned_version_payload);
                 }
                 Some(Err(_)) => {
                     unreachable!(

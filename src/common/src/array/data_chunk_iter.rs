@@ -20,9 +20,9 @@ use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::error::Result;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
+use crate::util::value_encoding;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum};
 
 impl DataChunk {
@@ -254,7 +254,7 @@ impl Row {
     /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&self) -> Result<Vec<u8>> {
+    pub fn serialize(&self) -> value_encoding::Result<Vec<u8>> {
         let mut result = vec![];
         for cell in &self.0 {
             result.extend(serialize_datum(cell)?);
@@ -315,7 +315,7 @@ impl RowDeserializer {
     }
 
     /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl Buf) -> Result<Row> {
+    pub fn deserialize(&self, mut data: impl Buf) -> value_encoding::Result<Row> {
         let mut values = Vec::with_capacity(self.data_types.len());
         for typ in &self.data_types {
             values.push(deserialize_datum(&mut data, typ)?);

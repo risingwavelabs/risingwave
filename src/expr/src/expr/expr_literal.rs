@@ -110,7 +110,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
         if let RexNode::Constant(prost_value) = prost.get_rex_node().unwrap() {
             // TODO: We need to unify these
-            let value = ScalarImpl::bytes_to_scalar(
+            let value = ScalarImpl::from_proto_bytes(
                 prost_value.get_body(),
                 prost.get_return_type().unwrap(),
             )?;

@@ -15,12 +15,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::{Buf, Bytes};
 use memcomparable::from_slice;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 
 use super::ColumnDescMapping;
 
@@ -110,4 +112,49 @@ pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
     let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
     let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
     (vnode, key_bytes)
+}
+
+/// used for streaming table serialize and deserialize
+/// todo(wcy-fdu): remove `RowSerde` trait after all executors using streaming table.
+pub fn serialize(row: Row) -> Result<Vec<u8>> {
+    let mut value_bytes = vec![];
+    for cell in &row.0 {
+        value_bytes.extend(serialize_datum(cell)?);
+    }
+    let res = value_bytes;
+    Ok(res)
+}
+
+pub fn deserialize(
+    column_mapping: Arc<ColumnDescMapping>,
+    raw_key: impl AsRef<[u8]>,
+    value: impl AsRef<[u8]>,
+) -> Result<(VirtualNode, Vec<u8>, Row)> {
+    let raw_key = raw_key.as_ref();
+    if raw_key.len() < VIRTUAL_NODE_SIZE {
+        // vnode + cell_id
+        return Err(ErrorCode::InternalError(format!(
+            "corrupted key: {:?}",
+            Bytes::copy_from_slice(raw_key)
+        ))
+        .into());
+    }
+
+    let (vnode, key_bytes) = parse_raw_key_to_vnode_and_key(raw_key);
+    let mut origin_row = deserialize_inner(&column_mapping.all_data_types, value.as_ref())?;
+
+    let mut output_row = Vec::with_capacity(column_mapping.output_index.len());
+    for col_idx in &column_mapping.output_index {
+        output_row.push(origin_row.0[*col_idx].take());
+    }
+    Ok((vnode, key_bytes.to_vec(), Row(output_row)))
+}
+
+fn deserialize_inner(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
+    // value encoding
+    let mut values = Vec::with_capacity(data_types.len());
+    for ty in data_types {
+        values.push(deserialize_datum(&mut row, ty)?);
+    }
+    Ok(Row(values))
 }

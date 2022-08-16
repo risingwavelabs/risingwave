@@ -586,8 +586,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(0)
     }
 
-    async fn flush(&self) -> RpcResult<()> {
-        Ok(())
+    async fn flush(&self) -> RpcResult<u64> {
+        Ok(0)
     }
 
     async fn list_table_fragments(
