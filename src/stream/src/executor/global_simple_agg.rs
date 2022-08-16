@@ -19,7 +19,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
@@ -27,7 +26,7 @@ use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
-    agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
+    generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
@@ -139,19 +138,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
 
-        // --- Retrieve all aggregation inputs in advance ---
-        let all_agg_input_arrays = agg_input_array_refs(agg_calls, &columns);
-        let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
-
-        // When applying batch, we will send columns of primary keys to the last N columns.
-        let all_agg_data = all_agg_input_arrays
-            .into_iter()
-            .map(|mut input_arrays| {
-                input_arrays.extend(pk_input_arrays.iter());
-                input_arrays
-            })
-            .collect_vec();
-
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
         if states.is_none() {
@@ -172,11 +158,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for (((agg_state, agg_call), data), state_table) in states
+        for ((agg_state, agg_call), state_table) in states
             .managed_states
             .iter_mut()
             .zip_eq(agg_calls.iter())
-            .zip_eq(all_agg_data.iter())
             .zip_eq(state_tables.iter_mut())
         {
             let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
