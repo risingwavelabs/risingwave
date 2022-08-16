@@ -123,8 +123,13 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
-        self.meta_client.subscribe_compact_tasks().await
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+        self.meta_client
+            .subscribe_compact_tasks(max_concurrent_task_number)
+            .await
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {

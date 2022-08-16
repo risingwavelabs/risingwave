@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod trace;
+mod builder;
+pub use builder::*;
 
-pub use trace::*;
+mod column_mapping;
+pub use column_mapping::*;

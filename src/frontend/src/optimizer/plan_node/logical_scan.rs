@@ -26,7 +26,7 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, ExprImpl, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::session::OptimizerContextRef;
@@ -85,7 +85,6 @@ impl LogicalScan {
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>();
-
         let schema = Schema { fields };
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
@@ -225,13 +224,13 @@ impl LogicalScan {
 
     /// The mapped distribution key of the scan operator.
     ///
-    /// The column indices in it is the position in the `required_col_idx`, instead of the position
+    /// The column indices in it is the position in the `output_col_idx`, instead of the position
     /// in all the columns of the table (which is the table's distribution key).
     ///
-    /// Return `None` if the table's distribution key are not all in the `required_col_idx`.
+    /// Return `None` if the table's distribution key are not all in the `output_col_idx`.
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
         let tb_idx_to_op_idx = self
-            .required_col_idx
+            .output_col_idx
             .iter()
             .enumerate()
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
@@ -247,18 +246,35 @@ impl LogicalScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &[usize],
+        primary_to_secondary_mapping: &HashMap<usize, usize>,
     ) -> LogicalScan {
-        assert_eq!(
-            primary_to_secondary_mapping.len(),
-            self.table_desc.columns.len()
-        );
         let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
 
         // create index scan plan to match the output order of the current table scan
         for &col_idx in &self.required_col_idx {
-            new_required_col_idx.push(primary_to_secondary_mapping[col_idx]);
+            new_required_col_idx.push(*primary_to_secondary_mapping.get(&col_idx).unwrap());
         }
+
+        struct Rewriter<'a> {
+            primary_to_secondary_mapping: &'a HashMap<usize, usize>,
+        }
+        impl ExprRewriter for Rewriter<'_> {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                InputRef::new(
+                    *self
+                        .primary_to_secondary_mapping
+                        .get(&input_ref.index)
+                        .unwrap(),
+                    input_ref.return_type(),
+                )
+                .into()
+            }
+        }
+        let mut rewriter = Rewriter {
+            primary_to_secondary_mapping,
+        };
+
+        let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
 
         Self::new(
             index_name.to_string(),
@@ -267,7 +283,7 @@ impl LogicalScan {
             index_table_desc,
             vec![],
             self.ctx(),
-            self.predicate.clone(),
+            new_predicate,
         )
     }
 
@@ -339,6 +355,10 @@ impl LogicalScan {
 
     pub fn output_col_idx(&self) -> &Vec<usize> {
         &self.output_col_idx
+    }
+
+    pub fn required_col_idx(&self) -> &Vec<usize> {
+        &self.required_col_idx
     }
 }
 

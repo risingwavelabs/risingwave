@@ -22,7 +22,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode,
+    DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_common::util::scan_range::ScanRange;
@@ -82,7 +82,7 @@ impl DummyExecutor {
 /// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
     table_desc: StorageTableDesc,
-    vnode_mapping: Vec<ParallelUnitId>,
+    vnode_mapping: VnodeMapping,
     build_side_key_types: Vec<DataType>,
     probe_side_schema: Schema,
     probe_side_column_ids: Vec<i32>,
@@ -698,9 +698,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BinaryHeap;
-    use std::sync::Arc;
-
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -799,16 +796,8 @@ mod tests {
 
         Box::new(OrderByExecutor::new(
             child,
-            vec![],
-            vec![],
-            vec![],
-            BinaryHeap::new(),
-            Arc::new(order_pairs),
-            vec![],
-            false,
-            false,
-            "OrderByExecutor".to_string(),
-            2048,
+            order_pairs,
+            "OrderByExecutor".into(),
         ))
     }
 
