@@ -475,7 +475,7 @@ impl ToBatch for LogicalScan {
                     return scan.to_batch();
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return join.to_batch_lookup_join_unchecked();
+                    return join.to_batch_lookup_join();
                 } else {
                     unreachable!();
                 }

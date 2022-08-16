@@ -826,7 +826,7 @@ impl PredicatePushdown for LogicalJoin {
 }
 
 impl LogicalJoin {
-    pub fn to_batch_lookup_join_unchecked(&self) -> Result<PlanRef> {
+    pub fn to_batch_lookup_join(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
@@ -839,7 +839,7 @@ impl LogicalJoin {
 
         Ok(self
             .convert_to_lookup_join(logical_join, predicate)
-            .unwrap())
+            .expect("Fail to convert to lookup join"))
     }
 }
 
