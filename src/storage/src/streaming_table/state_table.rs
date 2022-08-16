@@ -304,8 +304,19 @@ impl<S: StateStore> StateTable<S> {
                 }
             },
             None => {
-                if let Some(storage_row_bytes) =
-                    self.keyspace.get(&serialized_pk, read_options).await?
+                assert!(pk.size() <= self.pk_indices.len());
+                let key_indices = (0..pk.size())
+                    .into_iter()
+                    .map(|index| self.pk_indices[index])
+                    .collect_vec();
+                if let Some(storage_row_bytes) = self
+                    .keyspace
+                    .get(
+                        &serialized_pk,
+                        self.dist_key_indices == key_indices,
+                        read_options,
+                    )
+                    .await?
                 {
                     let row = deserialize(self.mapping.clone(), &serialized_pk, &storage_row_bytes)
                         .map_err(err)?
