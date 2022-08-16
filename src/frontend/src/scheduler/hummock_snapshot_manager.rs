@@ -31,7 +31,7 @@ const UNPIN_INTERVAL_SECS: u64 = 10;
 
 /// Cache of hummock snapshot in meta.
 pub struct HummockSnapshotManager {
-    /// Send epoch-related operations to `HummockSnapshotManagerCore`.
+    /// Send epoch-related operations to `HummockSnapshotManagerCore` for async batch handling.
     sender: Sender<EpochOperation>,
     /// The value is pushed from meta node to reduce rpc number.
     max_committed_epoch: Arc<AtomicU64>,
@@ -52,8 +52,6 @@ enum EpochOperation {
 
 impl HummockSnapshotManager {
     pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
-        // do not use unbounded_channel because it may cause OOM when the RPC `get_epoch` blocks a
-        // long time.
         let (sender, mut receiver) = channel(MAX_WAIT_EPOCH_REQUEST_NUM);
         let max_committed_epoch = Arc::new(AtomicU64::new(0));
         let max_committed_epoch_cloned = max_committed_epoch.clone();
