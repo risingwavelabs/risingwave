@@ -38,6 +38,7 @@ mod tests {
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::MockHummockMetaClient;
+    use risingwave_pb::hummock::pin_version_response::Payload;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
@@ -122,14 +123,8 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
 
@@ -237,7 +232,7 @@ mod tests {
             .id;
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
         let table = storage
             .sstable_store()
             .sstable(output_table_id, &mut StoreLocalStatistic::default())
@@ -358,7 +353,7 @@ mod tests {
         // 5. storage get back the correct kv after compaction
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
         let get_val = storage
             .get(
                 &key,
@@ -440,8 +435,7 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            let ssts = storage.local_version_manager().get_uncommitted_ssts(epoch);
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -567,14 +561,8 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         // Mimic dropping table
@@ -653,7 +641,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -734,17 +722,8 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
-        }
-
-        storage.sync(None).await.unwrap();
-        for epoch in &epoch_set {
-            hummock_meta_client
-                .commit_epoch(
-                    *epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -824,7 +803,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -908,17 +887,8 @@ mod tests {
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
-        }
-
-        storage.sync(None).await.unwrap();
-        for epoch in &epoch_set {
-            hummock_meta_client
-                .commit_epoch(
-                    *epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -994,7 +964,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);

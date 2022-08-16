@@ -579,6 +579,32 @@ impl StageRunner {
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
                 }
             }
+            PlanNodeType::BatchLookupJoin => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::LookupJoin(node) => {
+                        let side_table_desc = node
+                            .probe_side_table_desc
+                            .as_ref()
+                            .expect("no side table desc");
+                        node.probe_side_vnode_mapping = self
+                            .worker_node_manager
+                            .get_table_mapping(&side_table_desc.table_id.into())
+                            .unwrap_or_default();
+                        node.worker_nodes = self.worker_node_manager.list_worker_nodes();
+                    }
+                    _ => unreachable!(),
+                }
+
+                let left_child =
+                    self.convert_plan_node(&execution_plan_node.children[0], task_id, partition);
+
+                PlanNodeProst {
+                    children: vec![left_child],
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(node_body),
+                }
+            }
             _ => {
                 let children = execution_plan_node
                     .children

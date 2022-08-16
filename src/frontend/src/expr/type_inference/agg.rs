@@ -37,7 +37,7 @@ impl AggFuncSigMap {
         let arity = param_types.len();
         let inputs_type = param_types.into_iter().map(Into::into).collect();
         let sig = AggFuncSig {
-            func: func.clone(),
+            func,
             inputs_type,
             ret_type,
         };
@@ -81,7 +81,7 @@ fn build_type_derive_map() -> AggFuncSigMap {
     ] {
         for input in all_types {
             match AggCall::infer_return_type(&agg, &[DataType::from(input)]) {
-                Ok(v) => map.insert(agg.clone(), vec![input], DataTypeName::from(v)),
+                Ok(v) => map.insert(agg, vec![input], DataTypeName::from(v)),
                 Err(_e) => continue,
             }
         }

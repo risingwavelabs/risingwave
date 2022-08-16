@@ -101,6 +101,7 @@ where
             .all_table_mappings()
             .filter(|mapping| table_ids.contains(&mapping.table_id))
             .collect_vec();
+        let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {
@@ -115,6 +116,7 @@ where
                 users,
                 parallel_unit_mappings,
                 hummock_version: None,
+                hummock_snapshot,
             },
 
             WorkerType::Compactor => {
