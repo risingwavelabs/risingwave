@@ -199,28 +199,31 @@ impl<S: StateStore> ManagedStateImpl<S> {
         state_table: &RowBasedStateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
+        assert!(
+            is_row_count || row_count.is_some(),
+            "should set row_count for value states other than row count agg call"
+        );
         match agg_call.kind {
+            AggKind::Avg
+            | AggKind::Count
+            | AggKind::Sum
+            | AggKind::ApproxCountDistinct
+            | AggKind::SingleValue => Ok(Self::Value(
+                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
+            )),
+            // optimization: use single-value state for append-only min/max
+            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
+                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
+            )),
             AggKind::Max | AggKind::Min => {
-                assert!(
-                    row_count.is_some(),
-                    "should set row_count for value states other than AggKind::RowCount"
-                );
-
-                if agg_call.append_only {
-                    // optimization: use single-value state for append-only min/max
-                    Ok(Self::Value(
-                        ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-                    ))
-                } else {
-                    Ok(Self::Table(Box::new(GenericExtremeState::new(
-                        agg_call,
-                        pk,
-                        pk_indices,
-                        state_table_col_mapping,
-                        row_count.unwrap(),
-                        1024, // TODO: estimate a good cache size instead of hard-coding
-                    ))))
-                }
+                Ok(Self::Table(Box::new(GenericExtremeState::new(
+                    agg_call,
+                    pk,
+                    pk_indices,
+                    state_table_col_mapping,
+                    row_count.unwrap(),
+                    1024, // TODO: estimate a good cache size instead of hard-coding
+                ))))
             }
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,
@@ -228,20 +231,6 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 pk_indices,
                 state_table_col_mapping,
             )))),
-            // TODO: for append-only lists, we can create `ManagedValueState` instead of
-            // `ManagedExtremeState`.
-            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
-                assert!(
-                    is_row_count || row_count.is_some(),
-                    "should set row_count for value states other than AggKind::RowCount"
-                );
-                Ok(Self::Value(
-                    ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-                ))
-            }
-            AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-            )),
         }
     }
 }
