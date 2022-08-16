@@ -39,12 +39,13 @@ pub struct LocalVersion {
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
-    pub sync_uncommitted_data: Vec<(HummockEpoch, SyncUncommittedData)>,
+    pub sync_uncommitted_data: Vec<(Vec<HummockEpoch>, SyncUncommittedData)>,
     max_sync_epoch: u64,
 }
 
 #[derive(Debug, Clone)]
 pub enum SyncUncommittedData {
+    NoData,
     /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
     /// as `Syncing`.
     Syncing(KeyIndexedUncommittedData),
@@ -113,16 +114,14 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn get_min_unsynced_epoch(&self) -> Option<HummockEpoch> {
-        self.shared_buffer
-            .iter()
-            .find(|(key, _)| key > &&self.max_sync_epoch)
-            .map(|(key, _)| key)
-            .cloned()
-    }
-
-    pub fn set_max_sync_epoch(&mut self, epoch: HummockEpoch) {
-        self.max_sync_epoch = epoch;
+    pub fn swap_max_sync_epoch(&mut self,epoch:HummockEpoch) -> Option<HummockEpoch> {
+        if self.max_sync_epoch > epoch{
+            None
+        }else{
+            let last_epoch = self.max_sync_epoch;
+            self.max_sync_epoch = epoch;
+            Some(last_epoch)
+        }
     }
 
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
@@ -133,9 +132,20 @@ impl LocalVersion {
         self.shared_buffer.get(&epoch)
     }
 
+    /// Returns all shared buffer less than or equal to epoch
+    pub fn scan_mut_shared_buffer<R>(
+        &mut self,
+        epoch_range: R,
+    ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)>
+        where
+            R: RangeBounds<u64>,
+    {
+        self.shared_buffer.range_mut(epoch_range)
+    }
+
     pub fn add_sync_state(
         &mut self,
-        sync_epoch: HummockEpoch,
+        sync_epoch: Vec<HummockEpoch>,
         sync_uncommitted_data: SyncUncommittedData,
     ) {
         let node = self
@@ -144,13 +154,16 @@ impl LocalVersion {
             .find(|(epoch, _)| epoch == &sync_epoch);
         match &node {
             None => {
-                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
+                assert_matches!(sync_uncommitted_data, SyncUncommittedData::NoData);
                 if let Some(last) = self.sync_uncommitted_data.last() {
-                    assert!(last.0 < sync_epoch)
+                    assert!(last.0.first().lt(sync_epoch.first().unwrap()))
                 }
                 self.sync_uncommitted_data
                     .push((sync_epoch, sync_uncommitted_data));
                 return;
+            }
+            Some((_, SyncUncommittedData::NoData)) => {
+                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
             }
             Some((_, SyncUncommittedData::Syncing(_))) => {
                 assert_matches!(sync_uncommitted_data, SyncUncommittedData::Synced(_));

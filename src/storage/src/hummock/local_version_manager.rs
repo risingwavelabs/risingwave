@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
@@ -45,7 +46,7 @@ use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::shared_buffer::shared_buffer_uploader::SharedBufferUploader;
 use super::SstableStoreRef;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::local_version::SyncUncommittedData::{Synced, Syncing};
+use crate::hummock::local_version::SyncUncommittedData::{NoData, Synced, Syncing};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferItem;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{
@@ -501,44 +502,45 @@ impl LocalVersionManager {
     pub async fn sync_shared_buffer(
         &self,
         epoch: HummockEpoch,
-    ) -> HummockResult<(usize, Vec<LocalSstableInfo>)> {
-        if self.local_version.read().get_shared_buffer(epoch).is_none() {
-            tracing::trace!("sync epoch {} has no more task to do", epoch);
-            return Ok((0, vec![]));
-        }
+    ) -> HummockResult<(usize, Vec<LocalSstableInfo>,bool)> {
         tracing::trace!("sync epoch {}", epoch);
+        let last_epoch = match self.local_version.write().swap_max_sync_epoch(epoch){
+            Some(epoch) => epoch,
+            None => {
+                return Ok((0,vec![],false));
+            }
+        };
+        let epochs = self.local_version.write().scan_shared_buffer((Excluded(last_epoch), Included(epoch))).map(|(&key,_)| key).collect_vec();
+        if epochs.is_empty() {
+            tracing::trace!("sync epoch {} has no more task to do", epoch);
+            return Ok((0,vec![],false));
+        }
+        self.local_version.write().add_sync_state(epochs.clone(), NoData);
+
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
-            .send_event(SharedBufferEvent::SyncEpoch(epoch, tx));
+            .send_event(SharedBufferEvent::SyncEpoch(epochs, tx));
         let join_handles = rx.await.unwrap();
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        // TODO(xuxinhao): modify it after supporting uploading multiple shared buffers.#4442
-        loop {
-            let sync_epoch_notified = self.sync_epoch_notify.notified();
-            let min_unsynced_epoch = self.local_version.read().get_min_unsynced_epoch();
-            if min_unsynced_epoch.unwrap() == epoch {
-                break;
-            } else {
-                sync_epoch_notified.await;
-            }
-        }
+
         let (uncommitted_data, task_write_batch_size) = {
             // We keep the lock on max_sync_epoch until the task is saved in the sync task vec.
             let mut local_version_guard = self.local_version.write();
             local_version_guard.set_max_sync_epoch(epoch);
-            let (uncommitted_data, task_write_batch_size) = match local_version_guard
-                .get_mut_shared_buffer(epoch)
-                .unwrap()
-                .take_uncommitted_data()
-            {
-                Some(task) => task,
-                None => {
-                    tracing::trace!("sync epoch {} has no more task to do", epoch);
-                    return Ok((0, vec![]));
-                }
-            };
+            let (uncommitted_data, task_write_batch_size) = local_version_guard
+                .scan_mut_shared_buffer((Excluded(last_epoch), Included(epoch)))
+                .map(|(key,value)| value.take_uncommitted_data())
+            //     .unwrap()
+            //     .take_uncommitted_data()
+            // {
+            //     Some(task) => task,
+            //     None => {
+            //         tracing::trace!("sync epoch {} has no more task to do", epoch);
+            //         return Ok((0, vec![],true));
+            //     }
+            // };
             local_version_guard.add_sync_state(epoch, Syncing(uncommitted_data.clone()));
             (uncommitted_data, task_write_batch_size)
         };
