@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::Bound::{Excluded, Unbounded};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{HummockVersionDelta, HummockVersionDeltas};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -44,8 +42,7 @@ struct Task {
     callback_tx: Option<oneshot::Sender<NotificationVersion>>,
     operation: Operation,
     info: Info,
-    host2pin: Vec<(WorkerKey, u64)>,
-    current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
+    hummock_version_delta: HummockVersionDelta,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
@@ -74,8 +71,7 @@ impl NotificationManager {
                         task.target,
                         task.operation,
                         &task.info,
-                        task.host2pin,
-                        task.current_version_deltas,
+                        task.hummock_version_delta,
                     ),
                 };
                 if let Some(tx) = task.callback_tx {
@@ -96,16 +92,14 @@ impl NotificationManager {
         target: WorkerType,
         operation: Operation,
         info: Info,
-        host2pin: Vec<(WorkerKey, u64)>,
-        current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
+        hummock_version_delta: HummockVersionDelta,
     ) {
         let task = Task {
             target,
             callback_tx: None,
             operation,
             info,
-            host2pin,
-            current_version_deltas,
+            hummock_version_delta,
         };
         self.task_tx.send(task).unwrap();
     }
@@ -124,8 +118,7 @@ impl NotificationManager {
             callback_tx: Some(callback_tx),
             operation,
             info,
-            host2pin: vec![],
-            current_version_deltas: BTreeMap::new(),
+            hummock_version_delta: HummockVersionDelta::default(),
         };
         self.task_tx.send(task).unwrap();
         callback_rx.await.unwrap()
@@ -136,8 +129,7 @@ impl NotificationManager {
             WorkerType::Frontend,
             operation,
             info,
-            vec![],
-            BTreeMap::new(),
+            HummockVersionDelta::default(),
         );
     }
 
@@ -157,15 +149,13 @@ impl NotificationManager {
         &self,
         operation: Operation,
         info: Info,
-        host2pin: Vec<(WorkerKey, u64)>,
-        current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
+        hummock_version_delta: HummockVersionDelta,
     ) {
         self.notify_asynchronously(
             WorkerType::ComputeNode,
             operation,
             info,
-            host2pin,
-            current_version_deltas,
+            hummock_version_delta,
         );
     }
 
@@ -259,8 +249,7 @@ impl NotificationManagerCore {
         worker_type: WorkerType,
         operation: Operation,
         info: &Info,
-        host2pin: Vec<(WorkerKey, u64)>,
-        current_version_deltas: BTreeMap<u64, HummockVersionDelta>,
+        hummock_version_delta: HummockVersionDelta,
     ) -> NotificationVersion {
         self.current_version += 1;
 
@@ -272,22 +261,13 @@ impl NotificationManagerCore {
             _ => unreachable!(),
         };
 
-        let mut worker2pin: HashMap<WorkerKey, u64> = HashMap::new();
-        worker2pin.extend(host2pin.into_iter());
-
         let mut bad_keys = vec![];
         for (worker_key, sender) in senders.iter() {
             let specific_info = if matches!(worker_type, WorkerType::ComputeNode)
                 && matches!(info, Info::HummockVersionDeltas(_))
             {
                 Info::HummockVersionDeltas(HummockVersionDeltas {
-                    version_deltas: match worker2pin.get(worker_key) {
-                        Some(min_pinned) => current_version_deltas
-                            .range((Excluded(*min_pinned), Unbounded))
-                            .map(|(_, version_delta)| version_delta.clone())
-                            .collect_vec(),
-                        None => current_version_deltas.values().cloned().collect_vec(),
-                    },
+                    version_deltas: vec![hummock_version_delta.clone()],
                 })
             } else {
                 info.clone()

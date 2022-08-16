@@ -14,7 +14,7 @@
 
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -31,7 +31,6 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
     HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
 };
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -41,17 +40,15 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::RwLockWriteGuard;
+use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::metrics_utils::{
-    trigger_commit_stat, trigger_delta_sent_stat, trigger_sst_stat,
-};
+use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{ClusterManagerRef, IdCategory, MetaSrvEnv, WorkerKey, META_NODE_ID};
+use crate::manager::{ClusterManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID};
 use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
@@ -784,8 +781,6 @@ where
             }
         }
         compact_status.report_compact_task(compact_task);
-        let mut host2pin = vec![];
-        let mut deltas_to_send = BTreeMap::new();
         if compact_task.task_status {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -845,33 +840,18 @@ where
             }
             versioning.current_version = new_version;
 
-            let worker_nodes = self
-                .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
-                .await;
-            let mut global_min = *versioning
-                .hummock_version_deltas
-                .last_key_value()
-                .unwrap()
-                .0;
-            for worker_node in worker_nodes {
-                if let Some(min_pinned_id) = versioning
-                    .pinned_versions
-                    .get(&worker_node.id)
-                    .map(|pinned_version| pinned_version.min_pinned_id)
-                {
-                    if min_pinned_id < global_min {
-                        global_min = min_pinned_id;
-                    }
-                    host2pin.push((WorkerKey(worker_node.host.unwrap()), min_pinned_id));
-                }
-            }
-            deltas_to_send = versioning
-                .hummock_version_deltas
-                .range((Excluded(global_min), Unbounded))
-                .map(|(k, v)| (*k, v.clone()))
-                .collect();
-            trigger_delta_sent_stat(&self.metrics, &deltas_to_send);
+            self.env
+                .notification_manager()
+                .notify_compute_asynchronously(
+                    Operation::Add,
+                    Info::HummockVersionDeltas(HummockVersionDeltas::default()),
+                    versioning
+                        .hummock_version_deltas
+                        .last_key_value()
+                        .unwrap()
+                        .1
+                        .clone(),
+                );
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -901,17 +881,6 @@ where
             read_lock!(self, versioning).await.current_version.borrow(),
             compact_task.compaction_group_id,
         );
-
-        if compact_task.task_status {
-            self.env
-                .notification_manager()
-                .notify_compute_asynchronously(
-                    Operation::Add,
-                    Info::HummockVersionDeltas(HummockVersionDeltas::default()),
-                    host2pin,
-                    deltas_to_send,
-                );
-        }
 
         self.try_send_compaction_request(compact_task.compaction_group_id);
 
@@ -1062,43 +1031,17 @@ where
                 Operation::Update,
                 Info::HummockSnapshot(HummockSnapshot { epoch }),
             );
-
-        let mut host2pin = vec![];
-        let worker_nodes = self
-            .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
-            .await;
-
-        let mut global_min = *versioning
-            .hummock_version_deltas
-            .last_key_value()
-            .unwrap()
-            .0;
-        for worker_node in worker_nodes {
-            if let Some(min_pinned_id) = versioning
-                .pinned_versions
-                .get(&worker_node.id)
-                .map(|pinned_version| pinned_version.min_pinned_id)
-            {
-                if min_pinned_id < global_min {
-                    global_min = min_pinned_id;
-                }
-                host2pin.push((WorkerKey(worker_node.host.unwrap()), min_pinned_id));
-            }
-        }
-        let deltas_to_send: BTreeMap<u64, HummockVersionDelta> = versioning
-            .hummock_version_deltas
-            .range((Excluded(global_min), Unbounded))
-            .map(|(k, v)| (*k, v.clone()))
-            .collect();
-        trigger_delta_sent_stat(&self.metrics, &deltas_to_send);
         self.env
             .notification_manager()
             .notify_compute_asynchronously(
                 Operation::Add,
                 Info::HummockVersionDeltas(HummockVersionDeltas::default()),
-                host2pin,
-                deltas_to_send,
+                versioning
+                    .hummock_version_deltas
+                    .last_key_value()
+                    .unwrap()
+                    .1
+                    .clone(),
             );
 
         drop(versioning_guard);
@@ -1214,6 +1157,11 @@ where
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
+    }
+
+    #[named]
+    pub(crate) async fn get_read_guard(&self) -> RwLockReadGuard<Versioning> {
+        read_lock!(self, versioning).await
     }
 
     pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {

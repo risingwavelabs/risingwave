@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,7 +21,7 @@ use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
+use risingwave_pb::hummock::HummockVersion;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
@@ -125,19 +124,4 @@ pub fn trigger_sst_stat(
             }
         }
     }
-}
-
-pub fn trigger_delta_sent_stat(
-    metrics: &MetaMetrics,
-    deltas_to_send: &BTreeMap<u64, HummockVersionDelta>,
-) {
-    metrics
-        .delta_cnt_sent_to_cn
-        .set(deltas_to_send.len() as i64);
-    metrics.delta_total_size_sent_to_cn.set(
-        deltas_to_send
-            .values()
-            .map(|version_delta| version_delta.encoded_len())
-            .sum::<usize>() as i64,
-    );
 }
