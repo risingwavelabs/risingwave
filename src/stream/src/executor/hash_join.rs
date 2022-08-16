@@ -28,8 +28,10 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
+use super::actor::on_compute_error;
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::infallible_expr::InfallibleExpression;
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
@@ -529,6 +531,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 AlignedMessage::Left(chunk) => {
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
+                        &self.identity,
                         &mut self.side_l,
                         &mut self.side_r,
                         &self.output_data_types,
@@ -547,6 +550,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 AlignedMessage::Right(chunk) => {
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Right }>(
+                        &self.identity,
                         &mut self.side_l,
                         &mut self.side_r,
                         &self.output_data_types,
@@ -619,6 +623,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
+        identity: &'a str,
         mut side_l: &'a mut JoinSide<K, S>,
         mut side_r: &'a mut JoinSide<K, S>,
         output_data_types: &'a [DataType],
@@ -663,7 +668,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
 
                 cond_match = cond
-                    .eval_row(&new_row)?
+                    .eval_row_infallible(&new_row, |err| on_compute_error(err, identity))
                     .map(|s| *s.as_bool())
                     .unwrap_or(false);
             }
