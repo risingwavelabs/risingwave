@@ -32,28 +32,34 @@ use crate::utils::Condition;
 
 /// index selection cost matrix
 ///
-/// `column_idx`  0    1     2    3    4
 ///
-/// Equal      | 1  | 1  | 1  | 1  | 1  |
+/// |`column_idx`|   0 |   1 |   2 |   3 |   4 |
+///  ----------- | --- | --- | --- | --- | ---
+/// |Equal       |  1  |  1  |  1  |  1  |  1  |
+/// |In          |  10 |  8  |  5  |  5  |  5  |    // take the minimum value with actual in number
+/// |Range       |  500|  50 |  20 |  10 |  10 |
+/// |All         |10000| 100 |  30 |  20 |  10 |
 ///
-/// In         | 10 | 8  | 5  | 5  | 5  |    // take the minimum value with actual in number
-///
-/// Range      | 500| 50 | 20 | 10 | 10 |
-///
-/// All        |10000| 100| 30 | 20 | 10 |
-///
-/// total cost = cost(match type of 0 idx)
+/// index cost = cost(match type of 0 idx)
 ///             * cost(match type of 1 idx)
 ///             * ... cost(match type of the last idx)
 ///
 /// For Example:
+///
 /// index order key (a, b, c)
+///
 /// for a = 1 and b = 1 and c = 1, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
+///
 /// for a in (xxx) and b = 1 and c = 1, its cost is In0 * Equal1 * Equal2 = 10
+///
 /// for a = 1 and b in (xxx), its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
+///
 /// for a between xxx and yyy, its cost is Range0 = 500
+///
 /// for a = 1 and b between xxx and yyy, its cost is Equal0 * Range1 = 50
+///
 /// for a = 1, its cost is 100 = Equal0 * All1 = 100
+///
 /// for no condition, its cost is All0 = 10000
 ///
 /// With the assumption that the most effective part of a index is its prefix,
@@ -198,12 +204,11 @@ impl IndexSelectionRule {
             .chain(new_predicate.into_iter())
             .collect_vec();
         let on = Condition { conjunctions };
-        let join = LogicalJoin::new_with_hint(
+        let join = LogicalJoin::new(
             index_scan.into(),
             primary_table_scan.into(),
             JoinType::Inner,
             on,
-            true,
         );
 
         // 2. push down predicate, so we can calculate the cost of index lookup

@@ -185,13 +185,8 @@ impl TranslateApplyRule {
             (false, false) => {
                 let left = rewrite(join.left(), left_idxs, false)?;
                 let right = rewrite(join.right(), right_idxs, true)?;
-                let new_join = LogicalJoin::new_with_hint(
-                    left,
-                    right,
-                    join.join_type(),
-                    Condition::true_cond(),
-                    join.index_lookup_join(),
-                );
+                let new_join =
+                    LogicalJoin::new(left, right, join.join_type(), Condition::true_cond());
                 Some(new_join.into())
             }
             _ => None,

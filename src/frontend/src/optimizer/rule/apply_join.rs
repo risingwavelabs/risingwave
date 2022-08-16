@@ -172,12 +172,11 @@ impl Rule for ApplyJoinRule {
             correlated_id,
             correlated_indices,
         );
-        let new_join = LogicalJoin::new_with_hint(
+        let new_join = LogicalJoin::new(
             new_join_left.clone(),
             new_join_right.clone(),
             join.join_type(),
             new_join_condition,
-            join.index_lookup_join(),
         );
 
         match join.join_type() {
