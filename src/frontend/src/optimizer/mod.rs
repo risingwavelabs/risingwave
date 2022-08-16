@@ -243,14 +243,6 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        // Convert distinct aggregates.
-        plan = self.optimize_by_rules(
-            plan,
-            "Convert Distinct Aggregation".to_string(),
-            vec![DistinctAggRule::create()],
-            ApplyOrder::TopDown,
-        );
-
         // Prune Columns
         //
         // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
@@ -264,6 +256,14 @@ impl PlanRoot {
             ctx.trace("Prune Columns:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        // Convert distinct aggregates.
+        plan = self.optimize_by_rules(
+            plan,
+            "Convert Distinct Aggregation".to_string(),
+            vec![DistinctAggRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         plan = self.optimize_by_rules(
             plan,
