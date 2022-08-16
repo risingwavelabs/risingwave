@@ -475,10 +475,10 @@ where
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                minimal_pinned_snapshot: 0,
+                minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
-        if context_pinned_snapshot.minimal_pinned_snapshot == 0 {
+        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
@@ -539,14 +539,14 @@ where
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                minimal_pinned_snapshot: 0,
+                minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
 
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
         if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch
-            || context_pinned_snapshot.minimal_pinned_snapshot == 0
+            || context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH
         {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;

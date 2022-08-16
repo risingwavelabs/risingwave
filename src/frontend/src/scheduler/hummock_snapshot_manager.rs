@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use log::error;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
 
@@ -53,7 +54,7 @@ enum EpochOperation {
 impl HummockSnapshotManager {
     pub fn new(meta_client: Arc<dyn FrontendMetaClient>) -> Self {
         let (sender, mut receiver) = channel(MAX_WAIT_EPOCH_REQUEST_NUM);
-        let max_committed_epoch = Arc::new(AtomicU64::new(0));
+        let max_committed_epoch = Arc::new(AtomicU64::new(INVALID_EPOCH));
         let max_committed_epoch_cloned = max_committed_epoch.clone();
         tokio::spawn(async move {
             let mut manager =
@@ -164,7 +165,7 @@ impl HummockSnapshotManagerCore {
             // Initialize by setting `is_outdated` to `true`.
             meta_client,
             epoch_to_query_ids: BTreeMap::default(),
-            last_unpin_snapshot: Arc::new(AtomicU64::new(0)),
+            last_unpin_snapshot: Arc::new(AtomicU64::new(INVALID_EPOCH)),
             max_committed_epoch,
         }
     }
@@ -174,6 +175,7 @@ impl HummockSnapshotManagerCore {
         batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
     ) -> u64 {
         let epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        debug_assert_ne!(epoch, INVALID_EPOCH);
         let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
             None => {
                 self.epoch_to_query_ids.insert(epoch, HashSet::default());
