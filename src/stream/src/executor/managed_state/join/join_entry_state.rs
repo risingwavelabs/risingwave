@@ -15,7 +15,6 @@
 use std::collections::{btree_map, BTreeMap};
 
 use super::*;
-use crate::executor::error::StreamExecutorError;
 
 #[expect(dead_code)]
 type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
@@ -64,8 +63,8 @@ impl JoinEntryState {
         data_types: &'b [DataType],
     ) -> impl Iterator<Item = (&'a mut EncodedJoinRow, StreamExecutorResult<JoinRow>)> + 'a {
         self.cached.values_mut().map(|encoded| {
-            let decoded_row = encoded.decode(data_types)?;
-            (encoded, decoded_row)
+            let decoded = encoded.decode(data_types);
+            (encoded, decoded)
         })
     }
 }
