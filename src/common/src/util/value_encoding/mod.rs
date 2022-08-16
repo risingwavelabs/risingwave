@@ -66,7 +66,7 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
     match null_tag {
         0 => Ok(None),
         1 => deserialize_value(ty, data),
-        _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag).into()),
+        _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
     }
 }
 
@@ -160,7 +160,7 @@ fn deserialize_struct(data_type: &DataType, mut data: impl Buf) -> Result<Scalar
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
     ScalarImpl::from_proto_bytes(&bytes, &data_type.to_protobuf())
-        .map_err(|e| ValueEncodingError::InvalidStructEncoding(e))
+        .map_err(ValueEncodingError::InvalidStructEncoding)
 }
 
 fn deserialize_list(data_type: &DataType, mut data: impl Buf) -> Result<ScalarImpl> {
@@ -169,21 +169,21 @@ fn deserialize_list(data_type: &DataType, mut data: impl Buf) -> Result<ScalarIm
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
     ScalarImpl::from_proto_bytes(&bytes, &data_type.to_protobuf())
-        .map_err(|e| ValueEncodingError::InvalidListEncoding(e))
+        .map_err(ValueEncodingError::InvalidListEncoding)
 }
 
 fn deserialize_str(mut data: impl Buf) -> Result<String> {
     let len = data.get_u32_le();
     let mut bytes = vec![0; len as usize];
     data.copy_to_slice(&mut bytes);
-    Ok(String::from_utf8(bytes).map_err(ValueEncodingError::InvalidUtf8)?)
+    String::from_utf8(bytes).map_err(ValueEncodingError::InvalidUtf8)
 }
 
 fn deserialize_bool(mut data: impl Buf) -> Result<bool> {
     match data.get_u8() {
         1 => Ok(true),
         0 => Ok(false),
-        value => Err(ValueEncodingError::InvalidBoolEncoding(value).into()),
+        value => Err(ValueEncodingError::InvalidBoolEncoding(value)),
     }
 }
 
