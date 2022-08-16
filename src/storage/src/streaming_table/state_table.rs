@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::BufMut;
+use futures::{pin_mut, Stream, StreamExt};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
@@ -25,11 +29,12 @@ use risingwave_common::types::VirtualNode;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::key::range_of_prefix;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
-use crate::row_serde::row_serde_util::{deserialize, serialize};
+use crate::row_serde::row_serde_util::{deserialize, serialize, serialize_pk};
 use crate::row_serde::ColumnDescMapping;
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
@@ -409,6 +414,144 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 }
+
+/// Iterator functions.
+impl<S: StateStore> StateTable<S> {
+    /// This function scans rows from the relational table.
+    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
+        self.iter_with_pk_prefix(Row::empty(), epoch).await
+    }
+
+    /// This function scans rows from the relational table with specific `pk_prefix`.
+    pub async fn iter_with_pk_prefix<'a>(
+        &'a self,
+        pk_prefix: &'a Row,
+        epoch: u64,
+    ) -> StorageResult<RowStream<'a, S>> {
+        let storage_table_iter = self
+            .keyspace
+            .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
+            .await?;
+
+        let mem_table_iter = {
+            let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
+            let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
+            let encoded_key_range = range_of_prefix(&encoded_prefix);
+            self.mem_table.iter(encoded_key_range)
+        };
+
+        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
+    }
+}
+
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Row>>;
+pub type RowBasedRowStream<'a, S> = RowStream<'a, S>;
+
+struct StateTableRowIter<'a, M, C> {
+    mem_table_iter: M,
+    storage_table_iter: C,
+    _phantom: PhantomData<&'a ()>,
+}
+
+/// `StateTableRowIter` is able to read the just written data (uncommited data).
+/// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
+impl<'a, M, C> StateTableRowIter<'a, M, C>
+where
+    M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
+    C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
+{
+    fn new(mem_table_iter: M, storage_table_iter: C) -> Self {
+        Self {
+            mem_table_iter,
+            storage_table_iter,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// This function scans kv pairs from the `shared_storage`(`storage_table`) and
+    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is
+    /// (Included(prefix),Excluded(next_key(prefix))), all kv pairs within corresponding prefix will
+    /// be scanned. If a record exist in both `storage_table` and `mem_table`, result
+    /// `mem_table` is returned according to the operation(RowOp) on it.
+    #[try_stream(ok =  Row, error = StorageError)]
+    async fn into_stream(self) {
+        let storage_table_iter = self.storage_table_iter.fuse().peekable();
+        pin_mut!(storage_table_iter);
+
+        let mut mem_table_iter = self.mem_table_iter.fuse().peekable();
+
+        loop {
+            match (
+                storage_table_iter.as_mut().peek().await,
+                mem_table_iter.peek(),
+            ) {
+                (None, None) => break,
+                // The mem table side has come to an end, return data from the shared storage.
+                (Some(_), None) => {
+                    let (_, row) = storage_table_iter.next().await.unwrap()?;
+                    yield row
+                }
+                // The stream side has come to an end, return data from the mem table.
+                (None, Some(_)) => {
+                    let (_, row_op) = mem_table_iter.next().unwrap();
+                    match row_op {
+                        RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
+                            let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
+                                .map_err(err)?
+                                .2;
+                            yield row
+                        }
+                        _ => {}
+                    }
+                }
+                (Some(Ok((storage_pk, _))), Some((mem_table_pk, _))) => {
+                    match storage_pk.cmp(mem_table_pk) {
+                        Ordering::Less => {
+                            // yield data from storage table
+                            let (_, row) = storage_table_iter.next().await.unwrap()?;
+                            yield row;
+                        }
+                        Ordering::Equal => {
+                            // both memtable and storage contain the key, so we advance both
+                            // iterators and return the data in memory.
+                            let (_, row_op) = mem_table_iter.next().unwrap();
+                            let (_, old_row_in_storage) =
+                                storage_table_iter.next().await.unwrap()?;
+                            match row_op {
+                                RowOp::Insert(row) => {
+                                    yield row;
+                                }
+                                RowOp::Delete(_) => {}
+                                RowOp::Update((old_row, new_row)) => {
+                                    debug_assert!(old_row == &old_row_in_storage);
+                                    yield new_row;
+                                }
+                            }
+                        }
+                        Ordering::Greater => {
+                            // yield data from mem table
+                            let (_, row_op) = mem_table_iter.next().unwrap();
+                            match row_op {
+                                RowOp::Insert(row) => {
+                                    yield row;
+                                }
+                                RowOp::Delete(_) => {}
+                                RowOp::Update(_) => unreachable!(
+                                    "memtable update should always be paired with a storage key"
+                                ),
+                            }
+                        }
+                    }
+                }
+                (Some(Err(_)), Some(_)) => {
+                    // Throw the error.
+                    return Err(storage_table_iter.next().await.unwrap().unwrap_err());
+                }
+            }
+        }
+    }
+}
+
 fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StateTable(rw.into())
 }
