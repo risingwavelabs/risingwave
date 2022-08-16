@@ -256,6 +256,7 @@ message GetNewSstIdsResponse {
 
 message SubscribeCompactTasksRequest {
   uint32 context_id = 1;
+  uint64 max_concurrent_task_number = 2;
 }
 
 message SubscribeCompactTasksResponse {

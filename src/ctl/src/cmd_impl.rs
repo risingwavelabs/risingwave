@@ -15,5 +15,5 @@
 pub mod bench;
 pub mod hummock;
 pub mod meta;
-pub mod stream;
 pub mod table;
+pub mod trace;

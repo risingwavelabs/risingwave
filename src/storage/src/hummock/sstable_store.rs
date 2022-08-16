@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, ObjectMetadata, ObjectStore, ObjectStoreRef,
+    get_local_path, BlockLocation, ObjectMetadata, ObjectStoreRef,
 };
 
 use super::{

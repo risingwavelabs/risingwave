@@ -21,7 +21,7 @@ use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_object_store::object::{BlockLocation, ObjectStore};
+use risingwave_object_store::object::BlockLocation;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::value::HummockValue;

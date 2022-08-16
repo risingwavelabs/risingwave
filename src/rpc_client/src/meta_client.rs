@@ -527,9 +527,13 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
+            max_concurrent_task_number,
         };
         self.inner.subscribe_compact_tasks(req).await
     }

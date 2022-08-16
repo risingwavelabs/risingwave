@@ -27,7 +27,7 @@ const CONFIG_KEYS: [&str; 6] = [
     "QUERY_MODE",
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
-    "DATE_STYLE",
+    "DATESTYLE",
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
 ];
 
