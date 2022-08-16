@@ -282,7 +282,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         assert!(expr.len() == 1);
 
         let distinct = self.flip_coin() && self.is_distinct_allowed;
-        self.make_agg_expr(func.func.clone(), expr[0].clone(), distinct)
+        self.make_agg_expr(func.func, expr[0].clone(), distinct)
     }
 
     fn make_agg_expr(&mut self, func: AggKind, expr: Expr, distinct: bool) -> Expr {
