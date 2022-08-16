@@ -37,7 +37,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
-use risingwave_storage::batch_table::storage_table::{StorageTable, StorageTableBase};
+use risingwave_storage::batch_table::storage_table::StorageTable;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::Keyspace;
@@ -379,7 +379,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = StorageTableBase::new_for_test(
+    let table = StorageTable::new_for_test(
         memory_state_store,
         TableId::from(0x42),
         column_descs.clone(),

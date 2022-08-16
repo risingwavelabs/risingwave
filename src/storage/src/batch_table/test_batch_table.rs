@@ -17,10 +17,9 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
-use crate::batch_table::storage_table::StorageTableBase;
+use crate::batch_table::storage_table::StorageTable;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
-use crate::row_serde::RowBasedSerde;
 use crate::table::state_table::RowBasedStateTable;
 
 /// There are three struct in relational layer, StateTable, MemTable and CellBasedTable.
@@ -48,14 +47,13 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTableBase<MemoryStateStore, RowBasedSerde> =
-        StorageTableBase::new_for_test(
-            state_store.clone(),
-            TableId::from(0x42),
-            column_descs.clone(),
-            order_types.clone(),
-            pk_indices,
-        );
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices,
+    );
     let epoch: u64 = 0;
 
     state
@@ -126,14 +124,13 @@ async fn test_storage_get_row_for_string() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTableBase<MemoryStateStore, RowBasedSerde> =
-        StorageTableBase::new_for_test(
-            state_store.clone(),
-            TableId::from(0x42),
-            column_descs.clone(),
-            order_types.clone(),
-            pk_indices,
-        );
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices,
+    );
     let epoch: u64 = 0;
 
     state
@@ -211,14 +208,13 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         order_types.clone(),
         pk_indices.clone(),
     );
-    let mut table: StorageTableBase<MemoryStateStore, RowBasedSerde> =
-        StorageTableBase::new_for_test(
-            state_store.clone(),
-            TableId::from(0x42),
-            column_descs.clone(),
-            order_types.clone(),
-            pk_indices.clone(),
-        );
+    let mut table: StorageTable<MemoryStateStore> = StorageTable::new_for_test(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices.clone(),
+    );
     let epoch: u64 = 0;
 
     state

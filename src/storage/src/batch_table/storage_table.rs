@@ -38,7 +38,8 @@ use risingwave_pb::catalog::Table;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::{serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde};
+use crate::row_serde::row_serde_util::deserialize;
+use crate::row_serde::{serialize_pk, ColumnDescMapping};
 use crate::store::ReadOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
@@ -49,14 +50,13 @@ pub const DEFAULT_VNODE: VirtualNode = 0;
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format.
-pub type StorageTable<S> = StorageTableBase<S, RowBasedSerde>;
-/// [`StorageTableBase`] is the interface accessing relational data in KV(`StateStore`) with
+/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation.
 /// It is parameterized by its encoding, by specifying cell serializer and deserializers.
 /// TODO: Parameterize on `CellDeserializer`.
 #[derive(Clone)]
-pub struct StorageTableBase<S: StateStore, RS: RowSerde> {
+pub struct StorageTable<S: StateStore> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
@@ -70,9 +70,6 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde> {
 
     /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
-
-    /// Used for serializing the row.
-    row_deserializer: RS::Deserializer,
 
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
@@ -103,7 +100,7 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde> {
     _read_pattern_prefix_column: u32,
 }
 
-impl<S: StateStore, RS: RowSerde> std::fmt::Debug for StorageTableBase<S, RS> {
+impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorageTable").finish_non_exhaustive()
     }
@@ -113,8 +110,8 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StorageTable(rw.into())
 }
 
-impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
-    /// Create a read-write [`StorageTableBase`] given a complete set of `columns`.
+impl<S: StateStore> StorageTable<S> {
+    /// Create a read-write [`StorageTable`] given a complete set of `columns`.
     /// This is parameterized on cell based row serializer.
     pub fn new(
         store: S,
@@ -157,8 +154,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
     }
 }
 
-impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
-    /// Create a read-only [`StorageTableBase`] given a complete set of `columns` and a partial
+impl<S: StateStore> StorageTable<S> {
+    /// Create a read-only [`StorageTable`] given a complete set of `columns` and a partial
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
     /// This is parameterized on cell based row serializer.
@@ -187,7 +184,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
     }
 }
 
-impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
+impl<S: StateStore> StorageTable<S> {
     /// Create storage table from table catalog and store.
     pub fn from_table_catalog(
         table_catalog: &Table,
@@ -258,7 +255,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
-        let row_deserializer = RS::create_deserializer(mapping.clone());
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
 
@@ -282,7 +278,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
             table_columns,
             schema,
             pk_serializer,
-            row_deserializer,
             mapping,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -304,7 +299,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
 }
 
 /// Get
-impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
+impl<S: StateStore> StorageTable<S> {
     /// Check whether the given `vnode` is set in the `vnodes` of this table.
     fn check_vnode_is_set(&self, vnode: VirtualNode) {
         let is_set = self.vnodes.is_set(vnode as usize).unwrap();
@@ -364,10 +359,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
             .get(&serialized_pk, read_options.clone())
             .await?
         {
-            let deserialize_res = self
-                .row_deserializer
-                .deserialize(&serialized_pk, &value)
-                .map_err(err)?;
+            let deserialize_res =
+                deserialize(self.mapping.clone(), &serialized_pk, &value).map_err(err)?;
             Ok(Some(deserialize_res.2))
         } else {
             Ok(None)
@@ -387,7 +380,7 @@ pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
 /// The row iterator of the storage table.
 /// The wrapper of [`StorageTableIter`] if pk is not persisted.
-pub type StorageTableIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;
+pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
@@ -400,7 +393,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
+impl<S: StateStore> StorageTable<S> {
     /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
@@ -411,7 +404,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
         vnode_hint: Option<VirtualNode>,
         wait_epoch: bool,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S, RS>>
+    ) -> StorageResult<StorageTableIter<S>>
     where
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
@@ -441,7 +434,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
 
             async move {
                 let read_options = self.get_read_option(epoch);
-                let iter = StorageTableIterInner::<S, RS>::new(
+                let iter = StorageTableIterInner::<S>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     prefix_hint,
@@ -480,7 +473,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
         next_col_bounds: impl RangeBounds<Datum>,
         wait_epoch: bool,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S, RS>> {
+    ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
             pk_prefix: &Row,
@@ -578,7 +571,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
         epoch: u64,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<StorageTableIter<S, RS>> {
+    ) -> StorageResult<StorageTableIter<S>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true, false)
             .await
     }
@@ -589,28 +582,27 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS> {
         epoch: u64,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<StorageTableIter<S, RS>> {
+    ) -> StorageResult<StorageTableIter<S>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
             .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S, RS>> {
+    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S>> {
         self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.
-struct StorageTableIterInner<S: StateStore, RS: RowSerde> {
+struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
-    /// Cell-based row deserializer
-    row_deserializer: RS::Deserializer, // CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
+    table_descs: Arc<ColumnDescMapping>,
 }
 
-impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
+impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
@@ -631,14 +623,10 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
                 .await?;
         }
 
-        let row_deserializer = RS::create_deserializer(table_descs);
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
-        let iter = Self {
-            iter,
-            row_deserializer,
-        };
+        let iter = Self { iter, table_descs };
         Ok(iter)
     }
 
@@ -651,10 +639,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            let (_vnode, pk, row) = self
-                .row_deserializer
-                .deserialize(&key, &value)
-                .map_err(err)?;
+            let (_vnode, pk, row) =
+                deserialize(self.table_descs.clone(), &key, &value).map_err(err)?;
 
             yield (pk, row)
         }
