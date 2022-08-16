@@ -291,10 +291,26 @@ Before running end-to-end tests, you will need to start a full cluster first:
 ./risedev d
 ```
 
-Then run the end-to-end tests (replace `**/*.slt` with the test case directories and files available):
+Then to run the end-to-end tests, you can use one of the following commands according to which component you are developing:
 
 ```shell
-./risedev slt -p 4566 -d dev  './e2e_test/streaming/**/*.slt'
+# run all streaming tests
+./risedev slt-streaming -p 4566 -d dev -j 1
+# run all batch tests
+./risedev slt-batch -p 4566 -d dev -j 1
+# run both
+./risedev slt-all -p 4566 -d dev -j 1
+```
+
+**Note**: Use `-j 1` to create a separate database for each test case, which can ensure that previous test case failure won’t affect other tests due to table cleanups.
+
+Alternatively, you can also run some specific tests:
+
+```shell
+# run a single test
+./risedev slt -p 4566 -d dev './e2e_test/path/to/file.slt'
+# run all tests under a directory (including subdirectories)
+./risedev slt -p 4566 -d dev './e2e_test/path/to/directory/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.
