@@ -248,7 +248,7 @@ impl Binder {
             && let Some(bound_query) = self.cte_to_relation.get(&table_name)
         {
             let (query, mut original_alias) = bound_query.clone();
-            debug_assert_eq!(original_alias.name.value, table_name); // The original CTE alias ought to be its table name.
+            debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;

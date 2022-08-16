@@ -51,8 +51,6 @@ pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 use postgres_types::{ToSql, Type};
-use prost::Message;
-use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
 
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
@@ -141,7 +139,7 @@ impl Display for DataType {
             DataType::Float64 => f.write_str("double precision"),
             DataType::Decimal => f.write_str("numeric"),
             DataType::Date => f.write_str("date"),
-            DataType::Varchar => f.write_str("character varying"),
+            DataType::Varchar => f.write_str("varchar"),
             DataType::Time => f.write_str("time without time zone"),
             DataType::Timestamp => f.write_str("timestamp without time zone"),
             DataType::Timestampz => f.write_str("timestamp with time zone"),
@@ -645,7 +643,7 @@ impl Display for ScalarRefImpl<'_> {
     }
 }
 
-pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
+pub fn display_datum_ref(d: DatumRef<'_>) -> String {
     match d {
         Some(s) => format!("{}", s),
         None => "NULL".to_string(),
@@ -927,36 +925,10 @@ impl ScalarImpl {
             TypeName::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_protobuf_bytes(b)?),
             TypeName::Date => ScalarImpl::NaiveDate(NaiveDateWrapper::from_protobuf_bytes(b)?),
             TypeName::Struct => {
-                let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
-                let fields: Vec<Datum> = struct_value
-                    .fields
-                    .iter()
-                    .zip_eq(data_type.field_type.iter())
-                    .map(|(b, d)| {
-                        if b.is_empty() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
-                        }
-                    })
-                    .collect::<ArrayResult<Vec<Datum>>>()?;
-                ScalarImpl::Struct(StructValue::new(fields))
+                ScalarImpl::Struct(StructValue::from_protobuf_bytes(data_type.clone(), b)?)
             }
             TypeName::List => {
-                let list_value: ProstListValue = Message::decode(b.as_slice())?;
-                let d = &data_type.field_type[0];
-                let fields: Vec<Datum> = list_value
-                    .fields
-                    .iter()
-                    .map(|b| {
-                        if b.is_empty() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
-                        }
-                    })
-                    .collect::<ArrayResult<Vec<Datum>>>()?;
-                ScalarImpl::List(ListValue::new(fields))
+                ScalarImpl::List(ListValue::from_protobuf_bytes(data_type.clone(), b)?)
             }
             _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
         };
