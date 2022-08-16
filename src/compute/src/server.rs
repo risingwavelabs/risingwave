@@ -33,7 +33,9 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactionShutdowSenderMap, Compactor, CompactorContext, TaskProgressTracker};
+use risingwave_storage::hummock::compactor::{
+    CompactionExecutor, CompactionShutdowSenderMap, Compactor, CompactorContext,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
@@ -165,7 +167,7 @@ pub async fn compute_node_serve(
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
                 memory_limiter: memory_limiter.clone(),
                 sstable_id_manager: storage.sstable_id_manager(),
-                task_progress_tracker: TaskProgressTracker::default()
+                task_progress: Default::default(),
             });
             let (handle, shutdown_sender) =
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);

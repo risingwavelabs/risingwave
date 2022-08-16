@@ -40,7 +40,7 @@ mod tests {
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext, };
+    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::{HummockStorage, MemoryLimiter, SstableIdManager};
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};

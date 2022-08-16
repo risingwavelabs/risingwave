@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
@@ -48,4 +49,40 @@ pub struct CompactorContext {
     pub memory_limiter: Arc<MemoryLimiter>,
 
     pub sstable_id_manager: SstableIdManagerRef,
+
+    pub task_progress: Arc<Mutex<HashMap<u64, TaskProgress>>>,
+}
+
+#[derive(Default, Clone)]
+pub struct TaskProgress {
+    pub num_blocks_sealed: u32,
+    pub num_blocks_uploaded: u32,
+}
+
+/// Maps task_id to its `TaskProgress`
+#[derive(Default, Clone)]
+pub struct TaskProgressTracker {
+    task_id: u64,
+    map: Arc<Mutex<HashMap<u64, TaskProgress>>>,
+}
+
+impl TaskProgressTracker {
+    pub fn new(task_id: u64, task_progress_map: Arc<Mutex<HashMap<u64, TaskProgress>>>) -> Self {
+        Self {
+            task_id,
+            map: task_progress_map,
+        }
+    }
+
+    pub fn inc_blocks_sealed(&self) {
+        let mut guard = self.map.lock().unwrap();
+        let progress = guard.entry(self.task_id).or_insert_with(Default::default);
+        progress.num_blocks_sealed += 1;
+    }
+
+    pub fn inc_blocks_uploaded(&self) {
+        let mut guard = self.map.lock().unwrap();
+        let progress = guard.entry(self.task_id).or_insert_with(Default::default);
+        progress.num_blocks_uploaded += 1;
+    }
 }

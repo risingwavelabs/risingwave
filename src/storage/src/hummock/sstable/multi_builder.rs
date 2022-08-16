@@ -16,8 +16,7 @@ use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
-use super::SstableMeta;
-use crate::hummock::compactor::{TaskId, TaskProgressTracker};
+use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
@@ -50,7 +49,7 @@ pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
     policy: CachePolicy,
     sstable_store: SstableStoreRef,
     tracker: Option<MemoryTracker>,
-    task_progress: (TaskId, TaskProgressTracker),
+    task_progress: Option<TaskProgressTracker>,
 }
 
 impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
@@ -59,7 +58,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
         builder_factory: F,
         policy: CachePolicy,
         sstable_store: SstableStoreRef,
-        task_progress: (TaskId, TaskProgressTracker),
+        task_progress: Option<TaskProgressTracker>,
     ) -> Self {
         Self {
             builder_factory,
@@ -149,24 +148,13 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             };
             let policy = self.policy;
             let tracker = self.tracker.take();
+            let task_progress = self.task_progress.clone();
             let upload_join_handle = tokio::spawn(async move {
-                let ret = if policy == CachePolicy::Fill {
-                    let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
-                    sstable_store.put(sst, data, CachePolicy::Fill).await
-                } else {
-                    sstable_store
-                        .put(
-                            Sstable::new(table_id, meta_clone),
-                            data,
-                            CachePolicy::NotFill,
-                        )
-                        .await
-                };
-                let mut guard = task_progress.1.0.lock().unwrap();
-                let progress = guard.entry(task_id).or_insert_with(Default::default);
-                progress.num_blocks_uploaded += 1;
-                drop(guard);
+                let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
                 drop(tracker);
+                if let Some(progress_tracker) = task_progress {
+                    progress_tracker.inc_blocks_uploaded();
+                }
                 ret
             });
             self.sealed_builders.push(SealedSstableBuilder {
@@ -174,12 +162,9 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                 upload_join_handle,
                 bloom_filter_size,
             });
-            let task_id = self.task_progress.0;
-            // TODO: maybe error handle rather than unwrap...?
-            let mut guard = self.task_progress.1 .0.lock().unwrap();
-            let progress = guard.entry(task_id).or_insert_with(Default::default);
-            progress.num_blocks_sealed += 1;
-            drop(guard);
+            if let Some(progress_tracker) = &self.task_progress {
+                progress_tracker.inc_blocks_sealed();
+            }
         }
     }
 
@@ -246,7 +231,7 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
-            (0, TaskProgressTracker::default()),
+            None,
         );
         let results = builder.finish();
         assert!(results.is_empty());
@@ -271,7 +256,7 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
-            (0, TaskProgressTracker::default()),
+            None,
         );
 
         for i in 0..table_capacity {
@@ -295,7 +280,7 @@ mod tests {
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
-            (0, TaskProgressTracker::default()),
+            None,
         );
         let mut epoch = 100;
 
@@ -335,7 +320,7 @@ mod tests {
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
-            (0, TaskProgressTracker::default()),
+            None,
         );
 
         builder

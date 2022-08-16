@@ -235,6 +235,7 @@ impl SharedBufferCompactRunner {
                 iter,
                 dummy_compaction_filter,
                 filter_key_extractor,
+                None,
             )
             .await
     }

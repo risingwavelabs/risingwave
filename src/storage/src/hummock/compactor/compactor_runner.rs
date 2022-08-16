@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
+use super::TaskProgressTracker;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{
     ConcatSstableIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
@@ -78,8 +79,18 @@ impl CompactorRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
+        let progress_tracker = Some(TaskProgressTracker::new(
+            self.compact_task.task_id,
+            self.compactor.context.task_progress.clone(),
+        ));
         self.compactor
-            .compact_key_range_impl(split_index, iter, compaction_filter, filter_key_extractor)
+            .compact_key_range_impl(
+                split_index,
+                iter,
+                compaction_filter,
+                filter_key_extractor,
+                progress_tracker,
+            )
             .await
     }
 
