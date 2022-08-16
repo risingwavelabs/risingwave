@@ -195,7 +195,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         row_count: Option<usize>,
         pk_indices: PkIndices,
         is_row_count: bool,
-        pk: Option<&Row>,
+        group_key: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
@@ -209,16 +209,16 @@ impl<S: StateStore> ManagedStateImpl<S> {
             | AggKind::Sum
             | AggKind::ApproxCountDistinct
             | AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
+                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
             )),
             // optimization: use single-value state for append-only min/max
             AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
+                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
             )),
             AggKind::Max | AggKind::Min => {
                 Ok(Self::Table(Box::new(GenericExtremeState::new(
                     agg_call,
-                    pk,
+                    group_key,
                     pk_indices,
                     state_table_col_mapping,
                     row_count.unwrap(),
@@ -227,7 +227,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
             }
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,
-                pk,
+                group_key,
                 pk_indices,
                 state_table_col_mapping,
             )))),

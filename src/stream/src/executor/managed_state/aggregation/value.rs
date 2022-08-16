@@ -35,7 +35,7 @@ pub struct ManagedValueState {
 
     /// Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
-    pk: Option<Row>,
+    group_key: Option<Row>,
 }
 
 impl ManagedValueState {
@@ -43,7 +43,7 @@ impl ManagedValueState {
     pub async fn new<S: StateStore>(
         agg_call: AggCall,
         row_count: Option<usize>,
-        pk: Option<&Row>,
+        group_key: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let data = if row_count != Some(0) {
@@ -53,7 +53,7 @@ impl ManagedValueState {
             // View the state table as single-value table, and get the value via empty primary key
             // or group key.
             let raw_data = state_table
-                .get_row(pk.unwrap_or_else(Row::empty), epoch)
+                .get_row(group_key.unwrap_or_else(Row::empty), epoch)
                 .await?;
 
             // According to row layout, the last field of the row is value and we sure the row is
@@ -72,7 +72,7 @@ impl ManagedValueState {
                 data,
             )?,
             is_dirty: false,
-            pk: pk.cloned(),
+            group_key: group_key.cloned(),
         })
     }
 
@@ -113,7 +113,7 @@ impl ManagedValueState {
         // front of value). In this case, the pk is just group key.
 
         let mut v = vec![];
-        v.extend_from_slice(&self.pk.as_ref().unwrap_or_else(Row::empty).0);
+        v.extend_from_slice(&self.group_key.as_ref().unwrap_or_else(Row::empty).0);
         v.push(self.state.get_output()?);
 
         state_table.insert(Row::new(v))?;
