@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::{HummockVersionDelta, HummockVersionDeltas};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::{self, UnboundedSender};
@@ -42,7 +41,6 @@ struct Task {
     callback_tx: Option<oneshot::Sender<NotificationVersion>>,
     operation: Operation,
     info: Info,
-    hummock_version_delta: HummockVersionDelta,
 }
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
@@ -67,12 +65,7 @@ impl NotificationManager {
                 let version = match task.target {
                     WorkerType::Generic => guard.notify_all(task.operation, &task.info),
 
-                    _ => guard.notify(
-                        task.target,
-                        task.operation,
-                        &task.info,
-                        task.hummock_version_delta,
-                    ),
+                    _ => guard.notify(task.target, task.operation, &task.info),
                 };
                 if let Some(tx) = task.callback_tx {
                     tx.send(version).unwrap();
@@ -87,19 +80,12 @@ impl NotificationManager {
     }
 
     /// Add a notification to the waiting queue and return immediately
-    fn notify_asynchronously(
-        &self,
-        target: WorkerType,
-        operation: Operation,
-        info: Info,
-        hummock_version_delta: HummockVersionDelta,
-    ) {
+    fn notify_asynchronously(&self, target: WorkerType, operation: Operation, info: Info) {
         let task = Task {
             target,
             callback_tx: None,
             operation,
             info,
-            hummock_version_delta,
         };
         self.task_tx.send(task).unwrap();
     }
@@ -118,19 +104,13 @@ impl NotificationManager {
             callback_tx: Some(callback_tx),
             operation,
             info,
-            hummock_version_delta: HummockVersionDelta::default(),
         };
         self.task_tx.send(task).unwrap();
         callback_rx.await.unwrap()
     }
 
     pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(
-            WorkerType::Frontend,
-            operation,
-            info,
-            HummockVersionDelta::default(),
-        );
+        self.notify_asynchronously(WorkerType::Frontend, operation, info);
     }
 
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
@@ -145,18 +125,8 @@ impl NotificationManager {
         self.notify(WorkerType::Compactor, operation, info).await
     }
 
-    pub fn notify_compute_asynchronously(
-        &self,
-        operation: Operation,
-        info: Info,
-        hummock_version_delta: HummockVersionDelta,
-    ) {
-        self.notify_asynchronously(
-            WorkerType::ComputeNode,
-            operation,
-            info,
-            hummock_version_delta,
-        );
+    pub fn notify_compute_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
     }
 
     /// To notify all the `worker_type` sender
@@ -249,7 +219,6 @@ impl NotificationManagerCore {
         worker_type: WorkerType,
         operation: Operation,
         info: &Info,
-        hummock_version_delta: HummockVersionDelta,
     ) -> NotificationVersion {
         self.current_version += 1;
 
@@ -263,19 +232,10 @@ impl NotificationManagerCore {
 
         let mut bad_keys = vec![];
         for (worker_key, sender) in senders.iter() {
-            let specific_info = if matches!(worker_type, WorkerType::ComputeNode)
-                && matches!(info, Info::HummockVersionDeltas(_))
-            {
-                Info::HummockVersionDeltas(HummockVersionDeltas {
-                    version_deltas: vec![hummock_version_delta.clone()],
-                })
-            } else {
-                info.clone()
-            };
             if let Err(err) = sender.send(Ok(SubscribeResponse {
                 status: None,
                 operation: operation as i32,
-                info: Some(specific_info),
+                info: Some(info.clone()),
                 version: self.current_version,
             })) {
                 tracing::warn!(

@@ -844,15 +844,14 @@ where
                 .notification_manager()
                 .notify_compute_asynchronously(
                     Operation::Add,
-                    Info::HummockVersionDeltas(
-                        risingwave_pb::hummock::HummockVersionDeltas::default(),
-                    ),
-                    versioning
-                        .hummock_version_deltas
-                        .last_key_value()
-                        .unwrap()
-                        .1
-                        .clone(),
+                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                        version_deltas: vec![versioning
+                            .hummock_version_deltas
+                            .last_key_value()
+                            .unwrap()
+                            .1
+                            .clone()],
+                    }),
                 );
         } else {
             // The compaction task is cancelled.
@@ -1037,13 +1036,14 @@ where
             .notification_manager()
             .notify_compute_asynchronously(
                 Operation::Add,
-                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas::default()),
-                versioning
-                    .hummock_version_deltas
-                    .last_key_value()
-                    .unwrap()
-                    .1
-                    .clone(),
+                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                    version_deltas: vec![versioning
+                        .hummock_version_deltas
+                        .last_key_value()
+                        .unwrap()
+                        .1
+                        .clone()],
+                }),
             );
 
         drop(versioning_guard);
