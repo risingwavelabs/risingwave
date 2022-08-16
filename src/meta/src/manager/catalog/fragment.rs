@@ -78,7 +78,6 @@ pub struct ActorInfos {
 
 #[derive(Default)]
 pub struct BuildGraphInfo {
-    pub table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
     pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
 }
 
@@ -513,8 +512,6 @@ where
         for table_id in table_ids {
             match map.get(table_id) {
                 Some(table_fragment) => {
-                    info.table_node_actors
-                        .insert(*table_id, table_fragment.worker_actor_ids());
                     info.table_sink_actor_ids
                         .insert(*table_id, table_fragment.sink_actor_ids());
                 }

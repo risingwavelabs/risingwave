@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
@@ -157,7 +156,11 @@ where
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let _ddl_lock = self.ddl_lock.read().await;
-        let mut source = request.into_inner().source.unwrap();
+        let mut source = request
+            .into_inner()
+            .get_source()
+            .map_err(meta_error_to_tonic)?
+            .clone();
 
         let id = self
             .env
@@ -438,11 +441,7 @@ where
     S: MetaStore,
 {
     async fn notify_table_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
-        for table_id in table_fragment
-            .internal_table_ids()
-            .into_iter()
-            .chain(std::iter::once(table_fragment.table_id().table_id))
-        {
+        for table_id in table_fragment.all_table_ids() {
             let mapping = table_fragment
                 .get_table_hash_mapping(table_id)
                 .expect("no data distribution found");
@@ -477,7 +476,7 @@ where
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
         assert!(
             !dependent_relations.is_empty(),
-            "there should be at lease 1 dependent relation when creating sink"
+            "there should be at lease 1 dependent relation when creating table or sink"
         );
         relation.set_dependent_relations(dependent_relations);
 
@@ -503,8 +502,7 @@ where
                 .remove_processing_table(
                     ctx.internal_table_ids()
                         .into_iter()
-                        .chain(std::iter::once(mview_id))
-                        .collect_vec(),
+                        .chain(std::iter::once(mview_id)),
                     true,
                 )
                 .await;
@@ -541,8 +539,7 @@ where
             .remove_processing_table(
                 ctx.internal_table_ids()
                     .into_iter()
-                    .chain(std::iter::once(mview_id))
-                    .collect_vec(),
+                    .chain(std::iter::once(mview_id)),
                 false,
             )
             .await;
@@ -595,8 +592,18 @@ where
 
         // Resolve fragments.
         let parallel_degree = self.cluster_manager.get_parallel_unit_count().await;
+        ctx.dependent_table_ids = fragment_graph
+            .dependent_table_ids
+            .iter()
+            .map(|table_id| TableId::new(*table_id))
+            .collect();
+        ctx.table_sink_map = self
+            .fragment_manager
+            .get_build_graph_info(&ctx.dependent_table_ids)
+            .await?
+            .table_sink_actor_ids;
 
-        let mut actor_graph_builder = ActorGraphBuilder::new(
+        let actor_graph_builder = ActorGraphBuilder::new(
             self.env.id_gen_manager_ref(),
             &fragment_graph,
             parallel_degree as u32,
@@ -605,11 +612,7 @@ where
         .await?;
 
         let graph = actor_graph_builder
-            .generate_graph(
-                self.env.id_gen_manager_ref(),
-                self.fragment_manager.clone(),
-                ctx,
-            )
+            .generate_graph(self.env.id_gen_manager_ref(), ctx)
             .await?;
 
         assert_eq!(
@@ -712,8 +715,7 @@ where
                 .remove_processing_table(
                     ctx.internal_table_ids()
                         .into_iter()
-                        .chain(std::iter::once(mview_id))
-                        .collect_vec(),
+                        .chain(std::iter::once(mview_id)),
                     true,
                 )
                 .await;
@@ -740,8 +742,7 @@ where
             .remove_processing_table(
                 ctx.internal_table_ids()
                     .into_iter()
-                    .chain(std::iter::once(mview_id))
-                    .collect_vec(),
+                    .chain(std::iter::once(mview_id)),
                 false,
             )
             .await;

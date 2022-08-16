@@ -258,16 +258,14 @@ where
             }
         }
 
-        // get internal_table_id by fragment_manager
         let table_id = TableId::new(request.table_id);
-        if let Ok(table_frgament) = self
+        if let Ok(table_fragment) = self
             .fragment_manager
             .select_table_fragments_by_table_id(&table_id)
             .await
         {
-            option.internal_table_id = HashSet::from_iter(table_frgament.internal_table_ids());
+            option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
         }
-        option.internal_table_id.insert(request.table_id); // need to handle outter table_id (mv)
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",

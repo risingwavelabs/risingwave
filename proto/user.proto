@@ -127,8 +127,6 @@ message RevokePrivilegeResponse {
 }
 
 service UserService {
-  // TODO: add UpdateUser method to support `ALTER USER`, need more investigation. The FieldMask may be helpful:
-  // https://developers.google.com/protocol-buffers/docs/reference/java/com/google/protobuf/FieldMask.html.
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc DropUser(DropUserRequest) returns (DropUserResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);

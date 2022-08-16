@@ -108,15 +108,13 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
-        let table_ids = table_fragments
-            .internal_table_ids()
-            .into_iter()
-            .chain(std::iter::once(table_fragments.table_id().table_id))
-            .collect_vec();
         self.inner
             .write()
             .await
-            .unregister(&table_ids, self.env.meta_store())
+            .unregister(
+                &table_fragments.all_table_ids().collect_vec(),
+                self.env.meta_store(),
+            )
             .await
     }
 
@@ -170,14 +168,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec();
         let valid_ids = table_fragments_list
             .iter()
-            .flat_map(|table_fragments| {
-                table_fragments
-                    .internal_table_ids()
-                    .iter()
-                    .cloned()
-                    .chain(std::iter::once(table_fragments.table_id().table_id))
-                    .collect_vec()
-            })
+            .flat_map(|table_fragments| table_fragments.all_table_ids())
             .chain(source_ids.iter().cloned())
             .chain(source_ids_in_fragments.iter().cloned())
             .dedup()

@@ -189,7 +189,7 @@ where
 
                     if is_singleton {
                         // Directly find the singleton actor id.
-                        assert!(upstream_parallel_actor_mapping.len() == 1);
+                        assert_eq!(upstream_parallel_actor_mapping.len(), 1);
                         *upstream_parallel_actor_mapping.values().next().unwrap()
                     } else {
                         // 2. use our actor id to get parallel unit id of the chain actor
@@ -390,8 +390,6 @@ where
         )
         .await?;
 
-        #[expect(clippy::no_effect_underscore_binding)]
-        let _dependent_table_ids = &*dependent_table_ids;
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
 
@@ -768,15 +766,8 @@ where
         }
 
         // Remove internal_tables push to CN and Compactor
-        self.remove_processing_table(
-            table_fragments
-                .internal_table_ids()
-                .into_iter()
-                .chain(std::iter::once((*table_id).into()))
-                .collect(),
-            false,
-        )
-        .await;
+        self.remove_processing_table(table_fragments.all_table_ids(), false)
+            .await;
         Ok(table_fragments)
     }
 
@@ -784,7 +775,11 @@ where
         self.processing_table.try_lock().unwrap().clone()
     }
 
-    pub async fn remove_processing_table(&self, table_ids: Vec<u32>, notify: bool) {
+    pub async fn remove_processing_table(
+        &self,
+        table_ids: impl Iterator<Item = u32>,
+        notify: bool,
+    ) {
         let mut processing_table_guard = self.processing_table.lock().await;
         for table_id in table_ids {
             processing_table_guard.remove(&table_id);

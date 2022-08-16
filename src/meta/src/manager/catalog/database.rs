@@ -100,7 +100,7 @@ where
         );
         let tables = HashSet::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
-                relation_ref_count.entry(*depend_relation_id).or_insert(0);
+                relation_ref_count.entry(*depend_relation_id).or_insert(1);
             }
             (table.database_id, table.schema_id, table.name)
         }));

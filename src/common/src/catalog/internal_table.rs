@@ -17,16 +17,16 @@ use regex::Regex;
 
 pub const RW_TABLE_FUNCTION_NAME: &str = "rw_table";
 
-pub fn generate_intertable_name_with_type(
+pub fn generate_internal_table_name_with_type(
     mview_name: &str,
-    fragmen_id: u32,
+    fragment_id: u32,
     table_id: u32,
     table_type: &str,
 ) -> String {
     format!(
         "__internal_{}_{}_{}_{}",
         mview_name,
-        fragmen_id,
+        fragment_id,
         table_type.to_lowercase(),
         table_id
     )
