@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::ops::Index;
 use std::sync::Arc;
 
 use bytes::BufMut;
@@ -32,7 +31,7 @@ use super::mem_table::{MemTable, RowOp};
 use super::Distribution;
 use crate::error::{StorageError, StorageResult};
 use crate::row_serde::row_serde_util::{deserialize, serialize};
-use crate::row_serde::{serialize_pk, ColumnDescMapping};
+use crate::row_serde::ColumnDescMapping;
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
 use crate::{Keyspace, StateStore};
@@ -257,19 +256,9 @@ impl<S: StateStore> StateTable<S> {
         );
     }
 
-    fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
-        // The output columns should be exactly same with the table columns, so
-        // we can directly index into the row with indices to the table columns.
-        self.compute_vnode(row, &self.dist_key_indices)
-    }
-
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         self.compute_vnode(pk, &self.dist_key_in_pk_indices)
-    }
-
-    fn pk_serializer(&self) -> &OrderedRowSerializer {
-        &self.pk_serializer
     }
 
     // TODO: remove, should not be exposed to user
@@ -343,14 +332,9 @@ impl<S: StateStore> StateTable<S> {
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
-        let mut datums = vec![];
-        for pk_index in self.pk_indices() {
-            datums.push(value.index(*pk_index).clone());
-        }
-        let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
-        let vnode = self.compute_vnode_by_row(&value);
-        let (key_bytes, value_bytes) = serialize(vnode, &pk_bytes, value).map_err(err)?;
+        let pk = value.by_indices(self.pk_indices());
+        let key_bytes = self.serialize_pk_with_vnode(&pk);
+        let value_bytes = serialize(value).map_err(err)?;
         self.mem_table.insert(key_bytes, value_bytes);
         Ok(())
     }
@@ -358,30 +342,23 @@ impl<S: StateStore> StateTable<S> {
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
-        let mut datums = vec![];
-        for pk_index in self.pk_indices() {
-            datums.push(old_value.index(*pk_index).clone());
-        }
-        let pk = Row::new(datums);
-        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
-        let vnode = self.compute_vnode_by_row(&old_value);
-        let (key_bytes, value_bytes) = serialize(vnode, &pk_bytes, old_value).map_err(err)?;
+        let pk = old_value.by_indices(self.pk_indices());
+        let key_bytes = self.serialize_pk_with_vnode(&pk);
+        let value_bytes = serialize(old_value).map_err(err)?;
         self.mem_table.delete(key_bytes, value_bytes);
         Ok(())
     }
 
     /// Update a row. The old and new value should have the same pk.
     pub fn update(&mut self, old_value: Row, new_value: Row) -> StorageResult<()> {
-        let pk = old_value.by_indices(self.pk_indices());
-        debug_assert_eq!(pk, new_value.by_indices(self.pk_indices()));
-        let pk_bytes = serialize_pk(&pk, self.pk_serializer());
+        let old_pk = old_value.by_indices(self.pk_indices());
+        let new_pk = new_value.by_indices(self.pk_indices());
+        debug_assert_eq!(old_pk, new_pk);
 
-        let old_vnode = self.compute_vnode_by_row(&old_value);
-        let (_, old_value_bytes) =
-            serialize(old_vnode, &pk_bytes, old_value.clone()).map_err(err)?;
-        let new_vnode = self.compute_vnode_by_row(&old_value);
-        let (new_key_bytes, new_value_bytes) =
-            serialize(new_vnode, &pk_bytes, old_value).map_err(err)?;
+        let new_key_bytes = self.serialize_pk_with_vnode(&new_pk);
+
+        let old_value_bytes = serialize(old_value).map_err(err)?;
+        let new_value_bytes = serialize(new_value).map_err(err)?;
         self.mem_table
             .update(new_key_bytes, old_value_bytes, new_value_bytes);
         Ok(())
