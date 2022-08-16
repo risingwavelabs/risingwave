@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
-use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -145,7 +145,6 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
-    max_sync_epoch: AtomicU64,
     sstable_id_manager: SstableIdManagerRef,
     sync_epoch_notify: Notify,
 }
@@ -204,7 +203,6 @@ impl LocalVersionManager {
                 sstable_id_manager.clone(),
                 filter_key_extractor_manager.clone(),
             )),
-            max_sync_epoch: AtomicU64::new(0),
             sstable_id_manager,
             sync_epoch_notify: Notify::new(),
         });
@@ -511,13 +509,7 @@ impl LocalVersionManager {
         // TODO(xuxinhao): modify it after supporting uploading multiple shared buffers.#4442
         loop {
             let sync_epoch_notified = self.sync_epoch_notify.notified();
-            let min_unsynced_epoch = self
-                .local_version
-                .read()
-                .iter_shared_buffer()
-                .find(|(key, _)| key > &&self.max_sync_epoch.load(Relaxed))
-                .map(|(key, _)| key)
-                .cloned();
+            let min_unsynced_epoch = self.local_version.read().get_min_unsynced_epoch();
             if min_unsynced_epoch.unwrap() == epoch {
                 break;
             } else {
@@ -527,7 +519,7 @@ impl LocalVersionManager {
         let (uncommitted_data, task_write_batch_size) = {
             // We keep the lock on max_sync_epoch until the task is saved in the sync task vec.
             let mut local_version_guard = self.local_version.write();
-            self.max_sync_epoch.store(epoch, Relaxed);
+            local_version_guard.set_min_unsynced_epoch(epoch);
             let (uncommitted_data, task_write_batch_size) = match local_version_guard
                 .get_mut_shared_buffer(epoch)
                 .unwrap()

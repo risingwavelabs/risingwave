@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
@@ -38,6 +39,7 @@ pub struct LocalVersion {
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
     pub sync_uncommitted_data: Vec<(HummockEpoch, SyncUncommittedData)>,
+    max_sync_epoch: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -102,11 +104,24 @@ impl LocalVersion {
             pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
             version_ids_in_use,
             sync_uncommitted_data: Default::default(),
+            max_sync_epoch: 0,
         }
     }
 
     pub fn pinned_version(&self) -> &Arc<PinnedVersion> {
         &self.pinned_version
+    }
+
+    pub fn get_min_unsynced_epoch(&self) -> Option<HummockEpoch> {
+        self.shared_buffer
+            .iter()
+            .find(|(key, _)| key > &&self.max_sync_epoch)
+            .map(|(key, _)| key)
+            .cloned()
+    }
+
+    pub fn set_min_unsynced_epoch(&mut self, epoch: HummockEpoch) {
+        self.max_sync_epoch = epoch;
     }
 
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
@@ -128,10 +143,7 @@ impl LocalVersion {
             .find(|(epoch, _)| epoch == &sync_epoch);
         match &node {
             None => {
-                assert!(matches!(
-                    sync_uncommitted_data,
-                    SyncUncommittedData::Syncing(_)
-                ));
+                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
                 if let Some(last) = self.sync_uncommitted_data.last() {
                     assert!(last.0 < sync_epoch)
                 }
@@ -140,10 +152,7 @@ impl LocalVersion {
                 return;
             }
             Some((_, SyncUncommittedData::Syncing(_))) => {
-                assert!(matches!(
-                    sync_uncommitted_data,
-                    SyncUncommittedData::Synced(_)
-                ));
+                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Synced(_));
             }
             Some((_, SyncUncommittedData::Synced(_))) => {
                 panic!("sync over, can't modify uncommitted sst state");

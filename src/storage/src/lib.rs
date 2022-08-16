@@ -47,6 +47,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(assert_matches)]
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;

@@ -275,7 +275,7 @@ impl HummockStorage {
                 }
             }
             // iterate over uncommitted data in order index in descending order
-            let find_value = self
+            let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
                     uncommitted_data,
                     &internal_key,
@@ -284,13 +284,13 @@ impl HummockStorage {
                     check_bloom_filter,
                 )
                 .await?;
-            table_counts += find_value.1;
-            if let Some(v) = find_value.0 {
+            if let Some(v) = value {
                 return Ok(v);
             }
+            table_counts += table_count;
         }
         for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
-            let find_value = self
+            let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,
                     &internal_key,
@@ -299,10 +299,10 @@ impl HummockStorage {
                     check_bloom_filter,
                 )
                 .await?;
-            table_counts += find_value.1;
-            if let Some(v) = find_value.0 {
+            if let Some(v) = value {
                 return Ok(v);
             }
+            table_counts += table_count;
         }
 
         // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
@@ -380,6 +380,7 @@ impl HummockStorage {
         Ok(None)
     }
 
+    /// Get from `OrderSortedUncommittedData`. If not get successful, return None.
     async fn get_from_order_sorted_uncommitted_data(
         &self,
         order_sorted_uncommitted_data: OrderSortedUncommittedData,
