@@ -212,46 +212,6 @@ macro_rules! impl_has_variant {
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction}
 
 impl ExprImpl {
-    /// Used to check whether the expression has [`CorrelatedInputRef`].
-    // We need to traverse inside subqueries.
-    pub fn has_correlated_input_ref_by_depth(&self) -> bool {
-        struct Has {
-            has: bool,
-            depth: usize,
-        }
-
-        impl ExprVisitor<()> for Has {
-            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.depth() >= self.depth {
-                    self.has = true;
-                }
-            }
-
-            fn visit_subquery(&mut self, subquery: &Subquery) {
-                use crate::binder::BoundSetExpr;
-
-                self.depth += 1;
-                match &subquery.query.body {
-                    BoundSetExpr::Select(select) => select
-                        .select_items
-                        .iter()
-                        .chain(select.group_by.iter())
-                        .chain(select.where_clause.iter())
-                        .for_each(|expr| self.visit_expr(expr)),
-                    BoundSetExpr::Values(_) => {}
-                }
-                self.depth -= 1;
-            }
-        }
-
-        let mut visitor = Has {
-            has: false,
-            depth: 1,
-        };
-        visitor.visit_expr(self);
-        visitor.has
-    }
-
     pub fn has_correlated_input_ref_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
         struct Has {
             has: bool,

@@ -46,10 +46,6 @@ impl Subquery {
         Self { query, kind }
     }
 
-    pub fn is_correlated(&self) -> bool {
-        self.query.is_correlated()
-    }
-
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
         correlated_id: CorrelatedId,

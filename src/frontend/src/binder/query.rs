@@ -45,14 +45,6 @@ impl BoundQuery {
         self.schema().data_types()
     }
 
-    pub fn is_correlated(&self) -> bool {
-        self.body.is_correlated()
-            || self
-                .extra_order_exprs
-                .iter()
-                .any(|e| e.has_correlated_input_ref_by_depth())
-    }
-
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
         correlated_id: CorrelatedId,

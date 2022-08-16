@@ -44,18 +44,6 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn is_correlated(&self) -> bool {
-        self.select_items
-            .iter()
-            .chain(self.group_by.iter())
-            .chain(self.where_clause.iter())
-            .any(|expr| expr.has_correlated_input_ref_by_depth())
-            || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated(),
-                None => false,
-            }
-    }
-
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
         correlated_id: CorrelatedId,

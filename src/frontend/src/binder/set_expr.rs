@@ -37,13 +37,6 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
-        match self {
-            BoundSetExpr::Select(s) => s.is_correlated(),
-            BoundSetExpr::Values(_) => false,
-        }
-    }
-
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
         correlated_id: CorrelatedId,

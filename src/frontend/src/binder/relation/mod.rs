@@ -68,18 +68,6 @@ impl Relation {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
-        match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(),
-            Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth()
-                    || join.left.is_correlated()
-                    || join.right.is_correlated()
-            }
-            _ => false,
-        }
-    }
-
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
         correlated_id: CorrelatedId,

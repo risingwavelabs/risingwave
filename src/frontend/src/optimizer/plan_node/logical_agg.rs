@@ -853,12 +853,6 @@ impl ExprRewriter for LogicalAggBuilder {
     }
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
-        if subquery.is_correlated() {
-            self.error = Some(ErrorCode::NotImplemented(
-                "correlated subquery in HAVING or SELECT with agg".into(),
-                2275.into(),
-            ));
-        }
         subquery.into()
     }
 }
