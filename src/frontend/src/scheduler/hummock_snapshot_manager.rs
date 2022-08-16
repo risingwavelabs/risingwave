@@ -98,7 +98,9 @@ impl HummockSnapshotManager {
 
                 let need_unpin = last_unpin_time.elapsed().as_secs() >= UNPIN_INTERVAL_SECS;
                 if !pin_batches.is_empty() || need_unpin {
-                    let epoch = manager.get_epoch_for_query(&mut pin_batches);
+                    // Note: If we want stronger consistency, we should use
+                    // `get_epoch_for_query_from_rpc`.
+                    let epoch = manager.get_epoch_for_query_from_push(&mut pin_batches);
                     if need_unpin && epoch > 0 {
                         manager.unpin_snapshot_before(epoch);
                         last_unpin_time = Instant::now();
@@ -170,7 +172,44 @@ impl HummockSnapshotManagerCore {
         }
     }
 
-    fn get_epoch_for_query(
+    /// Retrieve max committed epoch from meta with an rpc. This method provides
+    /// better epoch freshness.
+    async fn get_epoch_for_query_from_rpc(
+        &mut self,
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
+    ) -> u64 {
+        let ret = self.meta_client.get_epoch().await;
+        match ret {
+            Ok(epoch) => {
+                let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
+                    None => {
+                        self.epoch_to_query_ids.insert(epoch, HashSet::default());
+                        self.epoch_to_query_ids.get_mut(&epoch).unwrap()
+                    }
+                    Some(queries) => queries,
+                };
+                for (id, cb) in batches.drain(..) {
+                    queries.insert(id);
+                    let _ = cb.send(Ok(epoch));
+                }
+                epoch
+            }
+            Err(e) => {
+                for (id, cb) in batches.drain(..) {
+                    let _ = cb.send(Err(SchedulerError::Internal(anyhow!(
+                        "Failed to get epoch for query: {:?} because of RPC Error: {:?}",
+                        id,
+                        e
+                    ))));
+                }
+                INVALID_EPOCH
+            }
+        }
+    }
+
+    /// Retrieve max committed epoch from locally cached value, which is maintained
+    /// by meta's notification service.
+    fn get_epoch_for_query_from_push(
         &mut self,
         batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
     ) -> u64 {
