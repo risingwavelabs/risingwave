@@ -233,13 +233,19 @@ impl SstableStore {
             self.delete_sst_data(sst_id).await?;
             return Err(e);
         }
+        // TODO: unify cache refill logic with `put_sst`.
         if let CachePolicy::Fill = uploader.policy {
             debug_assert!(!uploader.blocks.is_empty());
-            let sst = Sstable::new_with_blocks(sst_id, meta, uploader.blocks).unwrap();
-            let charge = sst.estimate_size();
-            self.meta_cache
-                .insert(sst_id, sst_id, charge, Box::new(sst));
+            for (block_idx, compressed_block) in uploader.blocks.iter().enumerate() {
+                let block = Block::decode(compressed_block.chunk())?;
+                self.block_cache
+                    .insert(sst_id, block_idx as u64, Box::new(block));
+            }
         }
+        let sst = Sstable::new(sst_id, meta);
+        let charge = sst.estimate_size();
+        self.meta_cache
+            .insert(sst_id, sst_id, charge, Box::new(sst));
         Ok(())
     }
 
