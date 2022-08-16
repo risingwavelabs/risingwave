@@ -67,7 +67,7 @@ pub struct GenericExtremeState<S: StateStore> {
 
     /// Whether the cache is synced to state table. The cache is synced iff:
     /// - the cache is empty and `total_count` is 0, or
-    /// - the cache is not empty and elements in the cache are the topest ones in the state table.
+    /// - the cache is not empty and elements in it are the top ones in the state table.
     cache_synced: bool,
 }
 
