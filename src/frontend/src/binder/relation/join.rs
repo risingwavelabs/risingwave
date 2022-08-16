@@ -19,7 +19,8 @@ use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
 };
 
-use crate::binder::{Binder, bind_context::BindContext, Relation, COLUMN_GROUP_PREFIX};
+use crate::binder::bind_context::BindContext;
+use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
 use crate::expr::{Expr as _, ExprImpl};
 
 #[derive(Debug, Clone)]
@@ -160,8 +161,16 @@ impl Binder {
                     };
                     // Select at most one column from each natural column group from left and right
                     col_indices.push((indices_l[0], indices_r[0] + l_len));
-                    let left_expr = Self::get_identifier_from_indices(&old_context, &indices_l, column.clone())?;
-                    let right_expr = Self::get_identifier_from_indices(&self.context, &indices_r, column.clone())?;
+                    let left_expr = Self::get_identifier_from_indices(
+                        &old_context,
+                        &indices_l,
+                        column.clone(),
+                    )?;
+                    let right_expr = Self::get_identifier_from_indices(
+                        &self.context,
+                        indices_r,
+                        column.clone(),
+                    )?;
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
                         op: BinaryOperator::And,
@@ -201,26 +210,24 @@ impl Binder {
         })
     }
 
-    fn get_identifier_from_indices(context: &BindContext, indices: &[usize], column: Ident) -> Result<Expr> {
+    fn get_identifier_from_indices(
+        context: &BindContext,
+        indices: &[usize],
+        column: Ident,
+    ) -> Result<Expr> {
         if indices.len() == 1 {
             let right_table = context.columns[indices[0]].table_name.clone();
             Ok(Expr::CompoundIdentifier(vec![
-                Ident::new(right_table.clone()),
-                column.clone(),
+                Ident::new(right_table),
+                column,
+            ]))
+        } else if let Some(group_id) = context.column_group_context.mapping.get(&indices[0]) {
+            Ok(Expr::CompoundIdentifier(vec![
+                Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
+                column,
             ]))
         } else {
-            if let Some(group_id) = context
-                .column_group_context
-                .mapping
-                .get(&indices[0]) 
-            {
-                Ok(Expr::CompoundIdentifier(vec![
-                    Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
-                    column,
-                ]))
-            } else {
-                return Err(ErrorCode::InternalError(format!("Ambiguous column name: {}", column.value)).into())
-            }
+            Err(ErrorCode::InternalError(format!("Ambiguous column name: {}", column.value)).into())
         }
     }
 }
