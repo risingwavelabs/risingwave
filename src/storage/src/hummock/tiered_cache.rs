@@ -13,6 +13,9 @@
 // limitations under the License.
 
 use std::hash::{BuildHasher, Hash};
+use std::marker::PhantomData;
+
+use risingwave_common::cache::CachableEntry;
 
 pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
 
@@ -100,9 +103,8 @@ where
     }
 }
 
-use std::marker::PhantomData;
-
-use risingwave_common::cache::CachableEntry;
+unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Send for TieredCacheEntryHolder<K, V> {}
+unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Sync for TieredCacheEntryHolder<K, V> {}
 
 #[cfg(target_os = "linux")]
 pub use super::file_cache;
@@ -151,6 +153,10 @@ where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
+    pub fn none() -> Self {
+        Self::NoneCache(PhantomData::default())
+    }
+
     #[allow(clippy::unused_async)]
     pub async fn open(options: TieredCacheOptions) -> Result<Self> {
         match options {

@@ -51,7 +51,7 @@ pub(crate) use boolean;
 macro_rules! struct_type {
     ($macro:ident) => {
         $macro! {
-            risingwave_common::types::DataType::Struct{fields:_},
+            risingwave_common::types::DataType::Struct{ .. },
             risingwave_common::array::StructArray
         }
     };
@@ -63,7 +63,7 @@ pub(crate) use struct_type;
 macro_rules! list {
     ($macro:ident) => {
         $macro! {
-            risingwave_common::types::DataType::List{datatype:_},
+            risingwave_common::types::DataType::List{ .. },
             risingwave_common::array::ListArray
         }
     };

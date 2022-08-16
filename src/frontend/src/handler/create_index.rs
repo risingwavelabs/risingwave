@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::StreamFragmenterV2;
 
 pub(crate) fn gen_create_index_plan(
     session: &SessionImpl,
@@ -99,18 +99,19 @@ pub(crate) fn gen_create_index_plan(
         .filter(|x| set.insert(*x))
         .collect_vec();
 
+    let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
+
     // Manually assemble the materialization plan for the index MV.
     let materialize = assemble_materialize(
         table_name,
         table.id,
         table_desc.clone(),
         context,
-        index_name.to_string(),
+        index_table_name.clone(),
         &index_columns,
         &include_columns,
     )?;
 
-    let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
     check_schema_writable(&index_schema_name)?;
     let (index_database_id, index_schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
@@ -307,8 +308,7 @@ pub async fn handle_create_index(
             columns,
             include,
         )?;
-        let plan = plan.to_stream_prost();
-        let graph = StreamFragmenter::build_graph(plan);
+        let graph = StreamFragmenterV2::build_graph(plan);
 
         (graph, index_table, index)
     };

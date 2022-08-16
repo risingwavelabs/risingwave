@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -24,6 +24,8 @@ use risingwave_pb::hummock::{
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
+use crate::hummock::HummockManager;
+use crate::storage::MetaStore;
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
@@ -36,6 +38,7 @@ type TaskId = u64;
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
+    max_concurrent_task_number: u64,
     // Tasks only register a heartbeat if they make progress since the last block.
     // Else, they may have stalled even if they are still running within the compactor.
     task_heartbeats: Mutex<HashMap<TaskId, TaskHeartbeat>>,
@@ -51,7 +54,6 @@ struct TaskHeartbeat {
 
 impl Compactor {
     pub async fn send_task(&self, task: Task) -> MetaResult<()> {
-        // TODO: compactor node backpressure
         self.sender
             .send(Ok(SubscribeCompactTasksResponse {
                 task: Some(task.clone()),
@@ -109,6 +111,10 @@ impl Compactor {
 
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
+    }
+
+    pub fn max_concurrent_task_number(&self) -> u64 {
+        self.max_concurrent_task_number
     }
 }
 
@@ -192,6 +198,36 @@ impl CompactorManager {
         cancellable_tasks
     }
 
+    pub async fn next_idle_compactor<S>(
+        &self,
+        hummock_manager: &HummockManager<S>,
+    ) -> Option<Arc<Compactor>>
+    where
+        S: MetaStore,
+    {
+        let mut visited = HashSet::new();
+        loop {
+            match self.next_compactor() {
+                None => {
+                    return None;
+                }
+                Some(compactor) => {
+                    if visited.contains(&compactor.context_id()) {
+                        return None;
+                    }
+                    if hummock_manager
+                        .get_assigned_tasks_number(compactor.context_id())
+                        .await
+                        <= compactor.max_concurrent_task_number()
+                    {
+                        return Some(compactor);
+                    }
+                    visited.insert(compactor.context_id());
+                }
+            }
+        }
+    }
+
     /// Gets next compactor to assign task.
     pub fn next_compactor(&self) -> Option<Arc<Compactor>> {
         let mut guard = self.inner.write();
@@ -218,6 +254,7 @@ impl CompactorManager {
     pub fn add_compactor(
         &self,
         context_id: HummockContextId,
+        max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.remove_compactor(context_id);
@@ -331,9 +368,9 @@ mod tests {
         // No compactors by default.
         assert_eq!(compactor_manager.inner.read().compactors.len(), 0);
 
-        let mut receiver = compactor_manager.add_compactor(1);
+        let mut receiver = compactor_manager.add_compactor(1, u64::MAX);
         assert_eq!(compactor_manager.inner.read().compactors.len(), 1);
-        let _receiver_2 = compactor_manager.add_compactor(2);
+        let _receiver_2 = compactor_manager.add_compactor(2, u64::MAX);
         assert_eq!(compactor_manager.inner.read().compactors.len(), 2);
         compactor_manager.remove_compactor(2);
         assert_eq!(compactor_manager.inner.read().compactors.len(), 1);
@@ -383,7 +420,7 @@ mod tests {
         assert!(compactor_manager.next_compactor().is_none());
 
         // Add a compactor.
-        let mut receiver = compactor_manager.add_compactor(context_id);
+        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
         assert_eq!(compactor_manager.inner.read().compactors.len(), 1);
         let compactor = compactor_manager.next_compactor().unwrap();
         // No compact task.
@@ -417,7 +454,7 @@ mod tests {
         let compactor_manager = CompactorManager::new(1);
         let mut receivers = vec![];
         for context_id in 0..5 {
-            receivers.push(compactor_manager.add_compactor(context_id));
+            receivers.push(compactor_manager.add_compactor(context_id, u64::MAX));
         }
         assert_eq!(compactor_manager.inner.read().compactors.len(), 5);
         for i in 0..receivers.len() * 3 {

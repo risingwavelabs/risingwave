@@ -19,14 +19,13 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
-use auto_enums::auto_enum;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::env_var_is_true;
+use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -280,13 +279,7 @@ impl LocalStreamManager {
         let (actor_ids_to_send, actor_ids_to_collect) = {
             let core = self.core.lock();
             let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
-            let actor_ids_to_collect = core
-                .context
-                .actor_infos
-                .read()
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
+            let actor_ids_to_collect = core.handles.keys().cloned().collect::<HashSet<_>>();
             (actor_ids_to_send, actor_ids_to_collect)
         };
         if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
@@ -295,7 +288,6 @@ impl LocalStreamManager {
         let barrier = &Barrier {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
-            span: tracing::Span::none(),
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
@@ -573,16 +565,13 @@ impl LocalStreamManagerCore {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 };
-                #[auto_enum(Future)]
-                let traced = match env_var_is_true("RW_ASYNC_STACK_TRACE") {
-                    true => trace_reporter.trace(
-                        actor,
-                        format!("Actor {actor_id}"),
-                        false,
-                        Duration::from_millis(1000),
-                    ),
-                    false => actor,
-                };
+                let traced = trace_reporter.optional_trace(
+                    actor,
+                    format!("Actor {actor_id}"),
+                    true,
+                    Duration::from_millis(1000),
+                    *ENABLE_ASYNC_STACK_TRACE,
+                );
                 let instrumented = monitor.instrument(traced);
                 tokio::spawn(instrumented)
             };

@@ -55,7 +55,7 @@ class StreamNode extends Node {
   }
 
   parseType(nodeProto) {
-    let types = new Set(["source", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
+    let types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
     for (let [type, _] of Object.entries(nodeProto)) {
       if (types.has(type)) {
         return type;
@@ -225,7 +225,7 @@ export default class StreamPlanParser {
       for (let actor of this.parsedActorMap.get(actorId).representedActorList) {
         list.add(actor.actorId);
       }
-      mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);
+      mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableId, [...list.values()]);
     }
 
     return mvTableIdToChainViewActorList;
@@ -268,7 +268,7 @@ export default class StreamPlanParser {
       for (let actor of this.parsedActorMap.get(actorId).representedActorList) {
         list.push(actor.actorId);
       }
-      mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
+      mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableId, list);
     }
 
     return mvTableIdToSingleViewActorList;

@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
@@ -530,9 +531,13 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
+            max_concurrent_task_number,
         };
         self.inner.subscribe_compact_tasks(req).await
     }
@@ -610,7 +615,8 @@ impl GrpcMetaClient {
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
-        let endpoint = Endpoint::from_shared(addr.to_string())?;
+        let endpoint = Endpoint::from_shared(addr.to_string())?
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);

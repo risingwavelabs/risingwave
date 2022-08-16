@@ -32,9 +32,10 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-use super::{BuildGraphInfo, CreateMaterializedViewContext, FragmentManagerRef};
-use crate::cluster::WorkerId;
-use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use super::CreateMaterializedViewContext;
+use crate::manager::{
+    BuildGraphInfo, FragmentManagerRef, IdCategory, IdGeneratorManagerRef, WorkerId,
+};
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -615,20 +616,11 @@ impl StreamGraphBuilder {
                         }
                     }
 
-                    NodeBody::TopN(node) => {
+                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
                         node.table_id_l += table_id_offset;
                         node.table_id_h += table_id_offset;
 
                         // TODO add catalog::Table to TopNNode
-                        check_and_fill_internal_table(node.table_id_l, None);
-                        check_and_fill_internal_table(node.table_id_h, None);
-                    }
-
-                    NodeBody::AppendOnlyTopN(node) => {
-                        node.table_id_l += table_id_offset;
-                        node.table_id_h += table_id_offset;
-
-                        // TODO add catalog::Table to AppendOnlyTopN
                         check_and_fill_internal_table(node.table_id_l, None);
                         check_and_fill_internal_table(node.table_id_h, None);
                     }
@@ -918,6 +910,7 @@ impl ActorGraphBuilder {
                         } as i32,
                         actors,
                         vnode_mapping: None,
+                        state_table_ids: vec![],
                     },
                 )
             })

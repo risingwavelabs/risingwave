@@ -18,7 +18,8 @@ use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter, GenericCounte
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_counter_with_registry, Histogram, HistogramVec, IntGauge, Opts, Registry,
+    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
+    IntGauge, Opts, Registry,
 };
 use risingwave_common::monitor::Print;
 use risingwave_hummock_sdk::HummockSstableId;
@@ -74,8 +75,7 @@ macro_rules! for_all_metrics {
             compact_write_sstn: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
-            compact_parallelism: GenericCounter<AtomicU64>,
-
+            compact_task_pending_num: IntGauge,
             get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
         }
@@ -308,14 +308,14 @@ impl StateStoreMetrics {
         let opts = histogram_opts!(
             "state_store_compact_task_duration",
             "Total time of compact that have been issued to state store",
-            exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
+            exponential_buckets(0.1, 1.6, 28).unwrap() // max 52000s
         );
         let compact_task_duration =
             register_histogram_vec_with_registry!(opts, &["level"], registry).unwrap();
         let opts = histogram_opts!(
             "state_store_get_table_id_total_time_duration",
             "Total time of compact that have been issued to state store",
-            exponential_buckets(0.001, 1.6, 28).unwrap() // max 520s
+            exponential_buckets(0.1, 1.6, 28).unwrap() // max 52000s
         );
         let get_table_id_total_time_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
@@ -382,8 +382,8 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let compact_parallelism = register_int_counter_with_registry!(
-            "storage_compact_parallelism",
+        let compact_task_pending_num = register_int_gauge_with_registry!(
+            "storage_compact_task_pending_num",
             "the num of storage compact parallelism",
             registry
         )
@@ -426,7 +426,7 @@ impl StateStoreMetrics {
             compact_write_sstn,
             compact_sst_duration,
             compact_task_duration,
-            compact_parallelism,
+            compact_task_pending_num,
 
             get_table_id_total_time_duration,
             remote_read_time,

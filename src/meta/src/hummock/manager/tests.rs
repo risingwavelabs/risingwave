@@ -28,11 +28,11 @@ use risingwave_pb::hummock::{
     CompactTaskProgress, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
 
-use crate::cluster::WorkerId;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{HummockManager, HummockManagerRef};
+use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::storage::MemStore;
 
@@ -144,18 +144,9 @@ async fn test_unpin_snapshot_before() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
-
-    // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager.list_parallel_units().await;
-    env.hash_mapping_manager()
-        .build_fragment_hash_mapping(1, &parallel_units);
-    for table_id in 1..sst_num + 2 {
-        env.hash_mapping_manager()
-            .set_fragment_state_table(1, table_id as u32);
-    }
 
     // No compaction task available.
     let task = hummock_manager
@@ -188,7 +179,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(
@@ -220,7 +211,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
@@ -852,18 +843,8 @@ async fn test_invalid_sst_id() {
 
 #[tokio::test]
 async fn test_trigger_manual_compaction() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2;
-
-    // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager.list_parallel_units().await;
-    env.hash_mapping_manager()
-        .build_fragment_hash_mapping(1, &parallel_units);
-    for table_id in 1..sst_num + 2 {
-        env.hash_mapping_manager()
-            .set_fragment_state_table(1, table_id as u32);
-    }
 
     {
         let option = ManualCompactionOption::default();
@@ -880,7 +861,7 @@ async fn test_trigger_manual_compaction() {
 
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
-    let receiver = compactor_manager_ref.add_compactor(context_id);
+    let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
     {
         let option = ManualCompactionOption::default();
         let result = hummock_manager
@@ -903,7 +884,7 @@ async fn test_trigger_manual_compaction() {
     }
 
     compactor_manager_ref.remove_compactor(context_id);
-    let _receiver = compactor_manager_ref.add_compactor(context_id);
+    let _receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
 
     {
         let option = ManualCompactionOption {

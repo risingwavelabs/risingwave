@@ -55,9 +55,11 @@ impl BatchManager {
         let task = BatchTaskExecution::new(tid, plan, context, epoch)?;
         let task_id = task.get_task_id().clone();
         let task = Arc::new(task);
-        task.clone().async_execute().await?;
-        if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
-            e.insert(task);
+        // Here the task id insert into self.tasks is put in front of `.async_execute`, cuz when
+        // send `TaskStatus::Running` in `.async_execute`, the query runner may schedule next stage,
+        // it's possible do not found parent task id in theory.
+        let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
+            e.insert(task.clone());
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -65,7 +67,9 @@ impl BatchManager {
                 task_id,
             ))
             .into())
-        }
+        };
+        task.clone().async_execute().await?;
+        ret
     }
 
     pub fn get_data(
@@ -103,12 +107,14 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &ProstTaskId) -> Result<()> {
+    pub fn abort_task(&self, sid: &ProstTaskId) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().get(&sid) {
             Some(task) => task.abort_task(),
-            None => Err(TaskNotFound.into()),
-        }
+            None => {
+                warn!("Task id not found for abort task")
+            }
+        };
     }
 
     pub fn remove_task(
@@ -297,7 +303,7 @@ mod tests {
             .fire_task(&task_id, plan.clone(), 0, context.clone())
             .await
             .unwrap();
-        manager.abort_task(&task_id).unwrap();
+        manager.abort_task(&task_id);
         let task_id = TaskId::from(&task_id);
         let res = manager.wait_until_task_aborted(&task_id).await;
         assert_eq!(res, Ok(()));

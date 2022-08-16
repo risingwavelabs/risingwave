@@ -25,14 +25,13 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
-use crate::cluster::{ClusterManager, ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::manager::{
     CompactionGroupManager, CompactionGroupManagerRef,
 };
 use crate::hummock::compaction_group::TableOption;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
-use crate::manager::MetaSrvEnv;
+use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
@@ -75,7 +74,7 @@ where
         .unwrap();
     compact_task.target_level = 6;
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);

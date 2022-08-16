@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
@@ -21,7 +21,7 @@ use crate::hummock::compactor::{TaskId, TaskProgressTracker};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, HummockResult, Sstable, SstableBuilder};
+use crate::hummock::{CachePolicy, HummockResult, SstableBuilder};
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
@@ -29,11 +29,9 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SealedSstableBuilder {
-    pub id: HummockSstableId,
-    pub meta: SstableMeta,
-    pub table_ids: Vec<u32>,
+    pub sst_info: SstableInfo,
     pub upload_join_handle: JoinHandle<HummockResult<()>>,
-    pub data_len: usize,
+    pub bloom_filter_size: usize,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -136,12 +134,19 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     /// will be no-op.
     pub fn seal_current(&mut self) {
         if let Some(builder) = self.current_builder.take() {
-            let (table_id, data, meta, table_ids) = builder.finish();
-            let len = data.len();
+            let (sst_id, data, meta, table_ids) = builder.finish();
             let sstable_store = self.sstable_store.clone();
-            let task_id = self.task_progress.0;
-            let task_progress = self.task_progress.clone();
-            let meta_clone = meta.clone();
+            let bloom_filter_size = meta.bloom_filter.len();
+            let sst_info = SstableInfo {
+                id: sst_id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: meta.smallest_key.clone(),
+                    right: meta.largest_key.clone(),
+                    inf: false,
+                }),
+                file_size: meta.estimated_size as u64,
+                table_ids,
+            };
             let policy = self.policy;
             let tracker = self.tracker.take();
             let upload_join_handle = tokio::spawn(async move {
@@ -157,8 +162,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                         )
                         .await
                 };
-                // TODO: maybe error handle rather than unwrap...?
-                let mut guard = task_progress.1 .0.lock().unwrap();
+                let mut guard = task_progress.1.0.lock().unwrap();
                 let progress = guard.entry(task_id).or_insert_with(Default::default);
                 progress.num_blocks_uploaded += 1;
                 drop(guard);
@@ -166,11 +170,9 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                 ret
             });
             self.sealed_builders.push(SealedSstableBuilder {
-                id: table_id,
-                meta,
-                table_ids,
+                sst_info,
                 upload_join_handle,
-                data_len: len,
+                bloom_filter_size,
             });
             let task_id = self.task_progress.0;
             // TODO: maybe error handle rather than unwrap...?
@@ -192,8 +194,6 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
 mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering::SeqCst;
-
-    use itertools::Itertools;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -221,7 +221,7 @@ mod tests {
     impl TableBuilderFactory for LocalTableBuilderFactory {
         async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
             let id = self.next_id.fetch_add(1, SeqCst);
-            let builder = SstableBuilder::new(id, self.options.clone());
+            let builder = SstableBuilder::new_for_test(id, self.options.clone());
             let tracker = self.limiter.require_memory(1).await.unwrap();
             Ok((tracker, builder))
         }
@@ -239,6 +239,7 @@ mod tests {
                 restart_interval: DEFAULT_RESTART_INTERVAL,
                 bloom_false_positive: 0.1,
                 compression_algorithm: CompressionAlgorithm::None,
+                estimate_bloom_filter_capacity: 0,
             },
         );
         let builder = CapacitySplitTableBuilder::new(
@@ -263,6 +264,7 @@ mod tests {
                 restart_interval: DEFAULT_RESTART_INTERVAL,
                 bloom_false_positive: 0.1,
                 compression_algorithm: CompressionAlgorithm::None,
+                ..Default::default()
             },
         );
         let mut builder = CapacitySplitTableBuilder::new(
@@ -285,7 +287,6 @@ mod tests {
 
         let results = builder.finish();
         assert!(results.len() > 1);
-        assert_eq!(results.iter().map(|p| p.id).duplicates().count(), 0);
     }
 
     #[tokio::test]

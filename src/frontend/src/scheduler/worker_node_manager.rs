@@ -12,19 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::catalog::TableId;
+use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
 use crate::scheduler::{SchedulerError, SchedulerResult};
 
-/// `WorkerNodeManager` manages live worker nodes.
+/// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
-    worker_nodes: RwLock<Vec<WorkerNode>>,
+    inner: RwLock<WorkerNodeManagerInner>,
+}
+
+#[derive(Default)]
+struct WorkerNodeManagerInner {
+    worker_nodes: Vec<WorkerNode>,
+    /// table vnode mapping info.
+    table_vnode_mapping: HashMap<TableId, VnodeMapping>,
 }
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
@@ -37,49 +46,59 @@ impl Default for WorkerNodeManager {
 
 impl WorkerNodeManager {
     pub fn new() -> Self {
-        let worker_nodes = RwLock::new(Vec::new());
-        Self { worker_nodes }
+        Self {
+            inner: RwLock::new(WorkerNodeManagerInner::default()),
+        }
     }
 
     /// Used in tests.
     pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
-        let worker_nodes = RwLock::new(worker_nodes);
-        Self { worker_nodes }
+        let inner = RwLock::new(WorkerNodeManagerInner {
+            worker_nodes,
+            table_vnode_mapping: HashMap::new(),
+        });
+        Self { inner }
     }
 
     pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
-        self.worker_nodes.read().unwrap().clone()
+        self.inner.read().unwrap().worker_nodes.clone()
     }
 
     pub fn add_worker_node(&self, node: WorkerNode) {
-        self.worker_nodes.write().unwrap().push(node);
+        self.inner.write().unwrap().worker_nodes.push(node);
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
-        self.worker_nodes.write().unwrap().retain(|x| *x != node);
+        self.inner
+            .write()
+            .unwrap()
+            .worker_nodes
+            .retain(|x| *x != node);
     }
 
-    pub fn refresh_worker_node(&self, nodes: Vec<WorkerNode>) {
-        let mut write_guard = self.worker_nodes.write().unwrap();
-        *write_guard = nodes;
+    pub fn refresh(&self, nodes: Vec<WorkerNode>, mapping: HashMap<TableId, VnodeMapping>) {
+        let mut write_guard = self.inner.write().unwrap();
+        write_guard.worker_nodes = nodes;
+        write_guard.table_vnode_mapping = mapping;
     }
 
     /// Get a random worker node.
     pub fn next_random(&self) -> SchedulerResult<WorkerNode> {
-        let current_nodes = self.worker_nodes.read().unwrap();
-        if current_nodes.is_empty() {
+        let inner = self.inner.read().unwrap();
+        if inner.worker_nodes.is_empty() {
             tracing::error!("No worker node available.");
             return Err(SchedulerError::EmptyWorkerNodes);
         }
 
-        Ok(current_nodes
+        Ok(inner
+            .worker_nodes
             .choose(&mut rand::thread_rng())
             .unwrap()
             .clone())
     }
 
     pub fn worker_node_count(&self) -> usize {
-        self.worker_nodes.read().unwrap().len()
+        self.inner.read().unwrap().worker_nodes.len()
     }
 
     /// If parallel unit ids is empty, the scheduler may fail to schedule any task and stuck at
@@ -92,7 +111,7 @@ impl WorkerNodeManager {
         if parallel_unit_ids.is_empty() {
             return Err(SchedulerError::EmptyWorkerNodes);
         }
-        let pu_to_worker = get_pu_to_worker_mapping(&self.worker_nodes.read().unwrap());
+        let pu_to_worker = get_pu_to_worker_mapping(&self.inner.read().unwrap().worker_nodes);
 
         let mut workers = Vec::with_capacity(parallel_unit_ids.len());
         for parallel_unit_id in parallel_unit_ids {
@@ -105,6 +124,42 @@ impl WorkerNodeManager {
             }
         }
         Ok(workers)
+    }
+
+    pub fn get_table_mapping(&self, table_id: &TableId) -> Option<VnodeMapping> {
+        self.inner
+            .read()
+            .unwrap()
+            .table_vnode_mapping
+            .get(table_id)
+            .cloned()
+    }
+
+    pub fn insert_table_mapping(&self, table_id: TableId, vnode_mapping: VnodeMapping) {
+        self.inner
+            .write()
+            .unwrap()
+            .table_vnode_mapping
+            .try_insert(table_id, vnode_mapping)
+            .unwrap();
+    }
+
+    pub fn update_table_mapping(&self, table_id: TableId, vnode_mapping: VnodeMapping) {
+        self.inner
+            .write()
+            .unwrap()
+            .table_vnode_mapping
+            .insert(table_id, vnode_mapping)
+            .unwrap();
+    }
+
+    pub fn remove_table_mapping(&self, table_id: &TableId) {
+        self.inner
+            .write()
+            .unwrap()
+            .table_vnode_mapping
+            .remove(table_id)
+            .unwrap();
     }
 }
 

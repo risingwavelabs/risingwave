@@ -40,11 +40,12 @@ use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::GlobalBarrierManager;
-use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::{CompactionScheduler, HummockManager};
-use crate::manager::{CatalogManager, IdleManager, MetaOpts, MetaSrvEnv, UserManager};
+use crate::manager::{
+    CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -53,7 +54,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction};
-use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
+use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -343,7 +344,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-    let user_manager = Arc::new(UserManager::new(env.clone()).await.unwrap());
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         env.clone(),
@@ -393,8 +393,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .await
                 .expect("list_table_fragments"),
             &catalog_manager
-                .get_catalog_core_guard()
-                .await
                 .list_sources()
                 .await
                 .expect("list_sources")
@@ -408,6 +406,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let compaction_scheduler = Arc::new(CompactionScheduler::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
+        env.opts.compactor_selection_retry_interval_sec,
     ));
     let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
         hummock_manager.clone(),
@@ -419,15 +418,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
-        stream_manager,
+        stream_manager.clone(),
         source_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
         ddl_lock.clone(),
     );
 
-    let user_srv =
-        UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone(), user_manager.clone());
+    let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
     let scale_srv = ScaleServiceImpl::<S>::new(
         barrier_manager.clone(),
         fragment_manager.clone(),
@@ -454,8 +452,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         env.clone(),
         catalog_manager,
         cluster_manager.clone(),
-        user_manager,
         hummock_manager.clone(),
+        stream_manager.clone(),
+        fragment_manager.clone(),
     );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {

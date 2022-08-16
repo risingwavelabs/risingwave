@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, Decimal, IntervalUnit, ScalarImpl};
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
 use risingwave_expr::vector_op::cast::str_parse;
-use risingwave_sqlparser::ast::{DateTimeField, Expr, Value};
+use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 
 use crate::binder::Binder;
 use crate::expr::{align_types, Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
@@ -66,61 +66,27 @@ impl Binder {
     fn bind_interval(
         &mut self,
         s: String,
-        leading_field: Option<DateTimeField>,
+        leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
-        // > INTERVAL '1' means 1 second.
-        // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
-        let unit = leading_field.unwrap_or(DateTimeField::Second);
-        use DateTimeField::*;
-        let tokens = parse_interval(&s)?;
-        // Todo: support more syntax
-        if tokens.len() > 2 {
-            return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
-        }
-        let num = match tokens.get(0) {
-            Some(TimeStrToken::Num(num)) => *num,
-            _ => {
-                return Err(
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
-                );
-            }
-        };
-        let interval_unit = match tokens.get(1) {
-            Some(TimeStrToken::TimeUnit(unit)) => unit,
-            _ => &unit,
-        };
-
-        let interval = (|| match interval_unit {
-            Year => {
-                let months = num.checked_mul(12)?;
-                Some(IntervalUnit::from_month(months as i32))
-            }
-            Month => Some(IntervalUnit::from_month(num as i32)),
-            Day => Some(IntervalUnit::from_days(num as i32)),
-            Hour => {
-                let ms = num.checked_mul(3600 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-            Minute => {
-                let ms = num.checked_mul(60 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-            Second => {
-                let ms = num.checked_mul(1000)?;
-                Some(IntervalUnit::from_millis(ms))
-            }
-        })()
-        .ok_or_else(|| {
-            RwError::from(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid interval {}.",
-                s
-            )))
-        })?;
-
+        let interval =
+            IntervalUnit::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 
         Ok(literal)
+    }
+
+    fn bind_date_time_field(field: AstDateTimeField) -> DateTimeField {
+        // This is a binder function rather than `impl From<AstDateTimeField> for DateTimeField`,
+        // so that the `sqlparser` crate and the `common` crate are kept independent.
+        match field {
+            AstDateTimeField::Year => DateTimeField::Year,
+            AstDateTimeField::Month => DateTimeField::Month,
+            AstDateTimeField::Day => DateTimeField::Day,
+            AstDateTimeField::Hour => DateTimeField::Hour,
+            AstDateTimeField::Minute => DateTimeField::Minute,
+            AstDateTimeField::Second => DateTimeField::Second,
+        }
     }
 
     /// `ARRAY[...]` is represented as an function call at the binder stage.
@@ -173,73 +139,6 @@ impl Binder {
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TimeStrToken {
-    Num(i64),
-    TimeUnit(DateTimeField),
-}
-
-fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
-    if !c.is_empty() {
-        match c.parse::<i64>() {
-            Ok(num) => {
-                t.push(TimeStrToken::Num(num));
-            }
-            Err(_) => {
-                return Err(
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", c)).into(),
-                );
-            }
-        }
-        c.clear();
-    }
-    Ok(())
-}
-
-fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
-    if !c.is_empty() {
-        t.push(TimeStrToken::TimeUnit(c.parse()?));
-        c.clear();
-    }
-    Ok(())
-}
-
-pub fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
-    let s = s.trim();
-    let mut tokens = Vec::new();
-    let mut num_buf = "".to_string();
-    let mut char_buf = "".to_string();
-    for (i, c) in s.chars().enumerate() {
-        match c {
-            '-' => {
-                num_buf.push(c);
-            }
-            c if c.is_ascii_digit() => {
-                convert_unit(&mut char_buf, &mut tokens)?;
-                num_buf.push(c);
-            }
-            c if c.is_ascii_alphabetic() => {
-                convert_digit(&mut num_buf, &mut tokens)?;
-                char_buf.push(c);
-            }
-            chr if chr.is_ascii_whitespace() => {
-                convert_unit(&mut char_buf, &mut tokens)?;
-                convert_digit(&mut num_buf, &mut tokens)?;
-            }
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "Invalid character at offset {} in {}: {:?}. Only support digit or alphabetic now",
-                    i, s, c
-                )).into());
-            }
-        }
-    }
-    convert_digit(&mut num_buf, &mut tokens)?;
-    convert_unit(&mut char_buf, &mut tokens)?;
-
-    Ok(tokens)
 }
 
 #[cfg(test)]

@@ -71,7 +71,8 @@ impl StreamHashJoin {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.to_vec(),
+            logical.base.logical_pk.to_vec(),
+            logical.functional_dependency().clone(),
             dist,
             append_only,
         );
@@ -97,14 +98,17 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        side2o_mapping: &ColIndexMapping,
+        l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                side2o_mapping.rewrite_provided_distribution(left)
+                l2o_mapping.rewrite_provided_distribution(left)
             }
-            (_, _) => panic!(),
+            (_, _) => unreachable!(
+                "suspicious distribution: left: {:?}, right: {:?}",
+                left, right
+            ),
         }
     }
 
@@ -239,7 +243,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
     // The pk of hash join internal table should be join_key + input_pk.
     let mut pk_indices = join_key_indices;
     // TODO(yuhao): dedup the dist key and pk.
-    pk_indices.extend(&base.pk_indices);
+    pk_indices.extend(&base.logical_pk);
 
     let mut columns_fields = schema.fields().to_vec();
 

@@ -32,6 +32,9 @@ pub enum SchedulerError {
     #[error("Empty workers found")]
     EmptyWorkerNodes,
 
+    #[error("Task fail")]
+    TaskExecutionError,
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }

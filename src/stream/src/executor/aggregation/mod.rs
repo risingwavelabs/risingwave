@@ -30,7 +30,6 @@ use risingwave_common::array::{
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
@@ -40,11 +39,12 @@ pub use row_count::*;
 use static_assertions::const_assert_eq;
 
 use super::PkIndices;
+use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Executor, PkDataTypes};
+use crate::executor::Executor;
 
 mod agg_call;
 mod agg_state;
@@ -354,11 +354,9 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
     pk_indices: PkIndices,
-    pk_data_types: PkDataTypes,
     epoch: u64,
-    key_hash_code: Option<HashCode>,
     state_tables: &[RowBasedStateTable<S>],
-    state_table_col_mappings: &[Vec<usize>],
+    state_table_col_mappings: &[Arc<StateTableColumnMapping>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -371,9 +369,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
             agg_call.clone(),
             row_count,
             pk_indices.clone(),
-            pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
-            key_hash_code.clone(),
             key,
             &state_tables[idx],
             state_table_col_mappings[idx].clone(),

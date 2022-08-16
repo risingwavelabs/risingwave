@@ -203,9 +203,9 @@ def section_compaction(panels):
             ),
         ]),
 
-        panels.timeseries_count("Compactor Task Splits Count", [
+        panels.timeseries_count("Compactor Running Task Count", [
             panels.target(
-                "sum(rate(storage_compact_parallelism[$__rate_interval])) by(job,instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
+                "avg(storage_compact_task_pending_num) by(job, instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
             ),
         ]),
 
@@ -448,6 +448,11 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
+                panels.target(
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upsteam_fragment_id}}"
+                ),
+            ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
                 panels.target(
                     "rate(stream_actor_barrier_time[$__rate_interval]) > 0", "{{actor_id}}"
@@ -564,6 +569,11 @@ def section_streaming_actors(outer_panels):
                           [90, 99, 999, "max"]),
                 panels.target(
                     "sum by(le, actor_id, wait_side, job, instance)(rate(stream_join_barrier_align_duration_sum[$__rate_interval])) / sum by(le,actor_id,wait_side,job,instance) (rate(stream_join_barrier_align_duration_count[$__rate_interval]))", "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}"
+                ),
+            ]),
+            panels.timeseries_percentage("Join Actor Input Blocking Time Ratio", [
+                panels.target(
+                    "rate(stream_join_actor_input_waiting_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
         ])
@@ -831,7 +841,7 @@ def section_hummock(panels):
                 "avg(state_store_block_cache_size) by (job,instance)", "data cache - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "avg(state_store_limit_memory_size) by (job)", "data cache - {{job}}"
+                "sum(state_store_limit_memory_size) by (job)", "uploading memory - {{job}}"
             ),
         ]),
         panels.timeseries_latency("Row SeqScan Next Duration", [

@@ -31,8 +31,8 @@ use crate::executor::exchange::input::LocalInput;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
+use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
-use crate::executor::test_utils::global_simple_agg::new_boxed_simple_agg_executor;
 use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
 use crate::task::SharedContext;
 
@@ -52,6 +52,7 @@ async fn test_merger_sum_aggr() {
             vec![],
             LocalInput::for_test(input_rx),
             ActorContext::create(),
+            0,
             0,
             0,
             metrics,
@@ -127,6 +128,7 @@ async fn test_merger_sum_aggr() {
         vec![],
         LocalInput::for_test(rx),
         ActorContext::create(),
+        0,
         0,
         0,
         Arc::new(StreamingMetrics::unused()),

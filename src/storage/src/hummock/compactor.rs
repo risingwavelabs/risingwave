@@ -103,7 +103,7 @@ pub struct CompactorContext {
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
 
-    pub compaction_executor: Option<Arc<CompactionExecutor>>,
+    pub compaction_executor: Arc<CompactionExecutor>,
 
     pub filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 
@@ -112,6 +112,8 @@ pub struct CompactorContext {
     pub sstable_id_manager: SstableIdManagerRef,
 
     pub task_progress: TaskProgressTracker,
+
+    pub shutdown_map: CompactionShutdowSenderMap,
 }
 
 #[derive(Default, Clone)]

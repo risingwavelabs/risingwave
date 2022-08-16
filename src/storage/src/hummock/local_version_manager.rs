@@ -412,24 +412,21 @@ impl LocalVersionManager {
         batch: SharedBufferBatch,
         is_remote_batch: bool,
     ) {
-        // Try get shared buffer with version read lock
-        let shared_buffer = self.local_version.read().get_shared_buffer(epoch).cloned();
-
-        // New a shared buffer with version write lock if shared buffer of the corresponding epoch
-        // does not exist before
-        let shared_buffer = shared_buffer.unwrap_or_else(|| {
-            self.local_version
-                .write()
-                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone())
-        });
+        let mut local_version_guard = self.local_version.write();
+        // Try get shared buffer
+        let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
+            Some(shared_buffer) => shared_buffer,
+            None => local_version_guard
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size.clone()),
+        };
 
         // Write into shared buffer
         if is_remote_batch {
             // The batch won't be synced to S3 asynchronously if it is a remote batch
-            shared_buffer.write().replicate_batch(batch);
+            shared_buffer.replicate_batch(batch);
         } else {
             // The batch will be synced to S3 asynchronously if it is a local batch
-            shared_buffer.write().write_batch(batch);
+            shared_buffer.write_batch(batch);
         }
 
         // Notify the buffer tracker after the batch has been added to shared buffer.
@@ -450,12 +447,12 @@ impl LocalVersionManager {
         // The current implementation is a trivial one, which issue only one flush task and wait for
         // the task to finish.
         let mut task = None;
-        for (epoch, shared_buffer) in self.local_version.read().iter_shared_buffer() {
+        for (epoch, shared_buffer) in self.local_version.write().iter_mut_shared_buffer() {
             // skip the epoch that is being synced
             if syncing_epoch.get(epoch).is_some() {
                 continue;
             }
-            if let Some(upload_task) = shared_buffer.write().new_upload_task(FlushWriteBatch) {
+            if let Some(upload_task) = shared_buffer.new_upload_task(FlushWriteBatch) {
                 task = Some((*epoch, upload_task));
                 break;
             }
@@ -472,7 +469,7 @@ impl LocalVersionManager {
             );
             // TODO: may apply different `is_local` according to whether local spill is enabled.
             let _ = self
-                .run_upload_task(order_index, epoch, payload, true)
+                .run_upload_task(order_index, epoch, payload)
                 .await
                 .inspect_err(|err| {
                     error!(
@@ -516,9 +513,9 @@ impl LocalVersionManager {
         }
         let (order_index, task_payload, task_write_batch_size) = match self
             .local_version
-            .read()
-            .get_shared_buffer(epoch)
-            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(SyncEpoch))
+            .write()
+            .get_mut_shared_buffer(epoch)
+            .and_then(|shared_buffer| shared_buffer.new_upload_task(SyncEpoch))
         {
             Some(task) => task,
             None => {
@@ -527,7 +524,7 @@ impl LocalVersionManager {
             }
         };
 
-        self.run_upload_task(order_index, epoch, task_payload, false)
+        self.run_upload_task(order_index, epoch, task_payload)
             .await?;
         tracing::trace!(
             "sync epoch {} finished. Task size {}",
@@ -547,18 +544,13 @@ impl LocalVersionManager {
         order_index: OrderIndex,
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
-        is_local: bool,
     ) -> HummockResult<()> {
-        let task_result = self
-            .shared_buffer_uploader
-            .flush(epoch, is_local, task_payload)
-            .await;
+        let task_result = self.shared_buffer_uploader.flush(epoch, task_payload).await;
 
-        let local_version_guard = self.local_version.read();
-        let mut shared_buffer_guard = local_version_guard
-            .get_shared_buffer(epoch)
-            .expect("shared buffer should exist since some uncommitted data is not committed yet")
-            .write();
+        let mut local_version_guard = self.local_version.write();
+        let shared_buffer_guard = local_version_guard
+            .get_mut_shared_buffer(epoch)
+            .expect("shared buffer should exist since some uncommitted data is not committed yet");
 
         let ret = match task_result {
             Ok(ssts) => {
@@ -586,7 +578,7 @@ impl LocalVersionManager {
         self.local_version
             .read()
             .get_shared_buffer(epoch)
-            .map(|shared_buffer| shared_buffer.read().get_ssts_to_commit())
+            .map(|shared_buffer| shared_buffer.get_ssts_to_commit())
             .unwrap_or_default()
     }
 
