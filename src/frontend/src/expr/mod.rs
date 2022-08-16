@@ -222,7 +222,7 @@ impl ExprImpl {
 
         impl ExprVisitor<()> for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.depth() == self.depth {
+                if correlated_input_ref.depth() >= self.depth {
                     self.has = true;
                 }
             }
