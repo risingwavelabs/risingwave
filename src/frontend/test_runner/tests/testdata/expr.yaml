@@ -261,7 +261,7 @@
 - sql: |
     create table t (v1 int);
     select concat_ws(v1, 1.2) from t;
-  binder_error: 'Bind error: cannot cast type Int32 to Varchar in Implicit context'
+  binder_error: 'Bind error: cannot cast type "integer" to "varchar" in Implicit context'
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;
