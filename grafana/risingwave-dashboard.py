@@ -285,6 +285,18 @@ def section_compaction(panels):
                 "version_size", "version size"
             ),
         ]),
+
+        panels.timeseries_count("Hummock Sstable BloomFilter Size", [
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+            ),
+        ]),
+
+        panels.timeseries_count("Hummock Sstable BloomFilter Size", [
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_sstable_meta_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_meta_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+            ),
+        ]),
     ]
 
 
@@ -779,6 +791,9 @@ def section_hummock(panels):
             ),
             panels.target(
                 "sum(rate(state_store_bloom_filter_might_positive_counts[$__rate_interval])) by (job,instance)", "bloom filter might positive  - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(state_check_bloom_filter_counts[$__rate_interval])) by (job,instance)", "bloom filter check count  - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_count("Read Merged SSTs", [
