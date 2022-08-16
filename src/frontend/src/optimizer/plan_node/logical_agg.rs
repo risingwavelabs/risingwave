@@ -189,7 +189,7 @@ impl PlanAggCall {
     pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         let total_agg_kind = match &self.agg_kind {
             AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::SingleValue => {
-                self.agg_kind.clone()
+                self.agg_kind
             }
             AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => AggKind::Sum,
             AggKind::Avg => {

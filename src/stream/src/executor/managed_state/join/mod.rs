@@ -31,7 +31,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
@@ -106,11 +106,7 @@ impl JoinRow {
 
     pub fn encode(&self) -> StreamExecutorResult<EncodedJoinRow> {
         Ok(EncodedJoinRow {
-            // TODO(yuhao): remove the `RwError` in value encoding.
-            row: self
-                .row
-                .serialize()
-                .map_err(StreamExecutorError::serde_error)?,
+            row: self.row.serialize()?,
             degree: self.degree,
         })
     }
@@ -125,10 +121,7 @@ pub struct EncodedJoinRow {
 impl EncodedJoinRow {
     fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow> {
         let deserializer = RowDeserializer::new(data_types.to_vec());
-        // TODO(yuhao): remove the `RwError` in value encoding.
-        let row = deserializer
-            .deserialize(self.row.as_ref())
-            .map_err(StreamExecutorError::serde_error)?;
+        let row = deserializer.deserialize(self.row.as_ref())?;
         Ok(JoinRow {
             row,
             degree: self.degree,
