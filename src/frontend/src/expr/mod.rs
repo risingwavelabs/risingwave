@@ -213,6 +213,9 @@ impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunc
 
 impl ExprImpl {
     /// Used to check whether the expression has [`CorrelatedInputRef`].
+    ///
+    /// This is the core logic that supports [`crate::binder::BoundQuery::is_correlated`]. Check the
+    /// doc of it for examples of `depth` being equal, less or greater.
     // We need to traverse inside subqueries.
     pub fn has_correlated_input_ref_by_depth(&self) -> bool {
         struct Has {
