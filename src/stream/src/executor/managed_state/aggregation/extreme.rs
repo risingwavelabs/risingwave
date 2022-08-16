@@ -78,11 +78,11 @@ pub struct GenericExtremeState<S: StateStore> {
 /// of adding a layer of indirection caused by async traits.
 #[async_trait]
 pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
-    async fn apply_batch(
+    async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
         epoch: u64,
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()>;
@@ -156,15 +156,15 @@ impl<S: StateStore> GenericExtremeState<S> {
         (cache_key, cache_data)
     }
 
-    /// Apply a batch of data to the state.
-    fn apply_batch_inner(
+    /// Apply a chunk of data to the state.
+    fn apply_chunk_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        chunk_cols: &[&ArrayImpl], // contains all upstream columns
+        columns: &[&ArrayImpl],
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
+        debug_assert!(super::verify_batch(ops, visibility, columns));
 
         for (i, op) in ops.iter().enumerate() {
             let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
@@ -176,7 +176,7 @@ impl<S: StateStore> GenericExtremeState<S> {
                 self.state_table_col_mapping
                     .upstream_columns()
                     .iter()
-                    .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
+                    .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
             let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
@@ -237,15 +237,15 @@ impl<S: StateStore> GenericExtremeState<S> {
 
 #[async_trait]
 impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
-    async fn apply_batch(
+    async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        chunk_cols: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
         _epoch: u64,
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
-        self.apply_batch_inner(ops, visibility, chunk_cols, state_table)
+        self.apply_chunk_inner(ops, visibility, columns, state_table)
     }
 
     async fn get_output(
@@ -343,7 +343,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -374,7 +374,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -467,7 +467,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -498,7 +498,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -619,7 +619,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state_1
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -628,7 +628,7 @@ mod tests {
                 )
                 .await?;
             managed_state_2
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -708,7 +708,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -739,7 +739,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -851,7 +851,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -894,7 +894,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             managed_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,

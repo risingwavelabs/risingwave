@@ -143,19 +143,19 @@ pub enum ManagedStateImpl<S: StateStore> {
 }
 
 impl<S: StateStore> ManagedStateImpl<S> {
-    pub async fn apply_batch(
+    pub async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
         epoch: u64,
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.apply_batch(ops, visibility, data),
+            Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_batch(ops, visibility, data, epoch, state_table)
+                    .apply_chunk(ops, visibility, columns, epoch, state_table)
                     .await
             }
         }

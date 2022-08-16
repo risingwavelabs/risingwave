@@ -81,19 +81,19 @@ impl ManagedValueState {
         })
     }
 
-    /// Apply a batch of data to the state.
-    pub fn apply_batch(
+    /// Apply a chunk of data to the state.
+    pub fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        chunk_cols: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
+        debug_assert!(super::verify_batch(ops, visibility, columns));
         self.is_dirty = true;
         let data = self
             .arg_indices
             .iter()
-            .map(|col_idx| chunk_cols[*col_idx])
+            .map(|col_idx| columns[*col_idx])
             .collect_vec();
         self.state.apply_batch(ops, visibility, &data)
     }
@@ -172,7 +172,7 @@ mod tests {
 
         // apply a batch and get the output
         managed_state
-            .apply_batch(
+            .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
                 &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None])
@@ -237,7 +237,7 @@ mod tests {
 
         // apply a batch and get the output
         managed_state
-            .apply_batch(
+            .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
                 &[

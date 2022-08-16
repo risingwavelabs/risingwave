@@ -129,19 +129,15 @@ impl<S: StateStore> ManagedStringAggState<S> {
         };
         (cache_key, cache_data)
     }
-}
 
-#[async_trait]
-impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
-    async fn apply_batch(
+    async fn apply_chunk_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        chunk_cols: &[&ArrayImpl], // contains all upstream columns
-        _epoch: u64,
+        columns: &[&ArrayImpl], // contains all upstream columns
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
+        debug_assert!(super::verify_batch(ops, visibility, columns));
 
         for (i, op) in ops.iter().enumerate() {
             let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
@@ -153,7 +149,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                 self.state_table_col_mapping
                     .upstream_columns()
                     .iter()
-                    .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
+                    .map(|col_idx| columns[*col_idx].datum_at(i))
                     .collect(),
             );
             let (cache_key, cache_data) = self.state_row_to_cache_entry(&state_row);
@@ -173,7 +169,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         Ok(())
     }
 
-    async fn get_output(
+    async fn get_output_inner(
         &mut self,
         epoch: u64,
         state_table: &RowBasedStateTable<S>,
@@ -214,6 +210,29 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         }
 
         Ok(Some(agg_result.into()))
+    }
+}
+
+#[async_trait]
+impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
+    async fn apply_chunk(
+        &mut self,
+        ops: Ops<'_>,
+        visibility: Option<&Bitmap>,
+        columns: &[&ArrayImpl], // contains all upstream columns
+        _epoch: u64,
+        state_table: &mut RowBasedStateTable<S>,
+    ) -> StreamExecutorResult<()> {
+        self.apply_chunk_inner(ops, visibility, columns, state_table)
+            .await
+    }
+
+    async fn get_output(
+        &mut self,
+        epoch: u64,
+        state_table: &RowBasedStateTable<S>,
+    ) -> StreamExecutorResult<Datum> {
+        self.get_output_inner(epoch, state_table).await
     }
 
     fn is_dirty(&self) -> bool {
@@ -290,7 +309,7 @@ mod tests {
         let (ops, columns, visibility) = chunk.into_inner();
         let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
         agg_state
-            .apply_batch(
+            .apply_chunk(
                 &ops,
                 visibility.as_ref(),
                 &chunk_cols,
@@ -372,7 +391,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -403,7 +422,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -486,7 +505,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,
@@ -517,7 +536,7 @@ mod tests {
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
-                .apply_batch(
+                .apply_chunk(
                     &ops,
                     visibility.as_ref(),
                     &chunk_cols,

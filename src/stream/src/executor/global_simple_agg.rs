@@ -167,7 +167,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
             let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
             agg_state
-                .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                .apply_chunk(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
                 .await?;
         }
 
