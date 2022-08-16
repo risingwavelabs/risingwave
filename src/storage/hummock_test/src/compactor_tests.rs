@@ -38,6 +38,7 @@ mod tests {
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::MockHummockMetaClient;
+    use risingwave_pb::hummock::pin_version_response::Payload;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
@@ -237,7 +238,7 @@ mod tests {
             .id;
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
         let table = storage
             .sstable_store()
             .sstable(output_table_id, &mut StoreLocalStatistic::default())
@@ -358,7 +359,7 @@ mod tests {
         // 5. storage get back the correct kv after compaction
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
         let get_val = storage
             .get(
                 &key,
@@ -653,7 +654,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -824,7 +825,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -994,7 +995,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(None, (false, vec![], Some(version)));
+            .try_update_pinned_version(None, Payload::PinnedVersion(version));
 
         // 6. scan kv to check key table_id
         let table_prefix = table_prefix(existing_table_id);
