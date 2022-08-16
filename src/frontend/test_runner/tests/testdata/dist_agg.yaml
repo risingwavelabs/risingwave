@@ -308,7 +308,7 @@
   before:
   - create_tables
   sql: |
-    select max(v) as a1 from AO group by k;;
+    select max(v) as a1 from AO group by k;
   stream_plan: |
     StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
       StreamProject { exprs: [max(ao.v), ao.k] }
@@ -319,7 +319,7 @@
   before:
   - create_tables
   sql: |
-    select sum(v) as a1 from T group by k;;
+    select sum(v) as a1 from T group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [sum(t.v)] }
@@ -336,7 +336,7 @@
   before:
   - create_tables
   sql: |
-    select sum(v) as a1 from Tk group by k;;
+    select sum(v) as a1 from Tk group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [sum(tk.v)] }
@@ -351,7 +351,7 @@
   before:
   - create_tables
   sql: |
-    select sum(v) as a1 from AO group by k;;
+    select sum(v) as a1 from AO group by k;
   stream_plan: |
     StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
       StreamProject { exprs: [sum(ao.v), ao.k] }
@@ -362,7 +362,7 @@
   before:
   - create_tables
   sql: |
-    select count(v) as a1 from T group by k;;
+    select count(v) as a1 from T group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [count(t.v)] }
@@ -379,7 +379,7 @@
   before:
   - create_tables
   sql: |
-    select count(v) as a1 from Tk group by k;;
+    select count(v) as a1 from Tk group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [count(tk.v)] }
@@ -394,7 +394,7 @@
   before:
   - create_tables
   sql: |
-    select count(v) as a1 from AO group by k;;
+    select count(v) as a1 from AO group by k;
   stream_plan: |
     StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
       StreamProject { exprs: [count(ao.v), ao.k] }
@@ -405,7 +405,7 @@
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from T group by k;;
+    select string_agg(v, ',' order by o) as a1 from T group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
@@ -424,7 +424,7 @@
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from Tk group by k;;
+    select string_agg(v, ',' order by o) as a1 from Tk group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [string_agg(tk.v, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
@@ -441,7 +441,7 @@
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from AO group by k;;
+    select string_agg(v, ',' order by o) as a1 from AO group by k;
   stream_plan: |
     StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
       StreamProject { exprs: [string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST)), ao.k] }
