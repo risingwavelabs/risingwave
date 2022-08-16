@@ -130,11 +130,11 @@ impl<S: StateStore> ManagedStringAggState<S> {
         (cache_key, cache_data)
     }
 
-    async fn apply_chunk_inner(
+    fn apply_chunk_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        columns: &[&ArrayImpl], // contains all upstream columns
+        columns: &[&ArrayImpl],
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
@@ -224,7 +224,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_chunk_inner(ops, visibility, columns, state_table)
-            .await
     }
 
     async fn get_output(
