@@ -37,6 +37,7 @@ pub(crate) struct FrontendObserverNode {
     catalog_updated_tx: Sender<CatalogVersion>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     user_info_updated_tx: Sender<UserInfoVersion>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 impl ObserverNodeImpl for FrontendObserverNode {
@@ -68,7 +69,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
                 )
             }
             Info::HummockSnapshot(_) => {
-                // TODO: remove snapshot notify
+                self.handle_hummock_snapshot_notification(resp);
             }
         }
     }
@@ -111,6 +112,8 @@ impl ObserverNodeImpl for FrontendObserverNode {
                         })
                         .collect(),
                 );
+                self.hummock_snapshot_manager
+                    .update_epoch(snapshot.hummock_snapshot.unwrap().get_epoch());
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
@@ -132,7 +135,7 @@ impl FrontendObserverNode {
         catalog_updated_tx: Sender<CatalogVersion>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         user_info_updated_tx: Sender<UserInfoVersion>,
-        _hummock_snapshot_manager: HummockSnapshotManagerRef,
+        hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -140,6 +143,7 @@ impl FrontendObserverNode {
             catalog_updated_tx,
             user_info_manager,
             user_info_updated_tx,
+            hummock_snapshot_manager,
         }
     }
 
@@ -253,6 +257,23 @@ impl FrontendObserverNode {
                     );
                     self.worker_node_manager
                         .update_table_mapping(table_id, mapping);
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    /// Update max committed epoch in `HummockSnapshotManager`.
+    fn handle_hummock_snapshot_notification(&self, resp: SubscribeResponse) {
+        let Some(info) = resp.info.as_ref() else {
+            return;
+        };
+        match info {
+            Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
+                Operation::Update => {
+                    self.hummock_snapshot_manager
+                        .update_epoch(hummock_snapshot.get_epoch());
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
