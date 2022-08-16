@@ -241,6 +241,32 @@ impl DataType {
             List { datatype } => datatype.mem_cmp_eq_value_enc(),
         }
     }
+
+    pub fn get_fixed_len(&self) -> Option<usize> {
+        use std::mem::size_of;
+
+        use DataType::*;
+        match self {
+            Int16 => Some(size_of::<i16>()),
+            Int32 => Some(size_of::<i32>()),
+            Int64 => Some(size_of::<i64>()),
+            Float32 => Some(size_of::<OrderedF32>()),
+            Float64 => Some(size_of::<OrderedF64>()),
+            Date => Some(size_of::<NaiveDateWrapper>()),
+            Time => Some(size_of::<NaiveTimeWrapper>()),
+            Timestamp => Some(size_of::<NaiveDateTimeWrapper>()),
+            Timestampz => Some(size_of::<i64>()),
+            Boolean => Some(size_of::<u8>()),
+            // IntervalUnit is serialized as (i32, i32, i64)
+            Interval => Some(size_of::<(i32, i32, i64)>()),
+            Decimal => None,
+            // these two types is var-length and should only be determine at runtime.
+            // TODO: need some test for this case (e.g. e2e test)
+            List { .. } => None,
+            Struct { .. } => None,
+            Varchar => None,
+        }
+    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation

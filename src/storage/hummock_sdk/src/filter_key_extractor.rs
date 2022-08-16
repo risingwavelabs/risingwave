@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::types::VIRTUAL_NODE_SIZE;
+use risingwave_common::types::{DataType, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowDeserializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
@@ -54,12 +54,34 @@ impl FilterKeyExtractorImpl {
             .map(|col_order| col_order.index as usize)
             .collect();
 
+        let data_types: Vec<DataType> = pk_indices
+            .iter()
+            .map(|column_idx| &table_catalog.columns[*column_idx])
+            .map(|col| ColumnDesc::from(col.column_desc.as_ref().unwrap()).data_type)
+            .collect();
+        let read_pattern_prefix_column = table_catalog.distribution_key.len();
+
+        let mut len = TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE;
+        let is_fixed_type = data_types
+            .iter()
+            .take(read_pattern_prefix_column)
+            .map(|column| {
+                let column_len = column.get_fixed_len();
+                if let Some(column_len) = column_len {
+                    len += column_len;
+                }
+                column_len
+            })
+            .all(|column_len| column_len.is_some());
+
         let match_read_pattern =
             !dist_key_indices.is_empty() && pk_indices.starts_with(&dist_key_indices);
         if !match_read_pattern {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
+        } else if is_fixed_type {
+            FilterKeyExtractorImpl::FixedLength(FixedLengthFilterKeyExtractor::new(len))
         } else {
             FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
         }
