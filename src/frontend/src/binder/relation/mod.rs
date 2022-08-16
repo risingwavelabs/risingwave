@@ -248,7 +248,7 @@ impl Binder {
             && let Some(bound_query) = self.cte_to_relation.get(&table_name)
         {
             let (query, mut original_alias) = bound_query.clone();
-            debug_assert_eq!(original_alias.name.value, table_name); // The original CTE alias ought to be its table name.
+            debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
@@ -379,6 +379,12 @@ impl Binder {
                     self.pop_and_merge_lateral_context()?;
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
+            }
+            TableFactor::NestedJoin(table_with_joins) => {
+                self.push_lateral_context();
+                let bound_join = self.bind_table_with_joins(*table_with_joins)?;
+                self.pop_and_merge_lateral_context()?;
+                Ok(bound_join)
             }
 
             // TODO: if and when we allow nested joins (binding table factors which are themselves

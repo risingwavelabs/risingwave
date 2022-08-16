@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::BlockLocation;
+use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -41,7 +42,12 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     let sstable_store = &*hummock.sstable_store();
 
     // Retrieves the latest HummockVersion from the meta client so we can access the SstableInfo
-    let version = meta_client.pin_version(u64::MAX).await?.2.unwrap();
+    let version = match meta_client.pin_version(u64::MAX).await? {
+        Payload::VersionDeltas(_) => {
+            unreachable!("should get full version")
+        }
+        Payload::PinnedVersion(version) => version,
+    };
 
     // SST's timestamp info is only available in object store
 
