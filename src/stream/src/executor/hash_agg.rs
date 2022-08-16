@@ -32,7 +32,10 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
-use super::{expect_first_barrier, pk_input_arrays, Executor, PkIndicesRef, StreamExecutorResult};
+use super::{
+    expect_first_barrier, pk_input_arrays, ActorContextRef, Executor, PkIndicesRef,
+    StreamExecutorResult,
+};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
     agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -59,6 +62,8 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
 }
 
 struct HashAggExecutorExtra<S: StateStore> {
+    ctx: ActorContextRef,
+
     /// See [`Executor::schema`].
     schema: Schema,
 
@@ -107,7 +112,9 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
@@ -127,6 +134,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
+                ctx,
                 schema,
                 pk_indices,
                 identity: format!("HashAggExecutor {:X}", executor_id),
@@ -198,6 +206,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     async fn apply_chunk(
         HashAggExecutorExtra::<S> {
+            ref ctx,
             ref identity,
             ref key_indices,
             ref agg_calls,
@@ -299,8 +308,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
-                let vis_map =
-                    agg_call_filter_res(identity, agg_call, &columns, Some(vis_map), capacity)?;
+                let vis_map = agg_call_filter_res(
+                    ctx,
+                    identity,
+                    agg_call,
+                    &columns,
+                    Some(vis_map),
+                    capacity,
+                )?;
                 // TODO(yuchao): make this work for all agg kinds in later PR
                 if matches!(agg_call.kind, AggKind::StringAgg)
                     || (matches!(agg_call.kind, AggKind::Min | AggKind::Max)
@@ -478,11 +493,14 @@ mod tests {
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::create_state_table;
     use crate::executor::test_utils::*;
-    use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
+    use crate::executor::{
+        ActorContext, ActorContextRef, Executor, HashAggExecutor, Message, PkIndices,
+    };
 
     struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
     struct HashAggExecutorDispatcherArgs<S: StateStore> {
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
@@ -498,6 +516,7 @@ mod tests {
 
         fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
             Ok(Box::new(HashAggExecutor::<K, S>::new(
+                args.ctx,
                 args.input,
                 args.agg_calls,
                 args.pk_indices,
@@ -537,6 +556,7 @@ mod tests {
             .unzip();
 
         let args = HashAggExecutorDispatcherArgs {
+            ctx: ActorContext::create(),
             input,
             agg_calls,
             key_indices,

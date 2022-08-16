@@ -26,11 +26,11 @@ use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node;
 
 use super::error::StreamExecutorError;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor::actor::on_compute_error;
+use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
 use crate::executor::infallible_expr::InfallibleExpression;
 
 pub struct HopWindowExecutor {
+    ctx: ActorContextRef,
     pub input: BoxedExecutor,
     pub info: ExecutorInfo,
 
@@ -42,6 +42,7 @@ pub struct HopWindowExecutor {
 
 impl HopWindowExecutor {
     pub fn new(
+        ctx: ActorContextRef,
         input: BoxedExecutor,
         info: ExecutorInfo,
         time_col_idx: usize,
@@ -50,6 +51,7 @@ impl HopWindowExecutor {
         output_indices: Vec<usize>,
     ) -> Self {
         HopWindowExecutor {
+            ctx,
             input,
             info,
             time_col_idx,
@@ -82,6 +84,7 @@ impl HopWindowExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let Self {
+            ctx,
             input,
             time_col_idx,
             window_slide,
@@ -196,8 +199,9 @@ impl HopWindowExecutor {
                 // TODO: compact may be not necessary here.
                 let chunk = chunk.compact()?;
                 let (data_chunk, ops) = chunk.into_parts();
-                let hop_start = hop_start
-                    .eval_infallible(&data_chunk, |err| on_compute_error(err, &info.identity));
+                let hop_start = hop_start.eval_infallible(&data_chunk, |err| {
+                    ctx.lock().on_compute_error(err, &info.identity)
+                });
                 let len = hop_start.len();
                 let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
                 let (origin_cols, vis) = data_chunk.into_parts();
@@ -207,7 +211,7 @@ impl HopWindowExecutor {
                     let window_start_col = if output_indices.contains(&window_start_col_index) {
                         Some(
                             window_start_exprs[i].eval_infallible(&hop_start_chunk, |err| {
-                                on_compute_error(err, &info.identity)
+                                ctx.lock().on_compute_error(err, &info.identity)
                             }),
                         )
                     } else {
@@ -216,7 +220,7 @@ impl HopWindowExecutor {
                     let window_end_col = if output_indices.contains(&window_end_col_index) {
                         Some(
                             window_end_exprs[i].eval_infallible(&hop_start_chunk, |err| {
-                                on_compute_error(err, &info.identity)
+                                ctx.lock().on_compute_error(err, &info.identity)
                             }),
                         )
                     } else {
@@ -255,7 +259,7 @@ mod tests {
     use risingwave_common::types::{DataType, IntervalUnit};
 
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, ExecutorInfo, StreamChunk};
+    use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
 
     #[tokio::test]
     async fn test_execute() {
@@ -285,6 +289,7 @@ mod tests {
         let window_size = IntervalUnit::from_minutes(30);
         let default_indices: Vec<_> = (0..5).collect();
         let executor = super::HopWindowExecutor::new(
+            ActorContext::create(),
             input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
@@ -364,6 +369,7 @@ mod tests {
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
         let executor = super::HopWindowExecutor::new(
+            ActorContext::create(),
             input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.

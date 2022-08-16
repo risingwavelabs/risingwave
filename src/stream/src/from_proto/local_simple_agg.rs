@@ -34,6 +34,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
             .try_collect()?;
 
         Ok(LocalSimpleAggExecutor::new(
+            params.actor_context,
             params.input.remove(0),
             agg_calls,
             params.pk_indices,

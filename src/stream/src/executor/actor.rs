@@ -12,18 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// FIXME: This is a false-positive clippy test, remove this while bumping toolchain.
-// https://github.com/tokio-rs/tokio/issues/4836
-// https://github.com/rust-lang/rust-clippy/issues/8493
-#![expect(clippy::declare_interior_mutable_const)]
-
-use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_stack_trace::{SpanValue, StackTrace};
-use futures::{pin_mut, Future};
+use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
@@ -98,6 +92,9 @@ impl OperatorInfoStatus {
 #[derive(Default)]
 pub struct ActorContext {
     pub info: Vec<OperatorInfo>,
+
+    /// TODO: report errors and prompt the user.
+    pub errors: HashMap<String, Vec<ExprError>>,
 }
 
 pub type ActorContextRef = Arc<Mutex<ActorContext>>;
@@ -106,33 +103,15 @@ impl ActorContext {
     pub fn create() -> ActorContextRef {
         Arc::new(Mutex::new(Self::default()))
     }
-}
 
-tokio::task_local! {
-    /// TODO: report errors and prompt the user.
-    static ACTOR_ERRORS: RefCell<HashMap<String,Vec<ExprError>>>;
-}
-
-pub fn on_compute_error(err: ExprError, identity: &str) {
-    ACTOR_ERRORS.with(|errors| {
+    pub fn on_compute_error(&mut self, err: ExprError, identity: &str) {
         log::error!("Compute error: {}, executor: {identity}", err);
-        errors
-            .borrow_mut()
+        self.errors
             .entry(identity.to_owned())
             .or_default()
             .push(err);
-    })
-}
-
-type TaskLocalFuture<T: Future> = impl Future<Output = T::Output>;
-
-trait CollectErrors: Future + Sized {
-    fn collect_errors(self) -> TaskLocalFuture<Self> {
-        ACTOR_ERRORS.scope(RefCell::new(HashMap::new()), self)
     }
 }
-
-impl<F: Future + Sized> CollectErrors for F {}
 
 /// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor<C> {
@@ -196,7 +175,6 @@ where
             .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
                 format!("Epoch {}", e.curr).into()
             }))
-            .collect_errors()
             .await
             .transpose()?
         {

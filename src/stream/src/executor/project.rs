@@ -20,17 +20,17 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
-use super::actor::on_compute_error;
 use super::infallible_expr::InfallibleExpression;
 use super::{
-    Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
-    StreamExecutorResult,
+    ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor,
+    SimpleExecutorWrapper, StreamExecutorResult,
 };
 
 pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
 
 impl ProjectExecutor {
     pub fn new(
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
@@ -43,7 +43,7 @@ impl ProjectExecutor {
         };
         SimpleExecutorWrapper {
             input,
-            inner: SimpleProjectExecutor::new(info, exprs, execuotr_id),
+            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id),
         }
     }
 }
@@ -52,6 +52,7 @@ impl ProjectExecutor {
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
 pub struct SimpleProjectExecutor {
+    ctx: ActorContextRef,
     info: ExecutorInfo,
 
     /// Expressions of the current projection.
@@ -59,7 +60,12 @@ pub struct SimpleProjectExecutor {
 }
 
 impl SimpleProjectExecutor {
-    pub fn new(input_info: ExecutorInfo, exprs: Vec<BoxedExpression>, executor_id: u64) -> Self {
+    pub fn new(
+        ctx: ActorContextRef,
+        input_info: ExecutorInfo,
+        exprs: Vec<BoxedExpression>,
+        executor_id: u64,
+    ) -> Self {
         let schema = Schema {
             fields: exprs
                 .iter()
@@ -67,6 +73,7 @@ impl SimpleProjectExecutor {
                 .collect_vec(),
         };
         Self {
+            ctx,
             info: ExecutorInfo {
                 schema,
                 pk_indices: input_info.pk_indices,
@@ -99,7 +106,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
             .iter_mut()
             .map(|expr| {
                 Column::new(expr.eval_infallible(&data_chunk, |err| {
-                    on_compute_error(err, &self.info.identity)
+                    self.ctx.lock().on_compute_error(err, &self.info.identity)
                 }))
             })
             .collect();
@@ -167,6 +174,7 @@ mod tests {
         );
 
         let project = Box::new(ProjectExecutor::new(
+            ActorContext::create(),
             Box::new(source),
             vec![],
             vec![test_expr],

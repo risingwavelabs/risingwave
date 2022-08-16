@@ -34,13 +34,15 @@ use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::managed_state::dynamic_filter::RangeCache;
 use super::monitor::StreamingMetrics;
-use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
+use super::{
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+};
 use crate::common::StreamChunkBuilder;
-use crate::executor::actor::on_compute_error;
 use crate::executor::infallible_expr::InfallibleExpression;
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
+    ctx: ActorContextRef,
     source_l: Option<BoxedExecutor>,
     source_r: Option<BoxedExecutor>,
     key_l: usize,
@@ -58,6 +60,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
 impl<S: StateStore> DynamicFilterExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        ctx: ActorContextRef,
         source_l: BoxedExecutor,
         source_r: BoxedExecutor,
         key_l: usize,
@@ -76,6 +79,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let schema = source_l.schema().clone();
         Self {
+            ctx,
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
@@ -103,7 +107,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut last_res = false;
 
         let eval_results = condition.map(|cond| {
-            cond.eval_infallible(data_chunk, |err| on_compute_error(err, self.identity()))
+            cond.eval_infallible(data_chunk, |err| {
+                self.ctx.lock().on_compute_error(err, self.identity())
+            })
         });
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
@@ -383,6 +389,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
+    use crate::executor::ActorContext;
 
     fn create_in_memory_state_table() -> (
         RowBasedStateTable<MemoryStateStore>,
@@ -419,6 +426,7 @@ mod tests {
 
         let (mem_state_l, mem_state_r) = create_in_memory_state_table();
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
+            ActorContext::create(),
             Box::new(source_l),
             Box::new(source_r),
             0,

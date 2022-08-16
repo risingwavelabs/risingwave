@@ -34,6 +34,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             .try_collect()?;
 
         Ok(ProjectExecutor::new(
+            params.actor_context,
             params.input.remove(0),
             params.pk_indices,
             project_exprs,
