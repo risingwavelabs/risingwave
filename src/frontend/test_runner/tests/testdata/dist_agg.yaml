@@ -304,6 +304,22 @@
       StreamProject { exprs: [max(tk.v), tk.k] }
         StreamHashAgg { group_key: [tk.k], aggs: [count, max(tk.v)] }
           StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+- id: extreme_on_S_by_k
+  before:
+  - create_tables
+  sql: |
+    select max(v) as a1 from S group by k;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [max(s.v)] }
+        BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
+          BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+  stream_plan: |
+    StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
+      StreamProject { exprs: [max(s.v), s.k] }
+        StreamHashAgg { group_key: [s.k], aggs: [count, max(s.v)] }
+          StreamExchange { dist: HashShard(s.k) }
+            StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
 - id: extreme_on_AO_by_k
   before:
   - create_tables
@@ -347,6 +363,22 @@
       StreamProject { exprs: [sum(tk.v), tk.k] }
         StreamHashAgg { group_key: [tk.k], aggs: [count, sum(tk.v)] }
           StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+- id: sum_on_S_by_k
+  before:
+  - create_tables
+  sql: |
+    select sum(v) as a1 from S group by k;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [sum(s.v)] }
+        BatchHashAgg { group_key: [s.k], aggs: [sum(s.v)] }
+          BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+  stream_plan: |
+    StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
+      StreamProject { exprs: [sum(s.v), s.k] }
+        StreamHashAgg { group_key: [s.k], aggs: [count, sum(s.v)] }
+          StreamExchange { dist: HashShard(s.k) }
+            StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
 - id: sum_on_AO_by_k
   before:
   - create_tables
@@ -390,6 +422,22 @@
       StreamProject { exprs: [count(tk.v), tk.k] }
         StreamHashAgg { group_key: [tk.k], aggs: [count, count(tk.v)] }
           StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+- id: cnt_on_S_by_k
+  before:
+  - create_tables
+  sql: |
+    select count(v) as a1 from S group by k;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [count(s.v)] }
+        BatchHashAgg { group_key: [s.k], aggs: [count(s.v)] }
+          BatchScan { table: s, columns: [s.k, s.v], distribution: UpstreamHashShard() }
+  stream_plan: |
+    StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
+      StreamProject { exprs: [count(s.v), s.k] }
+        StreamHashAgg { group_key: [s.k], aggs: [count, count(s.v)] }
+          StreamExchange { dist: HashShard(s.k) }
+            StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
 - id: cnt_on_AO_by_k
   before:
   - create_tables
@@ -437,6 +485,24 @@
         StreamHashAgg { group_key: [tk.k], aggs: [count, string_agg(tk.v, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
           StreamProject { exprs: [tk.k, tk.v, ',':Varchar, tk.o, tk.t._row_id] }
             StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.o, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+- id: string_agg_on_S_by_k
+  before:
+  - create_tables
+  sql: |
+    select string_agg(v, ',' order by o) as a1 from S group by k;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST))] }
+        BatchHashAgg { group_key: [s.k], aggs: [string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST))] }
+          BatchProject { exprs: [s.k, s.v, ',':Varchar, s.o] }
+            BatchScan { table: s, columns: [s.k, s.v, s.o], distribution: UpstreamHashShard() }
+  stream_plan: |
+    StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
+      StreamProject { exprs: [string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST)), s.k] }
+        StreamHashAgg { group_key: [s.k], aggs: [count, string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST))] }
+          StreamExchange { dist: HashShard(s.k) }
+            StreamProject { exprs: [s.k, s.v, ',':Varchar, s.o, s.t._row_id] }
+              StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
 - id: string_agg_on_AO_by_k
   before:
   - create_tables
