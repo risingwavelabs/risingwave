@@ -610,7 +610,7 @@ impl LocalVersionManager {
         ret
     }
 
-    pub fn read_fliter<R, B>(
+    pub fn read_filter<R, B>(
         self: &Arc<LocalVersionManager>,
         read_epoch: HummockEpoch,
         key_range: &R,
@@ -619,7 +619,7 @@ impl LocalVersionManager {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        LocalVersion::read_fliter(&self.local_version, read_epoch, key_range)
+        LocalVersion::read_filter(&self.local_version, read_epoch, key_range)
     }
 
     pub fn get_pinned_version(&self) -> Arc<PinnedVersion> {

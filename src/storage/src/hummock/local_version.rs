@@ -211,7 +211,7 @@ impl LocalVersion {
         cleaned_epoch
     }
 
-    pub fn read_fliter<R, B>(
+    pub fn read_filter<R, B>(
         this: &RwLock<Self>,
         read_epoch: HummockEpoch,
         key_range: &R,

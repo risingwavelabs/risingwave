@@ -440,7 +440,7 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let epoch = read_options.epoch;
-        let read_version = self.local_version_manager.read_fliter(epoch, key_range);
+        let read_version = self.local_version_manager.read_filter(epoch, key_range);
 
         // Check epoch validity
         validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
