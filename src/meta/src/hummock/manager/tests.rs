@@ -956,7 +956,7 @@ async fn test_trigger_manual_compaction() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task_heartbeat() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
 
