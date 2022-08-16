@@ -286,13 +286,13 @@ def section_compaction(panels):
             ),
         ]),
 
-        panels.timeseries_count("Hummock Sstable BloomFilter Size", [
+        panels.timeseries_bytes("Hummock Sstable BloomFilter Size", [
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
             ),
         ]),
 
-        panels.timeseries_count("Hummock Sstable BloomFilter Size", [
+        panels.timeseries_bytes("Hummock Sstable Meta Size", [
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_sstable_meta_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_meta_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
             ),
