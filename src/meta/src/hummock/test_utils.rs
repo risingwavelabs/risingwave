@@ -74,7 +74,7 @@ where
         .unwrap();
     compact_task.target_level = 6;
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);

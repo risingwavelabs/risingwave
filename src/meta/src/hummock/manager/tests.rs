@@ -178,7 +178,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(
@@ -210,7 +210,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
@@ -860,7 +860,7 @@ async fn test_trigger_manual_compaction() {
 
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
-    let receiver = compactor_manager_ref.add_compactor(context_id);
+    let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
     {
         let option = ManualCompactionOption::default();
         let result = hummock_manager
@@ -883,7 +883,7 @@ async fn test_trigger_manual_compaction() {
     }
 
     compactor_manager_ref.remove_compactor(context_id);
-    let _receiver = compactor_manager_ref.add_compactor(context_id);
+    let _receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
 
     {
         let option = ManualCompactionOption {
