@@ -613,7 +613,7 @@ def section_batch_exchange(outer_panels):
         outer_panels.row_collapsed("Batch Exchange", [
             panels.timeseries_row("Exchange Recv Row Number", [
                 panels.target(
-                    "batch_exchange_recv_row_number", "{{up_task_id}}->{{down_task_id}}"
+                    "batch_exchange_recv_row_number", "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}"
                 ),
             ]),
         ]),

@@ -171,32 +171,24 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 async fn data_chunk_stream(
     mut source: ExchangeSourceImpl,
     metrics: Option<Arc<BatchMetrics>>,
-    downstream_id: TaskId,
+    target_id: TaskId,
 ) {
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
                 debug!("Exchange source {:?} output empty chunk.", source);
             }
-            if metrics.is_some() {
-                let upstream_id = source.get_task_id();
-                let downstream_id = {
-                    format!(
-                        "{}_{}_{}",
-                        downstream_id.query_id, downstream_id.stage_id, downstream_id.task_id
-                    )
-                };
-                let upstream_id = {
-                    format!(
-                        "{}_{}_{}",
-                        upstream_id.query_id, upstream_id.stage_id, upstream_id.task_id
-                    )
-                };
+            if let Some(metrics) = metrics.as_ref() {
+                let source_id = source.get_task_id();
                 metrics
-                    .as_ref()
-                    .unwrap()
                     .exchange_recv_row_number
-                    .with_label_values(&[&upstream_id, &downstream_id])
+                    .with_label_values(&[
+                        &target_id.query_id,
+                        &source_id.stage_id.to_string(),
+                        &target_id.stage_id.to_string(),
+                        &source_id.task_id.to_string(),
+                        &target_id.task_id.to_string(),
+                    ])
                     .inc_by(res.cardinality().try_into().unwrap());
             }
             yield res;
