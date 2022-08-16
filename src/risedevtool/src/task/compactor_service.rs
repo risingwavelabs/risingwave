@@ -54,7 +54,15 @@ impl CompactorService {
                 config.listen_address, config.exporter_port
             ))
             .arg("--metrics-level")
-            .arg("1");
+            .arg("1")
+            .arg("--max-concurrent-task-number")
+            .arg(format!("{}", config.max_concurrent_task_number));
+        if let Some(compaction_worker_threads_number) =
+            config.compaction_worker_threads_number.as_ref()
+        {
+            cmd.arg("--compaction-worker-threads-number")
+                .arg(format!("{}", compaction_worker_threads_number));
+        }
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();

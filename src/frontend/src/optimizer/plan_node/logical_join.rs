@@ -18,7 +18,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::QueryMode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -826,6 +825,24 @@ impl PredicatePushdown for LogicalJoin {
     }
 }
 
+impl LogicalJoin {
+    pub fn to_batch_lookup_join(&self) -> Result<PlanRef> {
+        let predicate = EqJoinPredicate::create(
+            self.left.schema().len(),
+            self.right.schema().len(),
+            self.on.clone(),
+        );
+
+        let left = self.left().to_batch()?;
+        let right = self.right().to_batch()?;
+        let logical_join = self.clone_with_left_right(left, right);
+
+        Ok(self
+            .convert_to_lookup_join(logical_join, predicate)
+            .expect("Fail to convert to lookup join"))
+    }
+}
+
 impl ToBatch for LogicalJoin {
     fn to_batch(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
@@ -842,17 +859,10 @@ impl ToBatch for LogicalJoin {
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
-                if config.get_query_mode() == QueryMode::Local {
-                    if let Some(lookup_join) =
-                        self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
-                    {
-                        return Ok(lookup_join);
-                    }
-                } else {
-                    log::warn!(
-                        "Lookup Join can only be done in local mode. A different join will \
-                    be used instead."
-                    );
+                if let Some(lookup_join) =
+                    self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
+                {
+                    return Ok(lookup_join);
                 }
             }
 
