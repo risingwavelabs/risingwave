@@ -299,22 +299,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(state_tables.iter_mut())
             {
                 let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
-                // TODO(yuchao): make this work for all agg kinds in later PR
-                if matches!(agg_call.kind, AggKind::StringAgg)
-                    || (matches!(agg_call.kind, AggKind::Min | AggKind::Max)
-                        && !agg_call.append_only)
-                {
-                    let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
-                    agg_state
-                        .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
-                        .await?;
-                } else {
-                    // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
-                    let data = data.iter().map(|d| &**d).collect_vec();
-                    agg_state
-                        .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
-                        .await?;
-                }
+                let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
+                agg_state
+                    .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                    .await?;
             }
         }
 

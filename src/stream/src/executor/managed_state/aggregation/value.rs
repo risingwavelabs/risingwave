@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
@@ -26,6 +27,9 @@ use crate::executor::error::StreamExecutorResult;
 /// update the state. We don't use any trait to wrap around all `ManagedXxxState`, so as to reduce
 /// the overhead of creating boxed async future.
 pub struct ManagedValueState {
+    /// Upstream column indices of agg arguments.
+    arg_indices: Vec<usize>,
+
     /// The internal single-value state.
     state: Box<dyn StreamingAggStateImpl>,
 
@@ -65,6 +69,7 @@ impl ManagedValueState {
 
         // Create the internal state based on the value we get.
         Ok(Self {
+            arg_indices: agg_call.args.val_indices().to_vec(),
             state: create_streaming_agg_state(
                 agg_call.args.arg_types(),
                 &agg_call.kind,
@@ -81,11 +86,16 @@ impl ManagedValueState {
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        chunk_cols: &[&ArrayImpl],
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, data));
+        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
         self.is_dirty = true;
-        self.state.apply_batch(ops, visibility, data)
+        let data = self
+            .arg_indices
+            .iter()
+            .map(|col_idx| chunk_cols[*col_idx])
+            .collect_vec();
+        self.state.apply_batch(ops, visibility, &data)
     }
 
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
