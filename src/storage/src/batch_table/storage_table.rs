@@ -49,12 +49,7 @@ mod iter_utils;
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
-/// row-based encoding format.
-/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
-/// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
-/// if the key of the column id does not exist, it will be Null in the relation.
-/// It is parameterized by its encoding, by specifying cell serializer and deserializers.
-/// TODO: Parameterize on `CellDeserializer`.
+/// row-based encoding format, and is used in batch mode.
 #[derive(Clone)]
 pub struct StorageTable<S: StateStore> {
     /// The keyspace that the pk and value of the original table has.
@@ -110,55 +105,11 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StorageTable(rw.into())
 }
 
+// init
 impl<S: StateStore> StorageTable<S> {
-    /// Create a read-write [`StorageTable`] given a complete set of `columns`.
-    /// This is parameterized on cell based row serializer.
-    pub fn new(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        distribution: Distribution,
-    ) -> Self {
-        let column_ids = columns.iter().map(|c| c.column_id).collect();
-
-        Self::new_inner(
-            store,
-            table_id,
-            columns,
-            column_ids,
-            order_types,
-            pk_indices,
-            distribution,
-            Default::default(),
-            0,
-        )
-    }
-
-    pub fn new_for_test(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-        )
-    }
-}
-
-impl<S: StateStore> StorageTable<S> {
-    /// Create a read-only [`StorageTable`] given a complete set of `columns` and a partial
+    /// Create a  [`StorageTable`] given a complete set of `columns` and a partial
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
-    /// This is parameterized on cell based row serializer.
     #[allow(clippy::too_many_arguments)]
     pub fn new_partial(
         store: S,
@@ -179,6 +130,27 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             distribution,
             table_options,
+            0,
+        )
+    }
+
+    pub fn new_for_test(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        let column_ids = columns.iter().map(|c| c.column_id).collect();
+        Self::new_inner(
+            store,
+            table_id,
+            columns,
+            column_ids,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            Default::default(),
             0,
         )
     }

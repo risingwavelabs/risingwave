@@ -116,13 +116,12 @@ pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
 
 /// used for streaming table serialize and deserialize
 /// todo(wcy-fdu): remove `RowSerde` trait after all executors using streaming table.
-pub fn serialize(vnode: VirtualNode, pk: &[u8], row: Row) -> Result<(Vec<u8>, Vec<u8>)> {
+pub fn serialize(row: Row) -> Result<Vec<u8>> {
     let mut value_bytes = vec![];
-    let key = [vnode.to_be_bytes().as_slice(), pk].concat();
     for cell in &row.0 {
         value_bytes.extend(serialize_datum(cell)?);
     }
-    let res = (key, value_bytes);
+    let res = value_bytes;
     Ok(res)
 }
 
