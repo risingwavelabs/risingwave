@@ -133,6 +133,7 @@ impl HummockSnapshotManager {
     }
 
     pub fn update_epoch(&self, epoch: u64) {
+        println!("received epoch {}", epoch);
         self.max_committed_epoch.fetch_max(epoch, Ordering::Relaxed);
     }
 
@@ -214,7 +215,6 @@ impl HummockSnapshotManagerCore {
         batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
     ) -> u64 {
         let epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        debug_assert_ne!(epoch, INVALID_EPOCH);
         let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
             None => {
                 self.epoch_to_query_ids.insert(epoch, HashSet::default());
