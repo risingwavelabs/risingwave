@@ -34,9 +34,9 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
-    OverlappingLevel,
+    pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
+    LevelType, OverlappingLevel,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -129,6 +129,7 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
+use risingwave_pb::hummock::pin_version_response::{HummockVersionDeltas, Payload};
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -359,7 +360,7 @@ where
         &self,
         context_id: HummockContextId,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
+    ) -> Result<pin_version_response::Payload> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -374,20 +375,19 @@ where
 
         let version_id = versioning.current_version.id;
 
-        let (is_delta, ret_deltas) = {
+        let ret = {
             if last_pinned <= version_id
                 && versioning.hummock_version_deltas.contains_key(&last_pinned)
             {
-                (
-                    true,
-                    versioning
+                Payload::VersionDeltas(HummockVersionDeltas {
+                    delta: versioning
                         .hummock_version_deltas
                         .range((Excluded(last_pinned), Included(version_id)))
                         .map(|(_, delta)| delta.clone())
                         .collect_vec(),
-                )
+                })
             } else {
-                (false, vec![])
+                Payload::PinnedVersion(versioning.current_version.clone())
             }
         };
 
@@ -396,19 +396,13 @@ where
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
-        let ret_version = if is_delta {
-            None
-        } else {
-            Some(versioning.current_version.clone())
-        };
-
         #[cfg(test)]
         {
             drop(versioning_guard);
             self.check_state_consistency().await;
         }
 
-        Ok((is_delta, ret_deltas, ret_version))
+        Ok(ret)
     }
 
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
@@ -475,10 +469,10 @@ where
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                minimal_pinned_snapshot: 0,
+                minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
-        if context_pinned_snapshot.minimal_pinned_snapshot == 0 {
+        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
@@ -539,14 +533,14 @@ where
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                minimal_pinned_snapshot: 0,
+                minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
 
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
         if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch
-            || context_pinned_snapshot.minimal_pinned_snapshot == 0
+            || context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH
         {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
@@ -1021,7 +1015,7 @@ where
         self.env
             .notification_manager()
             .notify_frontend_asynchronously(
-                Operation::Update, // Frontends don't care about operation.
+                Operation::Update,
                 Info::HummockSnapshot(HummockSnapshot { epoch }),
             );
 
