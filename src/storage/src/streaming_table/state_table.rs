@@ -31,23 +31,19 @@ use risingwave_pb::catalog::Table;
 use super::mem_table::{MemTable, RowOp};
 use super::Distribution;
 use crate::error::{StorageError, StorageResult};
-use crate::row_serde::{
-    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
-};
+use crate::row_serde::row_serde_util::{deserialize, serialize};
+use crate::row_serde::{serialize_pk, ColumnDescMapping};
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
 use crate::{Keyspace, StateStore};
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
-/// row-based encoding.
-pub type StateTable<S> = StateTableBase<S, RowBasedSerde>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerde` for row to KV entries.
 ///
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, RS: RowSerde> {
+pub struct StateTable<S: StateStore> {
     /// buffer row operations.
     mem_table: MemTable,
 
@@ -60,9 +56,6 @@ pub struct StateTableBase<S: StateStore, RS: RowSerde> {
 
     /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
-
-    /// Used for serializing the row.
-    row_serializer: RS::Serializer,
 
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
@@ -93,7 +86,7 @@ pub struct StateTableBase<S: StateStore, RS: RowSerde> {
 }
 
 // init Statetable
-impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
+impl<S: StateStore> StateTable<S> {
     /// Create state table from table catalog and store.
     pub fn from_table_catalog(
         table_catalog: &Table,
@@ -146,7 +139,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         let pk_serializer = OrderedRowSerializer::new(order_types);
         let column_ids = table_columns.iter().map(|c| c.column_id).collect_vec();
 
-        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
 
         let Distribution {
@@ -164,7 +156,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
             keyspace,
             table_columns,
             pk_serializer,
-            row_serializer,
             mapping,
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
@@ -209,7 +200,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 
         let column_ids = table_columns.iter().map(|c| c.column_id).collect_vec();
         let pk_serializer = OrderedRowSerializer::new(order_types);
-        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
         let dist_key_in_pk_indices = dist_key_indices
             .iter()
@@ -230,7 +220,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
             keyspace,
             table_columns,
             pk_serializer,
-            row_serializer,
             mapping,
             pk_indices,
             dist_key_indices,
@@ -302,27 +291,24 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 }
 
 // point get
-impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
+impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
-        let mut deserializer = RS::create_deserializer(self.mapping.clone());
         let read_options = self.get_read_option(epoch);
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
-                    let row = deserializer
-                        .deserialize(serialized_pk, row_bytes)
+                    let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
                         .map_err(err)?
                         .2;
                     Ok(Some(row))
                 }
                 RowOp::Delete(_) => Ok(None),
                 RowOp::Update((_, row_bytes)) => {
-                    let row = deserializer
-                        .deserialize(serialized_pk, row_bytes)
+                    let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
                         .map_err(err)?
                         .2;
                     Ok(Some(row))
@@ -332,8 +318,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
                 if let Some(storage_row_bytes) =
                     self.keyspace.get(&serialized_pk, read_options).await?
                 {
-                    let row = deserializer
-                        .deserialize(&serialized_pk, &storage_row_bytes)
+                    let row = deserialize(self.mapping.clone(), &serialized_pk, &storage_row_bytes)
                         .map_err(err)?
                         .2;
                     Ok(Some(row))
@@ -354,7 +339,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 }
 
 // write
-impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
+impl<S: StateStore> StateTable<S> {
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
@@ -365,10 +350,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         let pk = Row::new(datums);
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         let vnode = self.compute_vnode_by_row(&value);
-        let (key_bytes, value_bytes) = self
-            .row_serializer
-            .serialize(vnode, &pk_bytes, value)
-            .map_err(err)?;
+        let (key_bytes, value_bytes) = serialize(vnode, &pk_bytes, value).map_err(err)?;
         self.mem_table.insert(key_bytes, value_bytes);
         Ok(())
     }
@@ -383,10 +365,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         let pk = Row::new(datums);
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         let vnode = self.compute_vnode_by_row(&old_value);
-        let (key_bytes, value_bytes) = self
-            .row_serializer
-            .serialize(vnode, &pk_bytes, old_value)
-            .map_err(err)?;
+        let (key_bytes, value_bytes) = serialize(vnode, &pk_bytes, old_value).map_err(err)?;
         self.mem_table.delete(key_bytes, value_bytes);
         Ok(())
     }
@@ -398,15 +377,11 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
 
         let old_vnode = self.compute_vnode_by_row(&old_value);
-        let (_, old_value_bytes) = self
-            .row_serializer
-            .serialize(old_vnode, &pk_bytes, old_value.clone())
-            .map_err(err)?;
+        let (_, old_value_bytes) =
+            serialize(old_vnode, &pk_bytes, old_value.clone()).map_err(err)?;
         let new_vnode = self.compute_vnode_by_row(&old_value);
-        let (new_key_bytes, new_value_bytes) = self
-            .row_serializer
-            .serialize(new_vnode, &pk_bytes, old_value)
-            .map_err(err)?;
+        let (new_key_bytes, new_value_bytes) =
+            serialize(new_vnode, &pk_bytes, old_value).map_err(err)?;
         self.mem_table
             .update(new_key_bytes, old_value_bytes, new_value_bytes);
         Ok(())
