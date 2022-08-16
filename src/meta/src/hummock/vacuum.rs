@@ -169,14 +169,19 @@ where
 
     /// Runs a full GC.
     /// 1. Meta node sends a `FullScanTask` to a compactor in this method.
-    /// 2. The compactor returns scan result of object store to meta node. See
-    /// `Vacuum::full_scan_inner` in storage crate. 3. Meta node decides which SSTs to delete.
+    /// 2. The compactor returns scan result of object store to meta node.
+    /// See `Vacuum::full_scan_inner` in storage crate.
+    /// 3. Meta node decides which SSTs to delete.
     /// See `HummockManager::extend_ssts_to_delete_from_scan`.
-    pub async fn run_full_gc(&self, sst_retention_time: Duration) -> Result<()> {
+    pub async fn run_full_gc(&self, mut sst_retention_time: Duration) -> Result<()> {
+        sst_retention_time = std::cmp::max(sst_retention_time, Duration::from_secs(3600 * 3));
+        tracing::info!(
+            "run full GC with sst_retention_time = {} secs",
+            sst_retention_time.as_secs()
+        );
         let compactor = match self.compactor_manager.next_compactor() {
             None => {
-                tracing::warn!("Try full GC but no available worker.");
-                return Ok(());
+                return Err(Error::CompactorUnreachable(0));
             }
             Some(compactor) => compactor,
         };

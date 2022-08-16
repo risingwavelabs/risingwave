@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
@@ -27,6 +28,7 @@ use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
+use crate::MetaError;
 
 pub struct HummockServiceImpl<S>
 where
@@ -306,5 +308,19 @@ where
             .extend_ssts_to_delete_from_scan(&request.into_inner().sst_ids)
             .await;
         Ok(Response::new(ReportFullScanTaskResponse { status: None }))
+    }
+
+    async fn trigger_full_gc(
+        &self,
+        request: Request<TriggerFullGcRequest>,
+    ) -> Result<Response<TriggerFullGcResponse>, Status> {
+        self.vacuum_trigger
+            .run_full_gc(Duration::from_secs(
+                request.into_inner().sst_retention_time_sec,
+            ))
+            .await
+            .map_err(MetaError::from)
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 }
