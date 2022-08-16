@@ -64,7 +64,7 @@ impl CreateSource for DefaultCreateSource {
         let task_output_id = prost_source.get_task_output_id()?;
         let task_id = TaskId::from(task_output_id.get_task_id()?);
 
-        if context.is_local_addr(&peer_addr) {
+        if context.is_local_addr(&peer_addr) && prost_source.local_execute_plan.is_none() {
             trace!("Exchange locally [{:?}]", task_output_id);
 
             Ok(ExchangeSourceImpl::Local(LocalExchangeSource::create(

@@ -51,8 +51,8 @@
     select * from t1 where b = 1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: (t1.b = 1:Int32) }
-        BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+      BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id = t1._row_id, output: [t1.a, t1.b, t1.c] }
+        BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(1))], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
@@ -119,3 +119,59 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchScan { table: idx2, columns: [idx2.a, idx2.b, idx2.c], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: UpstreamHashShard(idx2.b, idx2.a) }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    select * from t1 where c = 1 and a < 10;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx3.t1._row_id = t1._row_id AND (t1.a < 10:Int32), output: [t1.a, t1.b, t1.c] }
+        BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c = Int64(1)], distribution: SomeShard }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx3.t1._row_id = t1._row_id AND (t1.a < 10:Int32), output: [t1.a, t1.b, t1.c] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c = Int64(1)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    select * from t1 where a = 1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id, output: [t1.a, t1.b, t1.c] }
+        BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(1)], distribution: SomeShard }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id, output: [t1.a, t1.b, t1.c] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(1)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    select * from t1 where a = 1 and b = 2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id = t1._row_id, output: [t1.a, t1.b, t1.c] }
+        BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2)), idx2.a = Int32(1)], distribution: SomeShard }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id = t1._row_id, output: [t1.a, t1.b, t1.c] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2)), idx2.a = Int32(1)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    select * from t1 where b = 2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id = t1._row_id, output: [t1.a, t1.b, t1.c] }
+        BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: SomeShard }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx2.t1._row_id = t1._row_id, output: [t1.a, t1.b, t1.c] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: SomeShard }
