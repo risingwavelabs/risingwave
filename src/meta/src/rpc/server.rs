@@ -404,6 +404,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let compaction_scheduler = Arc::new(CompactionScheduler::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
+        env.opts.compactor_selection_retry_interval_sec,
     ));
     let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
         hummock_manager.clone(),
@@ -451,6 +452,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         cluster_manager.clone(),
         hummock_manager.clone(),
         stream_manager.clone(),
+        fragment_manager.clone(),
     );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {

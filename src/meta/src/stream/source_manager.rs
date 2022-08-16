@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::try_match_expand;
 use risingwave_connector::source::{
-    ConnectorProperties, SplitEnumeratorImpl, SplitImpl, SplitMetaData,
+    ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
@@ -74,7 +74,7 @@ pub struct SourceManager<S: MetaStore> {
 }
 
 pub struct SharedSplitMap {
-    splits: Option<BTreeMap<String, SplitImpl>>,
+    splits: Option<BTreeMap<SplitId, SplitImpl>>,
 }
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
@@ -362,7 +362,7 @@ pub(crate) fn fetch_source_fragments(
 // todo use min heap to optimize
 fn diff_splits(
     mut prev_actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    discovered_splits: &BTreeMap<String, SplitImpl>,
+    discovered_splits: &BTreeMap<SplitId, SplitImpl>,
 ) -> Option<HashMap<ActorId, Vec<SplitImpl>>> {
     let prev_split_ids: HashSet<_> = prev_actor_splits
         .values()

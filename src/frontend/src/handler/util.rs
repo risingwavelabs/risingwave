@@ -62,7 +62,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
             col.flatten()
                 .into_iter()
                 .map(|c| {
-                    let type_name = if let DataType::Struct { fields: _f } = c.data_type {
+                    let type_name = if let DataType::Struct { .. } = c.data_type {
                         c.type_name.clone()
                     } else {
                         format!("{:?}", &c.data_type)
