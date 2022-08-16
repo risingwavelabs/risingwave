@@ -142,6 +142,12 @@ impl From<prost::DecodeError> for HummockError {
     }
 }
 
+impl From<ObjectError> for HummockError {
+    fn from(error: ObjectError) -> Self {
+        HummockErrorInner::ObjectIoError(error).into()
+    }
+}
+
 impl std::fmt::Debug for HummockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::error::Error;
