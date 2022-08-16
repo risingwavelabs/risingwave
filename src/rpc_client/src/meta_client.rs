@@ -401,10 +401,10 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<()> {
+    pub async fn flush(&self) -> Result<HummockEpoch> {
         let request = FlushRequest::default();
-        self.inner.flush(request).await?;
-        Ok(())
+        let resp = self.inner.flush(request).await?;
+        Ok(resp.snapshot.unwrap().epoch)
     }
 
     pub async fn list_table_fragments(
@@ -442,17 +442,13 @@ impl HummockMetaClient for MetaClient {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
+    ) -> Result<pin_version_response::Payload> {
         let req = PinVersionRequest {
             context_id: self.worker_id(),
             last_pinned,
         };
         let resp = self.inner.pin_version(req).await?;
-        Ok((
-            resp.is_delta_response,
-            resp.version_deltas,
-            resp.pinned_version,
-        ))
+        Ok(resp.payload.unwrap())
     }
 
     async fn unpin_version(&self) -> Result<()> {
