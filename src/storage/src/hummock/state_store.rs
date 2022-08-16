@@ -276,7 +276,7 @@ impl HummockStorage {
             }
             // iterate over uncommitted data in order index in descending order
             let find_value = self
-                .find_value_from_order_sorted_uncommitted_data(
+                .get_from_order_sorted_uncommitted_data(
                     uncommitted_data,
                     &internal_key,
                     &mut stats,
@@ -291,7 +291,7 @@ impl HummockStorage {
         }
         for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
             let find_value = self
-                .find_value_from_order_sorted_uncommitted_data(
+                .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,
                     &internal_key,
                     &mut stats,
@@ -380,7 +380,7 @@ impl HummockStorage {
         Ok(None)
     }
 
-    async fn find_value_from_order_sorted_uncommitted_data(
+    async fn get_from_order_sorted_uncommitted_data(
         &self,
         order_sorted_uncommitted_data: OrderSortedUncommittedData,
         internal_key: &[u8],
