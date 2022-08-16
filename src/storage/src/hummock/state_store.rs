@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::RangeBounds;
@@ -19,7 +20,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::{key_with_epoch, next_key};
+use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::LevelType;
 
@@ -307,18 +308,63 @@ impl HummockStorage {
             if level.table_infos.is_empty() {
                 continue;
             }
-            let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-            for table_info in table_infos {
-                let table = self
-                    .sstable_store
-                    .sstable(table_info.id, &mut stats)
-                    .await?;
-                table_counts += 1;
-                if let Some(v) = self
-                    .get_from_table(table, &internal_key, key, check_bloom_filter, &mut stats)
-                    .await?
-                {
-                    return Ok(v);
+            match level.level_type() {
+                LevelType::Overlapping | LevelType::Unspecified => {
+                    let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+                    for table_info in table_infos {
+                        let table = self
+                            .sstable_store
+                            .sstable(table_info.id, &mut stats)
+                            .await?;
+                        table_counts += 1;
+                        if let Some(v) = self
+                            .get_from_table(
+                                table,
+                                &internal_key,
+                                key,
+                                check_bloom_filter,
+                                &mut stats,
+                            )
+                            .await?
+                        {
+                            return Ok(v);
+                        }
+                    }
+                }
+                LevelType::Nonoverlapping => {
+                    let mut table_info_idx = level.table_infos.partition_point(|table| {
+                        let ord =
+                            user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+                        ord == Ordering::Less || ord == Ordering::Equal
+                    });
+                    if table_info_idx == 0 {
+                        continue;
+                    }
+                    table_info_idx = table_info_idx.saturating_sub(1);
+                    let ord = user_key(
+                        &level.table_infos[table_info_idx]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .right,
+                    )
+                    .cmp(key.as_ref());
+                    // the case that the key falls into the gap between two ssts
+                    if ord == Ordering::Less {
+                        continue;
+                    }
+
+                    let table = self
+                        .sstable_store
+                        .sstable(level.table_infos[table_info_idx].id, &mut stats)
+                        .await?;
+                    table_counts += 1;
+                    if let Some(v) = self
+                        .get_from_table(table, &internal_key, key, check_bloom_filter, &mut stats)
+                        .await?
+                    {
+                        return Ok(v);
+                    }
                 }
             }
         }
