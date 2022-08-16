@@ -37,8 +37,8 @@ use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
 use crate::{Keyspace, StateStore};
 
-/// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
-/// encoding, using `RowSerde` for row to KV entries.
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
+/// row-based encoding.
 ///
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
@@ -77,7 +77,7 @@ pub struct StateTable<S: StateStore> {
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. For READ_WRITE instances, the table will also check whether the writed rows
+    /// executor. The table will also check whether the writed rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
 
@@ -85,7 +85,7 @@ pub struct StateTable<S: StateStore> {
     table_option: TableOption,
 }
 
-// init Statetable
+/// init Statetable
 impl<S: StateStore> StateTable<S> {
     /// Create state table from table catalog and store.
     pub fn from_table_catalog(
@@ -258,7 +258,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
-        // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
+        // The output columns should be exactly same with the table columns, so
         // we can directly index into the row with indices to the table columns.
         self.compute_vnode(row, &self.dist_key_indices)
     }
@@ -290,7 +290,7 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-// point get
+/// point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
