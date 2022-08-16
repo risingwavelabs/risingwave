@@ -47,7 +47,7 @@ pub use shared_buffer_compact::compact;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
-use self::context::TaskProgress;
+
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
