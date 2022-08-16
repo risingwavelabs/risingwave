@@ -14,7 +14,7 @@
 
 //! # Index selection cost matrix
 //!
-//! |column_idx | 0   |  1 | 2  | 3  | 4  | remark |
+//! |`column_idx`| 0   |  1 | 2  | 3  | 4  | remark |
 //! |-----------|-----|----|----|----|----|---|
 //! |Equal      | 1   | 1  | 1  | 1  | 1  | |
 //! |In         | 10  | 8  | 5  | 5  | 5  | take the minimum value with actual in number |
