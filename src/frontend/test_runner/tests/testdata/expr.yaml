@@ -321,7 +321,7 @@
 - sql: |
     select pg_typeof(row(true, 1, 'hello'));
   batch_plan: |
-    BatchProject { exprs: ['struct<boolean,integer,varchar>':Varchar] }
+    BatchProject { exprs: ['record':Varchar] }
       BatchValues { rows: [[]] }
 - sql: |
     select pg_typeof(array[1, 2]);
