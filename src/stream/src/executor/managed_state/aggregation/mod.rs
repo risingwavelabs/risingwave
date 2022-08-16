@@ -56,10 +56,6 @@ pub fn verify_batch(
 
 /// Common cache structure for managed table states (non-append-only `min`/`max`, `string_agg`).
 pub struct Cache<T> {
-    /// The cache is not ready to be populated yet.
-    is_cold_start: bool,
-    /// The cache is synced with the state table.
-    synced: bool,
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
@@ -71,58 +67,55 @@ impl<T> Cache<T> {
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
         Self {
-            is_cold_start: true,
-            synced: false,
             capacity,
             entries: Default::default(),
         }
     }
 
-    /// Begin to populate the cache.
-    pub fn begin_sync(&mut self) {
-        self.entries.clear(); // clear the cache if anything exists
-        self.is_cold_start = false;
+    /// Get the capacity of the cache.
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 
-    /// Check if cache is synced/populated.
-    pub fn is_synced(&self) -> bool {
-        self.synced
+    /// Get the number of entries in the cache.
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 
-    /// Mark the cache as synced/populated.
-    /// Must be called after `begin_sync()`.
-    pub fn set_synced(&mut self) {
-        assert!(!self.is_cold_start);
-        self.synced = true;
+    /// Check if the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Clear the cache.
+    pub fn clear(&mut self) {
+        self.entries.clear();
     }
 
     /// Insert an entry into the cache.
     /// Key: `OrderedRow` composed of order by fields.
     /// Value: The value fields that are to be aggregated.
     pub fn insert(&mut self, key: OrderedRow, value: T) {
-        if !self.is_cold_start {
-            self.entries.insert(key, value);
-            // evict if capacity is reached
-            while self.entries.len() > self.capacity {
-                self.entries.pop_last();
-            }
+        self.entries.insert(key, value);
+        // evict if capacity is reached
+        while self.entries.len() > self.capacity {
+            self.entries.pop_last();
         }
     }
 
     /// Remove an entry from the cache.
     pub fn remove(&mut self, key: OrderedRow) {
-        if !self.is_cold_start {
-            self.entries.remove(&key);
-        }
+        self.entries.remove(&key);
+    }
+
+    /// Get the last (largest) key in the cache
+    pub fn last_key(&self) -> Option<&OrderedRow> {
+        self.entries.last_key_value().map(|(k, _)| k)
     }
 
     /// Get the first (smallest) value in the cache.
     pub fn first_value(&self) -> Option<&T> {
-        if self.synced {
-            self.entries.first_key_value().map(|(_, v)| v)
-        } else {
-            None
-        }
+        self.entries.first_key_value().map(|(_, v)| v)
     }
 
     /// Iterate over the values in the cache.
@@ -227,6 +220,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 pk,
                 pk_indices,
                 state_table_col_mapping,
+                row_count.unwrap(),
             )))),
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
