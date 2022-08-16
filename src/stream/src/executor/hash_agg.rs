@@ -217,6 +217,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
+        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,
@@ -283,9 +284,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(state_tables.iter_mut())
             {
                 let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
-                let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
                 agg_state
-                    .apply_chunk(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                    .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
                     .await?;
             }
         }

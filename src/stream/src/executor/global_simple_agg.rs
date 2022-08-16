@@ -137,6 +137,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
+        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
 
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
@@ -165,9 +166,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .zip_eq(state_tables.iter_mut())
         {
             let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
-            let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
             agg_state
-                .apply_chunk(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
                 .await?;
         }
 
