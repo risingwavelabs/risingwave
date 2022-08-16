@@ -205,7 +205,7 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
                     Box::new(LiteralExpression::new(build_type.clone(), datum.clone())),
                 )?;
 
-                let datum = cast_expr.eval_row(&Row(vec![]))?;
+                let datum = cast_expr.eval_row(Row::empty())?;
                 datum.unwrap()
             };
 
