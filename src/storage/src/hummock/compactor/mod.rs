@@ -347,6 +347,7 @@ impl Compactor {
     pub fn start_compactor(
         compactor_context: Arc<CompactorContext>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        max_concurrent_task_number: u64,
     ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
@@ -387,7 +388,10 @@ impl Compactor {
                     }
                 }
 
-                let mut stream = match hummock_meta_client.subscribe_compact_tasks().await {
+                let mut stream = match hummock_meta_client
+                    .subscribe_compact_tasks(max_concurrent_task_number)
+                    .await
+                {
                     Ok(stream) => {
                         tracing::debug!("Succeeded subscribe_compact_tasks.");
                         stream

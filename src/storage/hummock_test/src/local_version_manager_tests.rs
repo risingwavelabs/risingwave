@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_storage::hummock::conflict_detector::ConflictDetector;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -90,7 +91,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version)));
+    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert_eq!(
@@ -106,7 +107,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version)));
+    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
@@ -252,7 +253,7 @@ async fn test_update_uncommitted_ssts() {
         ..Default::default()
     };
     assert!(local_version_manager
-        .try_update_pinned_version(None, (false, vec![], Some(version.clone()))));
+        .try_update_pinned_version(None, Payload::PinnedVersion(version.clone())));
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
@@ -280,7 +281,7 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(None, (false, vec![], Some(version.clone())));
+    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version.clone()));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());

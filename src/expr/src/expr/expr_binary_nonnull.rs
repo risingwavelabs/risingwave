@@ -155,15 +155,17 @@ macro_rules! gen_binary_expr_cmp {
                     gen_str_cmp($op),
                 ))
             }
-            (DataType::Struct { fields: _ }, DataType::Struct { fields: _ }) => Box::new(
-                BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
-                    $l,
-                    $r,
-                    $ret,
-                    gen_struct_cmp($op),
-                ),
-            ),
-            (DataType::List { datatype: _ }, DataType::List { datatype: _ }) => {
+            (DataType::Struct { .. }, DataType::Struct { .. }) => {
+                Box::new(
+                    BinaryExpression::<StructArray, StructArray, BoolArray, _>::new(
+                        $l,
+                        $r,
+                        $ret,
+                        gen_struct_cmp($op),
+                    ),
+                )
+            }
+            (DataType::List { .. }, DataType::List { .. }) => {
                 Box::new(BinaryExpression::<ListArray, ListArray, BoolArray, _>::new(
                     $l,
                     $r,
