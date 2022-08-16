@@ -178,7 +178,6 @@ impl StreamMaterialize {
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
-            read_pattern_prefix_column: 0,
         };
 
         Ok(Self { base, input, table })

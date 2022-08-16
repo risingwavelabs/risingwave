@@ -97,6 +97,8 @@ pub struct CompactorConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
+    pub max_concurrent_task_number: u64,
+    pub compaction_worker_threads_number: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

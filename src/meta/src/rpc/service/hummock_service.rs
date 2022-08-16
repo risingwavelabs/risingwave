@@ -72,16 +72,14 @@ where
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let (is_delta_response, version_deltas, pinned_version) = self
+        let payload = self
             .hummock_manager
             .pin_version(req.context_id, req.last_pinned)
             .await
             .map_err(meta_error_to_tonic)?;
         Ok(Response::new(PinVersionResponse {
             status: None,
-            is_delta_response,
-            version_deltas,
-            pinned_version,
+            payload: Some(payload),
         }))
     }
 
@@ -190,14 +188,17 @@ where
         &self,
         request: Request<SubscribeCompactTasksRequest>,
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
-        let context_id = request.into_inner().context_id;
+        let req = request.into_inner();
+        let context_id = req.context_id;
         // check_context and add_compactor as a whole is not atomic, but compactor_manager will
         // remove invalid compactor eventually.
         if !self.hummock_manager.check_context(context_id).await {
             return Err(anyhow::anyhow!("invalid hummock context {}", context_id))
                 .map_err(meta_error_to_tonic);
         }
-        let rx = self.compactor_manager.add_compactor(context_id);
+        let rx = self
+            .compactor_manager
+            .add_compactor(context_id, req.max_concurrent_task_number);
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 

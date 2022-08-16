@@ -82,7 +82,7 @@ impl<S: StateStore> Keyspace<S> {
     /// Treats the keyspace as a single key, and gets its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn value(&self, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefix, read_options).await
+        self.store.get(&self.prefix, true, read_options).await
     }
 
     /// Concatenates this keyspace and the given key to produce a prefixed key.
@@ -95,9 +95,12 @@ impl<S: StateStore> Keyspace<S> {
     pub async fn get(
         &self,
         key: impl AsRef<[u8]>,
+        check_bloom_filter: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        self.store.get(&self.prefixed_key(key), read_options).await
+        self.store
+            .get(&self.prefixed_key(key), check_bloom_filter, read_options)
+            .await
     }
 
     /// Scans `limit` keys from the keyspace and get their values.

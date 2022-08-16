@@ -47,6 +47,8 @@ pub trait TopNExecutorBase: Send + 'static {
 
     /// See [`Executor::identity`].
     fn identity(&self) -> &str;
+
+    async fn init(&mut self, epoch: u64) -> StreamExecutorResult<()>;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -89,6 +91,9 @@ where
 
         let barrier = expect_first_barrier(&mut input).await?;
         let mut epoch = barrier.epoch.curr;
+
+        self.inner.init(epoch).await?;
+
         yield Message::Barrier(barrier);
 
         #[for_await]

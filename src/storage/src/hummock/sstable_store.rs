@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, ObjectMetadata, ObjectStore, ObjectStoreRef,
+    get_local_path, BlockLocation, ObjectMetadata, ObjectStoreRef, ObjectStreamingUploader,
 };
 
 use super::{
@@ -89,6 +89,33 @@ impl LruCacheEventListener for BlockCacheEventListener {
 }
 
 // END section for tiered cache
+
+pub struct SstableStreamingUploader {
+    id: HummockSstableId,
+    /// Data are uploaded block by block, except for the size footer.
+    object_uploader: ObjectStreamingUploader,
+    /// Compressed blocks to refill block or meta cache.
+    blocks: Vec<Bytes>,
+    policy: CachePolicy,
+}
+
+impl SstableStreamingUploader {
+    /// Upload compressed block data.
+    pub fn upload_block(&mut self, block: Bytes) -> HummockResult<()> {
+        if let CachePolicy::Fill = self.policy {
+            self.blocks.push(block.clone());
+        }
+        self.object_uploader
+            .write_bytes(block)
+            .map_err(HummockError::object_io_error)
+    }
+
+    pub fn upload_size_footer(&mut self, size_footer: u32) -> HummockResult<()> {
+        self.object_uploader
+            .write_bytes(Bytes::from(size_footer.to_le_bytes().to_vec()))
+            .map_err(HummockError::object_io_error)
+    }
+}
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -180,17 +207,57 @@ impl SstableStore {
         Ok(())
     }
 
+    pub async fn put_sst_stream(
+        &self,
+        sst_id: HummockSstableId,
+        policy: CachePolicy,
+    ) -> HummockResult<SstableStreamingUploader> {
+        let data_path = self.get_sst_data_path(sst_id);
+        Ok(SstableStreamingUploader {
+            id: sst_id,
+            object_uploader: self.store.streaming_upload(&data_path).await?,
+            blocks: Vec::new(),
+            policy,
+        })
+    }
+
+    /// Finish uploading by providing size footer and metadata.
+    pub async fn finish_put_sst_stream(
+        &self,
+        uploader: SstableStreamingUploader,
+        meta: SstableMeta,
+    ) -> HummockResult<()> {
+        uploader.object_uploader.finish().await?;
+        let sst_id = uploader.id;
+        if let Err(e) = self.put_meta(sst_id, &meta).await {
+            self.delete_sst_data(sst_id).await?;
+            return Err(e);
+        }
+        // TODO: unify cache refill logic with `put_sst`.
+        if let CachePolicy::Fill = uploader.policy {
+            debug_assert!(!uploader.blocks.is_empty());
+            for (block_idx, compressed_block) in uploader.blocks.iter().enumerate() {
+                let block = Block::decode(compressed_block.chunk())?;
+                self.block_cache
+                    .insert(sst_id, block_idx as u64, Box::new(block));
+            }
+        }
+        let sst = Sstable::new(sst_id, meta);
+        let charge = sst.estimate_size();
+        self.meta_cache
+            .insert(sst_id, sst_id, charge, Box::new(sst));
+        Ok(())
+    }
+
     pub async fn delete(&self, sst_id: HummockSstableId) -> HummockResult<()> {
         // Meta
         self.store
             .delete(self.get_sst_meta_path(sst_id).as_str())
-            .await
-            .map_err(HummockError::object_io_error)?;
+            .await?;
         // Data
         self.store
             .delete(self.get_sst_data_path(sst_id).as_str())
-            .await
-            .map_err(HummockError::object_io_error)?;
+            .await?;
         self.meta_cache.erase(sst_id, &sst_id);
         Ok(())
     }
@@ -271,10 +338,7 @@ impl SstableStore {
                     return Ok(holder.into_owned());
                 }
 
-                let block_data = store
-                    .read(&data_path, Some(block_loc))
-                    .await
-                    .map_err(HummockError::object_io_error)?;
+                let block_data = store.read(&data_path, Some(block_loc)).await?;
                 let block = Block::decode(&block_data)?;
                 Ok(Box::new(block))
             }
@@ -382,18 +446,12 @@ impl SstableStore {
                         let meta = match meta_data {
                             Some(data) => data,
                             None => {
-                                let buf = store
-                                    .read(&meta_path, None)
-                                    .await
-                                    .map_err(HummockError::object_io_error)?;
+                                let buf = store.read(&meta_path, None).await?;
                                 SstableMeta::decode(&mut &buf[..])?
                             }
                         };
                         let sst = if load_data {
-                            let block_data = store
-                                .read(&data_path, None)
-                                .await
-                                .map_err(HummockError::object_io_error)?;
+                            let block_data = store.read(&data_path, None).await?;
                             Sstable::new_with_data(sst_id, meta, block_data)?
                         } else {
                             Sstable::new(sst_id, meta)
@@ -441,37 +499,40 @@ pub type SstableStoreRef = Arc<SstableStore>;
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Range;
     use std::sync::Arc;
 
+    use byteorder::{LittleEndian, ReadBytesExt};
+    use bytes::Bytes;
+    use risingwave_hummock_sdk::HummockSstableId;
+
+    use super::SstableStoreRef;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator};
+    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta};
     use crate::monitor::StoreLocalStatistic;
 
-    #[tokio::test]
-    async fn test_read_whole_data_object() {
-        let sstable_store = mock_sstable_store();
-        let (data, meta, _) = gen_test_sstable_data(
-            default_builder_opt_for_test(),
-            (0..100).map(|x| {
-                (
-                    iterator_test_key_of(x),
-                    HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
-                )
-            }),
-        );
-        sstable_store
-            .put_sst(1, meta.clone(), data, CachePolicy::NotFill)
-            .await
-            .unwrap();
+    fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
+        HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
+    }
+
+    async fn validate_sst(
+        sstable_store: SstableStoreRef,
+        id: HummockSstableId,
+        meta: SstableMeta,
+        x_range: Range<usize>,
+    ) {
         let mut stats = StoreLocalStatistic::default();
-        let holder = sstable_store.sstable(1, &mut stats).await.unwrap();
+        let holder = sstable_store.sstable(id, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
         assert!(holder.value().blocks.is_empty());
-        let holder = sstable_store.load_table(1, true, &mut stats).await.unwrap();
+        let holder = sstable_store
+            .load_table(id, true, &mut stats)
+            .await
+            .unwrap();
         assert_eq!(holder.value().meta, meta);
         assert_eq!(
             holder.value().meta.block_metas.len(),
@@ -484,11 +545,66 @@ mod tests {
             Arc::new(SstableIteratorReadOptions::default()),
         );
         iter.rewind().await.unwrap();
-        for i in 0..100 {
+        for i in x_range {
             let key = iter.key();
+            let value = iter.value();
             assert_eq!(key, iterator_test_key_of(i).as_slice());
+            assert_eq!(value, get_hummock_value(i).as_slice());
             iter.next().await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn test_read_whole_data_object() {
+        let sstable_store = mock_sstable_store();
+        let x_range = 0..100;
+        let (data, meta, _) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            x_range
+                .clone()
+                .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
+        );
+        sstable_store
+            .put_sst(1, meta.clone(), data, CachePolicy::NotFill)
+            .await
+            .unwrap();
+        validate_sst(sstable_store, 1, meta, x_range).await;
+    }
+
+    #[tokio::test]
+    async fn test_streaming_upload() {
+        let sstable_store = mock_sstable_store();
+        let x_range = 0..100;
+        let (data, meta, _) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            x_range
+                .clone()
+                .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
+        );
+        let mut blocks = vec![];
+        for block_meta in &meta.block_metas {
+            let end_offset = (block_meta.offset + block_meta.len) as usize;
+            let block = Bytes::from(data[block_meta.offset as usize..end_offset].to_vec());
+            blocks.push(block);
+        }
+        let size_footer = (&data[(data.len() - 4)..])
+            .read_u32::<LittleEndian>()
+            .unwrap();
+
+        let mut uploader = sstable_store
+            .put_sst_stream(1, CachePolicy::NotFill)
+            .await
+            .unwrap();
+        for block in blocks {
+            uploader.upload_block(block).unwrap();
+        }
+        uploader.upload_size_footer(size_footer).unwrap();
+        sstable_store
+            .finish_put_sst_stream(uploader, meta.clone())
+            .await
+            .unwrap();
+
+        validate_sst(sstable_store, 1, meta, x_range).await;
     }
 
     #[test]

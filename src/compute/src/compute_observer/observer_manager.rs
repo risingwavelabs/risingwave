@@ -68,7 +68,7 @@ impl ObserverNodeImpl for ComputeObserverNode {
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be frontend snapshot, but get {:?}",
+                    "the first notify should be meta snapshot, but get {:?}",
                     resp
                 ))
                 .into())
