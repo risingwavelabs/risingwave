@@ -563,7 +563,8 @@ mod tests {
             x_range
                 .clone()
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
-        );
+        )
+        .await;
         sstable_store
             .put_sst(1, meta.clone(), data, CachePolicy::NotFill)
             .await
@@ -580,7 +581,8 @@ mod tests {
             x_range
                 .clone()
                 .map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
-        );
+        )
+        .await;
         let mut blocks = vec![];
         for block_meta in &meta.block_metas {
             let end_offset = (block_meta.offset + block_meta.len) as usize;

@@ -12,18 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::SeqCst;
+
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
+use super::{
+    InMemSstableWriter, InMemWriterBuilder, SstableMeta, SstableWriter, SstableWriterBuilder,
+    StreamingSstableWriter, StreamingWriterBuilder,
+};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, HummockResult, SstableBuilder};
+use crate::hummock::{
+    CachePolicy, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
+};
 
 #[async_trait::async_trait]
-pub trait TableBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)>;
+pub trait TableBuilderFactory<B>: Send
+where
+    B: SstableWriterBuilder,
+{
+    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)>;
 }
 
 pub struct SealedSstableBuilder {
@@ -32,33 +44,136 @@ pub struct SealedSstableBuilder {
     pub bloom_filter_size: usize,
 }
 
+/// Consumer for the output of `SstableBuilder::finish`.
+#[async_trait::async_trait]
+pub trait SstableBuilderSealer<W>
+where
+    W: SstableWriter,
+{
+    async fn seal(
+        &self,
+        writer_output: W::Output,
+        sst_meta: SstableMeta,
+        sst_info: SstableInfo,
+        tracker: Option<MemoryTracker>,
+    ) -> HummockResult<SealedSstableBuilder>;
+}
+
+/// Upload the in-memory SST data and metadata all at once.
+pub struct BatchUploadSealer {
+    sstable_store: SstableStoreRef,
+    policy: CachePolicy,
+}
+
+impl BatchUploadSealer {
+    pub fn new(sstable_store: SstableStoreRef, policy: CachePolicy) -> BatchUploadSealer {
+        Self {
+            sstable_store,
+            policy,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableBuilderSealer<InMemSstableWriter> for BatchUploadSealer {
+    async fn seal(
+        &self,
+        writer_output: <InMemSstableWriter as SstableWriter>::Output,
+        meta: SstableMeta,
+        sst_info: SstableInfo,
+        tracker: Option<MemoryTracker>,
+    ) -> HummockResult<SealedSstableBuilder> {
+        let bloom_filter_size = meta.bloom_filter.len();
+        let policy = self.policy;
+        let sstable_store = self.sstable_store.clone();
+        let upload_join_handle = tokio::spawn(async move {
+            let ret = sstable_store
+                .put_sst(sst_info.id, meta, writer_output, policy)
+                .await;
+            drop(tracker);
+            ret
+        });
+        Ok(SealedSstableBuilder {
+            sst_info,
+            upload_join_handle,
+            bloom_filter_size,
+        })
+    }
+}
+
+pub struct StreamingUploadSealer {
+    sstable_store: SstableStoreRef,
+}
+
+impl StreamingUploadSealer {
+    pub fn new(sstable_store: SstableStoreRef) -> Self {
+        Self { sstable_store }
+    }
+}
+
+#[async_trait::async_trait]
+impl SstableBuilderSealer<StreamingSstableWriter> for StreamingUploadSealer {
+    async fn seal(
+        &self,
+        writer_output: <StreamingSstableWriter as SstableWriter>::Output,
+        meta: SstableMeta,
+        sst_info: SstableInfo,
+        tracker: Option<MemoryTracker>,
+    ) -> HummockResult<SealedSstableBuilder> {
+        let sstable_store = self.sstable_store.clone();
+        let bloom_filter_size = meta.bloom_filter.len();
+        let upload_join_handle = tokio::spawn(async move {
+            let ret = sstable_store
+                .finish_put_sst_stream(writer_output, meta)
+                .await;
+            drop(tracker);
+            ret
+        });
+        Ok(SealedSstableBuilder {
+            sst_info,
+            upload_join_handle,
+            bloom_filter_size,
+        })
+    }
+}
+
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
 /// based on their target capacity set in options.
 ///
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
-pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
-    /// When creating a new [`SstableBuilder`], caller use this closure to specify the id and
-    /// options.
+pub struct CapacitySplitTableBuilder<F, B, S>
+where
+    F: TableBuilderFactory<B>,
+    B: SstableWriterBuilder,
+    S: SstableBuilderSealer<B::Writer>,
+{
+    /// When creating a new [`SstableBuilder`], caller use this factory to generate it.
     builder_factory: F,
 
     sealed_builders: Vec<SealedSstableBuilder>,
 
-    current_builder: Option<SstableBuilder>,
+    current_builder: Option<SstableBuilder<B::Writer>>,
 
-    policy: CachePolicy,
-    sstable_store: SstableStoreRef,
+    /// When the `current_builder` is finished, caller use the consumer to consume SST data from
+    /// the builder.
+    builder_sealer: S,
+
     tracker: Option<MemoryTracker>,
 }
 
-impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
+impl<F, B, S> CapacitySplitTableBuilder<F, B, S>
+where
+    F: TableBuilderFactory<B>,
+    B: SstableWriterBuilder,
+    S: SstableBuilderSealer<B::Writer>,
+{
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(builder_factory: F, builder_sealer: S) -> Self {
         Self {
             builder_factory,
             sealed_builders: Vec::new(),
             current_builder: None,
-            policy,
-            sstable_store,
+            builder_sealer,
             tracker: None,
         }
     }
@@ -104,7 +219,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     ) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_ref() {
             if allow_split && builder.reach_capacity() {
-                self.seal_current();
+                self.seal_current().await?;
             }
         }
 
@@ -115,7 +230,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key.into_inner(), value);
+        builder.add(full_key.into_inner(), value)?;
         Ok(())
     }
 
@@ -123,194 +238,267 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     ///
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
-    pub fn seal_current(&mut self) {
+    pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
-            let (sst_id, data, meta, table_ids) = builder.finish();
-            let sstable_store = self.sstable_store.clone();
-            let bloom_filter_size = meta.bloom_filter.len();
+            let builder_output = builder.finish().await?;
+
+            let meta = &builder_output.meta;
+
             let sst_info = SstableInfo {
-                id: sst_id,
+                id: builder_output.sstable_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
                     left: meta.smallest_key.clone(),
                     right: meta.largest_key.clone(),
                     inf: false,
                 }),
                 file_size: meta.estimated_size as u64,
-                table_ids,
+                table_ids: builder_output.table_ids,
             };
-            let policy = self.policy;
             let tracker = self.tracker.take();
-            let upload_join_handle = tokio::spawn(async move {
-                let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
-                drop(tracker);
-                ret
-            });
-            self.sealed_builders.push(SealedSstableBuilder {
-                sst_info,
-                upload_join_handle,
-                bloom_filter_size,
-            })
+            self.sealed_builders.push(
+                self.builder_sealer
+                    .seal(
+                        builder_output.writer_output,
+                        builder_output.meta,
+                        sst_info,
+                        tracker,
+                    )
+                    .await?,
+            );
         }
+        Ok(())
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(mut self) -> Vec<SealedSstableBuilder> {
-        self.seal_current();
-        self.sealed_builders
+    pub async fn finish(mut self) -> HummockResult<Vec<SealedSstableBuilder>> {
+        self.seal_current().await?;
+        Ok(self.sealed_builders)
+    }
+}
+
+/// The writer will generate an entire SST in memory
+/// and the sealer will upload it to object store.
+pub fn get_multi_builer_hook_for_batch_upload(
+    opt: &SstableBuilderOptions,
+    sstable_store: SstableStoreRef,
+    policy: CachePolicy,
+) -> (InMemWriterBuilder, BatchUploadSealer) {
+    (
+        InMemWriterBuilder::from(opt),
+        BatchUploadSealer::new(sstable_store, policy),
+    )
+}
+
+/// The writer will upload blocks of data to object store
+/// and the sealer will finish the streaming upload.
+pub fn get_multi_builder_hook_for_streaming_upload(
+    sstable_store: SstableStoreRef,
+    policy: CachePolicy,
+) -> (StreamingWriterBuilder, StreamingUploadSealer) {
+    (
+        StreamingWriterBuilder::new(sstable_store.clone(), policy),
+        StreamingUploadSealer::new(sstable_store),
+    )
+}
+
+/// Used for unit tests and benchmarks.
+pub struct LocalTableBuilderFactory<B>
+where
+    B: SstableWriterBuilder,
+{
+    next_id: AtomicU64,
+    options: SstableBuilderOptions,
+    limiter: MemoryLimiter,
+    writer_builder: B,
+}
+
+impl<B> LocalTableBuilderFactory<B>
+where
+    B: SstableWriterBuilder,
+{
+    pub fn new(next_id: u64, writer_builder: B, options: SstableBuilderOptions) -> Self {
+        Self {
+            limiter: MemoryLimiter::new(1000000),
+            next_id: AtomicU64::new(next_id),
+            options,
+            writer_builder,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<B> TableBuilderFactory<B> for LocalTableBuilderFactory<B>
+where
+    B: SstableWriterBuilder,
+{
+    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
+        let id = self.next_id.fetch_add(1, SeqCst);
+        let builder = SstableBuilder::new_for_test(
+            id,
+            self.writer_builder.build(id).await?,
+            self.options.clone(),
+        );
+        let tracker = self.limiter.require_memory(1).await.unwrap();
+        Ok((tracker, builder))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU64;
-    use std::sync::atomic::Ordering::SeqCst;
-
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
-    use crate::hummock::{MemoryLimiter, SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
-    pub struct LocalTableBuilderFactory {
-        next_id: AtomicU64,
-        options: SstableBuilderOptions,
-        limiter: MemoryLimiter,
+    fn get_builder<B, S>(
+        opt: &SstableBuilderOptions,
+        writer_builder: B,
+        builder_sealer: S,
+    ) -> CapacitySplitTableBuilder<LocalTableBuilderFactory<B>, B, S>
+    where
+        B: SstableWriterBuilder,
+        S: SstableBuilderSealer<B::Writer>,
+    {
+        let builder_factory = LocalTableBuilderFactory::new(1001, writer_builder, opt.clone());
+        CapacitySplitTableBuilder::new(builder_factory, builder_sealer)
     }
 
-    impl LocalTableBuilderFactory {
-        pub fn new(next_id: u64, options: SstableBuilderOptions) -> Self {
-            Self {
-                limiter: MemoryLimiter::new(1000000),
-                next_id: AtomicU64::new(next_id),
-                options,
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl TableBuilderFactory for LocalTableBuilderFactory {
-        async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
-            let id = self.next_id.fetch_add(1, SeqCst);
-            let builder = SstableBuilder::new_for_test(id, self.options.clone());
-            let tracker = self.limiter.require_memory(1).await.unwrap();
-            Ok((tracker, builder))
+    macro_rules! run_test {
+        ($test_name:ident, $opt:expr $(, $args:expr)*) => {
+            // Test batch upload.
+            let (writer_builder, builder_sealer) = get_multi_builer_hook_for_batch_upload(&$opt, mock_sstable_store(), CachePolicy::NotFill);
+            $test_name(get_builder(&$opt, writer_builder, builder_sealer) $(, $args)*).await;
+            // Test streaming upload.
+            let (writer_builder, builder_sealer) = get_multi_builder_hook_for_streaming_upload(mock_sstable_store(), CachePolicy::NotFill);
+            $test_name(get_builder(&$opt, writer_builder, builder_sealer) $(, $args)*).await;
         }
     }
 
     #[tokio::test]
     async fn test_empty() {
+        async fn test_inner<F, B, C>(builder: CapacitySplitTableBuilder<F, B, C>)
+        where
+            F: TableBuilderFactory<B>,
+            B: SstableWriterBuilder,
+            C: SstableBuilderSealer<B::Writer>,
+        {
+            let results = builder.finish().await.unwrap();
+            assert!(results.is_empty());
+        }
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
-        let get_id_and_builder = LocalTableBuilderFactory::new(
-            1001,
-            SstableBuilderOptions {
-                capacity: table_capacity,
-                block_capacity: block_size,
-                restart_interval: DEFAULT_RESTART_INTERVAL,
-                bloom_false_positive: 0.1,
-                compression_algorithm: CompressionAlgorithm::None,
-                estimate_bloom_filter_capacity: 0,
-            },
-        );
-        let builder = CapacitySplitTableBuilder::new(
-            get_id_and_builder,
-            CachePolicy::NotFill,
-            mock_sstable_store(),
-        );
-        let results = builder.finish();
-        assert!(results.is_empty());
+        let opt = SstableBuilderOptions {
+            capacity: table_capacity,
+            block_capacity: block_size,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::None,
+            estimate_bloom_filter_capacity: 0,
+        };
+        run_test!(test_inner, opt);
     }
 
     #[tokio::test]
     async fn test_lots_of_tables() {
-        let block_size = 1 << 10;
-        let table_capacity = 4 * block_size;
-        let get_id_and_builder = LocalTableBuilderFactory::new(
-            1001,
-            SstableBuilderOptions {
-                capacity: table_capacity,
-                block_capacity: block_size,
-                restart_interval: DEFAULT_RESTART_INTERVAL,
-                bloom_false_positive: 0.1,
-                compression_algorithm: CompressionAlgorithm::None,
-                ..Default::default()
-            },
-        );
-        let mut builder = CapacitySplitTableBuilder::new(
-            get_id_and_builder,
-            CachePolicy::NotFill,
-            mock_sstable_store(),
-        );
+        async fn test_inner<F, B, S>(
+            mut builder: CapacitySplitTableBuilder<F, B, S>,
+            table_capacity: usize,
+        ) where
+            F: TableBuilderFactory<B>,
+            B: SstableWriterBuilder,
+            S: SstableBuilderSealer<B::Writer>,
+        {
+            for i in 0..table_capacity {
+                builder
+                    .add_user_key(
+                        b"key".to_vec(),
+                        HummockValue::put(b"value"),
+                        (table_capacity - i) as u64,
+                    )
+                    .await
+                    .unwrap();
+            }
 
-        for i in 0..table_capacity {
-            builder
-                .add_user_key(
-                    b"key".to_vec(),
-                    HummockValue::put(b"value"),
-                    (table_capacity - i) as u64,
-                )
-                .await
-                .unwrap();
+            let results = builder.finish().await.unwrap();
+            assert!(results.len() > 1);
         }
 
-        let results = builder.finish();
-        assert!(results.len() > 1);
+        let block_size = 1 << 10;
+        let table_capacity = 4 * block_size;
+        let opt = SstableBuilderOptions {
+            capacity: table_capacity,
+            block_capacity: block_size,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
+        };
+        run_test!(test_inner, opt, table_capacity);
     }
 
     #[tokio::test]
     async fn test_table_seal() {
-        let mut builder = CapacitySplitTableBuilder::new(
-            LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
-            CachePolicy::NotFill,
-            mock_sstable_store(),
-        );
-        let mut epoch = 100;
+        async fn test_inner<F, B, S>(mut builder: CapacitySplitTableBuilder<F, B, S>)
+        where
+            F: TableBuilderFactory<B>,
+            B: SstableWriterBuilder,
+            S: SstableBuilderSealer<B::Writer>,
+        {
+            let mut epoch = 100;
 
-        macro_rules! add {
-            () => {
-                epoch -= 1;
-                builder
-                    .add_user_key(b"k".to_vec(), HummockValue::put(b"v"), epoch)
-                    .await
-                    .unwrap();
-            };
+            macro_rules! add {
+                () => {
+                    epoch -= 1;
+                    builder
+                        .add_user_key(b"k".to_vec(), HummockValue::put(b"v"), epoch)
+                        .await
+                        .unwrap();
+                };
+            }
+
+            assert_eq!(builder.len(), 0);
+            builder.seal_current().await.unwrap();
+            assert_eq!(builder.len(), 0);
+            add!();
+            assert_eq!(builder.len(), 1);
+            add!();
+            assert_eq!(builder.len(), 1);
+            builder.seal_current().await.unwrap();
+            assert_eq!(builder.len(), 1);
+            add!();
+            assert_eq!(builder.len(), 2);
+            builder.seal_current().await.unwrap();
+            assert_eq!(builder.len(), 2);
+            builder.seal_current().await.unwrap();
+            assert_eq!(builder.len(), 2);
+
+            let results = builder.finish().await.unwrap();
+            assert_eq!(results.len(), 2);
         }
 
-        assert_eq!(builder.len(), 0);
-        builder.seal_current();
-        assert_eq!(builder.len(), 0);
-        add!();
-        assert_eq!(builder.len(), 1);
-        add!();
-        assert_eq!(builder.len(), 1);
-        builder.seal_current();
-        assert_eq!(builder.len(), 1);
-        add!();
-        assert_eq!(builder.len(), 2);
-        builder.seal_current();
-        assert_eq!(builder.len(), 2);
-        builder.seal_current();
-        assert_eq!(builder.len(), 2);
-
-        let results = builder.finish();
-        assert_eq!(results.len(), 2);
+        let opt = default_builder_opt_for_test();
+        run_test!(test_inner, opt);
     }
 
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
-        let mut builder = CapacitySplitTableBuilder::new(
-            LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
-            CachePolicy::NotFill,
-            mock_sstable_store(),
-        );
-
-        builder
-            .add_full_key(
-                FullKey::from_user_key_slice(b"k", 233).as_slice(),
-                HummockValue::put(b"v"),
-                false,
-            )
-            .await
-            .unwrap();
+        async fn test_inner<F, B, S>(mut builder: CapacitySplitTableBuilder<F, B, S>)
+        where
+            F: TableBuilderFactory<B>,
+            B: SstableWriterBuilder,
+            S: SstableBuilderSealer<B::Writer>,
+        {
+            builder
+                .add_full_key(
+                    FullKey::from_user_key_slice(b"k", 233).as_slice(),
+                    HummockValue::put(b"v"),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+        let opt = default_builder_opt_for_test();
+        run_test!(test_inner, opt);
     }
 }

@@ -45,28 +45,39 @@ pub use shared_buffer_compact::compact;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::multi_builder::CapacitySplitTableBuilder;
-use super::{HummockResult, SstableBuilderOptions};
+use super::multi_builder::{CapacitySplitTableBuilder, SstableBuilderSealer};
+use super::{HummockResult, SstableBuilderOptions, SstableWriterBuilder};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
+use crate::hummock::multi_builder::{
+    get_multi_builder_hook_for_streaming_upload, get_multi_builer_hook_for_batch_upload,
+    SealedSstableBuilder, TableBuilderFactory,
+};
 use crate::hummock::utils::{MemoryLimiter, MemoryTracker};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, DEFAULT_ENTRY_SIZE,
 };
 
-pub struct RemoteBuilderFactory {
+pub struct RemoteBuilderFactory<B>
+where
+    B: SstableWriterBuilder,
+{
     sstable_id_manager: SstableIdManagerRef,
     limiter: Arc<MemoryLimiter>,
     options: SstableBuilderOptions,
     remote_rpc_cost: Arc<AtomicU64>,
+    writer_builder: B,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
 }
 
 #[async_trait::async_trait]
-impl TableBuilderFactory for RemoteBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
+impl<B> TableBuilderFactory<B> for RemoteBuilderFactory<B>
+where
+    B: SstableWriterBuilder,
+{
+    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
+        // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
             .require_memory(
@@ -82,6 +93,7 @@ impl TableBuilderFactory for RemoteBuilderFactory {
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let builder = SstableBuilder::new(
             table_id,
+            self.writer_builder.build(table_id).await?,
             self.options.clone(),
             self.filter_key_extractor.clone(),
         );
@@ -432,14 +444,19 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn compact_and_build_sst<T: TableBuilderFactory>(
-        sst_builder: &mut CapacitySplitTableBuilder<T>,
+    pub async fn compact_and_build_sst<F, B, S>(
+        mut sst_builder: CapacitySplitTableBuilder<F, B, S>,
         kr: KeyRange,
         mut iter: impl HummockIterator<Direction = Forward>,
         gc_delete_keys: bool,
         watermark: Epoch,
         mut compaction_filter: impl CompactionFilter,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<Vec<SealedSstableBuilder>>
+    where
+        F: TableBuilderFactory<B>,
+        B: SstableWriterBuilder,
+        S: SstableBuilderSealer<B::Writer>,
+    {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
         } else {
@@ -502,7 +519,8 @@ impl Compactor {
 
             iter.next().await?;
         }
-        Ok(())
+
+        sst_builder.finish().await
     }
 }
 
@@ -547,42 +565,54 @@ impl Compactor {
         if options.estimate_bloom_filter_capacity == 0 {
             options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
         }
-        let builder_factory = RemoteBuilderFactory {
-            sstable_id_manager: self.context.sstable_id_manager.clone(),
-            limiter: self.memory_limiter.clone(),
-            options,
-            remote_rpc_cost: get_id_time.clone(),
-            filter_key_extractor,
-        };
 
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let mut builder = CapacitySplitTableBuilder::new(
-            builder_factory,
-            self.cache_policy,
-            self.context.sstable_store.clone(),
-        );
+        macro_rules! make_builder_and_compact {
+            ($writer_builder:expr, $builder_sealer:expr) => {{
+                // Monitor time cost building shared buffer to SSTs.
+                let compact_timer = if self.context.is_share_buffer_compact {
+                    self.context.stats.write_build_l0_sst_duration.start_timer()
+                } else {
+                    self.context.stats.compact_sst_duration.start_timer()
+                };
 
-        // Monitor time cost building shared buffer to SSTs.
-        let compact_timer = if self.context.is_share_buffer_compact {
-            self.context.stats.write_build_l0_sst_duration.start_timer()
+                let builder = self.get_multi_builder(
+                    $writer_builder,
+                    $builder_sealer,
+                    options,
+                    get_id_time.clone(),
+                    filter_key_extractor,
+                );
+
+                let sealed_builders = Compactor::compact_and_build_sst(
+                    builder,
+                    kr,
+                    iter,
+                    self.gc_delete_keys,
+                    self.watermark,
+                    compaction_filter,
+                )
+                .await?;
+                compact_timer.observe_duration();
+                sealed_builders
+            }};
+        }
+
+        let sealed_builders = if self.context.options.enable_sst_streaming_upload {
+            let (writer_builder, builder_sealer) = get_multi_builder_hook_for_streaming_upload(
+                self.context.sstable_store.clone(),
+                self.cache_policy,
+            );
+            make_builder_and_compact!(writer_builder, builder_sealer)
         } else {
-            self.context.stats.compact_sst_duration.start_timer()
+            let (writer_builder, builder_sealer) = get_multi_builer_hook_for_batch_upload(
+                &options,
+                self.context.sstable_store.clone(),
+                self.cache_policy,
+            );
+            make_builder_and_compact!(writer_builder, builder_sealer)
         };
 
-        Compactor::compact_and_build_sst(
-            &mut builder,
-            kr,
-            iter,
-            self.gc_delete_keys,
-            self.watermark,
-            compaction_filter,
-        )
-        .await?;
-        let builder_len = builder.len();
-        let sealed_builders = builder.finish();
-        compact_timer.observe_duration();
-
-        let mut ssts = Vec::with_capacity(builder_len);
+        let mut ssts = Vec::with_capacity(sealed_builders.len());
         let mut upload_join_handles = vec![];
         for SealedSstableBuilder {
             sst_info,
@@ -625,6 +655,31 @@ impl Compactor {
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
         Ok((split_index, ssts))
+    }
+
+    fn get_multi_builder<B, S>(
+        &self,
+        writer_builder: B,
+        builder_sealer: S,
+        options: SstableBuilderOptions,
+        remote_rpc_cost: Arc<AtomicU64>,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+    ) -> CapacitySplitTableBuilder<RemoteBuilderFactory<B>, B, S>
+    where
+        B: SstableWriterBuilder,
+        S: SstableBuilderSealer<B::Writer>,
+    {
+        let builder_factory = RemoteBuilderFactory {
+            sstable_id_manager: self.context.sstable_id_manager.clone(),
+            limiter: self.memory_limiter.clone(),
+            options,
+            remote_rpc_cost,
+            writer_builder,
+            filter_key_extractor,
+        };
+
+        // NOTICE: should be user_key overlap, NOT full_key overlap!
+        CapacitySplitTableBuilder::new(builder_factory, builder_sealer)
     }
 }
 

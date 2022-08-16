@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::BytesMut;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
@@ -25,10 +25,11 @@ use risingwave_hummock_sdk::key::{get_table_id, user_key};
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, DEFAULT_BLOCK_SIZE,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
+use crate::hummock::HummockResult;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
@@ -76,11 +77,21 @@ impl Default for SstableBuilderOptions {
     }
 }
 
-pub struct SstableBuilder {
+pub struct SstableBuilderOutput<WO> {
+    pub sstable_id: u64,
+    pub meta: SstableMeta,
+    pub writer_output: WO,
+    pub table_ids: Vec<u32>,
+}
+
+pub struct SstableBuilder<W>
+where
+    W: SstableWriter,
+{
     /// Options.
     options: SstableBuilderOptions,
-    /// Write buffer.
-    buf: BytesMut,
+    /// Data writer.
+    writer: W,
     /// Current block builder.
     block_builder: BlockBuilder,
     /// Block metadata vec.
@@ -98,10 +109,10 @@ pub struct SstableBuilder {
     last_bloom_filter_key_length: usize,
 }
 
-impl SstableBuilder {
-    pub fn new_for_test(sstable_id: u64, options: SstableBuilderOptions) -> Self {
+impl<W: SstableWriter> SstableBuilder<W> {
+    pub fn new_for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.capacity + options.block_capacity),
+            writer,
             block_builder: BlockBuilder::new(BlockBuilderOptions {
                 capacity: options.block_capacity,
                 restart_interval: options.restart_interval,
@@ -125,12 +136,13 @@ impl SstableBuilder {
 
     pub fn new(
         sstable_id: u64,
+        writer: W,
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> Self {
         Self {
             options: options.clone(),
-            buf: BytesMut::with_capacity(options.capacity),
+            writer,
             block_builder: BlockBuilder::new(BlockBuilderOptions {
                 capacity: options.block_capacity,
                 restart_interval: options.restart_interval,
@@ -150,11 +162,11 @@ impl SstableBuilder {
     }
 
     /// Add kv pair to sstable.
-    pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) {
+    pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) -> HummockResult<()> {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
-                offset: self.buf.len() as u32,
+                offset: self.writer.data_len() as u32,
                 len: 0,
                 smallest_key: full_key.to_vec(),
             })
@@ -191,9 +203,11 @@ impl SstableBuilder {
         self.last_full_key.extend_from_slice(full_key);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
-            self.build_block();
+            self.build_block()?;
         }
         self.key_count += 1;
+
+        Ok(())
     }
 
     /// Finish building sst.
@@ -208,12 +222,13 @@ impl SstableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
+    pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.clone();
 
-        self.build_block();
-        self.buf.put_u32_le(self.block_metas.len() as u32);
+        self.build_block()?;
+        let size_footer = self.block_metas.len() as u32;
+        let (data_len, writer_output) = self.writer.finish(size_footer).await?;
         assert!(!smallest_key.is_empty());
 
         let meta = SstableMeta {
@@ -227,36 +242,37 @@ impl SstableBuilder {
             } else {
                 vec![]
             },
-            estimated_size: self.buf.len() as u32,
+            estimated_size: data_len as u32,
             key_count: self.key_count as u32,
             smallest_key,
             largest_key,
             version: VERSION,
         };
 
-        (
-            self.sstable_id,
-            self.buf.freeze(),
+        Ok(SstableBuilderOutput::<W::Output> {
+            sstable_id: self.sstable_id,
             meta,
-            self.table_ids.into_iter().collect(),
-        )
+            writer_output,
+            table_ids: self.table_ids.into_iter().collect(),
+        })
     }
 
     pub fn approximate_len(&self) -> usize {
-        self.buf.len() + self.block_builder.approximate_len() + 4
+        self.writer.data_len() + self.block_builder.approximate_len() + 4
     }
 
-    fn build_block(&mut self) {
+    fn build_block(&mut self) -> HummockResult<()> {
         // Skip empty block.
         if self.block_builder.is_empty() {
-            return;
+            return Ok(());
         }
 
         let mut block_meta = self.block_metas.last_mut().unwrap();
         let block = self.block_builder.build();
-        self.buf.put_slice(block);
-        block_meta.len = self.buf.len() as u32 - block_meta.offset;
+        self.writer.write_block(block)?;
+        block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
+        Ok(())
     }
 
     pub fn len(&self) -> usize {
@@ -278,13 +294,13 @@ pub(super) mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
-        TEST_KEYS_COUNT,
+        default_builder_opt_for_test, default_sst_writer_from_opt, gen_default_test_sstable,
+        test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
 
-    #[test]
+    #[tokio::test]
     #[should_panic]
-    fn test_empty() {
+    async fn test_empty() {
         let opt = SstableBuilderOptions {
             capacity: 0,
             block_capacity: 4096,
@@ -294,20 +310,23 @@ pub(super) mod tests {
             estimate_bloom_filter_capacity: 0,
         };
 
-        let b = SstableBuilder::new_for_test(0, opt);
+        let b = SstableBuilder::new_for_test(0, default_sst_writer_from_opt(&opt), opt);
 
-        b.finish();
+        b.finish().await.unwrap();
     }
 
-    #[test]
-    fn test_smallest_key_and_largest_key() {
-        let mut b = SstableBuilder::new_for_test(0, default_builder_opt_for_test());
+    #[tokio::test]
+    async fn test_smallest_key_and_largest_key() {
+        let opt = default_builder_opt_for_test();
+        let mut b = SstableBuilder::new_for_test(0, default_sst_writer_from_opt(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));
+            b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)))
+                .unwrap();
         }
 
-        let (_, _, meta, _) = b.finish();
+        let output = b.finish().await.unwrap();
+        let meta = output.meta;
 
         assert_eq!(test_key_of(0), meta.smallest_key);
         assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);
