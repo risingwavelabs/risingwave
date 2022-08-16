@@ -38,7 +38,9 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::{Direction, FunctionalDependencySet, Order, RequiredDist};
+use crate::optimizer::property::{
+    Direction, Distribution, FunctionalDependencySet, Order, RequiredDist,
+};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
 /// See also [`crate::expr::AggOrderByExpr`]
@@ -542,7 +544,9 @@ impl LogicalAgg {
     }
 
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        // having group key, is not simple agg.
+        // having group key, is not simple agg. we will just use shuffle agg
+        // TODO(stonepage): in some situation the 2-phase agg is better. maybe some switch or
+        // hints for it.
         if !self.group_key().is_empty() {
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
@@ -552,42 +556,48 @@ impl LogicalAgg {
             )
             .into());
         }
-        // now self is simple agg
 
+        // now only simple agg
         let input_dist = stream_input.distribution().clone();
         let input_append_only = stream_input.append_only();
 
-        let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
+        let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
+            Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
+                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
+            ))
+            .into())
+        };
+
+        // some agg function can not rewrite to 2-phase agg
+        // we can only generate stand alone plan for the simple agg
+        let all_agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
             matches!(
                 c.agg_kind,
                 AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
             ) && c.order_by_fields.is_empty()
         });
-        let agg_calls_are_stateless = self.agg_calls.iter().all(|c| {
+        if !all_agg_calls_can_use_two_phase {
+            return gen_single_plan(stream_input);
+        }
+
+        // stateless 2-phase simple agg
+        // can be applied on stateless simple agg calls with input distributed by any shard
+        let all_local_are_stateless = self.agg_calls.iter().all(|c| {
             matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
                 || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
         });
+        if all_local_are_stateless && input_dist.satisfies(&RequiredDist::AnyShard) {
+            return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
+        }
 
-        if input_dist.satisfies(&RequiredDist::AnyShard)
-            && agg_calls_can_use_two_phase
-            && agg_calls_are_stateless
-        {
-            // stateless 2-phase simple agg
-            // can be applied on stateless simple agg calls with input distributed by any shard
-            self.gen_stateless_two_phase_streaming_agg_plan(stream_input)
-        } else if !input_dist.dist_column_indices().is_empty() && agg_calls_can_use_two_phase {
-            // 2-phase agg
-            // can be applied on agg calls not affected by order with input distributed by dist_key
-            self.gen_vnode_two_phase_streaming_agg_plan(
-                stream_input,
-                input_dist.dist_column_indices(),
-            )
-        } else {
-            // simple 1-phase agg
-            Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
-                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
-            ))
-            .into())
+        // try to use the vnode-based 2-phase simple agg
+        // can be applied on agg calls not affected by order with input distributed by dist_key
+        match input_dist {
+            Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
+            Distribution::Broadcast => unreachable!(),
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+                self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
+            }
         }
     }
 
