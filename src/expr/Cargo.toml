@@ -34,5 +34,4 @@ tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi
 tokio-stream = "0.1"
 toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
-value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
