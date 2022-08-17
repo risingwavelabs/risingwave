@@ -23,7 +23,7 @@ use super::{
 };
 use crate::expr::Expr;
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchUpdate` implements [`LogicalUpdate`]
 #[derive(Debug, Clone)]
@@ -65,7 +65,8 @@ impl_plan_tree_node_for_unary! { BatchUpdate }
 
 impl ToDistributedBatch for BatchUpdate {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed()?;
+        let new_input = RequiredDist::single()
+            .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -88,6 +89,8 @@ impl ToBatchProst for BatchUpdate {
 
 impl ToLocalBatch for BatchUpdate {
     fn to_local(&self) -> Result<PlanRef> {
-        unreachable!()
+        let new_input = RequiredDist::single()
+            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }
