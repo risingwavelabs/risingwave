@@ -40,7 +40,7 @@ pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
-mod local_version;
+pub mod local_version;
 pub mod local_version_manager;
 pub mod shared_buffer;
 pub mod sstable_store;
@@ -48,6 +48,7 @@ mod state_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 pub mod utils;
+pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
@@ -164,8 +165,10 @@ impl HummockStorage {
             return Ok(None);
         }
 
-        // Might have the key, take it as might positive.
-        stats.bloom_filter_might_positive_count += 1;
+        if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), key, stats) {
+            return Ok(None);
+        }
+
         // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
         // use default before refinement.
         let mut iter = SstableIterator::create(
@@ -213,6 +216,21 @@ impl HummockStorage {
 
     pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
         &self.sstable_id_manager
+    }
+
+    pub fn hit_sstable_bloom_filter(
+        sstable_info_ref: &Sstable,
+        key: &[u8],
+        local_stats: &mut StoreLocalStatistic,
+    ) -> bool {
+        local_stats.bloom_filter_check_counts += 1;
+        let surely_not_have = sstable_info_ref.surely_not_have_user_key(key);
+
+        if surely_not_have {
+            local_stats.bloom_filter_true_negative_count += 1;
+        }
+
+        !surely_not_have
     }
 }
 

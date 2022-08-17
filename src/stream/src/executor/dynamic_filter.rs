@@ -37,6 +37,7 @@ use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
+use crate::task::ActorId;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     source_l: Option<BoxedExecutor>,
@@ -48,7 +49,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     range_cache: RangeCache<S>,
     right_table: RowBasedStateTable<S>,
     is_right_table_writer: bool,
-    actor_id: u64,
+    actor_id: ActorId,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
 }
@@ -65,7 +66,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         mut state_table_l: RowBasedStateTable<S>,
         mut state_table_r: RowBasedStateTable<S>,
         is_right_table_writer: bool,
-        actor_id: u64,
+        actor_id: ActorId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         // TODO: enable sanity check for dynamic filter <https://github.com/singularity-data/risingwave/issues/3893>
@@ -347,6 +348,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
                     prev_epoch_value = Some(curr);
+
+                    // Update the vnode bitmap for the left state table if asked.
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
+                        self.range_cache
+                            .state_table
+                            .update_vnode_bitmap(vnode_bitmap);
+                    }
 
                     yield Message::Barrier(barrier);
                 }

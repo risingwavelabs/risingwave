@@ -364,7 +364,7 @@ impl StructValue {
                 if b.is_empty() {
                     Ok(None)
                 } else {
-                    Ok(Some(ScalarImpl::bytes_to_scalar(b, d)?))
+                    Ok(Some(ScalarImpl::from_proto_bytes(b, d)?))
                 }
             })
             .collect::<ArrayResult<Vec<Datum>>>()?;
