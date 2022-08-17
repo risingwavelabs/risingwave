@@ -313,12 +313,12 @@ mod tests {
             + c , 1 3 130",
         );
         let (ops, columns, visibility) = chunk.into_inner();
-        let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+        let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
         agg_state
             .apply_chunk(
                 &ops,
                 visibility.as_ref(),
-                &chunk_cols,
+                &column_refs,
                 epoch,
                 &mut state_table,
             )
@@ -400,12 +400,12 @@ mod tests {
                 + c _ 1 3 130",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
                 .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -431,12 +431,12 @@ mod tests {
                 + e + 2 2 137",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
                 .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -515,12 +515,12 @@ mod tests {
                 + c _ 1 3 130 D // hide this row",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
                 .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
@@ -546,12 +546,12 @@ mod tests {
                 + e , 2 8 137",
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             agg_state
                 .apply_chunk(
                     &ops,
                     visibility.as_ref(),
-                    &chunk_cols,
+                    &column_refs,
                     epoch,
                     &mut state_table,
                 )
