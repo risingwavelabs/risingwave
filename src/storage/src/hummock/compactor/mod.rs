@@ -32,7 +32,7 @@ pub use compaction_filter::{
     CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
     TTLCompactionFilter,
 };
-pub use context::CompactorContext;
+pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
@@ -53,6 +53,8 @@ pub use sstable_store::{
 };
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
+
+pub use self::context::TaskProgressTracker;
 
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions};
@@ -136,7 +138,7 @@ impl Compactor {
     /// Handles a compaction task and reports its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(
-        context: Arc<CompactorContext>,
+        compactor_context: Arc<CompactorContext>,
         mut compact_task: CompactTask,
         mut shutdown_rx: Receiver<()>,
     ) -> bool {
@@ -366,7 +368,7 @@ impl Compactor {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
-        let task_progress = compactor_context.task_progress.clone();
+        let task_progress = compactor_context.context.task_progress.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
         let shutdown_map = CompactionShutdownMap::default();
         let join_handle = tokio::spawn(async move {
@@ -613,8 +615,8 @@ impl Compactor {
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-    ) -> HummockResult<CompactOutput> {
-        let kr = self.splits[split_index].clone();
+        progress_tracker: Option<TaskProgressTracker>
+    ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
         let mut options = self.options.clone();
         options.estimate_bloom_filter_capacity = self

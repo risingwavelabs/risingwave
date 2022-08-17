@@ -151,7 +151,8 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                 table_ids,
             };
             let policy = self.policy;
-            let tracker = self.tracker.take();
+            let mut tracker = self.tracker.take().unwrap();
+            let task_progress = self.task_progress.clone();
             let upload_join_handle = tokio::spawn(async move {
                 if !tracker.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as u64)
                 {
