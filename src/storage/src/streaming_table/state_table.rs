@@ -290,16 +290,12 @@ impl<S: StateStore> StateTable<S> {
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
-                    let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
-                        .map_err(err)?
-                        .2;
+                    let row = deserialize(self.mapping.clone(), row_bytes).map_err(err)?;
                     Ok(Some(row))
                 }
                 RowOp::Delete(_) => Ok(None),
                 RowOp::Update((_, row_bytes)) => {
-                    let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
-                        .map_err(err)?
-                        .2;
+                    let row = deserialize(self.mapping.clone(), row_bytes).map_err(err)?;
                     Ok(Some(row))
                 }
             },
@@ -318,9 +314,7 @@ impl<S: StateStore> StateTable<S> {
                     )
                     .await?
                 {
-                    let row = deserialize(self.mapping.clone(), &serialized_pk, &storage_row_bytes)
-                        .map_err(err)?
-                        .2;
+                    let row = deserialize(self.mapping.clone(), &storage_row_bytes).map_err(err)?;
                     Ok(Some(row))
                 } else {
                     Ok(None)
