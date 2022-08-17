@@ -36,6 +36,11 @@ use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::storage::MemStore;
 
+
+
+
+
+
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
 }
@@ -953,9 +958,13 @@ async fn test_trigger_manual_compaction() {
     }
 }
 
+// This is a non-deterministic test
 #[cfg(madsim)]
 #[tokio::test]
 async fn test_hummock_compaction_task_heartbeat() {
+    use risingwave_pb::hummock::CompactTaskProgress;
+    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+    use crate::hummock::HummockManager;
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
@@ -1022,7 +1031,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         num_blocks_sealed: 1,
         num_blocks_uploaded: 1,
     };
-    compactor_manager.update_compaction_task_progress(context_id, vec![req]);
+    compactor_manager.update_task_heartbeats(context_id, vec![req]);
 
     // Cancel the task immediately and succeed.
     compact_task.task_status = false;
