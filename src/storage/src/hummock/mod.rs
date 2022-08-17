@@ -160,10 +160,6 @@ impl HummockStorage {
         check_bloom_filter: bool,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
-        if check_bloom_filter {
-            stats.bloom_filter_check_counts += 1;
-        }
-
         if check_bloom_filter && sstable.value().surely_not_have_user_key(key) {
             stats.bloom_filter_true_negative_count += 1;
             return Ok(None);
@@ -172,9 +168,6 @@ impl HummockStorage {
         if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), key, stats) {
             return Ok(None);
         }
-
-        // // Might have the key, take it as might positive.
-        // stats.bloom_filter_might_positive_count += 1;
 
         // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
         // use default before refinement.
