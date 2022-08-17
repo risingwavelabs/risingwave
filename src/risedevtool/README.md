@@ -120,11 +120,11 @@ This environment file will then be read by cargo-make, which decides whether or 
 ```
 
 As `ENABLE_PROMETHEUS_GRAFANA` is not set, download-grafana step is skipped.
-All steps for downloading components, copying config, and building RisingWave are described as cargo-make's toml config. See `risedev/*.toml` and `Makefile.toml` for more information.
+All steps for downloading components, copying config, and building RisingWave are described as cargo-make's toml config. See `risedevtool/*.toml` and `Makefile.toml` for more information.
 
 ### Config Expander
 
-`risedev.yml` is powerful yet simple. If you want to make changes to the configuration format, you may need to understand how it works. Source code is in `risedev/src/config`.
+`risedev.yml` is powerful yet simple. If you want to make changes to the configuration format, you may need to understand how it works. Source code is in `risedevtool/src/config`.
 
 #### Template Expanding
 
@@ -266,7 +266,7 @@ This expanded config will serve as a base config for the following config genera
 
 ### Config Generator
 
-RiseDev will generate config of each service using modules in risedev/src/config_gen. Given the above frontend meta-config, the server.properties will be generated (`risingwave.leader.computenodes` is no longer used):
+RiseDev will generate config of each service using modules in risedevtool/src/config_gen. Given the above frontend meta-config, the server.properties will be generated (`risingwave.leader.computenodes` is no longer used):
 
 ```apache
 risingwave.pgserver.ip=127.0.0.1

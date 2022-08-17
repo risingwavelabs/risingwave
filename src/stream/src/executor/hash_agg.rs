@@ -27,15 +27,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
-use super::{expect_first_barrier, pk_input_arrays, Executor, PkIndicesRef, StreamExecutorResult};
+use super::{expect_first_barrier, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
+    generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
@@ -225,6 +224,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
+        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,
@@ -233,20 +233,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // --- Find unique keys in this batch and generate visibility map for each key ---
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
         let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)?;
-
-        // --- Retrieve all aggregation inputs in advance ---
-        // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
-        let all_agg_input_arrays = agg_input_arrays(agg_calls, &columns);
-        let pk_input_arrays = pk_input_arrays(input_pk_indices, &columns);
-
-        // When applying batch, we will send columns of primary keys to the last N columns.
-        let all_agg_data = all_agg_input_arrays
-            .into_iter()
-            .map(|mut input_arrays| {
-                input_arrays.extend(pk_input_arrays.iter().cloned());
-                input_arrays
-            })
-            .collect_vec();
 
         let key_data_types = &schema.data_types()[..key_indices.len()];
         let mut futures = vec![];
@@ -298,30 +284,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (key, _, vis_map) in &unique_keys {
             let state = state_map.get_mut(key).unwrap().as_mut().unwrap();
             // 3. Apply batch to each of the state (per agg_call)
-            for (((agg_state, agg_call), data), state_table) in state
+            for ((agg_state, agg_call), state_table) in state
                 .managed_states
                 .iter_mut()
                 .zip_eq(agg_calls.iter())
-                .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
                 let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
-                // TODO(yuchao): make this work for all agg kinds in later PR
-                if matches!(agg_call.kind, AggKind::StringAgg)
-                    || (matches!(agg_call.kind, AggKind::Min | AggKind::Max)
-                        && !agg_call.append_only)
-                {
-                    let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
-                    agg_state
-                        .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
-                        .await?;
-                } else {
-                    // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
-                    let data = data.iter().map(|d| &**d).collect_vec();
-                    agg_state
-                        .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
-                        .await?;
-                }
+                agg_state
+                    .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
+                    .await?;
             }
         }
 
