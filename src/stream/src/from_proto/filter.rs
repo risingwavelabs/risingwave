@@ -29,9 +29,12 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Filter)?;
         let search_condition = build_from_prost(node.get_search_condition()?)?;
 
-        Ok(
-            FilterExecutor::new(params.input.remove(0), search_condition, params.executor_id)
-                .boxed(),
+        Ok(FilterExecutor::new(
+            params.actor_context,
+            params.input.remove(0),
+            search_condition,
+            params.executor_id,
         )
+        .boxed())
     }
 }

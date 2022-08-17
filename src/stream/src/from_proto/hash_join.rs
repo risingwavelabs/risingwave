@@ -23,7 +23,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use super::*;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::PkIndices;
+use crate::executor::{ActorContextRef, PkIndices};
 use crate::task::ActorId;
 
 pub struct HashJoinExecutorBuilder;
@@ -121,6 +121,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let state_table_r = RowBasedStateTable::from_table_catalog(table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
+            ctx: params.actor_context,
             source_l,
             source_r,
             params_l,
@@ -146,6 +147,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 struct HashJoinExecutorDispatcher<S: StateStore, const T: JoinTypePrimitive>(PhantomData<S>);
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
+    ctx: ActorContextRef,
     source_l: Box<dyn Executor>,
     source_r: Box<dyn Executor>,
     params_l: JoinParams,
@@ -170,6 +172,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
+            args.ctx,
             args.source_l,
             args.source_r,
             args.params_l,

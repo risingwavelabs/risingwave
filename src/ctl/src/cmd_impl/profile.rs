@@ -12,17 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::fs::{create_dir_all, File};
+use std::io::Write;
+use std::path::PathBuf;
 
-use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::ASYNC_STACK_TRACE_KEY;
+use chrono::prelude::Local;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::monitor_service::StackTraceResponse;
+use risingwave_pb::monitor_service::ProfilingResponse;
 use risingwave_rpc_client::ComputeClientPool;
 
 use crate::common::MetaServiceOpts;
 
-pub async fn trace() -> anyhow::Result<()> {
+pub async fn profile(sleep_s: u64) -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
 
@@ -33,39 +34,31 @@ pub async fn trace() -> anyhow::Result<()> {
 
     let clients = ComputeClientPool::new(u64::MAX);
 
-    let mut all_actor_traces = BTreeMap::new();
-    let mut all_rpc_traces = BTreeMap::new();
+    let profile_root_path = PathBuf::from(&std::env::var("PREFIX_PROFILING")?);
+    let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
+    let dir_path = profile_root_path.join(dir_name);
+    create_dir_all(&dir_path)?;
 
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let StackTraceResponse {
-            actor_traces,
-            rpc_traces,
-        } = client.stack_trace().await?;
-
-        all_actor_traces.extend(actor_traces);
-        all_rpc_traces.extend(rpc_traces.into_iter().map(|(k, v)| {
-            (
-                format!("{} ({})", HostAddr::from(cn.get_host().unwrap()), k),
-                v,
-            )
-        }));
-    }
-
-    if all_actor_traces.is_empty() && all_rpc_traces.is_empty() {
-        println!(
-            "No traces found. No actors are running, or `{ASYNC_STACK_TRACE_KEY}` is not set?"
+        let response = client.profile(sleep_s).await;
+        let host_addr = cn.get_host().expect("Should have host address");
+        let node_name = format!(
+            "compute-node-{}-{}",
+            host_addr.get_host().replace('.', "-"),
+            host_addr.get_port()
         );
-    } else {
-        println!("--- Actor Traces ---");
-        for (key, trace) in all_actor_traces {
-            println!(">> Actor {key}\n{trace}");
-        }
-        println!("--- RPC Traces ---");
-        for (key, trace) in all_rpc_traces {
-            println!(">> RPC {key}\n{trace}");
+        let svg_file_name = format!("{}.svg", node_name);
+        match response {
+            Ok(ProfilingResponse { result }) => {
+                let mut file = File::create(dir_path.join(svg_file_name))?;
+                file.write_all(&result)?;
+            }
+            Err(err) => {
+                tracing::error! {"Failed to get profiling result from {} with error {}", node_name, err.to_string()};
+            }
         }
     }
 
