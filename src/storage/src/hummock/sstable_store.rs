@@ -327,15 +327,23 @@ impl SstableStore {
             let store = self.store.clone();
             let sst_id = sst.id;
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
+            if use_tiered_cache {
+                stats.tiered_cache_total += 1;
+            }
+            let tiered_cache_miss = stats.tiered_cache_miss.clone();
 
             async move {
-                if use_tiered_cache && let Some(holder) = tiered_cache
-                    .get(&(sst_id, block_index))
-                    .await
-                    .map_err(HummockError::tiered_cache)?
-                {
-                    // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it later.
-                    return Ok(holder.into_owned());
+                if use_tiered_cache {
+                    if let Some(holder) = tiered_cache
+                        .get(&(sst_id, block_index))
+                        .await
+                        .map_err(HummockError::tiered_cache)?
+                    {
+                        // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it
+                        // later.
+                        return Ok(holder.into_owned());
+                    }
+                    tiered_cache_miss.fetch_add(1, Ordering::Relaxed);
                 }
 
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
