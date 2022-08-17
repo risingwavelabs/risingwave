@@ -312,6 +312,14 @@ message ReportFullScanTaskResponse {
   common.Status status = 1;
 }
 
+message TriggerFullGCRequest {
+  uint64 sst_retention_time_sec = 1;
+}
+
+message TriggerFullGCResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -327,6 +335,7 @@ service HummockManagerService {
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
+  rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
 }
 
 service CompactorService {}

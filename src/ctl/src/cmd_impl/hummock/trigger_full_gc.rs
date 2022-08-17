@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod list_version;
-pub use list_version::*;
-mod list_kv;
-pub use list_kv::*;
-mod sst_dump;
-pub use sst_dump::*;
-mod trigger_full_gc;
-mod trigger_manual_compaction;
+use risingwave_rpc_client::HummockMetaClient;
 
-pub use trigger_full_gc::*;
-pub use trigger_manual_compaction::*;
+use crate::common::MetaServiceOpts;
+
+pub async fn trigger_full_gc(sst_retention_time_sec: u64) -> anyhow::Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta_client = meta_opts.create_meta_client().await?;
+    let result = meta_client.trigger_full_gc(sst_retention_time_sec).await;
+    println!("{:#?}", result);
+    Ok(())
+}
