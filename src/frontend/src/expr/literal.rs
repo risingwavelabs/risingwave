@@ -103,10 +103,10 @@ mod tests {
         if let RexNode::Constant(prost) = node.as_ref().unwrap() {
             let data2 = ScalarImpl::from_proto_bytes(
                 prost.get_body(),
-                &DataType::Struct {
-                    fields: vec![DataType::Varchar, DataType::Int32, DataType::Int32].into(),
-                    field_names: vec![].into(),
-                }
+                &DataType::new_struct(
+                    vec![DataType::Varchar, DataType::Int32, DataType::Int32],
+                    vec![],
+                )
                 .to_protobuf(),
             )
             .unwrap();

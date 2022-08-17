@@ -232,12 +232,8 @@ impl FunctionCall {
     /// is castible to VARCHAR. It's to simply the casting rules.
     fn cast_nested(expr: ExprImpl, target_type: DataType, allows: CastContext) -> Result<ExprImpl> {
         let func = *expr.into_function_call().unwrap();
-        let (fields, field_names) = if let DataType::Struct {
-            fields,
-            field_names,
-        } = target_type.clone()
-        {
-            (fields, field_names)
+        let (fields, field_names) = if let DataType::Struct(t) = &target_type {
+            (t.fields.clone(), t.field_names.clone())
         } else {
             return Err(ErrorCode::BindError(format!(
                 "column is of type '{}' but expression is of type record",
@@ -253,10 +249,10 @@ impl FunctionCall {
                     .zip_eq(fields.to_vec())
                     .map(|(e, t)| Self::new_cast(e, t, allows))
                     .collect::<Result<Vec<_>>>()?;
-                let return_type = DataType::Struct {
-                    fields: inputs.iter().map(|i| i.return_type()).collect_vec().into(),
+                let return_type = DataType::new_struct(
+                    inputs.iter().map(|i| i.return_type()).collect_vec(),
                     field_names,
-                };
+                );
                 return Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into());
             }
             std::cmp::Ordering::Less => "Input has too few columns.",

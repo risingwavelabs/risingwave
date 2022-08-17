@@ -20,6 +20,7 @@ use protobuf::RepeatedField;
 use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use risingwave_pb::plan_common::ColumnDesc;
@@ -203,18 +204,17 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
                 .fields()
                 .iter()
                 .map(|f| protobuf_type_mapping(f, descriptors))
-                .collect::<Result<Vec<_>>>()?
-                .into();
+                .collect::<Result<Vec<_>>>()?;
             let field_names = m
                 .fields()
                 .iter()
                 .map(|f| f.name().to_string())
-                .collect_vec()
-                .into();
-            DataType::Struct {
+                .collect_vec();
+            StructType {
                 fields,
                 field_names,
             }
+            .into()
         }
         actual_type => {
             return Err(ErrorCode::NotImplemented(
@@ -531,23 +531,19 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let columns = columns.iter().map(RwColumnDesc::from).collect_vec();
-        if let DataType::Struct {
-            field_names,
-            fields,
-        } = columns[1].data_type.clone()
-        {
+        if let DataType::Struct(t) = columns[1].data_type.clone() {
             // country
-            if let DataType::Struct { field_names, .. } = fields[1].clone() {
+            if let DataType::Struct(tf1) = t.fields[1].clone() {
                 // city
                 assert_eq!(
-                    field_names.to_vec(),
+                    tf1.field_names.to_vec(),
                     vec!["address".to_string(), "zipcode".to_string()]
                 );
             } else {
                 unreachable!()
             }
             assert_eq!(
-                field_names.to_vec(),
+                t.field_names.to_vec(),
                 vec![
                     "address".to_string(),
                     "city".to_string(),

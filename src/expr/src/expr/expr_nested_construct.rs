@@ -45,11 +45,11 @@ impl Expression for NestedConstructExpression {
             .map(|e| e.eval_checked(input))
             .collect::<Result<Vec<_>>>()?;
 
-        if let DataType::Struct { fields, .. } = &self.data_type {
+        if let DataType::Struct(t) = &self.data_type {
             let mut builder = StructArrayBuilder::with_meta(
                 input.capacity(),
                 ArrayMeta::Struct {
-                    children: fields.clone(),
+                    children: t.fields.clone().into(),
                 },
             );
             builder.append_array_refs(columns, input.capacity())?;

@@ -17,6 +17,7 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
 use crate::catalog::Field;
 use crate::error::ErrorCode;
+use crate::types::struct_type::StructType;
 use crate::types::DataType;
 use crate::util::sort_util::OrderType;
 
@@ -150,14 +151,11 @@ impl ColumnDesc {
         type_name: &str,
         fields: Vec<ColumnDesc>,
     ) -> Self {
-        let data_type = DataType::Struct {
-            fields: fields
-                .iter()
-                .map(|f| f.data_type.clone())
-                .collect_vec()
-                .into(),
-            field_names: fields.iter().map(|f| f.name.clone()).collect_vec().into(),
-        };
+        let data_type = StructType {
+            fields: fields.iter().map(|f| f.data_type.clone()).collect_vec(),
+            field_names: fields.iter().map(|f| f.name.clone()).collect_vec(),
+        }
+        .into();
         Self {
             data_type,
             column_id: ColumnId::new(column_id),

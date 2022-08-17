@@ -642,10 +642,10 @@ mod test {
                 type_name: "".into(),
             },
             Field {
-                data_type: DataType::Struct {
-                    fields: Arc::new([DataType::Int32, DataType::Float32]),
-                    field_names: Arc::new(["v4".to_string(), "v5".to_string()]),
-                },
+                data_type: DataType::new_struct(
+                    vec![DataType::Int32, DataType::Float32],
+                    vec!["v4".to_string(), "v5".to_string()],
+                ),
                 name: "v3".into(),
                 sub_fields: vec![
                     Field {

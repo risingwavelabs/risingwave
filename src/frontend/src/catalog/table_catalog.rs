@@ -301,11 +301,10 @@ mod tests {
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar, DataType::Varchar].into(),
-                                field_names: vec!["address".to_string(), "zipcode".to_string()]
-                                    .into(),
-                            },
+                            data_type: DataType::new_struct(
+                                vec![DataType::Varchar, DataType::Varchar],
+                                vec!["address".to_string(), "zipcode".to_string()]
+                            ),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![

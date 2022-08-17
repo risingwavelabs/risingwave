@@ -224,10 +224,10 @@ mod tests {
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,
-            "v2" => DataType::Struct {
-                fields: vec![DataType::Int64,DataType::Float64,DataType::Float64].into(),
-                field_names: vec!["v3".to_string(), "v4".to_string(), "v5".to_string()].into(),
-            },
+            "v2" => DataType::new_struct(
+                vec![DataType::Int64,DataType::Float64,DataType::Float64],
+                vec!["v3".to_string(), "v4".to_string(), "v5".to_string()],
+            ),
         };
 
         assert_eq!(columns, expected_columns);

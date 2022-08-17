@@ -178,20 +178,20 @@ pub mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let city_type = DataType::Struct {
-            fields: vec![DataType::Varchar, DataType::Varchar].into(),
-            field_names: vec!["address".to_string(), "zipcode".to_string()].into(),
-        };
+        let city_type = DataType::new_struct(
+            vec![DataType::Varchar, DataType::Varchar],
+            vec!["address".to_string(), "zipcode".to_string()],
+        );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
-            "country" => DataType::Struct {
-                fields: vec![DataType::Varchar,city_type,DataType::Varchar].into(),
-                field_names: vec!["address".to_string(), "city".to_string(), "zipcode".to_string()].into(),
-            },
+            "country" => DataType::new_struct(
+                vec![DataType::Varchar,city_type,DataType::Varchar],
+                vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
+            ),
         };
         assert_eq!(columns, expected_columns);
     }
