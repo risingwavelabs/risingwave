@@ -24,8 +24,6 @@ pub type SourceResult<T> = std::result::Result<T, SourceError>;
 
 #[derive(thiserror::Error, Debug)]
 enum SourceErrorInner {
-    #[error("Source error: {0}")]
-    SourceError(String),
     #[error("Send error: {0}")]
     SendError(String),
     #[error("Sdk error: {0}")]
@@ -50,6 +48,8 @@ enum SourceErrorInner {
     ProstFieldNotFoundError(String),
     #[error(transparent)]
     Internal(anyhow::Error),
+    #[error(transparent)]
+    BaseSourceError(String),
 }
 
 impl From<SourceErrorInner> for SourceError {
