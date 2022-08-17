@@ -402,7 +402,7 @@ impl Parser {
                 }),
                 Keyword::ROW => self.parse_row_expr(),
                 Keyword::ARRAY => Ok(Expr::Array(
-                    self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
+                    self.parse_token_wrapped_exprs_zeroable(&Token::LBracket, &Token::RBracket)?,
                 )),
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
@@ -498,7 +498,7 @@ impl Parser {
 
             Token::LBrace => {
                 self.prev_token();
-                Ok(Expr::Array(self.parse_token_wrapped_exprs(
+                Ok(Expr::Array(self.parse_token_wrapped_exprs_zeroable(
                     &Token::LBrace,
                     &Token::RBrace,
                 )?))
@@ -2308,6 +2308,29 @@ impl Parser {
         if self.consume_token(left) {
             let exprs = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(right)?;
+            Ok(exprs)
+        } else {
+            self.expected(
+                format!("an array of expressions in {} and {}", left, right).as_str(),
+                self.peek_token(),
+            )
+        }
+    }
+
+    /// Parse a comma-separated list (maybe empty) from a wrapped expression
+    pub fn parse_token_wrapped_exprs_zeroable(
+        &mut self,
+        left: &Token,
+        right: &Token,
+    ) -> Result<Vec<Expr>, ParserError> {
+        if self.consume_token(left) {
+            let exprs = if self.consume_token(right) {
+                vec![]
+            } else {
+                let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                self.expect_token(right)?;
+                exprs
+            };
             Ok(exprs)
         } else {
             self.expected(
