@@ -339,7 +339,11 @@ impl Binder {
                         )]
                         .into_iter();
 
-                        self.bind_table_to_context(columns, "unnest".to_string(), None)?;
+                        self.bind_table_to_context(
+                            columns,
+                            tf.function_type.name().to_string(),
+                            alias,
+                        )?;
 
                         return Ok(Relation::TableFunction(Box::new(tf)));
                     }
