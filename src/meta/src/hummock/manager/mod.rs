@@ -217,16 +217,16 @@ where
                 }
                 for (context_id, mut task) in compactor_manager.get_timed_out_tasks() {
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
-                        // If the compactor is functioning correctly, this will eventually attempt to report task as failed as well.
-                        // But we are ok with this as task reporting is idempotent.
+                        // If the compactor is functioning correctly, this will eventually attempt
+                        // to report task as failed as well. But we are ok
+                        // with this as task reporting is idempotent.
                         let _ = compactor.cancel_task(task.task_id).await;
                     }
 
                     // Change task status to failed
                     task.task_status = false;
 
-                    if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await
-                    {
+                    if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await {
                         tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
                             until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
                     }
@@ -753,7 +753,8 @@ where
         );
         commit_multi_var!(self, Some(assignee_context_id), compact_task_assignment)?;
 
-        self.compactor_manager.initiate_task_heartbeat(assignee_context_id, compact_task.clone());
+        self.compactor_manager
+            .initiate_task_heartbeat(assignee_context_id, compact_task.clone());
 
         #[cfg(test)]
         {
@@ -893,7 +894,8 @@ where
         }
 
         // A task heartbeat is removed IFF a task report has been successfully committed.
-        self.compactor_manager.remove_task_heartbeat(context_id, compact_task.task_id);
+        self.compactor_manager
+            .remove_task_heartbeat(context_id, compact_task.task_id);
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",

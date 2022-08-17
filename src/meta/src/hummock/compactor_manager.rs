@@ -20,14 +20,14 @@ use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse, CompactTaskAssignment,
+    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
+    SubscribeCompactTasksResponse,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::hummock::HummockManager;
-
-use crate::model::MetadataModel;
 use crate::manager::MetaSrvEnv;
+use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -120,18 +120,24 @@ pub struct CompactorManager {
     inner: parking_lot::RwLock<CompactorManagerInner>,
     pub task_expiry_seconds: u64,
     // A map: { context_id -> { task_id -> heartbeat } }
-    task_heartbeats: parking_lot::RwLock<HashMap<HummockContextId, HashMap<TaskId, TaskHeartbeat>>>
+    task_heartbeats: parking_lot::RwLock<HashMap<HummockContextId, HashMap<TaskId, TaskHeartbeat>>>,
 }
 
 impl CompactorManager {
-    pub async fn new_with_meta<S: MetaStore>(env: MetaSrvEnv<S>, task_expiry_seconds: u64) -> MetaResult<Self> {
+    pub async fn new_with_meta<S: MetaStore>(
+        env: MetaSrvEnv<S>,
+        task_expiry_seconds: u64,
+    ) -> MetaResult<Self> {
         let manager = Self::new(task_expiry_seconds);
         // Initialize the existing task assignments from metastore
         CompactTaskAssignment::list(env.meta_store())
             .await?
             .into_iter()
             .for_each(|assignment| {
-                manager.initiate_task_heartbeat(assignment.context_id, assignment.compact_task.unwrap());
+                manager.initiate_task_heartbeat(
+                    assignment.context_id,
+                    assignment.compact_task.unwrap(),
+                );
             });
         Ok(manager)
     }
@@ -147,8 +153,7 @@ impl CompactorManager {
     pub async fn next_idle_compactor<S: MetaStore>(
         &self,
         hummock_manager: &HummockManager<S>,
-    ) -> Option<Arc<Compactor>>
-    {
+    ) -> Option<Arc<Compactor>> {
         let mut visited = HashSet::new();
         loop {
             match self.next_compactor() {
@@ -222,14 +227,14 @@ impl CompactorManager {
             guard.compactors.retain(|c| *c != context_id);
             guard.compactor_map.remove(&context_id);
         }
-        // Cancel any existing task from the heartbeats table that has not been externally cancelled.
+        // Cancel any existing task from the heartbeats table that has not been externally
+        // cancelled.
         tracing::info!("Removed compactor session {}", context_id);
     }
 
     pub fn get_compactor(&self, context_id: u32) -> Option<Arc<Compactor>> {
         self.inner.read().compactor_map.get(&context_id).cloned()
     }
-
 
     pub fn get_timed_out_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
         let now = SystemTime::now()
@@ -241,7 +246,10 @@ impl CompactorManager {
             let guard = self.task_heartbeats.read();
             for (context_id, heartbeats) in guard.iter() {
                 {
-                    for TaskHeartbeat { expire_at, task, .. } in heartbeats.values() {
+                    for TaskHeartbeat {
+                        expire_at, task, ..
+                    } in heartbeats.values()
+                    {
                         if *expire_at < now {
                             cancellable_tasks.push((*context_id, task.clone()));
                         }
@@ -288,7 +296,11 @@ impl CompactorManager {
         }
     }
 
-    pub fn update_task_heartbeats(&self, context_id: HummockContextId, progress_list: &Vec<CompactTaskProgress>) {
+    pub fn update_task_heartbeats(
+        &self,
+        context_id: HummockContextId,
+        progress_list: &Vec<CompactTaskProgress>,
+    ) {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
