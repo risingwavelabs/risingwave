@@ -33,7 +33,7 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
+    compactor_manager: CompactorManagerRef<S>,
     vacuum_trigger: Arc<VacuumTrigger<S>>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
@@ -45,7 +45,7 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef,
+        compactor_manager: CompactorManagerRef<S>,
         vacuum_trigger: Arc<VacuumTrigger<S>>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,

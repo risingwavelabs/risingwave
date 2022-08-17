@@ -51,7 +51,7 @@ use crate::MetaOpts;
 /// Start hummock's asynchronous tasks.
 pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
+    compactor_manager: CompactorManagerRef<S>,
     vacuum_trigger: Arc<VacuumTrigger<S>>,
     notification_manager: NotificationManagerRef,
     compaction_scheduler: CompactionSchedulerRef<S>,
@@ -84,7 +84,7 @@ where
 /// Starts a task to handle cluster membership change.
 pub async fn subscribe_cluster_membership_change<S>(
     hummock_manager: Arc<HummockManager<S>>,
-    compactor_manager: Arc<CompactorManager>,
+    compactor_manager: Arc<CompactorManager<S>>,
     notification_manager: NotificationManagerRef,
 ) -> (JoinHandle<()>, Sender<()>)
 where

@@ -312,8 +312,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let meta_metrics = Arc::new(MetaMetrics::new());
     monitor_process(meta_metrics.registry()).unwrap();
     let compactor_manager = Arc::new(hummock::CompactorManager::new(
+        enc.clone(),
         max_heartbeat_interval.as_secs(),
-    ));
+    ).await.unwrap());
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)

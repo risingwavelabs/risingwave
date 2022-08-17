@@ -20,17 +20,20 @@ use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse,
+    CancelCompactTask, CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse, CompactTaskAssignment,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::hummock::HummockManager;
+
+use crate::model::MetadataModel;
+use crate::manager::MetaSrvEnv;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
 
-pub type CompactorManagerRef = Arc<CompactorManager>;
+pub type CompactorManagerRef<S> = Arc<CompactorManager<S>>;
 type TaskId = u64;
 
 /// Wraps the stream between meta node and compactor node.
@@ -39,10 +42,6 @@ pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
     max_concurrent_task_number: u64,
-    // Tasks only register a heartbeat if they make progress since the last block.
-    // Else, they may have stalled even if they are still running within the compactor.
-    task_heartbeats: Mutex<HashMap<TaskId, TaskHeartbeat>>,
-    task_heartbeat_interval_seconds: u64,
 }
 
 struct TaskHeartbeat {
@@ -60,21 +59,6 @@ impl Compactor {
             }))
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
-        if let Task::CompactTask(task) = task {
-            let now = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("Clock may have gone backwards")
-                .as_secs();
-            self.task_heartbeats.lock().unwrap().insert(
-                task.task_id,
-                TaskHeartbeat {
-                    task,
-                    num_blocks_sealed: 0,
-                    num_blocks_uploaded: 0,
-                    expire_at: now + self.task_heartbeat_interval_seconds,
-                },
-            );
-        }
         Ok(())
     }
 
@@ -89,24 +73,6 @@ impl Compactor {
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
-    }
-
-    pub fn update_task_heartbeats(&self, progress_list: &Vec<CompactTaskProgress>) {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Clock may have gone backwards")
-            .as_secs();
-        let mut guard = self.task_heartbeats.lock().unwrap();
-        for progress in progress_list {
-            if let Some(task_ref) = guard.get_mut(&progress.task_id) {
-                if task_ref.num_blocks_sealed < progress.num_blocks_sealed
-                    || task_ref.num_blocks_uploaded < progress.num_blocks_uploaded
-                {
-                    // Refresh the expiry of the task as it is showing progress.
-                    task_ref.expire_at = now + self.task_heartbeat_interval_seconds;
-                }
-            }
-        }
     }
 
     pub fn context_id(&self) -> HummockContextId {
@@ -150,60 +116,35 @@ impl CompactorManagerInner {
 ///   `CompactStatus::report_compact_task`. It's the final state.
 /// - 3. Cancelled: an assigned task is reported as cancelled via
 ///   `CompactStatus::report_compact_task`. It's the final state.
-pub struct CompactorManager {
+pub struct CompactorManager<S> {
     inner: parking_lot::RwLock<CompactorManagerInner>,
-    pub task_heartbeat_interval_seconds: u64,
+    pub task_expiry_seconds: u64,
+    // { context_id -> { task_id -> heartbeat } }
+    task_heartbeats: parking_lot::RwLock<HashMap<HummockContextId, HashMap<TaskId, TaskHeartbeat>>>
 }
 
-impl Default for CompactorManager {
-    fn default() -> Self {
-        Self::new(1)
-    }
-}
-
-impl CompactorManager {
-    pub fn new(task_heartbeat_interval_seconds: u64) -> Self {
-        Self {
+impl<S: MetaStore> CompactorManager<S> {
+    pub async fn new(env: MetaSrvEnv<S>, task_expiry_seconds: u64) -> MetaResult<Self> {
+        let manager = Self {
             inner: parking_lot::RwLock::new(CompactorManagerInner::new()),
-            task_heartbeat_interval_seconds,
-        }
+            task_expiry_seconds,
+            task_heartbeats: Default::default(),
+        };
+        // Initialize the existing task assignments from metastore
+        CompactTaskAssignment::list(env.meta_store())
+            .await?
+            .into_iter()
+            .for_each(|assignment| {
+                manager.initiate_task_heartbeat(assignment.context_id, assignment.compact_task);
+            });
+                
+        Ok(manager)
     }
 
-    pub fn get_timed_out_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Clock may have gone backwards")
-            .as_secs();
-        let mut cancellable_tasks = vec![];
-        {
-            let guard = self.inner.write();
-            for compactor in guard.compactor_map.values() {
-                let mut cancellable_task_ids = vec![];
-                {
-                    let mut hb_guard = compactor.task_heartbeats.lock().unwrap();
-                    #[allow(clippy::significant_drop_in_scrutinee)]
-                    for (id, TaskHeartbeat { expire_at, .. }) in hb_guard.iter() {
-                        if *expire_at < now {
-                            cancellable_task_ids.push(*id);
-                        }
-                    }
-                    for id in &cancellable_task_ids {
-                        if let Some(TaskHeartbeat { task, .. }) = hb_guard.remove(id) {
-                            cancellable_tasks.push((compactor.context_id(), task));
-                        }
-                    }
-                }
-            }
-        }
-        cancellable_tasks
-    }
-
-    pub async fn next_idle_compactor<S>(
+    pub async fn next_idle_compactor(
         &self,
         hummock_manager: &HummockManager<S>,
     ) -> Option<Arc<Compactor>>
-    where
-        S: MetaStore,
     {
         let mut visited = HashSet::new();
         loop {
@@ -265,8 +206,6 @@ impl CompactorManager {
             Arc::new(Compactor {
                 context_id,
                 sender: tx,
-                task_heartbeats: Mutex::new(HashMap::new()),
-                task_heartbeat_interval_seconds: self.task_heartbeat_interval_seconds,
                 max_concurrent_task_number,
             }),
         );
@@ -275,31 +214,102 @@ impl CompactorManager {
     }
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
-        let mut guard = self.inner.write();
-        guard.compactors.retain(|c| *c != context_id);
-        guard.compactor_map.remove(&context_id);
-        tracing::info!("Removed compactor session {}", context_id);
-    }
-
-    pub fn update_compaction_task_progress(
-        &self,
-        context_id: HummockContextId,
-        task: Vec<CompactTaskProgress>,
-    ) {
-        let mut guard = self.inner.write();
-        if let Some(compactor) = guard.compactor_map.get_mut(&context_id) {
-            compactor.update_task_heartbeats(&task);
-            tracing::info!("Updated compactor task progress {}", context_id);
-        } else {
-            tracing::info!(
-                "Update compactor task progress failed. Compactor does not exist: {}",
-                context_id
-            );
+        {
+            let mut guard = self.inner.write();
+            guard.compactors.retain(|c| *c != context_id);
+            guard.compactor_map.remove(&context_id);
         }
+        // Cancel any existing task from the heartbeats table that has not been externally cancelled.
+        tracing::info!("Removed compactor session {}", context_id);
     }
 
     pub fn get_compactor(&self, context_id: u32) -> Option<Arc<Compactor>> {
         self.inner.read().compactor_map.get(&context_id).cloned()
+    }
+
+
+    pub fn get_timed_out_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        let mut cancellable_tasks = vec![];
+        {
+            let guard = self.task_heartbeats.read().unwrap();
+            for (context_id, heartbeats) in guard.iter() {
+                {
+                    for TaskHeartbeat { expire_at, task, .. } in heartbeats.values() {
+                        if *expire_at < now {
+                            cancellable_tasks.push((*context_id, task.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        cancellable_tasks
+    }
+
+    pub fn initiate_task_heartbeat(&self, context_id: HummockContextId, task: Task) {
+        if let Task::CompactTask(task) = task {
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("Clock may have gone backwards")
+                .as_secs();
+            let guard = self.task_heartbeats.write().unwrap();
+            let entry = guard.entry(context_id).or_insert_with(HashMap::new);
+            entry.insert(
+                task.task_id,
+                TaskHeartbeat {
+                    task,
+                    num_blocks_sealed: 0,
+                    num_blocks_uploaded: 0,
+                    expire_at: now + self.task_expiry_seconds,
+                },
+            );
+        }
+    }
+
+    pub fn remove_task_heartbeat(&self, context_id: HummockContextId, task: &Task) {
+        if let Task::CompactTask(task) = task {
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("Clock may have gone backwards")
+                .as_secs();
+            let guard = self.task_heartbeats.write().unwrap();
+            let mut garbage_collect = false;
+            if let Some(heartbeats) = guard.get_mut(context_id) {
+                heartbeats.remove(task.task_id);
+                if heartbeats.is_empty() {
+                    garbage_collect = true;
+                }
+            }
+            if garbage_collect {
+                guard.remove(context_id);
+            }
+        }
+    }
+
+    pub fn update_task_heartbeats(&self, context_id: HummockContextId, progress_list: &Vec<CompactTaskProgress>) {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        let mut guard = self.task_heartbeats.write().unwrap();
+        if let Some(heartbeats) = guard.get_mut(context_id) {
+            for progress in progress_list {
+                if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
+                    if task_ref.num_blocks_sealed < progress.num_blocks_sealed
+                        || task_ref.num_blocks_uploaded < progress.num_blocks_uploaded
+                    {
+                        // Refresh the expiry of the task as it is showing progress.
+                        task_ref.expire_at = now + self.task_expiry_seconds;
+                        // Update the task state to the latest state.
+                        task_ref.num_blocks_sealed = progress.num_blocks_sealed;
+                        task_ref.num_blocks_uploaded = progress.num_blocks_uploaded;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -365,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_remove_compactor() {
-        let compactor_manager = CompactorManager::new(1);
+        let compactor_manager = CompactorManager::new(1).await.unwrap();
         // No compactors by default.
         assert_eq!(compactor_manager.inner.read().compactors.len(), 0);
 
@@ -414,7 +424,7 @@ mod tests {
             .build();
         let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;
-        let compactor_manager = CompactorManager::new(1);
+        let compactor_manager = CompactorManager::new(1).await.unwrap();
         add_compact_task(hummock_manager.as_ref(), context_id, 1).await;
 
         // No compactor available.
@@ -452,7 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_compactor_round_robin() {
-        let compactor_manager = CompactorManager::new(1);
+        let compactor_manager = CompactorManager::new(1).await.unwrap();
         let mut receivers = vec![];
         for context_id in 0..5 {
             receivers.push(compactor_manager.add_compactor(context_id, u64::MAX));

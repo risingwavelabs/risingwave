@@ -47,7 +47,6 @@ pub use shared_buffer_compact::compact;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
-
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
@@ -251,7 +250,7 @@ impl Compactor {
         loop {
             tokio::select! {
                 _ = &mut shutdown_rx => {
-                    tracing::warn!("Compaction task cancelled externally");
+                    tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
                     return false;
                 }
                 future_result = buffered.next() => {
@@ -268,7 +267,7 @@ impl Compactor {
                             );
                             break;
                         }
-                        Some(_) => unreachable!("assume that join will not result in `JoinError`"),
+                        Some(Err(_)) => unreachable!("assume that join will not result in `JoinError`"),
                         None => break,
                     }
                 }
@@ -396,10 +395,6 @@ impl Compactor {
                                 .unwrap()
                                 .remove(&cancel_compact_task.task_id)
                             {
-                                tracing::warn!(
-                                    "Cancelling compaction task. task_id: {}",
-                                    cancel_compact_task.task_id
-                                );
                                 if tx.send(()).is_err() {
                                     tracing::warn!(
                                         "Cancellation of compaction task failed. task_id: {}",

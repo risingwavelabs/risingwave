@@ -73,7 +73,7 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
+    compactor_manager: CompactorManagerRef<S>,
     compactor_selection_retry_interval_sec: u64,
 }
 
@@ -83,7 +83,7 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef,
+        compactor_manager: CompactorManagerRef<S>,
         compactor_selection_retry_interval_sec: u64,
     ) -> Self {
         Self {
@@ -100,21 +100,19 @@ where
         self.hummock_manager
             .set_compaction_scheduler(request_channel.clone());
         tracing::info!("Start compaction scheduler.");
-        'compaction_trigger: loop {
+        loop {
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = request_rx.recv() => {
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
-                        None => {
-                            // There are no new compaction groups, lets wait for a bit.
-                            tokio::time::sleep(Duration::from_millis(200)).await;
-                            break 'compaction_trigger;
-                        }
+                        // The manager has dropped the connection, it means it has either died
+                        // or started a new session.
+                        None => break,
                     }
                 },
                 // Shutdown compactor
                 _ = &mut shutdown_rx => {
-                    break 'compaction_trigger;
+                    break;
                 }
             };
             self.pick_and_assign(compaction_group, request_channel.clone())

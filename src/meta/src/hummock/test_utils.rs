@@ -232,7 +232,7 @@ pub async fn setup_compute_env_with_config(
             .unwrap(),
     );
 
-    let compactor_manager = Arc::new(CompactorManager::new(1));
+    let compactor_manager = Arc::new(CompactorManager::new(1).await.unwrap());
 
     let hummock_manager = Arc::new(
         HummockManager::new(

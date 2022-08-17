@@ -87,7 +87,7 @@ pub struct HummockManager<S: MetaStore> {
     // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
 
-    compactor_manager: CompactorManagerRef,
+    compactor_manager: CompactorManagerRef<S>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -171,7 +171,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-        compactor_manager: CompactorManagerRef,
+        compactor_manager: CompactorManagerRef<S>,
     ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             env,
@@ -219,51 +219,18 @@ where
                 }
                 for (context_id, mut task) in compactor_manager.get_timed_out_tasks() {
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
+                        // If the compactor is functioning correctly, this will eventually attempt to report task as failed as well.
+                        // But we are ok with this as task reporting is idempotent.
                         let _ = compactor.cancel_task(task.task_id).await;
                     }
-                    // Since we cannot rely on the compactor to return, we will try to update the
-                    // compact task status ourselves which is an idempotent,
-                    // serializable operation.
 
                     // Change task status to failed
                     task.task_status = false;
 
-                    // TODO: this needs to be reliable, in other words, we cannot tolerate errors.
-                    // So, we retry and also have an idempotent fail-all which
-                    // we also retry (manually trigger `try_send_compaction_request`).
-                    // If all else fails, we report that we may never recover from this failure and
-                    // may fail to balance the LSM tree.
-                    let mut success = false;
-                    let mut last_err = None;
-                    for attempt_id in 0..REPORT_COMPACT_TASK_RETRIES {
-                        if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await
-                        {
-                            tracing::error!("Failed to cancel compaction task due to missing heartbeat (attempt: {attempt_id}). \
-                                {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
-                            last_err = Some(e);
-                        } else {
-                            success = true;
-                            break;
-                        }
-                    }
-                    if !success {
-                        tracing::error!("Failed to cancel compaction task due to missing heartbeat after {REPORT_COMPACT_TASK_RETRIES} retries. \
-                            THIS MAY RESULT IN A PERMANENTLY IMBALANCED LSM TREE. hummock context: {context_id}, task_id: {}, ERR: {:?}", task.task_id, last_err);
-                        let mut reschedule_success = false;
-                        for _ in 0..REPORT_COMPACT_TASK_RETRIES {
-                            if hummock_manager
-                                .try_send_compaction_request(task.compaction_group_id)
-                                .is_ok()
-                            {
-                                reschedule_success = true;
-                                break;
-                            }
-                        }
-                        if !reschedule_success {
-                            tracing::error!("Failed to reschedule compaction group due to missing heartbeat. \
-                                THIS MAY STALL THE ENTIRE COMPACTION GROUP AND RESULT IN A PERMANENTLY IMBALANCED \
-                                LSM TREE: compaction_group_id: {}, task_id: {}", task.compaction_group_id, task.task_id);
-                        }
+                    if let Err(e) = hummock_manager.report_compact_task(context_id, &task).await
+                    {
+                        tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                            until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
                     }
                 }
             }
@@ -925,7 +892,8 @@ where
             )?;
         }
 
-        // TODO: remove compaction task from `CompactorManager` heartbeat table.
+        // A task heartbeat is removed IFF a task report has been successfully committed.
+        self.compactor_manager.remove_task_heartbeat(context_id, compact_task);
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",

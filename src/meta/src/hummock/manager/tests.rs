@@ -954,6 +954,7 @@ async fn test_trigger_manual_compaction() {
     }
 }
 
+#[cfg(madsim)]
 #[tokio::test]
 async fn test_hummock_compaction_task_heartbeat() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;

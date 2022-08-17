@@ -25,9 +25,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::SstableInfo;
-use risingwave_storage::hummock::compactor::{
-    Compactor, DummyCompactionFilter,
-};
+use risingwave_storage::hummock::compactor::{Compactor, DummyCompactionFilter};
 use risingwave_storage::hummock::iterator::{
     ConcatIterator, ConcatSstableIterator, Forward, HummockIterator, HummockIteratorUnion,
     MultiSstIterator, UnorderedMergeIteratorInner,
