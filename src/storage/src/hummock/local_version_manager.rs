@@ -548,7 +548,9 @@ impl LocalVersionManager {
             local_version_guard.add_sync_state(epochs.clone(), Syncing(all_uncommitted_data));
             (task_payload, task_write_batch_size)
         };
-        let ssts = self.run_sync_upload_task(task_payload, epochs.clone()).await?;
+        let ssts = self
+            .run_sync_upload_task(task_payload, epochs.clone())
+            .await?;
         tracing::trace!(
             "sync epoch {} finished. Task size {}",
             epoch,
