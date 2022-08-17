@@ -775,8 +775,8 @@ impl BuildActorGraphState {
 
 /// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct ActorGraphBuilder {
-    /// GlobalFragmentId -> parallel_degree
-    parallelisms: HashMap<FragmentId, u32>,
+    /// Default parallelism.
+    default_parallelism: u32,
 
     fragment_graph: StreamFragmentGraph,
 }
@@ -813,23 +813,8 @@ impl ActorGraphBuilder {
 
         let fragment_graph = StreamFragmentGraph::from_protobuf(fragment_graph.clone(), offset);
 
-        // TODO(Kexiang): now simply use Count(ParallelUnit) as parallelism of each fragment
-        let parallelisms: HashMap<FragmentId, u32> = fragment_graph
-            .fragments()
-            .iter()
-            .map(|(id, fragment)| {
-                let id = id.as_global_id();
-                let parallel_degree = if fragment.is_singleton {
-                    1
-                } else {
-                    default_parallelism
-                };
-                (id, parallel_degree)
-            })
-            .collect();
-
         Ok(Self {
-            parallelisms,
+            default_parallelism,
             fragment_graph,
         })
     }
@@ -874,7 +859,7 @@ impl ActorGraphBuilder {
                 state.stream_graph_builder.fill_info(info);
 
                 // Generate actors of the streaming plan
-                self.build_actor_graph(&mut state, &self.fragment_graph)?;
+                self.build_actor_graph(&mut state, &self.fragment_graph, ctx)?;
                 state
             };
 
@@ -925,6 +910,7 @@ impl ActorGraphBuilder {
         &self,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
+        ctx: &CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // poped out from the heap will be the top-most node in plan, or the sink in stream graph.)
@@ -944,7 +930,7 @@ impl ActorGraphBuilder {
 
         while let Some(fragment_id) = actionable_fragment_id.pop_front() {
             // Build the actors corresponding to the fragment
-            self.build_actor_graph_fragment(fragment_id, state, fragment_graph)?;
+            self.build_actor_graph_fragment(fragment_id, state, fragment_graph, ctx)?;
 
             // Find if we can process more fragments
             for upstream_id in fragment_graph.get_upstreams(fragment_id).keys() {
@@ -972,14 +958,22 @@ impl ActorGraphBuilder {
         fragment_id: GlobalFragmentId,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
+        ctx: &CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
 
-        let parallel_degree = self
-            .parallelisms
-            .get(&fragment_id.as_global_id())
-            .unwrap()
-            .to_owned();
+        let parallel_degree = if current_fragment.is_singleton {
+            1
+        } else if current_fragment.dependent_table_id != 0 {
+            // set fragment parallelism to the parallelism of its dependent table.
+            let upstream_actors = ctx
+                .table_sink_map
+                .get(&TableId::new(current_fragment.dependent_table_id))
+                .expect("upstream actor should exist");
+            upstream_actors.len() as u32
+        } else {
+            self.default_parallelism
+        };
 
         let node = Arc::new(current_fragment.node.unwrap());
         let actor_ids = state

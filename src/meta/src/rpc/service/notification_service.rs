@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::{ActorInfo, HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
@@ -27,8 +27,10 @@ use tonic::{Request, Response, Status};
 use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerKey,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerId,
+    WorkerKey,
 };
+use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManagerRef;
 
@@ -62,6 +64,26 @@ where
             stream_manager,
             fragment_manager,
         }
+    }
+
+    fn resolve_actor_infos(
+        all_workers: &[WorkerNode],
+        all_actors: HashMap<WorkerId, Vec<ActorId>>,
+    ) -> Vec<ActorInfo> {
+        let host_map: HashMap<WorkerId, Option<HostAddress>> =
+            all_workers.iter().map(|w| (w.id, w.host.clone())).collect();
+        all_actors
+            .iter()
+            .flat_map(|(worker_id, actors)| {
+                actors.iter().map(|&actor_id| {
+                    let host = host_map.get(worker_id).cloned().unwrap_or_default();
+                    ActorInfo {
+                        actor_id,
+                        host: host.clone(),
+                    }
+                })
+            })
+            .collect()
     }
 }
 
@@ -103,6 +125,8 @@ where
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
+        let actor_infos = Self::resolve_actor_infos(&nodes, fragment_guard.all_worker_actor_ids());
+
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {
             WorkerType::Frontend => MetaSnapshot {
@@ -117,6 +141,7 @@ where
                 parallel_unit_mappings,
                 hummock_version: None,
                 hummock_snapshot,
+                actor_infos: vec![],
             },
 
             WorkerType::Compactor => {
@@ -134,6 +159,7 @@ where
                 MetaSnapshot {
                     tables,
                     hummock_version,
+                    actor_infos,
                     ..Default::default()
                 }
             }

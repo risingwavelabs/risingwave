@@ -116,18 +116,6 @@ pub async fn compute_node_serve(
 
     let mut join_handle_vec = vec![];
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
-    // todo use ObserverManager
-    let observer_manager = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        Box::new(compute_observer_node),
-        WorkerType::Compactor,
-    )
-    .await;
-
-    let observer_join_handle = observer_manager.start().await.unwrap();
-    join_handle_vec.push(observer_join_handle);
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -201,6 +189,19 @@ pub async fn compute_node_serve(
     ));
     let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
+
+    let compute_observer_node =
+        ComputeObserverNode::new(filter_key_extractor_manager.clone(), stream_mgr.clone());
+    let observer_manager = ObserverManager::new(
+        meta_client.clone(),
+        client_addr.clone(),
+        Box::new(compute_observer_node),
+        WorkerType::ComputeNode,
+    )
+    .await;
+
+    let observer_join_handle = observer_manager.start().await.unwrap();
+    join_handle_vec.push(observer_join_handle);
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());

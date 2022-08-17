@@ -21,11 +21,14 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
 };
 use risingwave_pb::catalog::{Source, Table};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
+use risingwave_stream::task::LocalStreamManager;
 
 pub struct ComputeObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    local_stream_manager: Arc<LocalStreamManager>,
 
     version: u64,
 }
@@ -64,6 +67,7 @@ impl ObserverNodeImpl for ComputeObserverNode {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 self.handle_catalog_snapshot(snapshot.tables);
+                self.handle_actor_info_snapshot(snapshot.actor_infos);
                 self.version = resp.version;
             }
             _ => {
@@ -80,11 +84,21 @@ impl ObserverNodeImpl for ComputeObserverNode {
 }
 
 impl ComputeObserverNode {
-    pub fn new(filter_key_extractor_manager: FilterKeyExtractorManagerRef) -> Self {
+    pub fn new(
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        local_stream_manager: Arc<LocalStreamManager>,
+    ) -> Self {
         Self {
             filter_key_extractor_manager,
+            local_stream_manager,
             version: 0,
         }
+    }
+
+    fn handle_actor_info_snapshot(&mut self, actor_infos: Vec<ActorInfo>) {
+        self.local_stream_manager
+            .update_actor_info(&actor_infos)
+            .unwrap();
     }
 
     fn handle_catalog_snapshot(&mut self, tables: Vec<Table>) {

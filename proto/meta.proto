@@ -169,6 +169,8 @@ message MetaSnapshot {
   hummock.HummockVersion hummock_version = 9;
   repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
+  // Actor infos for CN, only for new joined CN.
+  repeated common.ActorInfo actor_infos = 12;
 }
 
 message SubscribeResponse {

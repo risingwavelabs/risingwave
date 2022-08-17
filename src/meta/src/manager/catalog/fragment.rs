@@ -59,6 +59,20 @@ impl FragmentManagerCore {
                 .collect_vec()
         })
     }
+
+    /// List all actor location info with worker id.
+    pub fn all_worker_actor_ids(&self) -> HashMap<WorkerId, Vec<ActorId>> {
+        let mut actor_maps = HashMap::new();
+        self.table_fragments.values().for_each(|table_fragments| {
+            for (worker_id, actors) in table_fragments.worker_actor_ids() {
+                actor_maps
+                    .entry(worker_id)
+                    .or_insert_with(Vec::new)
+                    .extend(actors);
+            }
+        });
+        actor_maps
+    }
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.

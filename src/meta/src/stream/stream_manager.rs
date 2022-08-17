@@ -566,6 +566,7 @@ where
             let worker_node = locations.worker_locations.get(worker_id).unwrap();
             let client = self.client_pool.get(worker_node).await?;
 
+            // TODO: should broadcast actor info to all workers when schedule strategy is changed.
             client
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos_to_broadcast.clone(),
