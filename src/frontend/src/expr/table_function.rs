@@ -42,7 +42,7 @@ pub enum TableFunctionType {
 }
 
 impl TableFunctionType {
-    fn to_protobuf(&self) -> Type {
+    fn to_protobuf(self) -> Type {
         match self {
             TableFunctionType::Generate => Type::Generate,
             TableFunctionType::Unnest => Type::Unnest,
