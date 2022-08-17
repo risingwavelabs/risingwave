@@ -244,7 +244,7 @@ where
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            let (size, ssts) = self
+            let (size, ssts, is_sync) = self
                 .inner
                 .sync(epoch)
                 .stack_trace("store_sync")
@@ -254,7 +254,7 @@ where
             if size != 0 {
                 self.stats.write_l0_size_per_epoch.observe(size as _);
             }
-            Ok((size, ssts))
+            Ok((size, ssts, is_sync))
         }
     }
 

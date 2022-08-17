@@ -220,16 +220,16 @@ impl LocalStreamManager {
         result
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> Vec<LocalSstableInfo> {
+    pub async fn sync_epoch(&self, epoch: u64) -> (Vec<LocalSstableInfo>, bool) {
         let timer = self
             .core
             .lock()
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        let local_sst_info = dispatch_state_store!(self.state_store(), store, {
+        let (local_sst_info, need_sync) = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
-                Ok((_, ssts)) => ssts,
+                Ok((_, ssts, need_sync)) => (ssts, need_sync),
                 // TODO: Handle sync failure by propagating it back to global barrier manager
                 Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
@@ -238,7 +238,7 @@ impl LocalStreamManager {
             }
         });
         timer.observe_duration();
-        local_sst_info
+        (local_sst_info, need_sync)
     }
 
     pub async fn clear_storage_buffer(&self) {

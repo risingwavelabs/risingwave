@@ -160,7 +160,10 @@ impl StreamService for StreamServiceImpl {
             .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let (synced_sstables, need_sync) = self.mgr.sync_epoch(req.prev_epoch).stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+        let (synced_sstables, need_sync) = self
+            .mgr
+            .sync_epoch(req.prev_epoch)
+            .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
             .await;
 
         Ok(Response::new(BarrierCompleteResponse {

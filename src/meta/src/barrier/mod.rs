@@ -32,6 +32,7 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::Barrier;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -202,6 +203,30 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 }
 
+type PostCheckpoint<S> = (
+    Arc<CommandContext<S>>,
+    SmallVec<[Notifier; 1]>,
+    Vec<CreateMviewProgress>,
+);
+struct UncommittedStates<S: MetaStore> {
+    uncommitted_queue: VecDeque<PostCheckpoint<S>>,
+    uncommitted_ssts: Vec<LocalSstableInfo>,
+    uncommitted_work_id: HashMap<HummockSstableId, WorkerId>,
+}
+
+impl<S> Default for UncommittedStates<S>
+where
+    S: MetaStore,
+{
+    fn default() -> Self {
+        Self {
+            uncommitted_queue: Default::default(),
+            uncommitted_ssts: Default::default(),
+            uncommitted_work_id: Default::default(),
+        }
+    }
+}
+
 /// Controls the concurrent execution of commands.
 struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order.
@@ -221,6 +246,8 @@ struct CheckpointControl<S: MetaStore> {
     removing_actors: HashSet<ActorId>,
 
     metrics: Arc<MetaMetrics>,
+
+    uncommitted_states: UncommittedStates<S>,
 }
 
 impl<S> CheckpointControl<S>
@@ -235,7 +262,35 @@ where
             adding_actors: Default::default(),
             removing_actors: Default::default(),
             metrics,
+            uncommitted_states: Default::default(),
         }
+    }
+
+    fn add_uncommitted_states(
+        &mut self,
+        resps: &Vec<BarrierCompleteResponse>,
+        post_checkpoint: PostCheckpoint<S>,
+    ) {
+        for resp in resps {
+            resp
+                .synced_sstables
+                .iter()
+                .cloned()
+                .for_each(|grouped| {
+                    let sst = grouped.sst.expect("field not None");
+                    self.uncommitted_states
+                        .uncommitted_work_id
+                        .insert(sst.id, resp.worker_id);
+                    self.uncommitted_states.uncommitted_ssts.push((grouped.compaction_group_id, sst));
+                });
+        }
+        self.uncommitted_states
+            .uncommitted_queue
+            .push_front(post_checkpoint);
+    }
+
+    fn get_uncommitted_states(&mut self) -> UncommittedStates<S> {
+        take(&mut self.uncommitted_states)
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -365,9 +420,6 @@ where
             .position(|x| !matches!(x.state, Completed(_)))
             .unwrap_or(self.command_ctx_queue.len());
         let complete_nodes = self.command_ctx_queue.drain(..index).collect_vec();
-        complete_nodes
-            .iter()
-            .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
         complete_nodes
     }
 
@@ -670,6 +722,7 @@ where
                         barrier: Some(barrier),
                         actor_ids_to_send,
                         actor_ids_to_collect,
+                        need_sync: true,
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::inject_barrier",
@@ -735,7 +788,10 @@ where
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
             assert!(matches!(node.state, Completed(_)));
-            if let Err(err) = self.complete_barriers(node, tracker).await {
+            if let Err(err) = self
+                .complete_barriers(node, tracker, checkpoint_control)
+                .await
+            {
                 index = i;
                 err_msg = Some(err);
                 break;
@@ -785,55 +841,54 @@ where
         &self,
         node: &mut EpochNode<S>,
         tracker: &mut CreateMviewProgressTracker,
+        checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
-
         match &node.state {
             Completed(Ok(resps)) => {
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
                 // See https://github.com/singularity-data/risingwave/issues/1251
-                let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
-                let mut synced_ssts: Vec<LocalSstableInfo> = vec![];
-                for resp in resps {
-                    let mut t: Vec<LocalSstableInfo> = resp
-                        .synced_sstables
-                        .iter()
-                        .cloned()
-                        .map(|grouped| {
-                            let sst = grouped.sst.expect("field not None");
-                            sst_to_worker.insert(sst.id, resp.worker_id);
-                            (grouped.compaction_group_id, sst)
-                        })
-                        .collect_vec();
-                    synced_ssts.append(&mut t);
-                }
-
-                if prev_epoch == INVALID_EPOCH {
-                    assert!(
-                        synced_ssts.is_empty(),
-                        "no sstables should be produced in the first epoch"
-                    );
-                } else {
-                    self.hummock_manager
-                        .commit_epoch(prev_epoch, synced_ssts, sst_to_worker)
-                        .await?;
-                }
-
                 node.timer.take().unwrap().observe_duration();
-                node.wait_commit_timer.take().unwrap().observe_duration();
-                node.command_ctx.post_collect().await?;
 
-                // Notify about collected first.
-                let mut notifiers = take(&mut node.notifiers);
-                notifiers.iter_mut().for_each(Notifier::notify_collected);
+                let notifiers = take(&mut node.notifiers);
+                let command_ctx = node.command_ctx.clone();
+                let create_mv_progress = resps
+                    .iter()
+                    .flat_map(|r| r.create_mview_progress.clone())
+                    .collect_vec();
+                checkpoint_control
+                    .add_uncommitted_states(resps, (command_ctx, notifiers, create_mv_progress));
 
-                // Then try to finish the barrier for Create MVs.
-                let actors_to_finish = node.command_ctx.actors_to_track();
-                tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
-                for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                    tracker.update(progress);
+                // If not sync , we can't notify collection completion
+                if resps.iter().all(|node| node.need_sync) {
+                    let mut uncommitted_states = checkpoint_control.get_uncommitted_states();
+                    if prev_epoch != INVALID_EPOCH {
+                        self.hummock_manager
+                            .commit_epoch(
+                                prev_epoch,
+                                uncommitted_states.uncommitted_ssts,
+                                uncommitted_states.uncommitted_work_id,
+                            )
+                            .await?;
+                    }
+                    while let Some((command_ctx, mut notifiers, create_mv_progress)) =
+                        uncommitted_states.uncommitted_queue.pop_back()
+                    {
+                        checkpoint_control.remove_changes(command_ctx.command.changes());
+                        command_ctx.post_collect().await?;
+
+                        // Notify about collected first.
+                        notifiers.iter_mut().for_each(Notifier::notify_collected);
+
+                        // Then try to finish the barrier for Create MVs.
+                        let actors_to_finish = command_ctx.actors_to_track();
+                        tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers);
+                        for progress in create_mv_progress {
+                            tracker.update(&progress);
+                        }
+                    }
                 }
 
                 Ok(())

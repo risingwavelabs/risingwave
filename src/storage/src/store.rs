@@ -31,7 +31,7 @@ pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
     Future<Output = StorageResult<I>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
 pub trait SyncFutureTrait<'a> =
-    Future<Output = StorageResult<(usize, Vec<LocalSstableInfo>)>> + Send;
+    Future<Output = StorageResult<(usize, Vec<LocalSstableInfo>, bool)>> + Send;
 pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 
 #[macro_export]

@@ -48,7 +48,7 @@ pub enum SyncUncommittedData {
     NoData,
     /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
     /// as `Syncing`.
-    Syncing(KeyIndexedUncommittedData),
+    Syncing(Vec<KeyIndexedUncommittedData>),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
     Synced(Vec<UncommittedData>),
 }
@@ -60,9 +60,13 @@ impl SyncUncommittedData {
         B: AsRef<[u8]>,
     {
         match self {
+            SyncUncommittedData::NoData => {
+                vec![]
+            }
             SyncUncommittedData::Syncing(task) => {
                 let local_data_iter = task
                     .iter()
+                    .flatten()
                     .filter(|(_, data)| match data {
                         UncommittedData::Batch(batch) => {
                             range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
@@ -114,10 +118,10 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn swap_max_sync_epoch(&mut self,epoch:HummockEpoch) -> Option<HummockEpoch> {
-        if self.max_sync_epoch > epoch{
+    pub fn swap_max_sync_epoch(&mut self, epoch: HummockEpoch) -> Option<HummockEpoch> {
+        if self.max_sync_epoch > epoch {
             None
-        }else{
+        } else {
             let last_epoch = self.max_sync_epoch;
             self.max_sync_epoch = epoch;
             Some(last_epoch)
@@ -137,8 +141,8 @@ impl LocalVersion {
         &mut self,
         epoch_range: R,
     ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)>
-        where
-            R: RangeBounds<u64>,
+    where
+        R: RangeBounds<u64>,
     {
         self.shared_buffer.range_mut(epoch_range)
     }
@@ -156,7 +160,12 @@ impl LocalVersion {
             None => {
                 assert_matches!(sync_uncommitted_data, SyncUncommittedData::NoData);
                 if let Some(last) = self.sync_uncommitted_data.last() {
-                    assert!(last.0.first().lt(sync_epoch.first().unwrap()))
+                    assert!(
+                        last.0.first().lt(&sync_epoch.first()),
+                        "last epoch:{:?} >= sync epoch:{:?}",
+                        last,
+                        sync_epoch
+                    );
                 }
                 self.sync_uncommitted_data
                     .push((sync_epoch, sync_uncommitted_data));
@@ -210,8 +219,11 @@ impl LocalVersion {
             );
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
-            self.sync_uncommitted_data
-                .retain(|(epoch, _)| epoch > &new_pinned_version.max_committed_epoch);
+            self.sync_uncommitted_data.retain(|(epoch, _)| {
+                epoch
+                    .first()
+                    .gt(&Some(&new_pinned_version.max_committed_epoch))
+            });
         }
 
         self.version_ids_in_use.insert(new_pinned_version.id);
@@ -251,7 +263,8 @@ impl LocalVersion {
                         .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
-                            node.0 <= read_epoch && node.0 >= smallest_uncommitted_epoch
+                            node.0.last().le(&Some(&read_epoch))
+                                && node.0.first().ge(&Some(&smallest_uncommitted_epoch))
                         })
                         .map(|(_, value)| value.get_overlap_data(key_range))
                         .collect();

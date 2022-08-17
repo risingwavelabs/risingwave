@@ -285,7 +285,7 @@ async fn test_basic() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
-    let (_, ssts) = hummock_storage.sync(epoch1).await.unwrap();
+    let (_, ssts, _) = hummock_storage.sync(epoch1).await.unwrap();
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     hummock_storage.wait_epoch(epoch1).await.unwrap();
     let value = hummock_storage
@@ -864,11 +864,11 @@ async fn test_write_anytime() {
     assert_old_value(epoch2).await;
 
     println!("aaaa");
-    let (_, ssts1) = hummock_storage.sync(epoch1).await.unwrap();
+    let (_, ssts1, _) = hummock_storage.sync(epoch1).await.unwrap();
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
-    let (_, ssts2) = hummock_storage.sync(epoch2).await.unwrap();
+    let (_, ssts2, _) = hummock_storage.sync(epoch2).await.unwrap();
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
@@ -915,7 +915,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let (_, ssts) = hummock_storage.sync(epoch1).await.unwrap();
+    let (_, ssts, _) = hummock_storage.sync(epoch1).await.unwrap();
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
     let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
@@ -929,7 +929,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let (_, ssts) = hummock_storage.sync(epoch2).await.unwrap();
+    let (_, ssts, _) = hummock_storage.sync(epoch2).await.unwrap();
     meta_client.commit_epoch(epoch2, ssts).await.unwrap();
     hummock_storage.wait_epoch(epoch2).await.unwrap();
     assert!(hummock_storage
