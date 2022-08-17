@@ -23,7 +23,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
 };
-use crate::task::{ActorId, FragmentId};
+use crate::task::FragmentId;
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
@@ -37,8 +37,7 @@ pub struct ReceiverExecutor {
     /// Actor operator context
     status: OperatorInfoStatus,
 
-    /// Actor id,
-    actor_id: ActorId,
+    ctx: ActorContextRef,
 
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
@@ -62,9 +61,8 @@ impl ReceiverExecutor {
         schema: Schema,
         pk_indices: PkIndices,
         input: BoxedInput,
-        actor_context: ActorContextRef,
+        ctx: ActorContextRef,
         receiver_id: u64,
-        actor_id: ActorId,
         upstream_fragment_id: FragmentId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -75,8 +73,8 @@ impl ReceiverExecutor {
                 pk_indices,
                 identity: "ReceiverExecutor".to_string(),
             },
-            status: OperatorInfoStatus::new(actor_context, receiver_id),
-            actor_id,
+            status: OperatorInfoStatus::new(ctx.clone(), receiver_id),
+            ctx,
             upstream_fragment_id,
             metrics,
         }
@@ -85,7 +83,7 @@ impl ReceiverExecutor {
 
 impl Executor for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
-        let actor_id_str = self.actor_id.to_string();
+        let actor_id_str = self.ctx.id.to_string();
         let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         let stream = #[try_stream]

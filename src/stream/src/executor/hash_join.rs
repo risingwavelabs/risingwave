@@ -37,7 +37,6 @@ use super::{
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
-use crate::task::ActorId;
 
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
@@ -203,7 +202,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
 
-    actor_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -387,7 +385,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         params_r: JoinParams,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
-        actor_id: ActorId,
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
@@ -459,7 +456,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
         Self {
-            ctx,
+            ctx: ctx.clone(),
             input_l: Some(input_l),
             input_r: Some(input_r),
             output_data_types: original_output_data_types,
@@ -472,7 +469,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     col_l_datatypes.clone(),
                     state_table_l,
                     metrics.clone(),
-                    actor_id,
+                    ctx.id,
                     "left",
                 ), // TODO: decide the target cap
                 key_indices: params_l.key_indices,
@@ -488,7 +485,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     col_r_datatypes.clone(),
                     state_table_r,
                     metrics.clone(),
-                    actor_id,
+                    ctx.id,
                     "right",
                 ), // TODO: decide the target cap
                 key_indices: params_r.key_indices,
@@ -503,7 +500,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             op_info,
             epoch: 0,
             append_only_optimize,
-            actor_id,
             metrics,
         }
     }
@@ -515,11 +511,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
-            self.actor_id,
+            self.ctx.id,
             self.metrics.clone(),
         );
 
-        let actor_id_str = self.actor_id.to_string();
+        let actor_id_str = self.ctx.id.to_string();
         let mut start_time = minstant::Instant::now();
 
         pin_mut!(aligned_stream);
@@ -581,7 +577,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.epoch = epoch;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.side_l
                             .ht
                             .state_table
@@ -687,7 +683,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
 
                 cond_match = cond
-                    .eval_row_infallible(&new_row, |err| ctx.lock().on_compute_error(err, identity))
+                    .eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
                     .map(|s| *s.as_bool())
                     .unwrap_or(false);
             }
@@ -902,14 +898,13 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
-            1,
             1,
             cond,
             "HashJoinExecutor".to_string(),
@@ -957,14 +952,13 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
-            1,
             1,
             cond,
             "HashJoinExecutor".to_string(),

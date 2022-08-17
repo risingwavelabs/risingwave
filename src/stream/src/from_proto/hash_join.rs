@@ -24,7 +24,6 @@ use super::*;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
-use crate::task::ActorId;
 
 pub struct HashJoinExecutorBuilder;
 
@@ -134,7 +133,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             state_table_l,
             state_table_r,
             is_append_only,
-            actor_id: params.actor_id,
             metrics: params.executor_stats,
         };
 
@@ -160,7 +158,6 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     state_table_l: RowBasedStateTable<S>,
     state_table_r: RowBasedStateTable<S>,
     is_append_only: bool,
-    actor_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -179,7 +176,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.params_r,
             args.pk_indices,
             args.output_indices,
-            args.actor_id,
             args.executor_id,
             args.cond,
             args.op_info,

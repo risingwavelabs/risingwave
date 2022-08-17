@@ -41,7 +41,7 @@ use crate::task::SharedContext;
 /// and do this again and again.
 #[tokio::test]
 async fn test_merger_sum_aggr() {
-    let actor_ctx = ActorContext::create();
+    let actor_ctx = ActorContext::create(0);
 
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
@@ -53,8 +53,7 @@ async fn test_merger_sum_aggr() {
             schema,
             vec![],
             LocalInput::for_test(input_rx),
-            ActorContext::create(),
-            0,
+            actor_ctx.clone(),
             0,
             0,
             metrics,
@@ -97,7 +96,7 @@ async fn test_merger_sum_aggr() {
             0,
             context,
             StreamingMetrics::unused().into(),
-            ActorContext::create(),
+            actor_ctx.clone(),
         );
         (actor, rx)
     };
@@ -130,8 +129,7 @@ async fn test_merger_sum_aggr() {
         schema.clone(),
         vec![],
         LocalInput::for_test(rx),
-        ActorContext::create(),
-        0,
+        actor_ctx.clone(),
         0,
         0,
         Arc::new(StreamingMetrics::unused()),
@@ -209,7 +207,7 @@ async fn test_merger_sum_aggr() {
         0,
         context,
         StreamingMetrics::unused().into(),
-        ActorContext::create(),
+        actor_ctx.clone(),
     );
     handles.push(tokio::spawn(actor.run()));
 
