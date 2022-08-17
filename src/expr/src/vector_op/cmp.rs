@@ -158,23 +158,13 @@ macro_rules! gen_cmp {
     };
 }
 
-macro_rules! gen_is_distinct_from {
-    ($l:expr, $r:expr) => {
-        match ($l, $r) {
-            (Some(lv), Some(rv)) => Ok(Some(lv != rv)),
-            (Some(_), None) => Ok(Some(true)),
-            (None, Some(_)) => Ok(Some(true)),
-            (None, None) => Ok(Some(false)),
-        }
-    };
-}
-
 pub fn str_is_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
-    gen_is_distinct_from!(l, r)
-}
-
-pub fn struct_is_distinct_from(l: Option<StructRef>, r: Option<StructRef>) -> Result<Option<bool>> {
-    gen_is_distinct_from!(l, r)
+    match (l, r) {
+        (Some(lv), Some(rv)) => Ok(Some(lv != rv)),
+        (Some(_), None) => Ok(Some(true)),
+        (None, Some(_)) => Ok(Some(true)),
+        (None, None) => Ok(Some(false)),
+    }
 }
 
 #[inline(always)]

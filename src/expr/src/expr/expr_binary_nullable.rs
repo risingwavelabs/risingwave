@@ -22,9 +22,7 @@ use super::BoxedExpression;
 use crate::expr::template::BinaryNullableExpression;
 use crate::for_all_cmp_variants;
 use crate::vector_op::array_access::array_access;
-use crate::vector_op::cmp::{
-    general_is_distinct_from, str_is_distinct_from, struct_is_distinct_from,
-};
+use crate::vector_op::cmp::{general_is_distinct_from, str_is_distinct_from};
 use crate::vector_op::conjunction::{and, or};
 
 macro_rules! gen_nullable_cmp_impl {
@@ -135,14 +133,6 @@ pub fn new_distinct_from_expr(
         >::new(
             l, r, ret, str_is_distinct_from
         )),
-        (DataType::Struct { .. }, DataType::Struct { .. }) => {
-            Box::new(BinaryNullableExpression::<
-                StructArray,
-                StructArray,
-                BoolArray,
-                _,
-            >::new(l, r, ret, struct_is_distinct_from))
-        }
         _ => {
             for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
         }
