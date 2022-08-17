@@ -584,7 +584,7 @@ impl LocalStreamManagerCore {
                             metrics
                                 .actor_memory_usage
                                 .with_label_values(&[&actor_id_str])
-                                .set(alloc.bytes_in_use() as u64)
+                                .set(alloc.bytes_in_use() as i64)
                         });
 
                         tokio::time::sleep(Duration::from_secs(1)).await;
