@@ -19,13 +19,13 @@ pub struct ExpandExecutorBuilder;
 
 impl ExecutorBuilder for ExpandExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let expand_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Expand)?;
-        let input = params.input.remove(0);
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let pk_indices = params.pk_indices;
         let column_subsets = expand_node
             .column_subsets
