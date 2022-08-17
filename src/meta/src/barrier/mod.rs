@@ -203,24 +203,24 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 }
 
-type PostCheckpoint<S> = (
+type CheckpointPost<S> = (
     Arc<CommandContext<S>>,
     SmallVec<[Notifier; 1]>,
     Vec<CreateMviewProgress>,
 );
-struct UncommittedStates<S: MetaStore> {
-    uncommitted_queue: VecDeque<PostCheckpoint<S>>,
+struct UncommittedMessages<S: MetaStore> {
+    uncommitted_checkpoint_post: VecDeque<CheckpointPost<S>>,
     uncommitted_ssts: Vec<LocalSstableInfo>,
     uncommitted_work_id: HashMap<HummockSstableId, WorkerId>,
 }
 
-impl<S> Default for UncommittedStates<S>
+impl<S> Default for UncommittedMessages<S>
 where
     S: MetaStore,
 {
     fn default() -> Self {
         Self {
-            uncommitted_queue: Default::default(),
+            uncommitted_checkpoint_post: Default::default(),
             uncommitted_ssts: Default::default(),
             uncommitted_work_id: Default::default(),
         }
@@ -247,7 +247,7 @@ struct CheckpointControl<S: MetaStore> {
 
     metrics: Arc<MetaMetrics>,
 
-    uncommitted_states: UncommittedStates<S>,
+    uncommitted_messages: UncommittedMessages<S>,
 }
 
 impl<S> CheckpointControl<S>
@@ -262,33 +262,33 @@ where
             adding_actors: Default::default(),
             removing_actors: Default::default(),
             metrics,
-            uncommitted_states: Default::default(),
+            uncommitted_messages: Default::default(),
         }
     }
 
     fn add_uncommitted_states(
         &mut self,
         resps: &Vec<BarrierCompleteResponse>,
-        post_checkpoint: PostCheckpoint<S>,
+        checkpoint_post: CheckpointPost<S>,
     ) {
         for resp in resps {
             resp.synced_sstables.iter().cloned().for_each(|grouped| {
                 let sst = grouped.sst.expect("field not None");
-                self.uncommitted_states
+                self.uncommitted_messages
                     .uncommitted_work_id
                     .insert(sst.id, resp.worker_id);
-                self.uncommitted_states
+                self.uncommitted_messages
                     .uncommitted_ssts
                     .push((grouped.compaction_group_id, sst));
             });
         }
-        self.uncommitted_states
-            .uncommitted_queue
-            .push_front(post_checkpoint);
+        self.uncommitted_messages
+            .uncommitted_checkpoint_post
+            .push_front(checkpoint_post);
     }
 
-    fn get_uncommitted_states(&mut self) -> UncommittedStates<S> {
-        take(&mut self.uncommitted_states)
+    fn get_uncommitted_states(&mut self) -> UncommittedMessages<S> {
+        take(&mut self.uncommitted_messages)
     }
 
     /// Before resolving the actors to be sent or collected, we should first record the newly
@@ -872,7 +872,7 @@ where
                             .await?;
                     }
                     while let Some((command_ctx, mut notifiers, create_mv_progress)) =
-                        uncommitted_states.uncommitted_queue.pop_back()
+                        uncommitted_states.uncommitted_checkpoint_post.pop_back()
                     {
                         checkpoint_control.remove_changes(command_ctx.command.changes());
                         command_ctx.post_collect().await?;
