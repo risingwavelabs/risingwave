@@ -26,18 +26,18 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::{CompactOutput, Compactor, CompactorContext};
+use crate::hummock::compactor::{CompactOutput, Compactor, Context};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::{CachePolicy, HummockResult, MemoryLimiter};
+use crate::hummock::{CachePolicy, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
-    context: Arc<CompactorContext>,
+    context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
@@ -82,7 +82,7 @@ pub async fn compact(
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
-    context: Arc<CompactorContext>,
+    context: Arc<Context>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<SstableInfo>> {
     let mut start_user_keys = payload
@@ -143,8 +143,8 @@ async fn compact_shared_buffer(
     let mut compaction_futures = vec![];
 
     let mut local_stats = StoreLocalStatistic::default();
-    for (split_index, _) in splits.iter().enumerate() {
-        let compactor = SharedBufferCompactRunner::new(context.clone(), splits.clone());
+    for (split_index, key_range) in splits.into_iter().enumerate() {
+        let compactor = SharedBufferCompactRunner::new(split_index, key_range, context.clone());
         let iter = build_ordered_merge_iter::<ForwardIter>(
             &payload,
             sstable_store.clone(),
@@ -156,11 +156,7 @@ async fn compact_shared_buffer(
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
 
-        let split_task = async move {
-            compactor
-                .run(split_index, iter, multi_filter_key_extractor)
-                .await
-        };
+        let split_task = async move { compactor.run(iter, multi_filter_key_extractor).await };
         let rx = Compactor::request_execution(compaction_executor, split_task)?;
         compaction_futures.push(rx);
     }
@@ -205,37 +201,38 @@ async fn compact_shared_buffer(
 
 pub struct SharedBufferCompactRunner {
     compactor: Compactor,
+    split_index: usize,
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new(context: Arc<CompactorContext>, splits: Vec<KeyRange>) -> Self {
+    pub fn new(split_index: usize, key_range: KeyRange, context: Arc<Context>) -> Self {
+        let sstable_store = context.sstable_store.clone();
         let options = context.options.as_ref().into();
         let compactor = Compactor::new(
             context,
             options,
-            Arc::new(MemoryLimiter::new(u64::MAX - 1)),
-            splits,
+            sstable_store,
+            key_range,
             CachePolicy::Fill,
             false,
             u64::MAX,
         );
-        Self { compactor }
+        Self {
+            compactor,
+            split_index,
+        }
     }
 
     pub async fn run(
         &self,
-        split_index: usize,
         iter: impl HummockIterator<Direction = Forward>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
-        self.compactor
-            .compact_key_range_impl(
-                split_index,
-                iter,
-                dummy_compaction_filter,
-                filter_key_extractor,
-            )
-            .await
+        let ssts = self
+            .compactor
+            .compact_key_range_impl(iter, dummy_compaction_filter, filter_key_extractor)
+            .await?;
+        Ok((self.split_index, ssts))
     }
 }
