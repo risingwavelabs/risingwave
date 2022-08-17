@@ -34,7 +34,7 @@ pub struct TableFunction {
     pub function_type: TableFunctionType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum TableFunctionType {
     Generate,
     Unnest,
