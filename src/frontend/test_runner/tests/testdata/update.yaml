@@ -8,7 +8,7 @@
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = true;
-  binder_error: 'Bind error: cannot cast type Boolean to Int32 in Assign context'
+  binder_error: 'Bind error: cannot cast type "boolean" to "integer" in Assign context'
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = v2 + 1;
