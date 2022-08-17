@@ -125,29 +125,14 @@ pub fn serialize(row: Row) -> Result<Vec<u8>> {
     Ok(res)
 }
 
-pub fn deserialize(
-    column_mapping: Arc<ColumnDescMapping>,
-    raw_key: impl AsRef<[u8]>,
-    value: impl AsRef<[u8]>,
-) -> Result<(VirtualNode, Vec<u8>, Row)> {
-    let raw_key = raw_key.as_ref();
-    if raw_key.len() < VIRTUAL_NODE_SIZE {
-        // vnode + cell_id
-        return Err(ErrorCode::InternalError(format!(
-            "corrupted key: {:?}",
-            Bytes::copy_from_slice(raw_key)
-        ))
-        .into());
-    }
-
-    let (vnode, key_bytes) = parse_raw_key_to_vnode_and_key(raw_key);
+pub fn deserialize(column_mapping: Arc<ColumnDescMapping>, value: impl AsRef<[u8]>) -> Result<Row> {
     let mut origin_row = deserialize_inner(&column_mapping.all_data_types, value.as_ref())?;
 
     let mut output_row = Vec::with_capacity(column_mapping.output_index.len());
     for col_idx in &column_mapping.output_index {
         output_row.push(origin_row.0[*col_idx].take());
     }
-    Ok((vnode, key_bytes.to_vec(), Row(output_row)))
+    Ok(Row(output_row))
 }
 
 fn deserialize_inner(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {

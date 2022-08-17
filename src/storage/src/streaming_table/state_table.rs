@@ -21,6 +21,7 @@ use bytes::BufMut;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
@@ -33,7 +34,7 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
-use crate::error::{StorageError, StorageResult};
+use crate::{error::{StorageError, StorageResult}, keyspace::StripPrefixIterator};
 use crate::row_serde::row_serde_util::{deserialize, serialize, serialize_pk};
 use crate::row_serde::ColumnDescMapping;
 use crate::storage_value::StorageValue;
@@ -295,16 +296,12 @@ impl<S: StateStore> StateTable<S> {
         match mem_table_res {
             Some(row_op) => match row_op {
                 RowOp::Insert(row_bytes) => {
-                    let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
-                        .map_err(err)?
-                        .2;
+                    let row = deserialize(self.mapping.clone(), row_bytes).map_err(err)?;
                     Ok(Some(row))
                 }
                 RowOp::Delete(_) => Ok(None),
                 RowOp::Update((_, row_bytes)) => {
-                    let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
-                        .map_err(err)?
-                        .2;
+                    let row = deserialize(self.mapping.clone(), row_bytes).map_err(err)?;
                     Ok(Some(row))
                 }
             },
@@ -323,9 +320,7 @@ impl<S: StateStore> StateTable<S> {
                     )
                     .await?
                 {
-                    let row = deserialize(self.mapping.clone(), &serialized_pk, &storage_row_bytes)
-                        .map_err(err)?
-                        .2;
+                    let row = deserialize(self.mapping.clone(), storage_row_bytes).map_err(err)?;
                     Ok(Some(row))
                 } else {
                     Ok(None)
@@ -428,11 +423,31 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let storage_table_iter = self
-            .keyspace
-            .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
+        let read_options = self.get_read_option(epoch);
+        let pk_prefix_indices = (0..pk_prefix.size())
+            .into_iter()
+            .map(|index| self.pk_indices[index])
+            .collect_vec();
+        let prefix_hint = if self.dist_key_indices.is_empty()
+            || self.dist_key_indices != pk_prefix_indices
+        {
+            trace!(
+                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                self.keyspace.table_id(),
+                pk_prefix,
+                self.dist_key_indices,
+                pk_prefix_indices
+            );
+            None
+        } else {
+            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+            Some(serialized_pk_prefix)
+        };
+        let storage_table_iter =  self.keyspace
+            .iter_with_range(prefix_hint, .., read_options)
             .await?;
-
+  
         let mem_table_iter = {
             let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
             let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
@@ -440,16 +455,25 @@ impl<S: StateStore> StateTable<S> {
             self.mem_table.iter(encoded_key_range)
         };
 
-        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
+        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter, self.mapping).into_stream())
+    }
+
+    fn get_read_option(&self, epoch: u64) -> ReadOptions {
+        ReadOptions {
+            epoch,
+            table_id: Some(self.keyspace.table_id()),
+            retention_seconds: self.table_option.retention_seconds,
+        }
     }
 }
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Row>>;
 pub type RowBasedRowStream<'a, S> = RowStream<'a, S>;
 
-struct StateTableRowIter<'a, M, C> {
+struct StateTableRowIter<M, C> {
     mem_table_iter: M,
-    storage_table_iter: C,
+    state_store_iter: C,
+    
     _phantom: PhantomData<&'a ()>,
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
@@ -457,15 +481,15 @@ struct StateTableRowIter<'a, M, C> {
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
 /// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
-impl<'a, M, C> StateTableRowIter<'a, M, C>
+impl<'a, M, C> StateTableRowIter<'a,  M, C>
 where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, storage_table_iter: C, mapping:  Arc<ColumnDescMapping>) -> Self {
+    fn new(mem_table_iter: M, state_store_iter: StripPrefixIterator<S::Iter>, mapping: Arc<ColumnDescMapping>) -> Self {
         Self {
             mem_table_iter,
-            storage_table_iter,
+            state_store_iter,
             _phantom: PhantomData,
             mapping,
         }
@@ -478,20 +502,20 @@ where
     /// `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok =  Row, error = StorageError)]
     async fn into_stream(self) {
-        let storage_table_iter = self.storage_table_iter.fuse().peekable();
-        pin_mut!(storage_table_iter);
+        let state_store_iter = self.state_store_iter.fuse().peekable();
+        pin_mut!(state_store_iter);
 
         let mut mem_table_iter = self.mem_table_iter.fuse().peekable();
 
         loop {
             match (
-                storage_table_iter.as_mut().peek().await,
+                state_store_iter.as_mut().peek().await,
                 mem_table_iter.peek(),
             ) {
                 (None, None) => break,
                 // The mem table side has come to an end, return data from the shared storage.
                 (Some(_), None) => {
-                    let (_, row) = storage_table_iter.next().await.unwrap()?;
+                    let (_, row) = state_store_iter.next().await.unwrap()?;
                     yield row
                 }
                 // The stream side has come to an end, return data from the mem table.
@@ -499,9 +523,7 @@ where
                     let (_, row_op) = mem_table_iter.next().unwrap();
                     match row_op {
                         RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
-                            let row = deserialize(self.mapping.clone(), serialized_pk, row_bytes)
-                                .map_err(err)?
-                                .2;
+                            let row = deserialize(self.mapping.clone(), row_bytes).map_err(err)?;
                             yield row
                         }
                         _ => {}
@@ -511,7 +533,7 @@ where
                     match storage_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
                             // yield data from storage table
-                            let (_, row) = storage_table_iter.next().await.unwrap()?;
+                            let (_, row) = state_store_iter.next().await.unwrap()?;
                             yield row;
                         }
                         Ordering::Equal => {
@@ -519,14 +541,20 @@ where
                             // iterators and return the data in memory.
                             let (_, row_op) = mem_table_iter.next().unwrap();
                             let (_, old_row_in_storage) =
-                                storage_table_iter.next().await.unwrap()?;
+                            state_store_iter.next().await.unwrap()?;
                             match row_op {
-                                RowOp::Insert(row) => {
+                                RowOp::Insert(row_bytes) => {
+                                    let row = deserialize(self.mapping.clone(), row_bytes)
+                                        .map_err(err)?;
                                     yield row;
                                 }
                                 RowOp::Delete(_) => {}
-                                RowOp::Update((old_row, new_row)) => {
-                                    debug_assert!(old_row == &old_row_in_storage);
+                                RowOp::Update((old_row_bytes, new_row_bytes)) => {
+                                    let old_row = deserialize(self.mapping.clone(), old_row_bytes)
+                                        .map_err(err)?;
+                                    let new_row = deserialize(self.mapping.clone(), new_row_bytes)
+                                        .map_err(err)?;
+                                    debug_assert!(old_row == old_row_in_storage);
                                     yield new_row;
                                 }
                             }
@@ -535,7 +563,9 @@ where
                             // yield data from mem table
                             let (_, row_op) = mem_table_iter.next().unwrap();
                             match row_op {
-                                RowOp::Insert(row) => {
+                                RowOp::Insert(row_bytes) => {
+                                    let row = deserialize(self.mapping.clone(), row_bytes)
+                                        .map_err(err)?;
                                     yield row;
                                 }
                                 RowOp::Delete(_) => {}
@@ -548,7 +578,7 @@ where
                 }
                 (Some(Err(_)), Some(_)) => {
                     // Throw the error.
-                    return Err(storage_table_iter.next().await.unwrap().unwrap_err());
+                    return Err(state_store_iter.next().await.unwrap().unwrap_err());
                 }
             }
         }
