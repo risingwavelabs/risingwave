@@ -272,6 +272,8 @@ risedev:
       id: compactor-0
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-source-0}
+      max-concurrent-task-number: 15
+      compaction-worker-threads-number: 15
 
     - use: redpanda
       address: ${dns-host:rw-source-0}
@@ -568,6 +570,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    # Hint used by meta node
+    max-concurrent-task-number: 15
 
   grafana:
     # Listen address of Grafana

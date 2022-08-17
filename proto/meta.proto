@@ -76,6 +76,7 @@ message FlushRequest {}
 
 message FlushResponse {
   common.Status status = 1;
+  hummock.HummockSnapshot snapshot = 2;
 }
 
 message ListTableFragmentsRequest {
@@ -167,6 +168,7 @@ message MetaSnapshot {
   repeated user.UserInfo users = 8;
   hummock.HummockVersion hummock_version = 9;
   repeated common.ParallelUnitMapping parallel_unit_mappings = 10;
+  hummock.HummockSnapshot hummock_snapshot = 11;
 }
 
 message SubscribeResponse {

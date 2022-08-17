@@ -12,11 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! # Index selection cost matrix
+//!
+//! |`column_idx`| 0   |  1 | 2  | 3  | 4  | remark |
+//! |-----------|-----|----|----|----|----|---|
+//! |Equal      | 1   | 1  | 1  | 1  | 1  | |
+//! |In         | 10  | 8  | 5  | 5  | 5  | take the minimum value with actual in number |
+//! |Range      | 500 | 50 | 20 | 10 | 10 | |
+//! |All        |10000| 100| 30 | 20 | 10 | |
+//!
+//! ```text
+//! index cost = cost(match type of 0 idx)
+//! * cost(match type of 1 idx)
+//! * ... cost(match type of the last idx)
+//! ```
+//!
+//! ## Example
+//!
+//! Given index order key (a, b, c)
+//!
+//! - For `a = 1 and b = 1 and c = 1`, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
+//! - For `a in (xxx) and b = 1 and c = 1`, its cost is In0 * Equal1 * Equal2 = 10
+//! - For `a = 1 and b in (xxx)`, its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
+//! - For `a between xxx and yyy`, its cost is Range0 = 500
+//! - For `a = 1 and b between xxx and yyy`, its cost is Equal0 * Range1 = 50
+//! - For `a = 1`, its cost is 100 = Equal0 * All1 = 100
+//! - For no condition, its cost is All0 = 10000
+//!
+//! With the assumption that the most effective part of a index is its prefix,
+//! cost decreases as `column_idx` increasing.
+//!
+//! For index order key length > 5, we just ignore the rest.
+
 use std::cmp::min;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
@@ -31,36 +62,6 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
-/// index selection cost matrix
-///
-/// `column_idx`  0    1     2    3    4
-///
-/// Equal      | 1  | 1  | 1  | 1  | 1  |
-///
-/// In         | 10 | 8  | 5  | 5  | 5  |    // take the minimum value with actual in number
-///
-/// Range      | 500| 50 | 20 | 10 | 10 |
-///
-/// All        |10000| 100| 30 | 20 | 10 |
-///
-/// total cost = cost(match type of 0 idx)
-///             * cost(match type of 1 idx)
-///             * ... cost(match type of the last idx)
-///
-/// For Example:
-/// index order key (a, b, c)
-/// for a = 1 and b = 1 and c = 1, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
-/// for a in (xxx) and b = 1 and c = 1, its cost is In0 * Equal1 * Equal2 = 10
-/// for a = 1 and b in (xxx), its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
-/// for a between xxx and yyy, its cost is Range0 = 500
-/// for a = 1 and b between xxx and yyy, its cost is Equal0 * Range1 = 50
-/// for a = 1, its cost is 100 = Equal0 * All1 = 100
-/// for no condition, its cost is All0 = 10000
-///
-/// With the assumption that the most effective part of a index is its prefix,
-/// cost decreases as `column_idx` increasing.
-/// for index order key length > 5, we just ignore the rest.
-
 const INDEX_MAX_LEN: usize = 5;
 const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
     [1, 1, 1, 1, 1],
@@ -71,6 +72,7 @@ const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
 const LOOKUP_COST_CONST: usize = 3;
 
 pub struct IndexSelectionRule {}
+
 impl Rule for IndexSelectionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_scan: &LogicalScan = plan.as_logical_scan()?;
@@ -104,17 +106,11 @@ impl Rule for IndexSelectionRule {
                 }
             } else {
                 // non-covering index selection
-                // only enable non-covering index selection when lookup join is enabled
-                let config = logical_scan.base.ctx.inner().session_ctx.config();
-                if config.get_batch_enable_lookup_join()
-                    && config.get_query_mode() == QueryMode::Local
-                {
-                    let (index_lookup, lookup_cost) =
-                        self.gen_index_lookup(logical_scan, index, p2s_mapping);
-                    if lookup_cost.le(&min_cost) {
-                        min_cost = lookup_cost;
-                        final_plan = index_lookup;
-                    }
+                let (index_lookup, lookup_cost) =
+                    self.gen_index_lookup(logical_scan, index, p2s_mapping);
+                if lookup_cost.le(&min_cost) {
+                    min_cost = lookup_cost;
+                    final_plan = index_lookup;
                 }
             }
         }

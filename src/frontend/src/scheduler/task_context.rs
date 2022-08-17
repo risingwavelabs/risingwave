@@ -64,7 +64,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         todo!()
     }
 
-    fn stats(&self) -> Arc<BatchMetrics> {
-        todo!()
+    fn stats(&self) -> Option<Arc<BatchMetrics>> {
+        None
     }
 }
