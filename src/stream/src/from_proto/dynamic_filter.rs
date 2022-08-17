@@ -75,7 +75,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             state_table_l,
             state_table_r,
             is_right_table_writer,
-            params.actor_id as u64,
+            params.actor_id,
             params.executor_stats,
         )))
     }

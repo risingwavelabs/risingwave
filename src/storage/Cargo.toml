@@ -74,7 +74,6 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 twox-hash = "1"
-value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 

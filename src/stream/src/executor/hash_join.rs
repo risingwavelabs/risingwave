@@ -38,6 +38,7 @@ use super::{
 };
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
+use crate::task::ActorId;
 
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
@@ -203,7 +204,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
 
-    actor_id: u64,
+    actor_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -387,7 +388,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         params_r: JoinParams,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
-        actor_id: u64,
+        actor_id: ActorId,
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
@@ -579,6 +580,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.side_l.ht.update_epoch(epoch);
                     self.side_r.ht.update_epoch(epoch);
                     self.epoch = epoch;
+
+                    // Update the vnode bitmap for state tables of both sides if asked.
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
+                        self.side_l
+                            .ht
+                            .state_table
+                            .update_vnode_bitmap(vnode_bitmap.clone());
+                        self.side_r.ht.state_table.update_vnode_bitmap(vnode_bitmap);
+                    }
+
                     yield Message::Barrier(barrier);
                 }
             }

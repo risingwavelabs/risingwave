@@ -27,21 +27,18 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
-use super::{
-    expect_first_barrier, pk_input_arrays, ActorContextRef, Executor, PkIndicesRef,
-    StreamExecutorResult,
-};
+use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
-    agg_input_arrays, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
+    generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
+use crate::task::ActorId;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -62,6 +59,9 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
 }
 
 struct HashAggExecutorExtra<S: StateStore> {
+    /// The id of the actor that this executor belongs to.
+    actor_id: ActorId,
+
     ctx: ActorContextRef,
 
     /// See [`Executor::schema`].
@@ -118,6 +118,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
+        actor_id: ActorId,
         executor_id: u64,
         key_indices: Vec<usize>,
         mut state_tables: Vec<RowBasedStateTable<S>>,
@@ -134,6 +135,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
+                actor_id,
                 ctx,
                 schema,
                 pk_indices,
@@ -206,6 +208,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     async fn apply_chunk(
         HashAggExecutorExtra::<S> {
+            actor_id: _,
             ref ctx,
             ref identity,
             ref key_indices,
@@ -228,6 +231,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
+        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,
@@ -236,20 +240,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // --- Find unique keys in this batch and generate visibility map for each key ---
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
         let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)?;
-
-        // --- Retrieve all aggregation inputs in advance ---
-        // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
-        let all_agg_input_arrays = agg_input_arrays(agg_calls, &columns);
-        let pk_input_arrays = pk_input_arrays(input_pk_indices, &columns);
-
-        // When applying batch, we will send columns of primary keys to the last N columns.
-        let all_agg_data = all_agg_input_arrays
-            .into_iter()
-            .map(|mut input_arrays| {
-                input_arrays.extend(pk_input_arrays.iter().cloned());
-                input_arrays
-            })
-            .collect_vec();
 
         let key_data_types = &schema.data_types()[..key_indices.len()];
         let mut futures = vec![];
@@ -301,11 +291,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (key, _, vis_map) in &unique_keys {
             let state = state_map.get_mut(key).unwrap().as_mut().unwrap();
             // 3. Apply batch to each of the state (per agg_call)
-            for (((agg_state, agg_call), data), state_table) in state
+            for ((agg_state, agg_call), state_table) in state
                 .managed_states
                 .iter_mut()
                 .zip_eq(agg_calls.iter())
-                .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
                 let vis_map = agg_call_filter_res(
@@ -316,22 +305,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Some(vis_map),
                     capacity,
                 )?;
-                // TODO(yuchao): make this work for all agg kinds in later PR
-                if matches!(agg_call.kind, AggKind::StringAgg)
-                    || (matches!(agg_call.kind, AggKind::Min | AggKind::Max)
-                        && !agg_call.append_only)
-                {
-                    let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
-                    agg_state
-                        .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
-                        .await?;
-                } else {
-                    // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
-                    let data = data.iter().map(|d| &**d).collect_vec();
-                    agg_state
-                        .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
-                        .await?;
-                }
+                agg_state
+                    .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
+                    .await?;
             }
         }
 
@@ -463,6 +439,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         yield Message::Chunk(chunk?);
                     }
 
+                    // Update the vnode bitmap for state tables of all agg calls if asked.
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.actor_id) {
+                        for state_table in &mut extra.state_tables {
+                            state_table.update_vnode_bitmap(vnode_bitmap.clone());
+                        }
+                    }
+
                     yield Message::Barrier(barrier);
                     epoch = next_epoch;
                 }
@@ -473,8 +456,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
-
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
@@ -482,51 +463,16 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema, TableId};
-    use risingwave_common::error::Result;
-    use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+    use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::RowBasedStateTable;
-    use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::create_state_table;
     use crate::executor::test_utils::*;
-    use crate::executor::{
-        ActorContext, ActorContextRef, Executor, HashAggExecutor, Message, PkIndices,
-    };
-
-    struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
-
-    struct HashAggExecutorDispatcherArgs<S: StateStore> {
-        ctx: ActorContextRef,
-        input: Box<dyn Executor>,
-        agg_calls: Vec<AggCall>,
-        key_indices: Vec<usize>,
-        pk_indices: PkIndices,
-        executor_id: u64,
-        state_tables: Vec<RowBasedStateTable<S>>,
-        state_table_col_mappings: Vec<Vec<usize>>,
-    }
-
-    impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
-        type Input = HashAggExecutorDispatcherArgs<S>;
-        type Output = Result<Box<dyn Executor>>;
-
-        fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-            Ok(Box::new(HashAggExecutor::<K, S>::new(
-                args.ctx,
-                args.input,
-                args.agg_calls,
-                args.pk_indices,
-                args.executor_id,
-                args.key_indices,
-                args.state_tables,
-                args.state_table_col_mappings,
-            )?))
-        }
-    }
+    use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
+    use crate::task::ActorId;
 
     fn new_boxed_hash_agg_executor(
         input: Box<dyn Executor>,
@@ -536,10 +482,6 @@ mod tests {
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let keys = key_indices
-            .iter()
-            .map(|idx| input.schema().fields[*idx].data_type())
-            .collect_vec();
         let (state_tables, state_table_col_mappings) = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
@@ -555,18 +497,19 @@ mod tests {
             })
             .unzip();
 
-        let args = HashAggExecutorDispatcherArgs {
-            ctx: ActorContext::create(),
+        HashAggExecutor::<SerializedKey, MemoryStateStore>::new(
+            ActorContext::create(),
             input,
             agg_calls,
-            key_indices,
             pk_indices,
+            ActorId::default(),
             executor_id,
+            key_indices,
             state_tables,
             state_table_col_mappings,
-        };
-        let kind = calc_hash_key_kind(&keys);
-        HashAggExecutorDispatcher::dispatch_by_kind(kind, args).unwrap()
+        )
+        .unwrap()
+        .boxed()
     }
 
     // --- Test HashAgg with in-memory KeyedState ---

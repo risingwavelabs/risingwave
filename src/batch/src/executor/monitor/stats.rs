@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_with_registry, Histogram, Registry,
+    exponential_buckets, histogram_opts, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, Histogram, Registry,
 };
 
 pub struct BatchMetrics {
     pub row_seq_scan_next_duration: Histogram,
+    pub exchange_recv_row_number: GenericCounterVec<AtomicU64>,
 }
 
 impl BatchMetrics {
@@ -29,8 +32,23 @@ impl BatchMetrics {
         );
         let row_seq_scan_next_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
+            "batch_exchange_recv_row_number",
+            "Total number of row that have been received from upstream source",
+            &[
+                "query_id",
+                "source_stage_id",
+                "target_stage_id",
+                "source_task_id",
+                "target_task_id"
+            ],
+            registry
+        )
+        .unwrap();
+
         Self {
             row_seq_scan_next_duration,
+            exchange_recv_row_number,
         }
     }
 

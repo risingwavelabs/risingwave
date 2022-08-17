@@ -319,6 +319,51 @@
   planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
     SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
 - sql: |
+    /* uncorrelated subquery in HAVING */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    create table c (c1 int, c2 int);
+    select 1 from a having exists (
+      select 1 from b where exists (
+        select b1 from c
+      )
+    );
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32] }
+      LogicalJoin { type: LeftSemi, on: true, output: all }
+        LogicalAgg { aggs: [] }
+          LogicalProject { exprs: [] }
+            LogicalScan { table: a, columns: [a._row_id, a.a1, a.a2] }
+        LogicalProject { exprs: [1:Int32] }
+          LogicalApply { type: LeftSemi, on: true, correlated_id: 2 }
+            LogicalScan { table: b, columns: [b._row_id, b.b1, b.b2] }
+            LogicalProject { exprs: [CorrelatedInputRef { index: 1, correlated_id: 2 }] }
+              LogicalScan { table: c, columns: [c._row_id, c.c1, c.c2] }
+- sql: |
+    /* correlated column with depth=2 in HAVING */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    create table c (c1 int, c2 int);
+    select 1 from a having exists (
+      select 1 from b where exists (
+        select a1 from c
+      )
+    );
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
+    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
+    /* correlated column with depth>1 in HAVING */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    create table c (c1 int, c2 int);
+    select 1 from a where exists (
+      select 1 from b having exists (
+        select a1 from c
+      )
+    );
+  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
+    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+- sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     select t2.x, (select x from t1 where t1.y = t2.y) from t2 where x > 100 order by t2.x limit 100;

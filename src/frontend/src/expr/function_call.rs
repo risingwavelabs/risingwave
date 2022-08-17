@@ -217,7 +217,7 @@ impl FunctionCall {
             .into())
         } else {
             Err(ErrorCode::BindError(format!(
-                "cannot cast type {:?} to {:?} in {:?} context",
+                "cannot cast type \"{}\" to \"{}\" in {:?} context",
                 source, target, allows
             ))
             .into())
