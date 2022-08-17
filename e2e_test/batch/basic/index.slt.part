@@ -27,14 +27,6 @@ select v1,v2 from t1 where v2 = 4;
 3 4
 
 statement ok
-update t1 set v2 = 100 where v1 = 1;
-
-query II
-select v1,v2 from t1 where v1 = 1;
-----
-1 100
-
-statement ok
 delete from t1 where v1 = 1;
 
 query II
