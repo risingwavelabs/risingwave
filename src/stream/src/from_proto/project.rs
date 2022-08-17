@@ -34,9 +34,13 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             .map(build_from_prost)
             .try_collect()?;
 
-        Ok(
-            ProjectExecutor::new(input, params.pk_indices, project_exprs, params.executor_id)
-                .boxed(),
+        Ok(ProjectExecutor::new(
+            params.actor_context,
+            input,
+            params.pk_indices,
+            project_exprs,
+            params.executor_id,
         )
+        .boxed())
     }
 }

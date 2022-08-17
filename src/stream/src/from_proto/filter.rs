@@ -30,6 +30,12 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let search_condition = build_from_prost(node.get_search_condition()?)?;
 
-        Ok(FilterExecutor::new(input, search_condition, params.executor_id).boxed())
+        Ok(FilterExecutor::new(
+            params.actor_context,
+            input,
+            search_condition,
+            params.executor_id,
+        )
+        .boxed())
     }
 }

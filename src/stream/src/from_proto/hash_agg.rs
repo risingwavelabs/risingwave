@@ -22,12 +22,13 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use super::agg_call::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
-use crate::executor::{HashAggExecutor, PkIndices};
+use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
 use crate::task::ActorId;
 
-struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
+pub struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
-struct HashAggExecutorDispatcherArgs<S: StateStore> {
+pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
+    ctx: ActorContextRef,
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
@@ -44,6 +45,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(HashAggExecutor::<K, S>::new(
+            args.ctx,
             args.input,
             args.agg_calls,
             args.pk_indices,
@@ -94,6 +96,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             generate_state_tables_from_proto(store, &node.internal_tables, Some(vnodes.into()));
 
         let args = HashAggExecutorDispatcherArgs {
+            ctx: params.actor_context,
             input,
             agg_calls,
             key_indices,

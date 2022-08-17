@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod builder;
-pub use builder::*;
+use risingwave_rpc_client::HummockMetaClient;
 
-mod column_mapping;
-pub use column_mapping::*;
+use crate::common::MetaServiceOpts;
 
-mod infallible_expr;
-pub use infallible_expr::*;
+pub async fn trigger_full_gc(sst_retention_time_sec: u64) -> anyhow::Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta_client = meta_opts.create_meta_client().await?;
+    let result = meta_client.trigger_full_gc(sst_retention_time_sec).await;
+    println!("{:#?}", result);
+    Ok(())
+}

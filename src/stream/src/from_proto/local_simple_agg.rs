@@ -34,9 +34,13 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
 
-        Ok(
-            LocalSimpleAggExecutor::new(input, agg_calls, params.pk_indices, params.executor_id)?
-                .boxed(),
-        )
+        Ok(LocalSimpleAggExecutor::new(
+            params.actor_context,
+            input,
+            agg_calls,
+            params.pk_indices,
+            params.executor_id,
+        )?
+        .boxed())
     }
 }
