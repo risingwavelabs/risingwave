@@ -19,14 +19,13 @@ pub struct ChainExecutorBuilder;
 
 impl ExecutorBuilder for ChainExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Chain)?;
-        let snapshot = params.input.remove(1);
-        let mview = params.input.remove(0);
+        let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
 
         let upstream_indices: Vec<usize> = node
             .upstream_column_indices

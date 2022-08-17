@@ -21,12 +21,13 @@ pub struct ProjectExecutorBuilder;
 
 impl ExecutorBuilder for ProjectExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Project)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let project_exprs: Vec<_> = node
             .get_select_list()
             .iter()
@@ -35,7 +36,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
 
         Ok(ProjectExecutor::new(
             params.actor_context,
-            params.input.remove(0),
+            input,
             params.pk_indices,
             project_exprs,
             params.executor_id,
