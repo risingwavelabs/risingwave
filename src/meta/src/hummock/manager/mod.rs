@@ -217,9 +217,6 @@ where
                 }
                 for (context_id, mut task) in compactor_manager.get_timed_out_tasks() {
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
-                        // If the compactor is functioning correctly, this will eventually attempt
-                        // to report task as failed as well. But we are ok
-                        // with this as task reporting is idempotent.
                         let _ = compactor.cancel_task(task.task_id).await;
                     }
 
