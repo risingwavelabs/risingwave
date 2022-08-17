@@ -222,13 +222,13 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
+    pub fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.clone();
 
         self.build_block()?;
         let size_footer = self.block_metas.len() as u32;
-        let (data_len, writer_output) = self.writer.finish(size_footer).await?;
+        let (data_len, writer_output) = self.writer.finish(size_footer)?;
         assert!(!smallest_key.is_empty());
 
         let meta = SstableMeta {
@@ -312,7 +312,7 @@ pub(super) mod tests {
 
         let b = SstableBuilder::new_for_test(0, default_sst_writer_from_opt(&opt), opt);
 
-        b.finish().await.unwrap();
+        b.finish().unwrap();
     }
 
     #[tokio::test]
@@ -325,7 +325,7 @@ pub(super) mod tests {
                 .unwrap();
         }
 
-        let output = b.finish().await.unwrap();
+        let output = b.finish().unwrap();
         let meta = output.meta;
 
         assert_eq!(test_key_of(0), meta.smallest_key);

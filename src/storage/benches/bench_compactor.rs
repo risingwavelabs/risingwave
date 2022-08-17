@@ -83,7 +83,7 @@ async fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, 
             .add(&full_key, HummockValue::put(&value[start..end]))
             .unwrap();
     }
-    let output = builder.finish().await.unwrap();
+    let output = builder.finish().unwrap();
     (output.writer_output, output.meta)
 }
 

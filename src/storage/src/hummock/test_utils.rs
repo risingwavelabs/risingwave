@@ -103,7 +103,7 @@ pub fn default_sst_writer_from_opt(opt: &SstableBuilderOptions) -> InMemSstableW
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
-pub async fn gen_test_sstable_data(
+pub fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta, Vec<u32>) {
@@ -111,7 +111,7 @@ pub async fn gen_test_sstable_data(
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).unwrap();
     }
-    let output = b.finish().await.unwrap();
+    let output = b.finish().unwrap();
     (output.writer_output, output.meta, output.table_ids)
 }
 
@@ -123,7 +123,7 @@ pub async fn gen_test_sstable_inner(
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
 ) -> Sstable {
-    let (data, meta, _) = gen_test_sstable_data(opts, kv_iter).await;
+    let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
     let sst = Sstable::new(sst_id, meta.clone());
     sstable_store
         .put_sst(sst_id, meta, data, policy)

@@ -240,7 +240,7 @@ where
     /// will be no-op.
     pub async fn seal_current(&mut self) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.take() {
-            let builder_output = builder.finish().await?;
+            let builder_output = builder.finish()?;
 
             let meta = &builder_output.meta;
 
