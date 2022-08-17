@@ -37,8 +37,7 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
-use crate::common::StreamChunkBuilder;
-use crate::executor::infallible_expr::InfallibleExpression;
+use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 use crate::task::ActorId;
 

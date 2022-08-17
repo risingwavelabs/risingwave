@@ -20,11 +20,11 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
-use super::infallible_expr::InfallibleExpression;
 use super::{
     ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor,
     SimpleExecutorWrapper, StreamExecutorResult,
 };
+use crate::common::InfallibleExpression;
 
 pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
 

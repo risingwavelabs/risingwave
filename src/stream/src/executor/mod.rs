@@ -46,7 +46,6 @@ use crate::task::ActorId;
 mod actor;
 mod barrier_align;
 pub mod exchange;
-mod infallible_expr;
 pub mod monitor;
 
 pub mod aggregation;

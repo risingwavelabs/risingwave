@@ -24,7 +24,7 @@ use super::{
     ActorContextRef, Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
     StreamExecutorResult,
 };
-use crate::executor::infallible_expr::InfallibleExpression;
+use crate::common::InfallibleExpression;
 
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 

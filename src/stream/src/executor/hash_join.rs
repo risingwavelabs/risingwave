@@ -30,13 +30,12 @@ use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::infallible_expr::InfallibleExpression;
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
-use crate::common::StreamChunkBuilder;
+use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 use crate::task::ActorId;
 

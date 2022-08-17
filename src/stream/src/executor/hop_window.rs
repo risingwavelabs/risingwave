@@ -27,7 +27,7 @@ use risingwave_pb::expr::expr_node;
 
 use super::error::StreamExecutorError;
 use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor::infallible_expr::InfallibleExpression;
+use crate::common::InfallibleExpression;
 
 pub struct HopWindowExecutor {
     ctx: ActorContextRef,

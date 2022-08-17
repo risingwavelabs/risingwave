@@ -38,9 +38,8 @@ use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
-use super::infallible_expr::InfallibleExpression;
 use super::{ActorContextRef, PkIndices};
-use crate::common::StateTableColumnMapping;
+use crate::common::{InfallibleExpression, StateTableColumnMapping};
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
