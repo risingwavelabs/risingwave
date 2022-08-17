@@ -237,7 +237,7 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let actor_memory_usage = register!(
+        let actor_memory_usage = register_int_gauge_vec_with_registry!(
             "actor_memory_usage",
             "Memory usage (bytes)",
             &["actor_id"],

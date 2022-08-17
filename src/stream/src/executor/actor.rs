@@ -21,7 +21,6 @@ use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
-use stats_alloc::{LocalStatsAlloc, TASK_LOCAL_ALLOC};
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
