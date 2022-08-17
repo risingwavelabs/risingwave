@@ -12,41 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(allocator_api)]
+use std::alloc::{Allocator, Global};
+use std::cell::UnsafeCell;
 
-use std::alloc::Allocator;
-use std::ops::Deref;
-use std::sync::atomic::AtomicUsize;
-use std::sync::{atomic, Arc};
+use tokio::task_local;
 
-mod task_local;
-
-pub use task_local::*;
-
-pub struct StatsAlloc<T> {
-    bytes_in_use: AtomicUsize,
+pub struct LocalStatsAlloc<T> {
+    bytes_in_use: UnsafeCell<usize>,
 
     inner: T,
 }
 
-impl<T> StatsAlloc<T> {
+impl<T> LocalStatsAlloc<T> {
     pub fn new(inner: T) -> Self {
         Self {
-            bytes_in_use: AtomicUsize::new(0),
+            bytes_in_use: UnsafeCell::new(0),
             inner,
         }
     }
 
     pub fn bytes_in_use(&self) -> usize {
-        self.bytes_in_use.load(atomic::Ordering::Relaxed)
-    }
-
-    pub fn shared(self) -> SharedStatsAlloc<T> {
-        SharedStatsAlloc(Arc::new(self))
+        unsafe { *self.bytes_in_use.get() }
     }
 }
 
-unsafe impl<T> Allocator for StatsAlloc<T>
+unsafe impl<T> Allocator for LocalStatsAlloc<T>
 where
     T: Allocator,
 {
@@ -55,15 +45,15 @@ where
         &self,
         layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(layout.size(), atomic::Ordering::Relaxed);
+        unsafe {
+            *self.bytes_in_use.get() += layout.size();
+        }
         self.inner.allocate(layout)
     }
 
     #[inline(always)]
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        self.bytes_in_use
-            .fetch_sub(layout.size(), atomic::Ordering::Relaxed);
+        *self.bytes_in_use.get() -= layout.size();
         self.inner.deallocate(ptr, layout)
     }
 
@@ -72,8 +62,9 @@ where
         &self,
         layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(layout.size(), atomic::Ordering::Relaxed);
+        unsafe {
+            *self.bytes_in_use.get() += layout.size();
+        }
         self.inner.allocate_zeroed(layout)
     }
 
@@ -84,10 +75,8 @@ where
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
-        self.bytes_in_use
-            .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
+        *self.bytes_in_use.get() += new_layout.size();
+        *self.bytes_in_use.get() -= old_layout.size();
         self.inner.grow(ptr, old_layout, new_layout)
     }
 
@@ -98,10 +87,8 @@ where
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
-        self.bytes_in_use
-            .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
+        *self.bytes_in_use.get() += new_layout.size();
+        *self.bytes_in_use.get() -= old_layout.size();
         self.inner.grow_zeroed(ptr, old_layout, new_layout)
     }
 
@@ -112,73 +99,68 @@ where
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.bytes_in_use
-            .fetch_add(new_layout.size(), atomic::Ordering::Relaxed);
-        self.bytes_in_use
-            .fetch_sub(old_layout.size(), atomic::Ordering::Relaxed);
+        *self.bytes_in_use.get() += new_layout.size();
+        *self.bytes_in_use.get() -= old_layout.size();
         self.inner.shrink(ptr, old_layout, new_layout)
     }
 }
 
-pub struct SharedStatsAlloc<T>(Arc<StatsAlloc<T>>);
-
-impl<T> Clone for SharedStatsAlloc<T> {
-    fn clone(&self) -> Self {
-        SharedStatsAlloc(self.0.clone())
-    }
+task_local! {
+    pub static TASK_LOCAL_ALLOC: LocalStatsAlloc<Global>;
 }
 
-impl<T> Deref for SharedStatsAlloc<T> {
-    type Target = StatsAlloc<T>;
+#[derive(Clone, Copy)]
+pub struct TaskLocalAllocator;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-unsafe impl<T: Allocator> Allocator for SharedStatsAlloc<T> {
+unsafe impl Allocator for TaskLocalAllocator {
+    #[inline(always)]
     fn allocate(
         &self,
         layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.allocate(layout)
+        TASK_LOCAL_ALLOC.with(|alloc| alloc.allocate(layout))
     }
 
+    #[inline(always)]
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        self.0.deallocate(ptr, layout)
+        TASK_LOCAL_ALLOC.with(|alloc| alloc.deallocate(ptr, layout))
     }
 
+    #[inline(always)]
     fn allocate_zeroed(
         &self,
         layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.allocate_zeroed(layout)
+        TASK_LOCAL_ALLOC.with(|alloc| alloc.allocate_zeroed(layout))
     }
 
+    #[inline(always)]
     unsafe fn grow(
         &self,
         ptr: std::ptr::NonNull<u8>,
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.grow(ptr, old_layout, new_layout)
+        TASK_LOCAL_ALLOC.with(|alloc| alloc.grow(ptr, old_layout, new_layout))
     }
 
+    #[inline(always)]
     unsafe fn grow_zeroed(
         &self,
         ptr: std::ptr::NonNull<u8>,
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.grow_zeroed(ptr, old_layout, new_layout)
+        TASK_LOCAL_ALLOC.with(|alloc| alloc.grow_zeroed(ptr, old_layout, new_layout))
     }
 
+    #[inline(always)]
     unsafe fn shrink(
         &self,
         ptr: std::ptr::NonNull<u8>,
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        self.0.shrink(ptr, old_layout, new_layout)
+        TASK_LOCAL_ALLOC.with(|alloc| alloc.shrink(ptr, old_layout, new_layout))
     }
 }

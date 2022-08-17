@@ -5916,6 +5916,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stats_alloc"
 version = "0.1.11"
 dependencies = [
+ "madsim-tokio",
  "workspace-hack",
 ]
 

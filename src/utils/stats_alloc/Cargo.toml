@@ -7,5 +7,13 @@ description = "Allocator with statistics"
 
 [dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 
 [dev-dependencies]

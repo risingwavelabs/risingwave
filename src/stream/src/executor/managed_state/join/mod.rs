@@ -13,7 +13,6 @@
 // limitations under the License.
 
 mod join_entry_state;
-use std::alloc::Global;
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
@@ -29,7 +28,7 @@ use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
-use stats_alloc::{SharedStatsAlloc, StatsAlloc};
+use stats_alloc::TaskLocalAllocator;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::monitor::StreamingMetrics;
@@ -155,7 +154,7 @@ pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
 type JoinHashMapInner<K> =
-    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, TaskLocalAllocator>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -194,9 +193,6 @@ impl JoinHashMapMetrics {
 }
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
-    /// Allocator
-    #[expect(dead_code)]
-    alloc: SharedStatsAlloc<Global>,
     /// Store the join states.
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
     // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
@@ -233,28 +229,19 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .map(|idx| data_types[*idx].clone())
             .collect_vec();
 
-        let alloc = StatsAlloc::new(Global).shared();
         Self {
             inner: EvictableHashMap::with_hasher_in(
                 target_cap,
                 PrecomputedBuildHasher,
-                alloc.clone(),
+                TaskLocalAllocator,
             ),
             join_key_data_types,
             col_data_types: data_types,
             pk_indices,
             current_epoch: 0,
             state_table,
-            alloc,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
-    }
-
-    #[expect(dead_code)]
-    /// Report the bytes used by the join map.
-    // FIXME: Currently, only memory used in the hash map itself is counted.
-    pub fn bytes_in_use(&self) -> usize {
-        self.alloc.bytes_in_use()
     }
 
     pub fn update_epoch(&mut self, epoch: u64) {
