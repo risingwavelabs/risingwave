@@ -77,10 +77,7 @@ where
             .flat_map(|(worker_id, actors)| {
                 actors.iter().map(|&actor_id| {
                     let host = host_map.get(worker_id).cloned().unwrap_or_default();
-                    ActorInfo {
-                        actor_id,
-                        host,
-                    }
+                    ActorInfo { actor_id, host }
                 })
             })
             .collect()
