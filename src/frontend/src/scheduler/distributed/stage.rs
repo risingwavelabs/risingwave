@@ -94,7 +94,7 @@ struct TaskStatusHolder {
 
 pub struct StageExecution {
     epoch: u64,
-    stage: QueryStageRef,
+    pub(crate) stage: QueryStageRef,
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
@@ -103,7 +103,7 @@ pub struct StageExecution {
     /// Children stage executions.
     ///
     /// We use `Vec` here since children's size is usually small.
-    children: Vec<Arc<StageExecution>>,
+    pub(crate) children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
 }
@@ -231,7 +231,8 @@ impl StageExecution {
     ///
     /// When this method is called, all tasks should have been scheduled, and their `worker_node`
     /// should have been set.
-    fn all_exchange_sources_for(&self, output_id: u32) -> Vec<ExchangeSource> {
+    pub fn all_exchange_sources_for(&self, output_id: u32) -> Vec<ExchangeSource> {
+        println!("get source exchange for self.stage.id {:?}", self.stage.id);
         self.tasks
             .iter()
             .map(|(task_id, status_holder)| {

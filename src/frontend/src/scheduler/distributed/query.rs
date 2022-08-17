@@ -18,18 +18,32 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
+use risingwave_common::bail;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::{
+    ExchangeNode, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
+    TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst,
+};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
+use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_pb::common::HostAddress;
+use std::default::Default;
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
+use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
-use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
+use crate::scheduler::plan_fragmenter::{
+    ExecutionPlanNode, Query, StageId, TaskId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID,
+};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
     ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError, SchedulerResult,
@@ -100,7 +114,6 @@ impl QueryExecution {
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
-
         let stage_executions = {
             let mut stage_executions: HashMap<StageId, Arc<StageExecution>> =
                 HashMap::with_capacity(query.stage_graph.stages.len());
@@ -209,6 +222,11 @@ impl QueryExecution {
 
 impl QueryRunner {
     async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>) {
+        if self.query.stage_graph.stages.len() == 1 {
+            self.send_root_stage_info().await;
+            return Ok(());
+        }
+
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -241,8 +259,10 @@ impl QueryRunner {
                             .await;
                     }
 
-                    if self.scheduled_stages_count == self.stage_executions.len() {
-                        // Now all stages have been scheduled, send root stage info.
+                    // For root stage, we execute in frontend local. We will pass the root fragment
+                    // to QueryResultFetcher and execute to get a Chunk stream.
+                    if self.scheduled_stages_count == self.stage_executions.len() - 1 {
+                        // Now all non-root stages have been scheduled, send root stage info.
                         self.send_root_stage_info().await;
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
@@ -282,10 +302,7 @@ impl QueryRunner {
         }
     }
 
-    #[expect(clippy::unused_async)]
     async fn send_root_stage_info(&mut self) {
-        let root_task_status = self.stage_executions[&self.query.root_stage_id()]
-            .get_task_status_unchecked(ROOT_TASK_ID);
 
         let root_task_output_id = {
             let root_task_id_prost = TaskIdProst {
@@ -300,12 +317,18 @@ impl QueryRunner {
             }
         };
 
+        let root_fragment = self.create_plan_fragment();
+        let root_task_status = self.stage_executions[&self.query.root_stage_id()]
+            .get_task_status_unchecked(ROOT_TASK_ID);
         let root_stage_result = QueryResultFetcher::new(
             self.epoch,
             self.hummock_snapshot_manager.clone(),
             root_task_output_id,
-            root_task_status.task_host_unchecked(),
+            HostAddress {
+                ..Default::default()
+            },
             self.compute_client_pool.clone(),
+            Some(root_fragment),
         );
 
         // Consume sender here.
@@ -361,6 +384,86 @@ impl QueryRunner {
         for (_stage_id, stage_execution) in self.stage_executions.iter() {
             // The stop is return immediately so no need to spawn tasks.
             stage_execution.stop().await;
+        }
+    }
+
+    fn create_plan_fragment(&self) -> PlanFragment {
+        let root_stage_id = self.query.stage_graph.root_stage_id;
+        let root_stage = self.stage_executions.get(&root_stage_id).unwrap();
+        let plan_node_prost =
+            Self::convert_plan_node(root_stage, &root_stage.stage.root, ROOT_TASK_ID);
+        let exchange_info = root_stage.stage.exchange_info.clone();
+
+        PlanFragment {
+            root: Some(plan_node_prost),
+            exchange_info: Some(exchange_info),
+        }
+    }
+
+    fn convert_plan_node(
+        stage_execution: &StageExecution,
+        execution_plan_node: &ExecutionPlanNode,
+        task_id: TaskId,
+    ) -> PlanNodeProst {
+        match execution_plan_node.plan_node_type {
+            PlanNodeType::BatchExchange => {
+                // Find the stage this exchange node should fetch from and get all exchange sources.
+                let child_stage = stage_execution
+                    .children
+                    .iter()
+                    .find(|child_stage| {
+                        child_stage.stage.id == execution_plan_node.source_stage_id.unwrap()
+                    })
+                    .unwrap();
+                let exchange_sources = child_stage.all_exchange_sources_for(task_id);
+
+                match &execution_plan_node.node {
+                    NodeBody::Exchange(_exchange_node) => {
+                        PlanNodeProst {
+                            children: vec![],
+                            // TODO: Generate meaningful identify
+                            identity: Uuid::new_v4().to_string(),
+                            node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                sources: exchange_sources,
+                                input_schema: execution_plan_node.schema.clone(),
+                            })),
+                        }
+                    }
+                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => {
+                        PlanNodeProst {
+                            children: vec![],
+                            // TODO: Generate meaningful identify
+                            identity: Uuid::new_v4().to_string(),
+                            node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
+                                exchange: Some(ExchangeNode {
+                                    sources: exchange_sources,
+                                    input_schema: execution_plan_node.schema.clone(),
+                                }),
+                                column_orders: sort_merge_exchange_node.column_orders.clone(),
+                            })),
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            PlanNodeType::BatchSeqScan => {
+                unreachable!("Scan can not be the root fragment");
+            }
+            _ => {
+                let children = execution_plan_node
+                    .children
+                    .iter()
+                    // FIXME:
+                    .map(|e| Self::convert_plan_node(stage_execution, e, task_id))
+                    .collect();
+
+                PlanNodeProst {
+                    children,
+                    // TODO: Generate meaningful identify
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(execution_plan_node.node.clone()),
+                }
+            }
         }
     }
 }
