@@ -47,6 +47,7 @@ use crate::executor::{BoxedMessageStream, Message, PkIndices};
 pub struct GlobalSimpleAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     info: ExecutorInfo,
+    ctx: ActorContextRef,
 
     /// Pk indices from input
     input_pk_indices: Vec<usize>,
@@ -89,6 +90,7 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     pub fn new(
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
@@ -105,6 +107,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         }
 
         Ok(Self {
+            ctx,
             input,
             info: ExecutorInfo {
                 schema,
@@ -126,6 +129,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
     #[allow(clippy::too_many_arguments)]
     async fn apply_chunk(
+        ctx: &ActorContextRef,
+        identity: &str,
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
         _input_schema: &Schema,
@@ -165,7 +170,14 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .zip_eq(agg_calls.iter())
             .zip_eq(state_tables.iter_mut())
         {
-            let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
+            let vis_map = agg_call_filter_res(
+                ctx,
+                identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )?;
             agg_state
                 .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
                 .await?;
@@ -226,6 +238,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let GlobalSimpleAggExecutor {
+            ctx,
             input,
             info,
             input_pk_indices,
@@ -247,6 +260,8 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             match msg {
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
+                        &ctx,
+                        &info.identity,
                         &agg_calls,
                         &input_pk_indices,
                         &input_schema,
@@ -359,6 +374,7 @@ mod tests {
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(
+            ActorContext::create(),
             keyspace.clone(),
             Box::new(source),
             agg_calls,

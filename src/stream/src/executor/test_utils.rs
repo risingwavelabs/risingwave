@@ -164,7 +164,9 @@ pub mod agg_executor {
     use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::AggCall;
-    use crate::executor::{BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices};
+    use crate::executor::{
+        ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
+    };
 
     /// Create state table for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_internal_table_catalog`.
@@ -238,6 +240,7 @@ pub mod agg_executor {
     }
 
     pub fn new_boxed_simple_agg_executor(
+        ctx: ActorContextRef,
         keyspace_gen: Vec<(MemoryStateStore, TableId)>,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
@@ -262,6 +265,7 @@ pub mod agg_executor {
 
         Box::new(
             GlobalSimpleAggExecutor::new(
+                ctx,
                 input,
                 agg_calls,
                 pk_indices,
