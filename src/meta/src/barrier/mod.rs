@@ -272,17 +272,15 @@ where
         post_checkpoint: PostCheckpoint<S>,
     ) {
         for resp in resps {
-            resp
-                .synced_sstables
-                .iter()
-                .cloned()
-                .for_each(|grouped| {
-                    let sst = grouped.sst.expect("field not None");
-                    self.uncommitted_states
-                        .uncommitted_work_id
-                        .insert(sst.id, resp.worker_id);
-                    self.uncommitted_states.uncommitted_ssts.push((grouped.compaction_group_id, sst));
-                });
+            resp.synced_sstables.iter().cloned().for_each(|grouped| {
+                let sst = grouped.sst.expect("field not None");
+                self.uncommitted_states
+                    .uncommitted_work_id
+                    .insert(sst.id, resp.worker_id);
+                self.uncommitted_states
+                    .uncommitted_ssts
+                    .push((grouped.compaction_group_id, sst));
+            });
         }
         self.uncommitted_states
             .uncommitted_queue
