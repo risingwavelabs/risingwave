@@ -22,7 +22,7 @@
 //! |All        |10000| 100| 30 | 20 | 10 | |
 //!
 //! ```text
-//! total cost = cost(match type of 0 idx)
+//! index cost = cost(match type of 0 idx)
 //! * cost(match type of 1 idx)
 //! * ... cost(match type of the last idx)
 //! ```
@@ -48,7 +48,6 @@ use std::cmp::min;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
@@ -107,17 +106,11 @@ impl Rule for IndexSelectionRule {
                 }
             } else {
                 // non-covering index selection
-                // only enable non-covering index selection when lookup join is enabled
-                let config = logical_scan.base.ctx.inner().session_ctx.config();
-                if config.get_batch_enable_lookup_join()
-                    && config.get_query_mode() == QueryMode::Local
-                {
-                    let (index_lookup, lookup_cost) =
-                        self.gen_index_lookup(logical_scan, index, p2s_mapping);
-                    if lookup_cost.le(&min_cost) {
-                        min_cost = lookup_cost;
-                        final_plan = index_lookup;
-                    }
+                let (index_lookup, lookup_cost) =
+                    self.gen_index_lookup(logical_scan, index, p2s_mapping);
+                if lookup_cost.le(&min_cost) {
+                    min_cost = lookup_cost;
+                    final_plan = index_lookup;
                 }
             }
         }
