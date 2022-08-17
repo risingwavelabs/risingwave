@@ -188,7 +188,7 @@ impl InnerConnectorSourceReader {
 impl SourceChunkBuilder for ConnectorSourceReader {}
 
 impl ConnectorSourceReader {
-    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
+    pub async fn next(&mut self) -> SourceResult<StreamChunkWithState> {
         let batch = self
             .message_rx
             .recv()

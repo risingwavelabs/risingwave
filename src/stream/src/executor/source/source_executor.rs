@@ -23,7 +23,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
@@ -217,6 +217,7 @@ impl<S: StateStore> SourceExecutor<S> {
             SourceImpl::TableV2(t) => t
                 .stream_reader(self.column_ids.clone())
                 .await
+                .map_err(|err| RwError::from(anyhow::anyhow!(err)))
                 .map(SourceStreamReaderImpl::TableV2),
             SourceImpl::Connector(c) => c
                 .stream_reader(

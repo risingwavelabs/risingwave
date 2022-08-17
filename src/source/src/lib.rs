@@ -38,7 +38,7 @@ use enum_as_inner::EnumAsInner;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::Result;
+use risingwave_connector::source::error::SourceResult;
 use risingwave_connector::source::SplitId;
 pub use table_v2::*;
 
@@ -79,7 +79,7 @@ pub enum SourceStreamReaderImpl {
 }
 
 impl SourceStreamReaderImpl {
-    pub async fn next(&mut self) -> Result<StreamChunkWithState> {
+    pub async fn next(&mut self) -> SourceResult<StreamChunkWithState> {
         match self {
             SourceStreamReaderImpl::TableV2(t) => t.next().await.map(Into::into),
             SourceStreamReaderImpl::Connector(c) => c.next().await,
