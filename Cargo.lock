@@ -4734,6 +4734,7 @@ dependencies = [
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
+ "pprof",
  "prometheus",
  "prost 0.11.0",
  "rand 0.8.5",
@@ -4837,6 +4838,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "bytes",
+ "chrono",
  "clap 3.2.15",
  "comfy-table",
  "futures",

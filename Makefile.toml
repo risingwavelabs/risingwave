@@ -59,6 +59,7 @@ script = '''
 rm -rf "${PREFIX_DATA}"
 rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
+rm -rf "${PREFIX_PROFILING}"
 '''
 
 

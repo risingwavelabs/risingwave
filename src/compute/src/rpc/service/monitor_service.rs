@@ -13,9 +13,13 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use risingwave_common::util::shared_writer::SharedWriter;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
-use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
+use risingwave_pb::monitor_service::{
+    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
+};
 use risingwave_stream::task::LocalStreamManager;
 use tonic::{Request, Response, Status};
 
@@ -65,6 +69,38 @@ impl MonitorService for MonitorServiceImpl {
             actor_traces,
             rpc_traces,
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn profiling(
+        &self,
+        request: Request<ProfilingRequest>,
+    ) -> Result<Response<ProfilingResponse>, Status> {
+        if std::env::var("RW_PROFILE_PATH").is_ok() {
+            return Err(Status::internal(
+                "Profiling is already running by setting RW_PROFILE_PATH",
+            ));
+        }
+        let time = request.into_inner().get_time();
+        let guard = pprof::ProfilerGuardBuilder::default()
+            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+            .build()
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(time)).await;
+        let buf = SharedWriter::new(vec![]);
+        match guard.report().build() {
+            Ok(report) => {
+                report.flamegraph(buf.clone()).unwrap();
+                tracing::info!("succeed to generate flamegraph");
+                Ok(Response::new(ProfilingResponse {
+                    result: buf.into_inner(),
+                }))
+            }
+            Err(err) => {
+                tracing::warn!("failed to generate flamegraph: {}", err);
+                Err(Status::internal(err.to_string()))
+            }
+        }
     }
 }
 
