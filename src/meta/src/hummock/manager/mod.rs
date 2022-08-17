@@ -65,8 +65,6 @@ use versioning::*;
 mod compaction;
 use compaction::*;
 
-const REPORT_COMPACT_TASK_RETRIES: usize = 5;
-
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -87,7 +85,7 @@ pub struct HummockManager<S: MetaStore> {
     // `compaction_scheduler` is used to schedule a compaction for specified CompactionGroupId
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
 
-    compactor_manager: CompactorManagerRef<S>,
+    compactor_manager: CompactorManagerRef,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -171,7 +169,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
-        compactor_manager: CompactorManagerRef<S>,
+        compactor_manager: CompactorManagerRef,
     ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             env,
@@ -755,6 +753,8 @@ where
         );
         commit_multi_var!(self, Some(assignee_context_id), compact_task_assignment)?;
 
+        self.compactor_manager.initiate_task_heartbeat(assignee_context_id, compact_task.clone());
+
         #[cfg(test)]
         {
             drop(compaction_guard);
@@ -893,7 +893,7 @@ where
         }
 
         // A task heartbeat is removed IFF a task report has been successfully committed.
-        self.compactor_manager.remove_task_heartbeat(context_id, compact_task);
+        self.compactor_manager.remove_task_heartbeat(context_id, compact_task.task_id);
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",

@@ -24,15 +24,14 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::pin_version_response::Payload;
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTaskProgress, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{HummockManager, HummockManagerRef};
+use crate::hummock::HummockManagerRef;
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::storage::MemStore;

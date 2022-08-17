@@ -1016,7 +1016,7 @@ mod tests {
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
             // TODO: what should we choose the task heartbeat interval to be? Anyway, we don't run a
             // heartbeat thread here, so it doesn't matter.
-            let compactor_manager = Arc::new(CompactorManager::new(env.clone(), 1).await.unwrap());
+            let compactor_manager = Arc::new(CompactorManager::new_with_meta(env.clone(), 1).await.unwrap());
 
             let hummock_manager = Arc::new(
                 HummockManager::new(

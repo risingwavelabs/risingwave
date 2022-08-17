@@ -33,7 +33,7 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef<S>,
+    compactor_manager: CompactorManagerRef,
     vacuum_trigger: Arc<VacuumTrigger<S>>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
@@ -45,7 +45,7 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef<S>,
+        compactor_manager: CompactorManagerRef,
         vacuum_trigger: Arc<VacuumTrigger<S>>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
@@ -208,7 +208,7 @@ where
     ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
         let req = request.into_inner();
         self.compactor_manager
-            .update_compaction_task_progress(req.context_id, req.progress);
+            .update_task_heartbeats(req.context_id, &req.progress);
         Ok(Response::new(ReportCompactionTaskProgressResponse {
             status: None,
         }))

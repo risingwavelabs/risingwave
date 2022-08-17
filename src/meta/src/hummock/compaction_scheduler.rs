@@ -73,7 +73,7 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef<S>,
+    compactor_manager: CompactorManagerRef,
     compactor_selection_retry_interval_sec: u64,
 }
 
@@ -83,7 +83,7 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef<S>,
+        compactor_manager: CompactorManagerRef,
         compactor_selection_retry_interval_sec: u64,
     ) -> Self {
         Self {
