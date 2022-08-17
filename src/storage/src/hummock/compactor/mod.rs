@@ -45,13 +45,13 @@ pub use shared_buffer_compact::compact;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::multi_builder::{CapacitySplitTableBuilder, SstableBuilderSealer};
-use super::{HummockResult, SstableBuilderOptions, SstableWriterBuilder};
+use super::multi_builder::CapacitySplitTableBuilder;
+use super::{HummockResult, SstableBuilderOptions, SstableWriter, SstableWriterBuilder};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{
-    get_multi_builder_hook_for_streaming_upload, get_multi_builer_hook_for_batch_upload,
-    SealedSstableBuilder, TableBuilderFactory,
+    get_writer_builder_for_batch_upload, get_writer_builder_for_streaming_upload, SplitTableOutput,
+    TableBuilderFactory,
 };
 use crate::hummock::utils::{MemoryLimiter, MemoryTracker};
 use crate::hummock::vacuum::Vacuum;
@@ -72,10 +72,13 @@ where
 }
 
 #[async_trait::async_trait]
-impl<B> TableBuilderFactory<B> for RemoteBuilderFactory<B>
+impl<B> TableBuilderFactory for RemoteBuilderFactory<B>
 where
     B: SstableWriterBuilder,
 {
+    type Writer = <B as SstableWriterBuilder>::Writer;
+    type WriterBuilder = B;
+
     async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
@@ -444,18 +447,19 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn compact_and_build_sst<F, B, S>(
-        mut sst_builder: CapacitySplitTableBuilder<F, B, S>,
+    pub async fn compact_and_build_sst<F>(
+        sst_builder: &mut CapacitySplitTableBuilder<F>,
         kr: KeyRange,
         mut iter: impl HummockIterator<Direction = Forward>,
         gc_delete_keys: bool,
         watermark: Epoch,
         mut compaction_filter: impl CompactionFilter,
-    ) -> HummockResult<Vec<SealedSstableBuilder>>
+    ) -> HummockResult<()>
     where
-        F: TableBuilderFactory<B>,
-        B: SstableWriterBuilder,
-        S: SstableBuilderSealer<B::Writer>,
+        F: TableBuilderFactory,
+    // Limit writer output to `impl Into<JoinHandle<HummockResult<()>>>`
+        <<<F as TableBuilderFactory>::WriterBuilder as SstableWriterBuilder>::Writer as SstableWriter>::Output:
+        Into<JoinHandle<HummockResult<()>>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
@@ -519,8 +523,7 @@ impl Compactor {
 
             iter.next().await?;
         }
-
-        sst_builder.finish().await
+        Ok(())
     }
 }
 
@@ -567,7 +570,7 @@ impl Compactor {
         }
 
         macro_rules! make_builder_and_compact {
-            ($writer_builder:expr, $builder_sealer:expr) => {{
+            ($writer_builder:expr) => {{
                 // Monitor time cost building shared buffer to SSTs.
                 let compact_timer = if self.context.is_share_buffer_compact {
                     self.context.stats.write_build_l0_sst_duration.start_timer()
@@ -575,16 +578,15 @@ impl Compactor {
                     self.context.stats.compact_sst_duration.start_timer()
                 };
 
-                let builder = self.get_multi_builder(
+                let mut builder = self.get_multi_builder(
                     $writer_builder,
-                    $builder_sealer,
                     options,
                     get_id_time.clone(),
                     filter_key_extractor,
                 );
 
-                let sealed_builders = Compactor::compact_and_build_sst(
-                    builder,
+                Compactor::compact_and_build_sst(
+                    &mut builder,
                     kr,
                     iter,
                     self.gc_delete_keys,
@@ -592,33 +594,34 @@ impl Compactor {
                     compaction_filter,
                 )
                 .await?;
+                let ret = builder.finish()?;
                 compact_timer.observe_duration();
-                sealed_builders
+                ret
             }};
         }
 
-        let sealed_builders = if self.context.options.enable_sst_streaming_upload {
-            let (writer_builder, builder_sealer) = get_multi_builder_hook_for_streaming_upload(
+        let split_table_outputs = if self.context.options.enable_sst_streaming_upload {
+            let writer_builder = get_writer_builder_for_streaming_upload(
                 self.context.sstable_store.clone(),
                 self.cache_policy,
             );
-            make_builder_and_compact!(writer_builder, builder_sealer)
+            make_builder_and_compact!(writer_builder)
         } else {
-            let (writer_builder, builder_sealer) = get_multi_builer_hook_for_batch_upload(
+            let writer_builder = get_writer_builder_for_batch_upload(
                 &options,
                 self.context.sstable_store.clone(),
                 self.cache_policy,
             );
-            make_builder_and_compact!(writer_builder, builder_sealer)
+            make_builder_and_compact!(writer_builder)
         };
 
-        let mut ssts = Vec::with_capacity(sealed_builders.len());
+        let mut ssts = Vec::with_capacity(split_table_outputs.len());
         let mut upload_join_handles = vec![];
-        for SealedSstableBuilder {
+        for SplitTableOutput::<JoinHandle<HummockResult<()>>> {
             sst_info,
-            upload_join_handle,
+            writer_output,
             bloom_filter_size,
-        } in sealed_builders
+        } in split_table_outputs
         {
             // bloomfilter occuppy per thousand keys
             self.context
@@ -626,7 +629,7 @@ impl Compactor {
                 .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
-            upload_join_handles.push(upload_join_handle);
+            upload_join_handles.push(writer_output);
 
             if self.context.is_share_buffer_compact {
                 self.context
@@ -657,17 +660,15 @@ impl Compactor {
         Ok((split_index, ssts))
     }
 
-    fn get_multi_builder<B, S>(
+    fn get_multi_builder<B>(
         &self,
         writer_builder: B,
-        builder_sealer: S,
         options: SstableBuilderOptions,
         remote_rpc_cost: Arc<AtomicU64>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-    ) -> CapacitySplitTableBuilder<RemoteBuilderFactory<B>, B, S>
+    ) -> CapacitySplitTableBuilder<RemoteBuilderFactory<B>>
     where
         B: SstableWriterBuilder,
-        S: SstableBuilderSealer<B::Writer>,
     {
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
@@ -679,7 +680,7 @@ impl Compactor {
         };
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
-        CapacitySplitTableBuilder::new(builder_factory, builder_sealer)
+        CapacitySplitTableBuilder::new(builder_factory)
     }
 }
 

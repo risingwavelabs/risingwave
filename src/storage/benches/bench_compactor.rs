@@ -30,14 +30,14 @@ use risingwave_storage::hummock::iterator::{
     MultiSstIterator, UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::multi_builder::{
-    get_multi_builer_hook_for_batch_upload, CapacitySplitTableBuilder, LocalTableBuilderFactory,
+    get_writer_builder_for_batch_upload, CapacitySplitTableBuilder, LocalTableBuilderFactory,
 };
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, InMemSstableWriter, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableMeta, SstableStore, TieredCache,
+    CachePolicy, CompressionAlgorithm, InMemWriter, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableMeta, SstableStore, SstableWriter, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -61,7 +61,7 @@ pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
 
 const MAX_KEY_COUNT: usize = 128 * 1024;
 
-async fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, SstableMeta) {
+fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, SstableMeta) {
     let opt = SstableBuilderOptions {
         capacity: 32 * 1024 * 1024,
         block_capacity: 16 * 1024,
@@ -70,7 +70,7 @@ async fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, 
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
     };
-    let writer = InMemSstableWriter::from(&opt);
+    let writer = InMemWriter::from(&opt);
     let mut builder = SstableBuilder::new_for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
@@ -84,7 +84,7 @@ async fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, 
             .unwrap();
     }
     let output = builder.finish().unwrap();
-    (output.writer_output, output.meta)
+    output.writer.finish(output.meta, None).unwrap()
 }
 
 async fn scan_all_table(sstable_store: SstableStoreRef) {
@@ -102,8 +102,7 @@ async fn scan_all_table(sstable_store: SstableStoreRef) {
 
 fn bench_table_build(c: &mut Criterion) {
     c.bench_function("bench_table_build", |b| {
-        b.to_async(FuturesExecutor)
-            .iter(|| build_table(0, 0..(MAX_KEY_COUNT as u64), 1));
+        b.iter(|| build_table(0, 0..(MAX_KEY_COUNT as u64), 1));
     });
 }
 
@@ -112,8 +111,7 @@ fn bench_table_scan(c: &mut Criterion) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    let (data, meta) =
-        runtime.block_on(async move { build_table(0, 0..(MAX_KEY_COUNT as u64), 1).await });
+    let (data, meta) = build_table(0, 0..(MAX_KEY_COUNT as u64), 1);
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
         sstable_store1
@@ -143,15 +141,13 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
     };
-    let (writer_builder, builder_sealer) =
-        get_multi_builer_hook_for_batch_upload(&opt, sstable_store, CachePolicy::NotFill);
-    let builder = CapacitySplitTableBuilder::new(
-        LocalTableBuilderFactory::new(32, writer_builder, opt),
-        builder_sealer,
-    );
+    let writer_builder =
+        get_writer_builder_for_batch_upload(&opt, sstable_store, CachePolicy::NotFill);
+    let mut builder =
+        CapacitySplitTableBuilder::new(LocalTableBuilderFactory::new(32, writer_builder, opt));
 
     Compactor::compact_and_build_sst(
-        builder,
+        &mut builder,
         KeyRange::inf(),
         iter,
         false,
@@ -185,12 +181,8 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         .unwrap();
     let sstable_store1 = sstable_store.clone();
     let test_key_size = 256 * 1024;
-    let ((data1, meta1), (data2, meta2)) = runtime.block_on(async move {
-        (
-            build_table(1, 0..test_key_size, 1).await,
-            build_table(2, 0..test_key_size, 1).await,
-        )
-    });
+    let (data1, meta1) = build_table(1, 0..test_key_size, 1);
+    let (data2, meta2) = build_table(2, 0..test_key_size, 1);
     let level1 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
         sstable_store1
@@ -203,12 +195,8 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             .unwrap();
     });
 
-    let ((data1, meta1), (data2, meta2)) = runtime.block_on(async move {
-        (
-            build_table(1, 0..test_key_size, 2).await,
-            build_table(2, 0..test_key_size, 2).await,
-        )
-    });
+    let (data1, meta1) = build_table(1, 0..test_key_size, 2);
+    let (data2, meta2) = build_table(2, 0..test_key_size, 2);
     let sstable_store1 = sstable_store.clone();
     let level2 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
@@ -224,7 +212,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
-        b.to_async(&runtime).iter(|| {
+        b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
                 HummockIteratorUnion::First(ConcatIterator::new(
@@ -244,7 +232,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     c.bench_function("bench_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
-        b.to_async(&runtime).iter(|| {
+        b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
                 ConcatSstableIterator::new(

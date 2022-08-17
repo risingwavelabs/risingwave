@@ -21,7 +21,9 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
-use super::{CompressionAlgorithm, InMemSstableWriter, SstableMeta, DEFAULT_RESTART_INTERVAL};
+use super::{
+    CompressionAlgorithm, InMemWriter, SstableMeta, SstableWriter, DEFAULT_RESTART_INTERVAL,
+};
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
@@ -98,8 +100,8 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
     }
 }
 
-pub fn default_sst_writer_from_opt(opt: &SstableBuilderOptions) -> InMemSstableWriter {
-    InMemSstableWriter::from(opt)
+pub fn default_sst_writer_from_opt(opt: &SstableBuilderOptions) -> InMemWriter {
+    InMemWriter::from(opt)
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
@@ -112,7 +114,8 @@ pub fn gen_test_sstable_data(
         b.add(&key, value.as_slice()).unwrap();
     }
     let output = b.finish().unwrap();
-    (output.writer_output, output.meta, output.table_ids)
+    let (data, meta) = output.writer.finish(output.meta, None).unwrap();
+    (data, meta, output.table_ids)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`

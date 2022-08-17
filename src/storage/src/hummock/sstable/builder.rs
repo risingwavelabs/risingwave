@@ -77,10 +77,13 @@ impl Default for SstableBuilderOptions {
     }
 }
 
-pub struct SstableBuilderOutput<WO> {
+pub struct SstableBuilderOutput<W>
+where
+    W: SstableWriter,
+{
     pub sstable_id: u64,
     pub meta: SstableMeta,
-    pub writer_output: WO,
+    pub writer: W,
     pub table_ids: Vec<u32>,
 }
 
@@ -222,13 +225,12 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
+    pub fn finish(mut self) -> HummockResult<SstableBuilderOutput<W>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.clone();
 
         self.build_block()?;
-        let size_footer = self.block_metas.len() as u32;
-        let (data_len, writer_output) = self.writer.finish(size_footer)?;
+        let data_len = self.writer.data_len() + 4;
         assert!(!smallest_key.is_empty());
 
         let meta = SstableMeta {
@@ -249,10 +251,10 @@ impl<W: SstableWriter> SstableBuilder<W> {
             version: VERSION,
         };
 
-        Ok(SstableBuilderOutput::<W::Output> {
+        Ok(SstableBuilderOutput::<W> {
             sstable_id: self.sstable_id,
             meta,
-            writer_output,
+            writer: self.writer,
             table_ids: self.table_ids.into_iter().collect(),
         })
     }
