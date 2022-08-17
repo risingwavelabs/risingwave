@@ -15,7 +15,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::util::shared_writer::SharedWriter;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
@@ -81,20 +80,19 @@ impl MonitorService for MonitorServiceImpl {
                 "Profiling is already running by setting RW_PROFILE_PATH",
             ));
         }
-        let time = request.into_inner().get_time();
+        let time = request.into_inner().get_time_s();
         let guard = pprof::ProfilerGuardBuilder::default()
             .blocklist(&["libc", "libgcc", "pthread", "vdso"])
             .build()
             .unwrap();
         tokio::time::sleep(Duration::from_secs(time)).await;
-        let buf = SharedWriter::new(vec![]);
+        // let buf = SharedWriter::new(vec![]);
+        let mut buf = vec![];
         match guard.report().build() {
             Ok(report) => {
-                report.flamegraph(buf.clone()).unwrap();
+                report.flamegraph(&mut buf).unwrap();
                 tracing::info!("succeed to generate flamegraph");
-                Ok(Response::new(ProfilingResponse {
-                    result: buf.into_inner(),
-                }))
+                Ok(Response::new(ProfilingResponse { result: buf }))
             }
             Err(err) => {
                 tracing::warn!("failed to generate flamegraph: {}", err);

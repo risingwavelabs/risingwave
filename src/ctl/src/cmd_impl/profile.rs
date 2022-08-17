@@ -23,7 +23,7 @@ use risingwave_rpc_client::ComputeClientPool;
 
 use crate::common::MetaServiceOpts;
 
-pub async fn profile(sleep: u64) -> anyhow::Result<()> {
+pub async fn profile(sleep_s: u64) -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
 
@@ -43,7 +43,7 @@ pub async fn profile(sleep: u64) -> anyhow::Result<()> {
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let response = client.profile(sleep).await;
+        let response = client.profile(sleep_s).await;
         let host_addr = cn.get_host().expect("Should have host address");
         let node_name = format!(
             "compute-node-{}-{}",

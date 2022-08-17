@@ -13,7 +13,7 @@ message StackTraceResponse {
 
 message ProfilingRequest {
   // How long the profiling should last.
-  uint64 time = 1;
+  uint64 time_s = 1;
 }
 
 message ProfilingResponse {
