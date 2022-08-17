@@ -65,6 +65,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             RowBasedStateTable::from_table_catalog(node.get_right_table()?, store, None);
 
         Ok(Box::new(DynamicFilterExecutor::new(
+            params.actor_context,
             source_l,
             source_r,
             key_l,

@@ -43,6 +43,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
 
         Ok(GlobalSimpleAggExecutor::new(
+            params.actor_context,
             params.input.remove(0),
             agg_calls,
             params.pk_indices,
