@@ -72,7 +72,7 @@ pub fn record_table_vnode_mappings(
                 .state_table_ids
                 .push(node.right_table.as_ref().unwrap().id);
         }
-        NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
+        NodeBody::AppendOnlyTopN(node) => {
             fragment.state_table_ids.push(node.table_id_l);
             fragment.state_table_ids.push(node.table_id_h);
         }

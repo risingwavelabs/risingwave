@@ -616,7 +616,7 @@ impl StreamGraphBuilder {
                         }
                     }
 
-                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
+                    NodeBody::AppendOnlyTopN(node) => {
                         node.table_id_l += table_id_offset;
                         node.table_id_h += table_id_offset;
 

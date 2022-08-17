@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableId;
+use std::sync::Arc;
+
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 
 use super::*;
 use crate::executor::GroupTopNExecutor;
@@ -28,24 +30,26 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GroupTopN)?;
-        let order_pairs: Vec<_> = node
-            .get_column_orders()
-            .iter()
-            .map(OrderPair::from_prost)
-            .collect();
         let limit = if node.limit == 0 {
             None
         } else {
             Some(node.limit as usize)
         };
-        let table_id = TableId::new(node.get_table_id());
-        let key_indices = node
-            .get_distribution_key()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
         let group_by = node
             .get_group_key()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect();
+        let table = node.get_table()?;
+        let vnodes = params.vnode_bitmap.map(Arc::new);
+        let state_table = RowBasedStateTable::from_table_catalog(table, store, vnodes);
+        let order_pairs = table
+            .get_order_key()
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
+        let key_indices = table
+            .get_distribution_key()
             .iter()
             .map(|idx| *idx as usize)
             .collect();
@@ -55,12 +59,11 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             order_pairs,
             (node.offset as usize, limit),
             params.pk_indices,
-            store,
-            table_id,
             0,
             params.executor_id,
             key_indices,
             group_by,
+            state_table,
         )?
         .boxed())
     }

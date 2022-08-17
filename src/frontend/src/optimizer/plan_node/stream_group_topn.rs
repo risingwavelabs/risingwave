@@ -15,12 +15,13 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::utils::TableCatalogBuilder;
 use super::{PlanBase, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay};
+use crate::optimizer::property::{Distribution, Order, OrderDisplay};
 use crate::{PlanRef, TableCatalog};
 
 #[derive(Debug, Clone)]
@@ -116,21 +117,16 @@ impl StreamGroupTopN {
 impl ToStreamProst for StreamGroupTopN {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let column_orders = self
-            .order()
-            .field_order
-            .iter()
-            .map(FieldOrder::to_protobuf)
-            .collect();
         let group_key = self.group_key.iter().map(|idx| *idx as u32).collect();
 
         let group_topn_node = GroupTopNNode {
-            column_orders,
             limit: self.limit as u64,
             offset: self.offset as u64,
-            distribution_key: vec![], // TODO: seems unnecessary
             group_key,
-            table_id: 0,
+            table: Some(self.infer_internal_table_catalog().to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)
