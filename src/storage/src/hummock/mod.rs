@@ -40,7 +40,7 @@ pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
-mod local_version;
+pub mod local_version;
 pub mod local_version_manager;
 pub mod shared_buffer;
 pub mod sstable_store;
@@ -48,6 +48,7 @@ mod state_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 pub mod utils;
+pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
