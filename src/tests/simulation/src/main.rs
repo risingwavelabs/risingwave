@@ -139,19 +139,40 @@ async fn main() {
         .build();
     client_node
         .spawn(async move {
-            run_slt_task(&args.files, &args, &frontend_ip)
-                .await
-                .unwrap()
+            let glob = &args.files;
+            if args.jobs > 1 {
+                run_parallel_slt_task(glob, &frontend_ip, args.jobs)
+                    .await
+                    .unwrap();
+            } else {
+                run_slt_task(glob, &frontend_ip[0]).await;
+            }
         })
         .await
         .unwrap();
 }
 
-async fn run_slt_task(glob: &str, args: &Args, hosts: &[String]) -> Result<(), ParallelTestError> {
+async fn run_slt_task(glob: &str, host: &str) {
+    let mut tester =
+        sqllogictest::Runner::new(Postgres::connect(host.to_string(), "dev".to_string()).await);
+    let files = glob::glob(glob).expect("failed to read glob pattern");
+    for file in files {
+        let file = file.unwrap();
+        let path = file.as_path();
+        println!("{}", path.display());
+        tester.run_file_async(path).await.unwrap();
+    }
+}
+
+async fn run_parallel_slt_task(
+    glob: &str,
+    hosts: &[String],
+    jobs: usize,
+) -> Result<(), ParallelTestError> {
     let db = Postgres::connect(hosts[0].clone(), "dev".to_string()).await;
     let mut tester = sqllogictest::Runner::new(db);
     tester
-        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, args.jobs)
+        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, jobs)
         .await
 }
 
