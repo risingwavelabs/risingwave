@@ -22,7 +22,9 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
+use risingwave_sqlparser::ast::{
+    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, TableConstraint,
+};
 
 use super::create_source::make_prost_source;
 use crate::binder::{bind_data_type, bind_struct_field};
@@ -37,12 +39,16 @@ use crate::stream_fragmenter::StreamFragmenterV2;
 
 /// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.
 pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
+    // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
+    let mut pk_column_id = None;
+
     let column_descs = {
         let mut column_descs = Vec::with_capacity(columns.len() + 1);
         // Put the hidden row id column in the first column. This is used for PK.
         column_descs.push(row_id_column_desc());
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
+            let column_id = ColumnId::new((i + 1) as i32);
             // Destruct to make sure all fields are properly handled rather than ignored.
             // Do NOT use `..` to ignore fields you do not want to deal with.
             // Reject them with a clear NotImplemented error.
@@ -59,13 +65,25 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
                 )
                 .into());
             }
-            if !options.is_empty() {
-                let s = options.iter().map(ToString::to_string).join(" ");
-                return Err(ErrorCode::NotImplemented(
-                    format!("column constraints \"{}\"", s),
-                    None.into(),
-                )
-                .into());
+            for option_def in options {
+                match option_def.option {
+                    ColumnOption::Unique { is_primary: true } => {
+                        if pk_column_id.is_some() {
+                            return Err(ErrorCode::BindError(
+                                "multiple primary keys are not allowed".into(),
+                            )
+                            .into());
+                        }
+                        pk_column_id = Some(column_id);
+                    }
+                    _ => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!("column constraints \"{}\"", option_def),
+                            None.into(),
+                        )
+                        .into())
+                    }
+                }
             }
             check_valid_column_name(&name.real_value())?;
             let field_descs = if let AstDataType::Struct(fields) = &data_type {
@@ -78,7 +96,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
             };
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
-                column_id: ColumnId::new((i + 1) as i32),
+                column_id,
                 name: name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
