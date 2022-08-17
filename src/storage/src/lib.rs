@@ -68,7 +68,9 @@ pub mod write_batch;
 mod storage_failpoints;
 
 pub use keyspace::Keyspace;
+extern crate core;
 extern crate test;
+
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 

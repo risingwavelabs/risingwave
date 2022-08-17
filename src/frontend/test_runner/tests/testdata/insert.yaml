@@ -17,7 +17,7 @@
     /* insert values on non-assign-castable types */
     create table t (v1 real, v2 int);
     insert into t values (22.33, true);
-  binder_error: 'Bind error: cannot cast type Boolean to Int32 in Assign context'
+  binder_error: 'Bind error: cannot cast type "boolean" to "integer" in Assign context'
 - sql: |
     /* insert values mismatch columns length */
     create table t (v1 real, v2 int, v3 varchar);
@@ -82,7 +82,8 @@
     /* insert into select with cast error */
     create table t (v1 timestamp, v2 real);
     insert into t select time '01:02:03', 4.5 from t;
-  binder_error: 'Bind error: cannot cast type Time to Timestamp in Assign context'
+  binder_error: 'Bind error: cannot cast type "time without time zone" to "timestamp
+    without time zone" in Assign context'
 - sql: |
     /* insert into select mismatch columns length */
     create table t (v1 int, v2 real);
