@@ -42,9 +42,6 @@ pub struct MergeExecutor {
 
     info: ExecutorInfo,
 
-    /// Actor operator context.
-    status: OperatorInfoStatus,
-
     /// Shared context of the stream manager.
     context: Arc<SharedContext>,
 
@@ -62,12 +59,12 @@ impl MergeExecutor {
         upstream_fragment_id: FragmentId,
         inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
-        receiver_id: u64,
+        _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             upstreams: inputs,
-            ctx: ctx.clone(),
+            ctx,
             fragment_id,
             upstream_fragment_id,
             info: ExecutorInfo {
@@ -75,7 +72,6 @@ impl MergeExecutor {
                 pk_indices,
                 identity: "MergeExecutor".to_string(),
             },
-            status: OperatorInfoStatus::new(ctx, receiver_id),
             context,
             metrics,
         }
@@ -99,7 +95,7 @@ impl MergeExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(mut self: Box<Self>) {
+    async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.ctx.id, self.upstreams);
         let actor_id_str = self.ctx.id.to_string();
@@ -114,7 +110,6 @@ impl MergeExecutor {
                 .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let msg: Message = msg?;
-            self.status.next_message(&msg);
 
             match &msg {
                 Message::Chunk(chunk) => {

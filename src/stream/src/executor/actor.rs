@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_stack_trace::{SpanValue, StackTrace};
 use futures::pin_mut;
@@ -25,73 +24,13 @@ use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
-use super::{Message, StreamConsumer};
+use super::StreamConsumer;
 use crate::executor::Epoch;
 use crate::task::{ActorId, SharedContext};
-
-pub struct OperatorInfo {
-    pub operator_id: u64,
-    pub source_barrier_at: VecDeque<(u64, Instant)>,
-    pub source_first_chunk_at: VecDeque<(u64, Instant)>,
-}
-
-impl OperatorInfo {
-    pub fn new(operator_id: u64) -> Self {
-        Self {
-            operator_id,
-            source_barrier_at: VecDeque::new(),
-            source_first_chunk_at: VecDeque::new(),
-        }
-    }
-}
-
-pub struct OperatorInfoStatus {
-    last_barrier_curr_epoch: Option<u64>,
-    ctx: ActorContextRef,
-    actor_context_position: usize,
-}
-
-impl OperatorInfoStatus {
-    pub fn new(ctx: ActorContextRef, receiver_id: u64) -> Self {
-        let actor_context_position = {
-            let mut info = ctx.info.lock();
-            let actor_context_position = info.len();
-            info.push(OperatorInfo::new(receiver_id));
-            actor_context_position
-        };
-
-        Self {
-            last_barrier_curr_epoch: None,
-            ctx,
-            actor_context_position,
-        }
-    }
-
-    pub fn next_message(&mut self, msg: &Message) {
-        match msg {
-            Message::Barrier(barrier) => {
-                let info = &mut self.ctx.info.lock()[self.actor_context_position];
-                info.source_barrier_at
-                    .push_back((barrier.epoch.prev, Instant::now()));
-                self.last_barrier_curr_epoch = Some(barrier.epoch.curr);
-            }
-            Message::Chunk(_) => {
-                if let Some(epoch) = self.last_barrier_curr_epoch.take() {
-                    let info = &mut self.ctx.info.lock()[self.actor_context_position];
-                    info.source_first_chunk_at
-                        .push_back((epoch, Instant::now()))
-                }
-            }
-        }
-    }
-}
 
 /// Shared by all operators of an actor.
 #[derive(Default)]
 pub struct ActorContext {
-    /// TODO: remove it <https://github.com/singularity-data/risingwave/issues/4663>
-    pub info: Mutex<Vec<OperatorInfo>>,
-
     pub id: ActorId,
 
     /// TODO: report errors and prompt the user.

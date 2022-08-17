@@ -18,7 +18,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 
 use super::exchange::input::BoxedInput;
-use super::{ActorContextRef, OperatorInfoStatus};
+use super::ActorContextRef;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
@@ -33,9 +33,6 @@ pub struct ReceiverExecutor {
 
     /// Logical Operator Info
     info: ExecutorInfo,
-
-    /// Actor operator context
-    status: OperatorInfoStatus,
 
     ctx: ActorContextRef,
 
@@ -62,7 +59,7 @@ impl ReceiverExecutor {
         pk_indices: PkIndices,
         input: BoxedInput,
         ctx: ActorContextRef,
-        receiver_id: u64,
+        _receiver_id: u64,
         upstream_fragment_id: FragmentId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -73,7 +70,6 @@ impl ReceiverExecutor {
                 pk_indices,
                 identity: "ReceiverExecutor".to_string(),
             },
-            status: OperatorInfoStatus::new(ctx.clone(), receiver_id),
             ctx,
             upstream_fragment_id,
             metrics,
@@ -95,7 +91,6 @@ impl Executor for ReceiverExecutor {
                     .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
                     .inc_by(start_time.elapsed().as_nanos() as u64);
                 let msg: Message = msg?;
-                self.status.next_message(&msg);
 
                 match &msg {
                     Message::Chunk(chunk) => {
