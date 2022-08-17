@@ -37,8 +37,8 @@ use crate::stream_fragmenter::StreamFragmenterV2;
 
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
-/// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.
-pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
+/// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
+pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
 
@@ -105,15 +105,23 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         column_descs
     };
 
+    Ok((column_descs, pk_column_id))
+}
+
+pub fn bind_sql_table_constraints(
+    column_descs: &[ColumnDesc],
+    _pk_column_id_from_columns: Option<ColumnId>,
+    _constraints: Vec<TableConstraint>,
+) -> Result<(Vec<ColumnCatalog>, Vec<i32>)> {
     let columns_catalog = column_descs
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(i, c)| ColumnCatalog {
             column_desc: c.to_protobuf().into(),
             is_hidden: i == 0, // the row id column is hidden
         })
         .collect_vec();
-    Ok(columns_catalog)
+    Ok((columns_catalog, vec![0]))
 }
 
 pub(crate) fn gen_create_table_plan(
@@ -122,11 +130,21 @@ pub(crate) fn gen_create_table_plan(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    let (columns, pk_column_ids) =
+        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, vec![])?;
+    if pk_column_ids != [0] {
+        return Err(ErrorCode::NotImplemented(
+            "specifying primary key for table".into(),
+            4256.into(),
+        )
+        .into());
+    }
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
-            columns: bind_sql_columns(columns)?,
+            columns,
             properties: context.inner().with_properties.clone(),
         }),
     )?;
