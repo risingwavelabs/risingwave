@@ -48,8 +48,6 @@ enum SourceErrorInner {
     ProstFieldNotFoundError(String),
     #[error(transparent)]
     Internal(anyhow::Error),
-    #[error("{0}")]
-    BaseSourceError(String),
 }
 
 impl From<SourceErrorInner> for SourceError {
@@ -85,7 +83,7 @@ impl std::fmt::Debug for SourceError {
 
 impl SourceError {
     pub fn into_source_error(s: String) -> Self {
-        SourceErrorInner::BaseSourceError(s).into()
+        SourceErrorInner::Internal(anyhow::anyhow!(s)).into()
     }
 
     pub fn send_error(s: String) -> Self {
