@@ -79,7 +79,7 @@ where
                     let host = host_map.get(worker_id).cloned().unwrap_or_default();
                     ActorInfo {
                         actor_id,
-                        host: host.clone(),
+                        host,
                     }
                 })
             })
