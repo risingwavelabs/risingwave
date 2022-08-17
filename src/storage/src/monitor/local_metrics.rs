@@ -27,9 +27,8 @@ pub struct StoreLocalStatistic {
     pub scan_key_count: u64,
     pub processed_key_count: u64,
     pub bloom_filter_true_negative_count: u64,
-    pub bloom_filter_might_positive_count: u64,
     pub remote_io_time: Arc<AtomicU64>,
-    pub check_bloom_filter_counts: u64,
+    pub bloom_filter_check_counts: u64,
 }
 
 impl StoreLocalStatistic {
@@ -43,12 +42,11 @@ impl StoreLocalStatistic {
         self.scan_key_count += other.scan_key_count;
         self.processed_key_count += other.processed_key_count;
         self.bloom_filter_true_negative_count += other.bloom_filter_true_negative_count;
-        self.bloom_filter_might_positive_count += other.bloom_filter_might_positive_count;
         self.remote_io_time.fetch_add(
             other.remote_io_time.load(Ordering::Relaxed),
             Ordering::Relaxed,
         );
-        self.check_bloom_filter_counts += other.check_bloom_filter_counts;
+        self.bloom_filter_check_counts += other.bloom_filter_check_counts;
     }
 
     pub fn report(&self, metrics: &StateStoreMetrics) {
@@ -86,21 +84,15 @@ impl StoreLocalStatistic {
                 .inc_by(self.bloom_filter_true_negative_count);
         }
 
-        if self.bloom_filter_might_positive_count > 0 {
-            metrics
-                .bloom_filter_might_positive_counts
-                .inc_by(self.bloom_filter_might_positive_count);
-        }
-
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
             metrics.remote_read_time.observe(t / 1000.0);
         }
 
-        if self.check_bloom_filter_counts > 0 {
+        if self.bloom_filter_check_counts > 0 {
             metrics
-                .check_bloom_filter_counts
-                .inc_by(self.check_bloom_filter_counts);
+                .bloom_filter_check_counts
+                .inc_by(self.bloom_filter_check_counts);
         }
     }
 }

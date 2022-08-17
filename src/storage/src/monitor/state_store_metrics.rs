@@ -34,8 +34,7 @@ macro_rules! for_all_metrics {
             get_shared_buffer_hit_counts: GenericCounter<AtomicU64>,
 
             bloom_filter_true_negative_counts: GenericCounter<AtomicU64>,
-            bloom_filter_might_positive_counts: GenericCounter<AtomicU64>,
-            check_bloom_filter_counts: GenericCounter<AtomicU64>,
+            bloom_filter_check_counts: GenericCounter<AtomicU64>,
 
             range_scan_size: Histogram,
             range_scan_duration: Histogram,
@@ -143,15 +142,8 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let bloom_filter_might_positive_counts = register_int_counter_with_registry!(
-            "state_store_bloom_filter_might_positive_counts",
-            "Total number of sst tables that have been considered possibly positive by bloom filters",
-            registry
-        )
-        .unwrap();
-
-        let check_bloom_filter_counts = register_int_counter_with_registry!(
-            "state_check_bloom_filter_counts",
+        let bloom_filter_check_counts = register_int_counter_with_registry!(
+            "state_bloom_filter_check_counts",
             "Total number of read request to check bloom filters",
             registry
         )
@@ -419,8 +411,7 @@ impl StateStoreMetrics {
             get_shared_buffer_hit_counts,
 
             bloom_filter_true_negative_counts,
-            bloom_filter_might_positive_counts,
-            check_bloom_filter_counts,
+            bloom_filter_check_counts,
 
             range_scan_size,
             range_scan_duration,

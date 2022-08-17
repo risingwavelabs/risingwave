@@ -785,24 +785,22 @@ def section_hummock(panels):
                 "sum(rate(state_store_iter_size_sum[$__rate_interval])) by(job, instance) / sum(rate(state_store_iter_size_count[$__rate_interval])) by (job, instance)", "{{job}} @ {{instance}}"
             ),
         ]),
-        panels.timeseries_count("Read Bloom Filter", [
+        
+        panels.timeseries_ops("Read Bloom Filter", [
             panels.target(
                 "sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)", "bloom filter true negative  - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum(rate(state_store_bloom_filter_might_positive_counts[$__rate_interval])) by (job,instance)", "bloom filter might positive  - {{job}} @ {{instance}}"
-            ),
-            panels.target(
-                "sum(rate(state_check_bloom_filter_counts[$__rate_interval])) by (job,instance)", "bloom filter check count  - {{job}} @ {{instance}}"
+                "sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance)", "bloom filter check count  - {{job}} @ {{instance}}"
             ),
         ]),
         
-        panels.timeseries_count("Bloom Filter Hit Rate", [
+        panels.timeseries_count(" Filter-Cache Hit Rate", [
             panels.target(
-                "(sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)) / (sum(rate(state_check_bloom_filter_counts[$__rate_interval])) by (job,instance))", "bloom filter hit rate - {{job}} @ {{instance}}"
+                "(sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)) / (sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance))", "bloom filter hit rate - {{job}} @ {{instance}}"
             ),
         ]),
-        
+
         panels.timeseries_ops("Read Merged SSTs", [
             panels.target(
                 "histogram_quantile(0.9, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, instance))", "# merged ssts p90  - {{job}} @ {{instance}}", True

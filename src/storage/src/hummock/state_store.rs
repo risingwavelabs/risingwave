@@ -176,18 +176,17 @@ impl HummockStorage {
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
-                        local_stats.check_bloom_filter_counts += 1;
-
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info.id, &mut local_stats)
                             .await?;
 
-                        if !sstable.value().surely_not_have_user_key(bloom_filter_key) {
-                            local_stats.bloom_filter_might_positive_count += 1;
+                        if Self::hit_sstable_bloom_filter(
+                            sstable.value(),
+                            bloom_filter_key,
+                            &mut local_stats,
+                        ) {
                             sstables.push((*sstable_info).clone());
-                        } else {
-                            local_stats.bloom_filter_true_negative_count += 1;
                         }
                     } else {
                         sstables.push((*sstable_info).clone());
@@ -208,14 +207,13 @@ impl HummockStorage {
                         .sstable(table_info.id, &mut local_stats)
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
-                        local_stats.check_bloom_filter_counts += 1;
-
-                        if sstable.value().surely_not_have_user_key(bloom_filter_key) {
-                            local_stats.bloom_filter_true_negative_count += 1;
+                        if !Self::hit_sstable_bloom_filter(
+                            sstable.value(),
+                            bloom_filter_key,
+                            &mut local_stats,
+                        ) {
                             continue;
                         }
-
-                        local_stats.bloom_filter_might_positive_count += 1;
                     }
 
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
