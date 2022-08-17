@@ -130,7 +130,7 @@ impl ToStreamProst for StreamGroupTopN {
             offset: self.offset as u64,
             distribution_key: vec![], // TODO: seems unnecessary
             group_key,
-            table_id_l: 0,
+            table_id: 0,
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)

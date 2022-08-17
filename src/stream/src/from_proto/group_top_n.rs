@@ -38,7 +38,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         } else {
             Some(node.limit as usize)
         };
-        let table_id_l = TableId::new(node.get_table_id_l());
+        let table_id = TableId::new(node.get_table_id());
         let key_indices = node
             .get_distribution_key()
             .iter()
@@ -56,7 +56,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             (node.offset as usize, limit),
             params.pk_indices,
             store,
-            table_id_l,
+            table_id,
             0,
             params.executor_id,
             key_indices,
