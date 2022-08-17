@@ -448,6 +448,11 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
+                panels.target(
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upsteam_fragment_id}}"
+                ),
+            ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
                 panels.target(
                     "rate(stream_actor_barrier_time[$__rate_interval]) > 0", "{{actor_id}}"
@@ -566,6 +571,11 @@ def section_streaming_actors(outer_panels):
                     "sum by(le, actor_id, wait_side, job, instance)(rate(stream_join_barrier_align_duration_sum[$__rate_interval])) / sum by(le,actor_id,wait_side,job,instance) (rate(stream_join_barrier_align_duration_count[$__rate_interval]))", "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}"
                 ),
             ]),
+            panels.timeseries_percentage("Join Actor Input Blocking Time Ratio", [
+                panels.target(
+                    "rate(stream_join_actor_input_waiting_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
+                ),
+            ]),
         ])
     ]
 
@@ -592,6 +602,18 @@ def section_streaming_exchange(outer_panels):
             panels.timeseries_bytes_per_sec("Fragment Exchange Recv Throughput", [
                 panels.target(
                     "rate(stream_exchange_frag_recv_size[$__rate_interval])", "{{up_fragment_id}}->{{down_fragment_id}}"
+                ),
+            ]),
+        ]),
+    ]
+
+def section_batch_exchange(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed("Batch Exchange", [
+            panels.timeseries_row("Exchange Recv Row Number", [
+                panels.target(
+                    "batch_exchange_recv_row_number", "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}"
                 ),
             ]),
         ]),
@@ -1234,6 +1256,7 @@ dashboard = Dashboard(
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
+        *section_batch_exchange(panels),
         *section_hummock(panels),
         *section_hummock_manager(panels),
         *section_grpc_meta_catalog_service(panels),

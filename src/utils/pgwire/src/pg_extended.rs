@@ -142,16 +142,14 @@ impl PgStatement {
     ) -> Result<PgPortal, ()> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
+        // params is empty(): Don't need to replace generic params($1,$2).
         if params.is_empty() {
-            let row_description =
-                Self::infer_row_description::<SM>(session, statement.as_str()).await?;
-
             return Ok(PgPortal {
                 name: portal_name,
                 query_string: self.query_string.clone(),
                 result_cache: None,
                 stmt_type: None,
-                row_description,
+                row_description: self.row_desc(),
                 result_format,
             });
         }

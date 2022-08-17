@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
@@ -26,7 +29,7 @@ use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNStateNew;
 use super::top_n::{generate_internal_key, TopNCache};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 pub type GroupTopNExecutor<S> = TopNExecutorWrapper<InnerGroupTopNExecutorNew<S>>;
 
@@ -155,28 +158,6 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
             caches: HashMap::new(),
         })
     }
-
-    async fn flush_inner(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.managed_state.flush(epoch).await
-    }
-}
-
-impl<S: StateStore> Executor for InnerGroupTopNExecutorNew<S> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        panic!("Should execute by wrapper");
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
 }
 
 #[async_trait]
@@ -198,6 +179,21 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 group_key.push(row[col_id].clone());
             }
 
+            // If 'self.caches' does not already have a cache for the current group, create a new
+            // cache for it and insert it into `self.caches`
+            let pk_prefix = Row::new(group_key.clone());
+            let entry = self.caches.entry(group_key);
+            match entry {
+                Occupied(_) => {}
+                Vacant(entry) => {
+                    let mut topn_cache = TopNCache::new(self.offset, self.limit.unwrap_or(1024));
+                    self.managed_state
+                        .init_topn_cache(Some(&pk_prefix), &mut topn_cache, epoch)
+                        .await?;
+                    entry.insert(topn_cache);
+                }
+            }
+
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
@@ -211,14 +207,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
                 }
             }
 
-            // If 'self.caches' does not already have a cache for the current group, create a new
-            // cache for it and insert it into `self.caches`
-            self.caches
-                .entry(group_key.clone())
-                .or_insert_with(|| TopNCache::new(self.offset, self.limit.unwrap_or(1024)));
-
             // update the corresponding rows in the group cache.
-            let pk_prefix = Row::new(group_key);
             self.caches
                 .get_mut(&pk_prefix.0)
                 .unwrap()
@@ -239,7 +228,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
     }
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.flush_inner(epoch).await
+        self.managed_state.flush(epoch).await
     }
 
     fn schema(&self) -> &Schema {
@@ -252,6 +241,16 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    fn update_state_table_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
+        self.managed_state
+            .state_table
+            .update_vnode_bitmap(vnode_bitmap);
+    }
+
+    async fn init(&mut self, _epoch: u64) -> StreamExecutorResult<()> {
+        Ok(())
     }
 }
 

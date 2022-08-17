@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ParallelUnitId};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
@@ -25,9 +25,6 @@ use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
-
-    /// Used for scheduling.
-    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     pub source: BoundQuery,
 
@@ -43,7 +40,6 @@ impl Binder {
         _columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
-        let (schema_name, table_name) = Self::resolve_table_name(source_name.clone())?;
         let table_source = self.bind_table_source(source_name)?;
 
         let expected_types = table_source
@@ -51,12 +47,6 @@ impl Binder {
             .iter()
             .map(|c| c.data_type.clone())
             .collect();
-
-        let vnode_mapping = self
-            .catalog
-            .get_table_by_name(&self.db_name, &schema_name, &table_name)?
-            .vnode_mapping
-            .clone();
 
         // When the column types of `source` query does not match `expected_types`, casting is
         // needed.
@@ -122,7 +112,6 @@ impl Binder {
 
         let insert = BoundInsert {
             table_source,
-            vnode_mapping,
             source,
             cast_exprs,
         };

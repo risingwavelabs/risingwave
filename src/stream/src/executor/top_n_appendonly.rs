@@ -170,11 +170,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             key_indices,
         })
     }
-
-    async fn flush_inner(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.managed_higher_state.flush(epoch).await?;
-        self.managed_lower_state.flush(epoch).await
-    }
 }
 
 #[async_trait]
@@ -262,7 +257,8 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     }
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.flush_inner(epoch).await
+        self.managed_higher_state.flush(epoch).await?;
+        self.managed_lower_state.flush(epoch).await
     }
 
     fn schema(&self) -> &Schema {
@@ -275,6 +271,10 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    async fn init(&mut self, _epoch: u64) -> StreamExecutorResult<()> {
+        Ok(())
     }
 }
 

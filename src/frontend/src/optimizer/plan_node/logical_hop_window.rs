@@ -71,22 +71,24 @@ impl LogicalHopWindow {
         let window_end_index = output_indices
             .iter()
             .position(|&idx| idx == input.schema().len() + 1);
-        let pk_indices = (|| {
-            let input_pk = input
-                .logical_pk()
-                .iter()
-                .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx));
-            let window_pk = if let Some(start_idx) = window_start_index {
-                std::iter::once(start_idx)
-            } else if let Some(end_idx) = window_end_index {
-                std::iter::once(end_idx)
+        let pk_indices = {
+            if window_start_index.is_none() && window_end_index.is_none() {
+                None
             } else {
-                // If neither `window_start` or `window_end` is in `output_indices`, pk cannot be
-                // derived. In this situation, return empty vec.
-                return Vec::new();
-            };
-            input_pk.chain(window_pk).collect_vec()
-        })();
+                let mut pk = input
+                    .logical_pk()
+                    .iter()
+                    .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx))
+                    .collect_vec();
+                if let Some(start_idx) = window_start_index {
+                    pk.push(start_idx);
+                };
+                if let Some(end_idx) = window_end_index {
+                    pk.push(end_idx);
+                };
+                Some(pk)
+            }
+        };
         let functional_dependency = {
             let mut fd_set =
                 ColIndexMapping::identity_or_none(input.schema().len(), original_schema.len())
@@ -100,6 +102,12 @@ impl LogicalHopWindow {
                 fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
             }
             fd_set
+        };
+        let pk_indices = match pk_indices {
+            Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
+                functional_dependency.minimize_key(&pk_indices)
+            }
+            _ => pk_indices.unwrap_or_default(),
         };
         let base = PlanBase::new_logical(ctx, actual_schema, pk_indices, functional_dependency);
         LogicalHopWindow {

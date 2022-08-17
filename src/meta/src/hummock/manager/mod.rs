@@ -14,12 +14,11 @@
 
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use function_name::named;
 use itertools::Itertools;
@@ -35,9 +34,9 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
-    OverlappingLevel,
+    pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
+    LevelType, OverlappingLevel,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -130,6 +129,7 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
+use risingwave_pb::hummock::pin_version_response::{HummockVersionDeltas, Payload};
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -360,7 +360,7 @@ where
         &self,
         context_id: HummockContextId,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
+    ) -> Result<pin_version_response::Payload> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -375,20 +375,19 @@ where
 
         let version_id = versioning.current_version.id;
 
-        let (is_delta, ret_deltas) = {
+        let ret = {
             if last_pinned <= version_id
                 && versioning.hummock_version_deltas.contains_key(&last_pinned)
             {
-                (
-                    true,
-                    versioning
+                Payload::VersionDeltas(HummockVersionDeltas {
+                    delta: versioning
                         .hummock_version_deltas
                         .range((Excluded(last_pinned), Included(version_id)))
                         .map(|(_, delta)| delta.clone())
                         .collect_vec(),
-                )
+                })
             } else {
-                (false, vec![])
+                Payload::PinnedVersion(versioning.current_version.clone())
             }
         };
 
@@ -397,19 +396,13 @@ where
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
-        let ret_version = if is_delta {
-            None
-        } else {
-            Some(versioning.current_version.clone())
-        };
-
         #[cfg(test)]
         {
             drop(versioning_guard);
             self.check_state_consistency().await;
         }
 
-        Ok((is_delta, ret_deltas, ret_version))
+        Ok(ret)
     }
 
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
@@ -476,10 +469,10 @@ where
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                minimal_pinned_snapshot: 0,
+                minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
-        if context_pinned_snapshot.minimal_pinned_snapshot == 0 {
+        if context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH {
             context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
@@ -540,14 +533,14 @@ where
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                minimal_pinned_snapshot: 0,
+                minimal_pinned_snapshot: INVALID_EPOCH,
             },
         );
 
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
         if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch
-            || context_pinned_snapshot.minimal_pinned_snapshot == 0
+            || context_pinned_snapshot.minimal_pinned_snapshot == INVALID_EPOCH
         {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
@@ -657,10 +650,12 @@ where
         };
         trigger_sst_stat(
             &self.metrics,
-            compaction
-                .compaction_statuses
-                .get(&compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+            Some(
+                compaction
+                    .compaction_statuses
+                    .get(&compaction_group_id)
+                    .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+            ),
             &current_version,
             compaction_group_id,
         );
@@ -692,18 +687,13 @@ where
 
     /// Assigns a compaction task to a compactor
     #[named]
-    pub async fn assign_compaction_task<T: Future<Output = bool>>(
+    pub async fn assign_compaction_task(
         &self,
         compact_task: &CompactTask,
         assignee_context_id: HummockContextId,
-        send_task: T,
     ) -> Result<()> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let _timer = start_measure_real_process_timer!(self);
-        if !send_task.await {
-            return Err(Error::CompactorUnreachable(assignee_context_id));
-        }
-
         let compaction = compaction_guard.deref_mut();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -867,12 +857,14 @@ where
 
         trigger_sst_stat(
             &self.metrics,
-            compaction
-                .compaction_statuses
-                .get(&compact_task.compaction_group_id)
-                .ok_or(Error::InvalidCompactionGroup(
-                    compact_task.compaction_group_id,
-                ))?,
+            Some(
+                compaction
+                    .compaction_statuses
+                    .get(&compact_task.compaction_group_id)
+                    .ok_or(Error::InvalidCompactionGroup(
+                        compact_task.compaction_group_id,
+                    ))?,
+            ),
             read_lock!(self, versioning).await.current_version.borrow(),
             compact_task.compaction_group_id,
         );
@@ -1009,13 +1001,21 @@ where
 
         // Update metrics
         trigger_commit_stat(&self.metrics, &versioning.current_version);
+        for compaction_group_id in &modified_compaction_groups {
+            trigger_sst_stat(
+                &self.metrics,
+                None,
+                &versioning.current_version,
+                *compaction_group_id,
+            );
+        }
 
         tracing::trace!("new committed epoch {}", epoch);
 
         self.env
             .notification_manager()
             .notify_frontend_asynchronously(
-                Operation::Update, // Frontends don't care about operation.
+                Operation::Update,
                 Info::HummockSnapshot(HummockSnapshot { epoch }),
             );
 
@@ -1180,7 +1180,6 @@ where
         false
     }
 
-    #[named]
     pub async fn trigger_manual_compaction(
         &self,
         compaction_group: CompactionGroupId,
@@ -1206,7 +1205,7 @@ where
         let compact_task = self
             .manual_get_compact_task(compaction_group, manual_compaction_option)
             .await;
-        let compact_task = match compact_task {
+        let mut compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
@@ -1224,37 +1223,51 @@ where
             }
         };
 
-        let send_task = async {
-            tokio::time::timeout(Duration::from_secs(3), async {
-                compactor
-                    .send_task(Task::CompactTask(compact_task.clone()))
-                    .await
-                    .is_ok()
-            })
-            .await
-            .unwrap_or(false)
-        };
-
-        match self
-            .assign_compaction_task(&compact_task, compactor.context_id(), send_task)
+        let mut is_failed = false;
+        let mut need_cancel_task = false;
+        if let Err(e) = self
+            .assign_compaction_task(&compact_task, compactor.context_id())
             .await
         {
-            Ok(_) => {}
+            is_failed = true;
+            tracing::warn!(
+                "Failed to assign compaction task to compactor {}: {:#?}",
+                compactor.context_id(),
+                e
+            );
+        }
 
-            Err(error) => {
-                // cancel task in memory
-                let mut compaction_guard = write_lock!(self, compaction).await;
-                let compaction = compaction_guard.deref_mut();
-                let compact_status = compaction
-                    .compaction_statuses
-                    .get_mut(&compact_task.task_id)
-                    .unwrap();
-                compact_status.cancel_compaction_tasks_if(|pending_task_id| {
-                    pending_task_id == compact_task.task_id
-                });
-
-                return Err(error);
+        if !is_failed {
+            if let Err(e) = compactor
+                .send_task(Task::CompactTask(compact_task.clone()))
+                .await
+            {
+                is_failed = true;
+                need_cancel_task = true;
+                tracing::warn!(
+                    "Failed to send task {} to {}. {:#?}",
+                    compact_task.task_id,
+                    compactor.context_id(),
+                    e
+                );
             }
+        }
+
+        if need_cancel_task {
+            compact_task.task_status = false;
+            if let Err(e) = self
+                .report_compact_task(compactor.context_id(), &compact_task)
+                .await
+            {
+                tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
+                // TODO #3677: handle cancellation via compaction heartbeat after #4496
+            }
+        }
+
+        if is_failed {
+            return Err(Error::InternalError(
+                "Failed to trigger_manual_compaction".to_string(),
+            ));
         }
 
         tracing::info!(
