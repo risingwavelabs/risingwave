@@ -80,7 +80,7 @@ impl MonitorService for MonitorServiceImpl {
                 "Profiling is already running by setting RW_PROFILE_PATH",
             ));
         }
-        let time = request.into_inner().get_time_s();
+        let time = request.into_inner().get_sleep_s();
         let guard = pprof::ProfilerGuardBuilder::default()
             .blocklist(&["libc", "libgcc", "pthread", "vdso"])
             .build()

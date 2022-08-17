@@ -144,11 +144,11 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn profile(&self, time_s: u64) -> Result<ProfilingResponse> {
+    pub async fn profile(&self, sleep_s: u64) -> Result<ProfilingResponse> {
         Ok(self
             .monitor_client
             .to_owned()
-            .profiling(ProfilingRequest { time_s })
+            .profiling(ProfilingRequest { sleep_s })
             .await?
             .into_inner())
     }
