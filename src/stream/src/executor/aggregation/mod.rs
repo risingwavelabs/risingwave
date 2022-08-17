@@ -24,8 +24,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DataChunk, DecimalArray,
-    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DataChunk, DecimalArray, F32Array,
+    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
     NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
@@ -289,37 +289,6 @@ pub fn create_streaming_agg_state(
         _ => todo!(),
     };
     Ok(state)
-}
-
-/// Get clones of aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
-    agg_calls
-        .iter()
-        .map(|agg| {
-            agg.args
-                .val_indices()
-                .iter()
-                .map(|val_idx| columns[*val_idx].array())
-                .collect()
-        })
-        .collect()
-}
-
-/// Get references to aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_array_refs<'a>(
-    agg_calls: &[AggCall],
-    columns: &'a [Column],
-) -> Vec<Vec<&'a ArrayImpl>> {
-    agg_calls
-        .iter()
-        .map(|agg| {
-            agg.args
-                .val_indices()
-                .iter()
-                .map(|val_idx| columns[*val_idx].array_ref())
-                .collect()
-        })
-        .collect()
 }
 
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
