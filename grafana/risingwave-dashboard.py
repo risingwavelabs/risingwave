@@ -285,6 +285,18 @@ def section_compaction(panels):
                 "version_size", "version size"
             ),
         ]),
+
+        panels.timeseries_bytes("Hummock Sstable BloomFilter Size", [
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+            ),
+        ]),
+
+        panels.timeseries_bytes("Hummock Sstable Meta Size", [
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_sstable_meta_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_meta_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+            ),
+        ]),
     ]
 
 
@@ -773,14 +785,30 @@ def section_hummock(panels):
                 "sum(rate(state_store_iter_size_sum[$__rate_interval])) by(job, instance) / sum(rate(state_store_iter_size_count[$__rate_interval])) by (job, instance)", "{{job}} @ {{instance}}"
             ),
         ]),
-        panels.timeseries_count("Read Bloom Filter", [
+        
+        panels.timeseries_ops("Read Bloom Filter", [
             panels.target(
                 "sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)", "bloom filter true negative  - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum(rate(state_store_bloom_filter_might_positive_counts[$__rate_interval])) by (job,instance)", "bloom filter might positive  - {{job}} @ {{instance}}"
+                "sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance)", "bloom filter check count  - {{job}} @ {{instance}}"
             ),
         ]),
+        
+        panels.timeseries_percentage(" Filter-Cache Hit Rate", [
+            panels.target(
+                "(sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)) / (sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance))", "bloom filter hit rate - {{job}} @ {{instance}}"
+            ),
+
+            panels.target(
+                "((sum(rate(state_store_sst_store_block_request_counts{type='meta_total'}[$__rate_interval])) by (job,instance)) - (sum(rate(state_store_sst_store_block_request_counts{type='meta_miss'}[$__rate_interval])) by (job,instance))) / (sum(rate(state_store_sst_store_block_request_counts{type='meta_total'}[$__rate_interval])) by (job,instance))", "meta cache hit rate - {{job}} @ {{instance}}"
+            ),
+
+            panels.target(
+                "((sum(rate(state_store_sst_store_block_request_counts{type='data_total'}[$__rate_interval])) by (job,instance)) - (sum(rate(state_store_sst_store_block_request_counts{type='data_miss'}[$__rate_interval])) by (job,instance))) / (sum(rate(state_store_sst_store_block_request_counts{type='data_total'}[$__rate_interval])) by (job,instance))", "block cache hit rate - {{job}} @ {{instance}}"
+            ),
+        ]),
+
         panels.timeseries_count("Read Merged SSTs", [
             panels.target(
                 "histogram_quantile(0.9, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, instance))", "# merged ssts p90  - {{job}} @ {{instance}}", True
