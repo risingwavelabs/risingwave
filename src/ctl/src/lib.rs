@@ -49,6 +49,12 @@ enum Commands {
     Bench(BenchCommands),
     /// Commands for tracing the compute nodes
     Trace,
+    // TODO(yuhao): profile other nodes
+    /// Commands for profilng the compute nodes
+    Profile {
+        #[clap(short, long = "sleep")]
+        sleep: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -130,6 +136,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
         Commands::Trace => cmd_impl::trace::trace().await?,
+        Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
     }
     Ok(())
 }
