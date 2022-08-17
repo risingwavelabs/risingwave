@@ -488,7 +488,7 @@ where
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self) -> MetaResult<()> {
+    pub async fn flush(&self) -> MetaResult<u64> {
         let start = Instant::now();
 
         debug!("start barrier flush");
@@ -497,7 +497,8 @@ where
         let elapsed = Instant::now().duration_since(start);
         debug!("barrier flushed in {:?}", elapsed);
 
-        Ok(())
+        let max_committed_epoch = self.hummock_manager.get_last_epoch()?.epoch;
+        Ok(max_committed_epoch)
     }
 
     pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {

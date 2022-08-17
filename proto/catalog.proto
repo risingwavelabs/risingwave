@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package catalog;
 
-import "common.proto";
 import "expr.proto";
 import "plan_common.proto";
 
@@ -76,10 +75,7 @@ message Table {
   repeated int32 pk = 13;
   bool appendonly = 14;
   uint32 owner = 15;
-  common.ParallelUnitMapping mapping = 16;
-  map<string, string> properties = 17;
-  // the count of column for prefix in storage_pk
-  uint32 read_pattern_prefix_column = 18;
+  map<string, string> properties = 16;
 }
 
 message Schema {

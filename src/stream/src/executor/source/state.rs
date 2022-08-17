@@ -96,6 +96,7 @@ impl<S: StateStore> SourceStateHandler<S> {
         self.keyspace
             .get(
                 state_identifier.as_str(),
+                true,
                 ReadOptions {
                     epoch,
                     table_id: Some(self.keyspace.table_id()),

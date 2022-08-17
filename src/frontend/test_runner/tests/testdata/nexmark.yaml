@@ -211,31 +211,32 @@
                         BatchExchange { order: [], dist: HashShard(bid.auction) }
                           BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
-      StreamProject { exprs: [bid.auction, sum(count), window_start, window_start] }
-        StreamFilter { predicate: (sum(count) >= max(max(sum(count)))) }
-          StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
-            StreamExchange { dist: HashShard(window_start) }
-              StreamProject { exprs: [bid.auction, sum(count), window_start] }
-                StreamHashAgg { group_key: [window_start, bid.auction], aggs: [sum(count), sum(count)] }
-                  StreamExchange { dist: HashShard(window_start, bid.auction) }
-                    StreamHashAgg { group_key: [window_start, bid.auction, Vnode(bid._row_id)], aggs: [count, count] }
-                      StreamProject { exprs: [window_start, bid.auction, bid._row_id, Vnode(bid._row_id)] }
-                        StreamProject { exprs: [window_start, bid.auction, bid._row_id] }
-                          StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-                            StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
-            StreamProject { exprs: [max(max(sum(count))), window_start] }
-              StreamHashAgg { group_key: [window_start], aggs: [sum(count), max(max(sum(count)))] }
-                StreamExchange { dist: HashShard(window_start) }
-                  StreamHashAgg { group_key: [window_start, Vnode(bid.auction, window_start)], aggs: [count, max(sum(count))] }
-                    StreamProject { exprs: [window_start, sum(count), bid.auction, Vnode(bid.auction, window_start)] }
-                      StreamProject { exprs: [window_start, sum(count), bid.auction] }
-                        StreamHashAgg { group_key: [bid.auction, window_start], aggs: [sum(count), sum(count)] }
-                          StreamExchange { dist: HashShard(bid.auction, window_start) }
-                            StreamHashAgg { group_key: [bid.auction, window_start, Vnode(bid._row_id)], aggs: [count, count] }
-                              StreamProject { exprs: [bid.auction, window_start, bid._row_id, Vnode(bid._row_id)] }
-                                StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-                                  StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+    StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [auction, window_start#1] }
+      StreamExchange { dist: HashShard(bid.auction, window_start) }
+        StreamProject { exprs: [bid.auction, sum(count), window_start, window_start] }
+          StreamFilter { predicate: (sum(count) >= max(max(sum(count)))) }
+            StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
+              StreamExchange { dist: HashShard(window_start) }
+                StreamProject { exprs: [bid.auction, sum(count), window_start] }
+                  StreamHashAgg { group_key: [window_start, bid.auction], aggs: [sum(count), sum(count)] }
+                    StreamExchange { dist: HashShard(window_start, bid.auction) }
+                      StreamHashAgg { group_key: [window_start, bid.auction, Vnode(bid._row_id)], aggs: [count, count] }
+                        StreamProject { exprs: [window_start, bid.auction, bid._row_id, Vnode(bid._row_id)] }
+                          StreamProject { exprs: [window_start, bid.auction, bid._row_id] }
+                            StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
+                              StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+              StreamProject { exprs: [max(max(sum(count))), window_start] }
+                StreamHashAgg { group_key: [window_start], aggs: [sum(count), max(max(sum(count)))] }
+                  StreamExchange { dist: HashShard(window_start) }
+                    StreamHashAgg { group_key: [window_start, Vnode(bid.auction, window_start)], aggs: [count, max(sum(count))] }
+                      StreamProject { exprs: [window_start, sum(count), bid.auction, Vnode(bid.auction, window_start)] }
+                        StreamProject { exprs: [window_start, sum(count), bid.auction] }
+                          StreamHashAgg { group_key: [bid.auction, window_start], aggs: [sum(count), sum(count)] }
+                            StreamExchange { dist: HashShard(bid.auction, window_start) }
+                              StreamHashAgg { group_key: [bid.auction, window_start, Vnode(bid._row_id)], aggs: [count, count] }
+                                StreamProject { exprs: [bid.auction, window_start, bid._row_id, Vnode(bid._row_id)] }
+                                  StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
+                                    StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
 - id: nexmark_q6
   before:
   - create_tables
@@ -356,23 +357,24 @@
             BatchProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
               BatchScan { table: auction, columns: [auction.date_time, auction.seller], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [id, name, starttime, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)(hidden), auction.seller(hidden), TumbleStart(auction.date_time, '00:00:10':Interval)(hidden), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)(hidden)], pk_columns: [id, name, starttime, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
-      StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND TumbleStart(person.date_time, '00:00:10':Interval) = TumbleStart(auction.date_time, '00:00:10':Interval) AND (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval) = (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), output: all }
-        StreamExchange { dist: HashShard(person.id, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
-          StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
-            StreamHashAgg { group_key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [sum(count)] }
-              StreamExchange { dist: HashShard(person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
-                StreamHashAgg { group_key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), Vnode(person._row_id)], aggs: [count] }
-                  StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), person._row_id, Vnode(person._row_id)] }
-                    StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), person._row_id] }
-                      StreamTableScan { table: person, columns: [person.id, person.name, person.date_time, person._row_id], pk: [person._row_id], distribution: UpstreamHashShard(person._row_id) }
-        StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
-          StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [sum(count)] }
-            StreamExchange { dist: HashShard(auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
-              StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), Vnode(auction._row_id)], aggs: [count] }
-                StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction._row_id, Vnode(auction._row_id)] }
-                  StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction._row_id] }
-                    StreamTableScan { table: auction, columns: [auction.date_time, auction.seller, auction._row_id], pk: [auction._row_id], distribution: UpstreamHashShard(auction._row_id) }
+    StreamMaterialize { columns: [id, name, starttime, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)(hidden), auction.seller(hidden), TumbleStart(auction.date_time, '00:00:10':Interval)(hidden), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)(hidden)], pk_columns: [name, auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
+      StreamExchange { dist: HashShard(person.name, auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
+        StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND TumbleStart(person.date_time, '00:00:10':Interval) = TumbleStart(auction.date_time, '00:00:10':Interval) AND (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval) = (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), output: all }
+          StreamExchange { dist: HashShard(person.id, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
+            StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
+              StreamHashAgg { group_key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [sum(count)] }
+                StreamExchange { dist: HashShard(person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
+                  StreamHashAgg { group_key: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), Vnode(person._row_id)], aggs: [count] }
+                    StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), person._row_id, Vnode(person._row_id)] }
+                      StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), person._row_id] }
+                        StreamTableScan { table: person, columns: [person.id, person.name, person.date_time, person._row_id], pk: [person._row_id], distribution: UpstreamHashShard(person._row_id) }
+          StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)] }
+            StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [sum(count)] }
+              StreamExchange { dist: HashShard(auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
+                StreamHashAgg { group_key: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), Vnode(auction._row_id)], aggs: [count] }
+                  StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction._row_id, Vnode(auction._row_id)] }
+                    StreamProject { exprs: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction._row_id] }
+                      StreamTableScan { table: auction, columns: [auction.date_time, auction.seller, auction._row_id], pk: [auction._row_id], distribution: UpstreamHashShard(auction._row_id) }
 - id: nexmark_q9
   before:
   - create_tables
@@ -572,7 +574,7 @@
   sql: |
     SELECT
         auction,
-        to_char(date_time, 'yyyy-MM-dd') AS day,
+        to_char(date_time, 'YYYY-MM-DD') AS day,
         count(*) AS total_bids,
         count(*) filter (where price < 10000) AS rank1_bids,
         count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
@@ -582,22 +584,22 @@
         avg(price) AS avg_price,
         sum(price) AS sum_price
     FROM bid
-    GROUP BY auction, to_char(date_time, 'yyyy-MM-dd');
+    GROUP BY auction, to_char(date_time, 'YYYY-MM-DD');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), (sum(bid.price) / count(bid.price)), sum(bid.price)] }
-        BatchHashAgg { group_key: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], aggs: [count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), sum(bid.price), count(bid.price), sum(bid.price)] }
-          BatchExchange { order: [], dist: HashShard(bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)) }
-            BatchProject { exprs: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price] }
+      BatchProject { exprs: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), (sum(bid.price) / count(bid.price)), sum(bid.price)] }
+        BatchHashAgg { group_key: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar)], aggs: [count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), sum(bid.price), count(bid.price), sum(bid.price)] }
+          BatchExchange { order: [], dist: HashShard(bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar)) }
+            BatchProject { exprs: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), bid.price] }
               BatchScan { table: bid, columns: [bid.auction, bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], pk_columns: [auction, day] }
-      StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), sum(count), sum(count filter((bid.price < 10000:Int32))), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))), sum(count filter((bid.price >= 1000000:Int32))), min(min(bid.price)), max(max(bid.price)), (sum(sum(bid.price)) / sum(count(bid.price))), sum(sum(bid.price))] }
-        StreamHashAgg { group_key: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)], aggs: [sum(count), sum(count), sum(count filter((bid.price < 10000:Int32))), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))), sum(count filter((bid.price >= 1000000:Int32))), min(min(bid.price)), max(max(bid.price)), sum(sum(bid.price)), sum(count(bid.price)), sum(sum(bid.price))] }
-          StreamExchange { dist: HashShard(bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar)) }
-            StreamHashAgg { group_key: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), Vnode(bid._row_id)], aggs: [count, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), sum(bid.price), count(bid.price), sum(bid.price)] }
-              StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid._row_id, Vnode(bid._row_id)] }
-                StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar), bid.price, bid._row_id] }
+      StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), sum(count), sum(count filter((bid.price < 10000:Int32))), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))), sum(count filter((bid.price >= 1000000:Int32))), min(min(bid.price)), max(max(bid.price)), (sum(sum(bid.price)) / sum(count(bid.price))), sum(sum(bid.price))] }
+        StreamHashAgg { group_key: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar)], aggs: [sum(count), sum(count), sum(count filter((bid.price < 10000:Int32))), sum(count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32))), sum(count filter((bid.price >= 1000000:Int32))), min(min(bid.price)), max(max(bid.price)), sum(sum(bid.price)), sum(count(bid.price)), sum(sum(bid.price))] }
+          StreamExchange { dist: HashShard(bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar)) }
+            StreamHashAgg { group_key: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), Vnode(bid._row_id)], aggs: [count, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), sum(bid.price), count(bid.price), sum(bid.price)] }
+              StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), bid.price, bid._row_id, Vnode(bid._row_id)] }
+                StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar), bid.price, bid._row_id] }
                   StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
 - id: nexmark_q18
   before:

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use futures::{pin_mut, StreamExt};
@@ -25,11 +24,12 @@ use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
+use crate::executor::top_n::TopNCache;
 use crate::executor::PkIndices;
 
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
-    state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: RowBasedStateTable<S>,
     /// The total number of rows in state table.
     total_count: usize,
     /// For deserializing `OrderedRow`.
@@ -107,8 +107,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         self.total_count
     }
 
-    fn get_topn_row(&self, iter_res: Cow<Row>) -> TopNStateRow {
-        let row = iter_res.into_owned();
+    pub fn get_topn_row(&self, row: Row) -> TopNStateRow {
         let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
         for pk_index in self.state_table.pk_indices() {
             datums.push(row[*pk_index].clone());
@@ -147,7 +146,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
             )
         };
         while let Some(item) = stream.next().await {
-            rows.push(self.get_topn_row(item?));
+            rows.push(self.get_topn_row(item?.into_owned()));
         }
         Ok(rows)
     }
@@ -163,7 +162,8 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
-            let topn_row = self.get_topn_row(item?);
+            // Note(bugen): should first compare with start key before constructing TopNStateRow.
+            let topn_row = self.get_topn_row(item?.into_owned());
             if topn_row.ordered_key <= *start_key {
                 continue;
             }
@@ -172,6 +172,52 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
                 break;
             }
         }
+        Ok(())
+    }
+
+    pub async fn init_topn_cache(
+        &self,
+        pk_prefix: Option<&Row>,
+        topn_cache: &mut TopNCache,
+        epoch: u64,
+    ) -> StreamExecutorResult<()> {
+        assert!(topn_cache.low.is_empty());
+        assert!(topn_cache.middle.is_empty());
+        assert!(topn_cache.high.is_empty());
+
+        let state_table_iter = iter_state_table(&self.state_table, epoch, pk_prefix).await?;
+        pin_mut!(state_table_iter);
+        if topn_cache.offset > 0 {
+            while let Some(item) = state_table_iter.next().await {
+                let topn_row = self.get_topn_row(item?.into_owned());
+                topn_cache.low.insert(topn_row.ordered_key, topn_row.row);
+                if topn_cache.low.len() == topn_cache.offset {
+                    break;
+                }
+            }
+        }
+
+        assert!(topn_cache.limit > 0, "topn cache limit should always > 0");
+        while let Some(item) = state_table_iter.next().await {
+            let topn_row = self.get_topn_row(item?.into_owned());
+            topn_cache.middle.insert(topn_row.ordered_key, topn_row.row);
+            if topn_cache.middle.len() == topn_cache.limit {
+                break;
+            }
+        }
+
+        assert!(
+            topn_cache.high_capacity > 0,
+            "topn cache high_capacity should always > 0"
+        );
+        while let Some(item) = state_table_iter.next().await {
+            let topn_row = self.get_topn_row(item?.into_owned());
+            topn_cache.high.insert(topn_row.ordered_key, topn_row.row);
+            if topn_cache.high.len() == topn_cache.high_capacity {
+                break;
+            }
+        }
+
         Ok(())
     }
 

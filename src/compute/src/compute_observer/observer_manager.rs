@@ -63,12 +63,12 @@ impl ObserverNodeImpl for ComputeObserverNode {
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
-                self.handle_catalog_snapshot(snapshot.table);
+                self.handle_catalog_snapshot(snapshot.tables);
                 self.version = resp.version;
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be frontend snapshot, but get {:?}",
+                    "the first notify should be meta snapshot, but get {:?}",
                     resp
                 ))
                 .into())

@@ -36,7 +36,6 @@ members = [
   "src/utils/runtime",
   "src/utils/static-link",
   "src/utils/stats_alloc",
-  "src/utils/value-encoding",
   "src/workspace-hack",
 ]
 
