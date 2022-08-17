@@ -90,9 +90,13 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  bool is_delta_response = 2;
-  repeated HummockVersionDelta version_deltas = 3;
-  HummockVersion pinned_version = 4;
+  message HummockVersionDeltas {
+    repeated HummockVersionDelta delta = 1;
+  }
+  oneof payload {
+    HummockVersionDeltas version_deltas = 2;
+    HummockVersion pinned_version = 3;
+  }
 }
 
 message UnpinVersionBeforeRequest {
@@ -252,6 +256,7 @@ message GetNewSstIdsResponse {
 
 message SubscribeCompactTasksRequest {
   uint32 context_id = 1;
+  uint64 max_concurrent_task_number = 2;
 }
 
 message SubscribeCompactTasksResponse {

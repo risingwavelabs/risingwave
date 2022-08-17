@@ -27,7 +27,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef,
+    SstableStoreRef, SstableStoreWrite,
 };
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;

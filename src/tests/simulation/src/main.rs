@@ -17,6 +17,8 @@
 use std::time::Duration;
 
 use clap::Parser;
+use rand::Rng;
+use sqllogictest::ParallelTestError;
 
 #[cfg(not(madsim))]
 fn main() {
@@ -51,6 +53,9 @@ pub struct Args {
     /// This determines worker_node_parallelism.
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
+
+    #[clap(short, long, default_value = "1")]
+    jobs: usize,
 }
 
 #[cfg(madsim)]
@@ -80,7 +85,9 @@ async fn main() {
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     // frontend node
+    let mut frontend_ip = vec![];
     for i in 1..=args.frontend_nodes {
+        frontend_ip.push(format!("192.168.2.{i}"));
         handle
             .create_node()
             .name(format!("frontend-{i}"))
@@ -125,7 +132,6 @@ async fn main() {
     }
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     // client
     let client_node = handle
         .create_node()
@@ -134,17 +140,43 @@ async fn main() {
         .build();
     client_node
         .spawn(async move {
-            let mut tester = sqllogictest::Runner::new(Postgres::connect("192.168.2.1").await);
-            let files = glob::glob(&args.files).expect("failed to read glob pattern");
-            for file in files {
-                let file = file.unwrap();
-                let path = file.as_path();
-                println!("{}", path.display());
-                tester.run_file_async(path).await.unwrap();
+            let glob = &args.files;
+            if args.jobs > 1 {
+                run_parallel_slt_task(glob, &frontend_ip, args.jobs)
+                    .await
+                    .unwrap();
+            } else {
+                let i = rand::thread_rng().gen_range(0..frontend_ip.len());
+                run_slt_task(glob, &frontend_ip[i]).await;
             }
         })
         .await
         .unwrap();
+}
+
+async fn run_slt_task(glob: &str, host: &str) {
+    let mut tester =
+        sqllogictest::Runner::new(Postgres::connect(host.to_string(), "dev".to_string()).await);
+    let files = glob::glob(glob).expect("failed to read glob pattern");
+    for file in files {
+        let file = file.unwrap();
+        let path = file.as_path();
+        println!("{}", path.display());
+        tester.run_file_async(path).await.unwrap();
+    }
+}
+
+async fn run_parallel_slt_task(
+    glob: &str,
+    hosts: &[String],
+    jobs: usize,
+) -> Result<(), ParallelTestError> {
+    let i = rand::thread_rng().gen_range(0..hosts.len());
+    let db = Postgres::connect(hosts[i].clone(), "dev".to_string()).await;
+    let mut tester = sqllogictest::Runner::new(db);
+    tester
+        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, jobs)
+        .await
 }
 
 struct Postgres {
@@ -153,11 +185,11 @@ struct Postgres {
 }
 
 impl Postgres {
-    async fn connect(host: &str) -> Self {
+    async fn connect(host: String, dbname: String) -> Self {
         let (client, connection) = tokio_postgres::Config::new()
-            .host(host)
+            .host(&host)
             .port(4566)
-            .dbname("dev")
+            .dbname(&dbname)
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
