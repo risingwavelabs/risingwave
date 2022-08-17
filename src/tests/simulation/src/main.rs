@@ -17,6 +17,7 @@
 use std::time::Duration;
 
 use clap::Parser;
+use rand::Rng;
 use sqllogictest::ParallelTestError;
 
 #[cfg(not(madsim))]
@@ -145,7 +146,8 @@ async fn main() {
                     .await
                     .unwrap();
             } else {
-                run_slt_task(glob, &frontend_ip[0]).await;
+                let i = rand::thread_rng().gen_range(0..frontend_ip.len());
+                run_slt_task(glob, &frontend_ip[i]).await;
             }
         })
         .await
@@ -169,7 +171,8 @@ async fn run_parallel_slt_task(
     hosts: &[String],
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
-    let db = Postgres::connect(hosts[0].clone(), "dev".to_string()).await;
+    let i = rand::thread_rng().gen_range(0..hosts.len());
+    let db = Postgres::connect(hosts[i].clone(), "dev".to_string()).await;
     let mut tester = sqllogictest::Runner::new(db);
     tester
         .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, jobs)
