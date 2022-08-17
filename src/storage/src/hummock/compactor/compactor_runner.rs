@@ -81,9 +81,18 @@ impl CompactorRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let task_progress = TaskProgressTracker::new(self.compact_task.task_id, self.compactor.context.task_progress.clone());
-        let ssts = self.compactor
-            .compact_key_range_impl(iter, compaction_filter, filter_key_extractor, Some(task_progress))
+        let task_progress = TaskProgressTracker::new(
+            self.compact_task.task_id,
+            self.compactor.context.task_progress.clone(),
+        );
+        let ssts = self
+            .compactor
+            .compact_key_range_impl(
+                iter,
+                compaction_filter,
+                filter_key_extractor,
+                Some(task_progress),
+            )
             .await?;
         Ok((self.split_index, ssts))
     }

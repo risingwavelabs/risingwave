@@ -55,7 +55,6 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
 pub use self::context::TaskProgressTracker;
-
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
@@ -615,7 +614,7 @@ impl Compactor {
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-        progress_tracker: Option<TaskProgressTracker>
+        progress_tracker: Option<TaskProgressTracker>,
     ) -> HummockResult<Vec<SstableInfo>> {
         let get_id_time = Arc::new(AtomicU64::new(0));
         let mut options = self.options.clone();
