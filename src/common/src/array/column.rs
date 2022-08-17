@@ -56,6 +56,9 @@ impl Column {
         self.array
     }
 
+    /// Expand the `columns` according to `column_subsets`.
+    ///
+    /// This is a helper function for Expand operator.
     #[try_stream(boxed, ok = Vec<Column>, error = ArrayError)]
     pub async fn expand_columns(
         cardinality: usize,

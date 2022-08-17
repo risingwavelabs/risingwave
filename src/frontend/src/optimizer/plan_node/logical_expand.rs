@@ -26,9 +26,14 @@ use super::{
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// [`LogicalExpand`] expand one row multiple times according to `column_subsets`.
+/// [`LogicalExpand`] expand one row multiple times according to `column_subsets` and also keep
+/// original columns of input. It can be used to implement distinct aggregation and group set.
 ///
-/// It can be used to implement distinct aggregation and group set.
+/// This is the schema of `LogicalExpand`:
+/// | expanded columns(i.e. some columns are set to null) | original columns of input | flag |.
+///
+/// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
+/// is used to distinguish between different `subset`s in `column_subsets`.
 #[derive(Debug, Clone)]
 pub struct LogicalExpand {
     pub base: PlanBase,
@@ -209,7 +214,7 @@ mod tests {
     use crate::optimizer::plan_node::{LogicalExpand, LogicalValues};
     use crate::session::OptimizerContext;
 
-    /// TODO(Wenzhuo): change this test according to expand's new definition.
+    // TODO(Wenzhuo): change this test according to expand's new definition.
     #[tokio::test]
     async fn fd_derivation_expand() {
         // input: [v1, v2, v3]
