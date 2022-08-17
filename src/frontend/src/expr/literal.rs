@@ -101,7 +101,7 @@ mod tests {
         let data = Some(ScalarImpl::Struct(value.clone()));
         let node = literal_to_protobuf(&data);
         if let RexNode::Constant(prost) = node.as_ref().unwrap() {
-            let data2 = ScalarImpl::bytes_to_scalar(
+            let data2 = ScalarImpl::from_proto_bytes(
                 prost.get_body(),
                 &DataType::Struct {
                     fields: vec![DataType::Varchar, DataType::Int32, DataType::Int32].into(),
@@ -120,7 +120,7 @@ mod tests {
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_protobuf(&data);
         if let RexNode::Constant(prost) = node.as_ref().unwrap() {
-            let data2 = ScalarImpl::bytes_to_scalar(
+            let data2 = ScalarImpl::from_proto_bytes(
                 prost.get_body(),
                 &DataType::List {
                     datatype: Box::new(DataType::Int32),

@@ -285,16 +285,8 @@ async fn test_basic() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
-    meta_client
-        .commit_epoch(
-            epoch1,
-            hummock_storage
-                .local_version_manager()
-                .get_uncommitted_ssts(epoch1),
-        )
-        .await
-        .unwrap();
+    let (_, ssts) = hummock_storage.sync(epoch1).await.unwrap();
+    meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     hummock_storage.wait_epoch(epoch1).await.unwrap();
     let value = hummock_storage
         .get(
@@ -435,7 +427,8 @@ async fn test_state_store_sync() {
     // );
 
     // trigger a sync
-    hummock_storage.sync(Some(epoch)).await.unwrap();
+    hummock_storage.sync(epoch - 1).await.unwrap();
+    hummock_storage.sync(epoch).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
     // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
@@ -870,16 +863,17 @@ async fn test_write_anytime() {
     // Assert epoch 2 correctness
     assert_old_value(epoch2).await;
 
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
+    println!("aaaa");
+    let (_, ssts1) = hummock_storage.sync(epoch1).await.unwrap();
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
-    hummock_storage.sync(Some(epoch2)).await.unwrap();
+    let (_, ssts2) = hummock_storage.sync(epoch2).await.unwrap();
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
-    assert!(!hummock_storage.get_uncommitted_ssts(epoch1).is_empty());
-    assert!(!hummock_storage.get_uncommitted_ssts(epoch2).is_empty());
+    assert!(!ssts1.is_empty());
+    assert!(!ssts2.is_empty());
 }
 
 #[tokio::test]
@@ -921,8 +915,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
-    let ssts = hummock_storage.get_uncommitted_ssts(epoch1);
+    let (_, ssts) = hummock_storage.sync(epoch1).await.unwrap();
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
     let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
@@ -936,8 +929,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch2)).await.unwrap();
-    let ssts = hummock_storage.get_uncommitted_ssts(epoch2);
+    let (_, ssts) = hummock_storage.sync(epoch2).await.unwrap();
     meta_client.commit_epoch(epoch2, ssts).await.unwrap();
     hummock_storage.wait_epoch(epoch2).await.unwrap();
     assert!(hummock_storage

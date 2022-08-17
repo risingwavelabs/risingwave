@@ -49,6 +49,7 @@ impl BoundSelect {
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
+            .chain(self.having.iter())
             .any(|expr| expr.has_correlated_input_ref_by_depth())
             || match self.from.as_ref() {
                 Some(relation) => relation.is_correlated(),

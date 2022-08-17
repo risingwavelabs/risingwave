@@ -401,10 +401,10 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<()> {
+    pub async fn flush(&self) -> Result<HummockEpoch> {
         let request = FlushRequest::default();
-        self.inner.flush(request).await?;
-        Ok(())
+        let resp = self.inner.flush(request).await?;
+        Ok(resp.snapshot.unwrap().epoch)
     }
 
     pub async fn list_table_fragments(

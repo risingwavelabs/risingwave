@@ -25,6 +25,7 @@ use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
 
 use crate::exchange_source::ExchangeSource;
+use crate::task::TaskId;
 
 /// Use grpc client as the source.
 pub struct GrpcExchangeSource {
@@ -89,5 +90,9 @@ impl ExchangeSource for GrpcExchangeSource {
 
             Ok(Some(data))
         }
+    }
+
+    fn get_task_id(&self) -> TaskId {
+        TaskId::from(self.task_output_id.get_task_id().unwrap())
     }
 }

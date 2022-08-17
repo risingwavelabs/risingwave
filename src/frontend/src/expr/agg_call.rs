@@ -177,7 +177,7 @@ impl AggCall {
     }
 
     pub fn agg_kind(&self) -> AggKind {
-        self.agg_kind.clone()
+        self.agg_kind
     }
 
     /// Get a reference to the agg call's inputs.
