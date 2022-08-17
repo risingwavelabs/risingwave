@@ -92,17 +92,6 @@ impl Binder {
                 )
                 .into());
             }
-            if bound
-                .iter()
-                .flatten()
-                .any(|expr| expr.has_correlated_input_ref_by_depth())
-            {
-                return Err(ErrorCode::NotImplemented(
-                    "VALUES is disallowed to have CorrelatedInputRef.".into(),
-                    None.into(),
-                )
-                .into());
-            }
         }
 
         // Calculate column types.
@@ -128,10 +117,18 @@ impl Binder {
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );
-        Ok(BoundValues {
+
+        let bound_values = BoundValues {
             rows: bound,
             schema,
-        })
+        };
+        if bound_values.is_correlated() {
+            return Err(ErrorCode::InternalError(
+                "Values is disallowed to have CorrelatedInputRef.".to_string(),
+            )
+            .into());
+        }
+        Ok(bound_values)
     }
 }
 

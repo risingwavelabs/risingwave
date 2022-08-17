@@ -233,17 +233,25 @@ impl ExprImpl {
             fn visit_subquery(&mut self, subquery: &Subquery) {
                 use crate::binder::BoundSetExpr;
 
-                self.depth += 1;
                 match &subquery.query.body {
-                    BoundSetExpr::Select(select) => select
-                        .select_items
-                        .iter()
-                        .chain(select.group_by.iter())
-                        .chain(select.where_clause.iter())
-                        .for_each(|expr| self.visit_expr(expr)),
-                    BoundSetExpr::Values(_) => {}
+                    BoundSetExpr::Select(select) => {
+                        self.depth += 1;
+                        select
+                            .select_items
+                            .iter()
+                            .chain(select.group_by.iter())
+                            .chain(select.where_clause.iter())
+                            .for_each(|expr| self.visit_expr(expr));
+                        self.depth -= 1;
+                    }
+                    BoundSetExpr::Values(values) => {
+                        values
+                            .rows
+                            .iter()
+                            .flatten()
+                            .for_each(|expr| self.visit_expr(expr));
+                    }
                 }
-                self.depth -= 1;
             }
         }
 
