@@ -250,6 +250,7 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, list, prefix)
     }
 
+    #[allow(dead_code)]
     fn store_media_type(&self) -> StoreMediaTypeE {
         StoreMediaTypeE::None
     }
