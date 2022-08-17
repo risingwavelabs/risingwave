@@ -136,17 +136,20 @@ impl PlanTreeNodeUnary for LogicalExpand {
                     .collect_vec()
             })
             .collect_vec();
-        let (mut map, new_input_col_num) = input_col_change.into_parts();
-        // TODO: rewrite.
-        map.extend({
-            map.clone()
+        let (mut mapping, new_input_col_num) = input_col_change.into_parts();
+        mapping.extend({
+            mapping
+                .clone()
                 .into_iter()
                 .map(|p| p.map(|i| i + new_input_col_num))
                 .collect_vec()
         });
-        map.push(Some(2 * new_input_col_num));
+        mapping.push(Some(2 * new_input_col_num));
 
-        (Self::new(input, column_subsets), ColIndexMapping::new(map))
+        (
+            Self::new(input, column_subsets),
+            ColIndexMapping::new(mapping),
+        )
     }
 }
 
