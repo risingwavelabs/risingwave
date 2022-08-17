@@ -41,9 +41,13 @@ mod tests {
     use risingwave_pb::hummock::pin_version_response::Payload;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
-    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+    use risingwave_storage::hummock::compactor::{
+        CompactionExecutor, Compactor, CompactorContext, Context,
+    };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-    use risingwave_storage::hummock::{HummockStorage, MemoryLimiter, SstableIdManager};
+    use risingwave_storage::hummock::{
+        CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager,
+    };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::{ReadOptions, WriteOptions};
@@ -123,14 +127,8 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
     }
 
@@ -150,20 +148,27 @@ mod tests {
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
-        CompactorContext {
+        let context = Arc::new(Context {
             options: storage.options().clone(),
             sstable_store: storage.sstable_store(),
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
+            read_memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
-            memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
                 storage.options().sstable_id_remote_fetch_number,
             )),
             task_progress: Default::default(),
+        });
+        CompactorContext {
+            sstable_store: Arc::new(CompactorSstableStore::new(
+                context.sstable_store.clone(),
+                context.read_memory_limiter.clone(),
+            )),
+            context,
         }
     }
 
@@ -444,8 +449,7 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            let ssts = storage.local_version_manager().get_uncommitted_ssts(epoch);
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -572,14 +576,8 @@ mod tests {
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
 
-            storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         // Mimic dropping table
@@ -740,17 +738,8 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
-        }
-
-        storage.sync(None).await.unwrap();
-        for epoch in &epoch_set {
-            hummock_meta_client
-                .commit_epoch(
-                    *epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {
@@ -915,17 +904,8 @@ mod tests {
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
-        }
-
-        storage.sync(None).await.unwrap();
-        for epoch in &epoch_set {
-            hummock_meta_client
-                .commit_epoch(
-                    *epoch,
-                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
-                )
-                .await
-                .unwrap();
+            let (_, ssts) = storage.sync(epoch).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
         let manual_compcation_option = ManualCompactionOption {

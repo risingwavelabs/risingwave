@@ -45,6 +45,36 @@ impl BoundQuery {
         self.schema().data_types()
     }
 
+    /// Checks whether this query contains references to outer queries.
+    ///
+    /// Note there are 3 cases:
+    /// ```sql
+    /// select 1 from a having exists ( -- this is self
+    ///   select 1 from b where exists (
+    ///     select b1 from c
+    ///   )
+    /// );
+    ///
+    /// select 1 from a having exists ( -- this is self
+    ///   select 1 from b where exists (
+    ///     select a1 from c
+    ///   )
+    /// );
+    ///
+    /// select 1 from a where exists (
+    ///   select 1 from b having exists ( -- this is self, not the one above
+    ///     select a1 from c
+    ///   )
+    /// );
+    /// ```
+    /// We assume `self` is the subquery after `having`. In other words, the query with `from b` in
+    /// first 2 examples and the query with `from c` in the last example.
+    ///
+    /// * The first example is uncorrelated, because it is self-contained and does not depend on
+    ///   table `a`, although there is correlated input ref (`b1`) in it.
+    /// * The second example is correlated, because it depend on a correlated input ref (`a1`) that
+    ///   goes out.
+    /// * The last example is also correlated. because it cannot be evaluated independently either.
     pub fn is_correlated(&self) -> bool {
         self.body.is_correlated()
             || self

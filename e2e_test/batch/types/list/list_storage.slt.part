@@ -1,0 +1,39 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE a(b INTEGER[]);
+
+statement ok
+INSERT INTO a VALUES (ARRAY[1, 2]), (NULL), (ARRAY[3, 4, 5, 6]), (ARRAY[NULL, 7]);
+
+query I rowsort
+SELECT * FROM a
+----
+{1,2}
+NULL
+{3,4,5,6}
+{NULL,7}
+
+statement ok
+CREATE TABLE c(b VARCHAR[]);
+
+statement ok
+INSERT INTO c VALUES (ARRAY['hello', 'world']), (NULL), (ARRAY['fejwfoaejwfoijwafew', 'b', 'c']), (ARRAY[NULL, 'XXXXXXXXXXXXXXXXXXXXXXXX']);
+
+query I rowsort
+SELECT * FROM c
+----
+{hello,world}
+NULL
+{NULL,XXXXXXXXXXXXXXXXXXXXXXXX}
+{fejwfoaejwfoijwafew,b,c}
+
+statement ok
+drop table a;
+
+statement ok
+drop table c;

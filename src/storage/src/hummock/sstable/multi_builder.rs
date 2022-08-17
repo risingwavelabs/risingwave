@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
+use zstd::zstd_safe::WriteBuf;
 
 use crate::hummock::compactor::TaskProgressTracker;
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, HummockResult, SstableBuilder};
+use crate::hummock::{CachePolicy, HummockResult, SstableBuilder, SstableStoreWrite};
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
@@ -47,7 +49,9 @@ pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
     current_builder: Option<SstableBuilder>,
 
     policy: CachePolicy,
-    sstable_store: SstableStoreRef,
+
+    sstable_store: Arc<dyn SstableStoreWrite>,
+
     tracker: Option<MemoryTracker>,
     task_progress: Option<TaskProgressTracker>,
 }
@@ -57,7 +61,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     pub fn new(
         builder_factory: F,
         policy: CachePolicy,
-        sstable_store: SstableStoreRef,
+        sstable_store: Arc<dyn SstableStoreWrite>,
         task_progress: Option<TaskProgressTracker>,
     ) -> Self {
         Self {
@@ -148,8 +152,12 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             };
             let policy = self.policy;
             let tracker = self.tracker.take();
-            let task_progress = self.task_progress.clone();
             let upload_join_handle = tokio::spawn(async move {
+                if !tracker.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as u64)
+                {
+                    tracing::debug!("failed to allocate increase memory for meta file, sst id: {}, file size: {}, meta size: {}",
+                        sst_id, data.capacity(), meta.encoded_size());
+                }
                 let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
                 drop(tracker);
                 if let Some(progress_tracker) = task_progress {
