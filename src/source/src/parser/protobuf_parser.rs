@@ -20,7 +20,6 @@ use protobuf::RepeatedField;
 use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 use risingwave_pb::plan_common::ColumnDesc;
@@ -210,11 +209,7 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
                 .iter()
                 .map(|f| f.name().to_string())
                 .collect_vec();
-            StructType {
-                fields,
-                field_names,
-            }
-            .into()
+            DataType::new_struct(fields, field_names)
         }
         actual_type => {
             return Err(ErrorCode::NotImplemented(

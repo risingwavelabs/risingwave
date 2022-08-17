@@ -118,11 +118,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
-                StructType {
-                    fields,
-                    field_names,
-                }
-                .into()
+                DataType::new_struct(fields, field_names)
             }
             TypeName::List => DataType::List {
                 // The first (and only) item is the list element type.
@@ -263,11 +259,13 @@ impl DataType {
     }
 
     pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
-        StructType {
-            fields,
-            field_names,
-        }
-        .into()
+        Self::Struct(
+            StructType {
+                fields,
+                field_names,
+            }
+            .into(),
+        )
     }
 }
 
@@ -1105,11 +1103,10 @@ mod tests {
 
     #[test]
     fn test_data_type_display() {
-        let d: DataType = StructType::new(vec![
-            (DataType::Int32, "i".to_string()),
-            (DataType::Varchar, "j".to_string()),
-        ])
-        .into();
+        let d: DataType = DataType::new_struct(
+            vec![DataType::Int32, DataType::Varchar],
+            vec!["i".to_string(), "j".to_string()],
+        );
         assert_eq!(format!("{}", d), "struct<i integer,j varchar>".to_string());
     }
 }

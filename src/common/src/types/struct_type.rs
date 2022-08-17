@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use super::DataType;
 use crate::array::ArrayMeta;
 
@@ -27,11 +25,5 @@ impl StructType {
         ArrayMeta::Struct {
             children: self.fields.clone().into(),
         }
-    }
-}
-
-impl From<StructType> for DataType {
-    fn from(t: StructType) -> Self {
-        DataType::Struct(Arc::new(t))
     }
 }
