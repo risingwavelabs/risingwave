@@ -434,7 +434,7 @@ impl<S: StateStore> StateTable<S> {
             .await?;
 
         let mem_table_iter = {
-            let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
+            let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
             let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
             let encoded_key_range = range_of_prefix(&encoded_prefix);
             self.mem_table.iter(encoded_key_range)
@@ -451,6 +451,8 @@ struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_table_iter: C,
     _phantom: PhantomData<&'a ()>,
+    /// Mapping from column id to column index. Used for deserializing the row.
+    mapping: Arc<ColumnDescMapping>,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
@@ -460,11 +462,12 @@ where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, storage_table_iter: C) -> Self {
+    fn new(mem_table_iter: M, storage_table_iter: C, mapping:  Arc<ColumnDescMapping>) -> Self {
         Self {
             mem_table_iter,
             storage_table_iter,
             _phantom: PhantomData,
+            mapping,
         }
     }
 
