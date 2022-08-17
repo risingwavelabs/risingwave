@@ -478,8 +478,8 @@ mod tests {
     }
 
     // This test takes seconds because the TTL is measured in seconds.
+    #[cfg(madsim)]
     #[tokio::test]
-    #[ignore]
     async fn test_heartbeat() {
         let (_env, _hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
         let context_id_1 = worker_node.id;
