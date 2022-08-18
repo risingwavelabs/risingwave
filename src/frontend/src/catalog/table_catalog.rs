@@ -119,7 +119,7 @@ impl TableCatalog {
                 .iter()
                 .map(FieldOrder::to_order_pair)
                 .collect(),
-            pk: self.stream_key.clone(),
+            stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
