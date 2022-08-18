@@ -65,7 +65,7 @@ pub struct TableCatalog {
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
     pub order_key: Vec<FieldOrder>,
 
-    /// Primary key of the Materialize operator's output.
+    /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
     /// Distribution key column indices.
@@ -146,7 +146,7 @@ impl TableCatalog {
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
             order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
-            pk: self.stream_key.iter().map(|x| *x as _).collect(),
+            stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
@@ -205,7 +205,7 @@ impl From<ProstTable> for TableCatalog {
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
-            stream_key: tb.pk.iter().map(|x| *x as _).collect(),
+            stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
             properties: tb.properties,
@@ -278,7 +278,7 @@ mod tests {
                 direct: Direction::Asc,
             }
             .to_protobuf()],
-            pk: vec![0],
+            stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
