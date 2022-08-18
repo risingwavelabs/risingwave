@@ -26,11 +26,12 @@ use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
 use crate::hummock::error::{Error, Result};
 use crate::hummock::{CompactorManager, HummockManagerRef};
-use crate::manager::ClusterManagerRef;
+use crate::manager::{ClusterManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub struct VacuumManager<S: MetaStore> {
+    env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: Arc<CompactorManager>,
@@ -43,10 +44,12 @@ where
     S: MetaStore,
 {
     pub fn new(
+        env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: Arc<CompactorManager>,
     ) -> Self {
         Self {
+            env,
             hummock_manager,
             compactor_manager,
             pending_sst_ids: Default::default(),
@@ -203,7 +206,8 @@ where
     }
 
     pub async fn complete_full_gc(&self, sst_ids: Vec<HummockSstableId>) -> Result<usize> {
-        let spin_interval = Duration::from_secs(5);
+        let spin_interval =
+            Duration::from_secs(self.env.opts.collect_gc_watermark_spin_interval_sec);
         let watermark = collect_global_gc_watermark(
             self.hummock_manager.cluster_manager().clone(),
             spin_interval,
@@ -302,9 +306,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_vacuum() {
-        let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
+        let (env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
         let compactor_manager = Arc::new(CompactorManager::new());
-        let vacuum = Arc::new(VacuumManager::new(hummock_manager, compactor_manager));
+        let vacuum = Arc::new(VacuumManager::new(env, hummock_manager, compactor_manager));
         let (join_handle, shutdown_sender) =
             start_vacuum_scheduler(vacuum, Duration::from_secs(60));
         shutdown_sender.send(()).unwrap();
@@ -313,10 +317,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_vacuum_basic() {
-        let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+        let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = Arc::new(CompactorManager::default());
         let vacuum = Arc::new(VacuumManager::new(
+            env,
             hummock_manager.clone(),
             compactor_manager.clone(),
         ));
