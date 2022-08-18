@@ -31,11 +31,6 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let order_pairs: Vec<_> = node
-            .get_column_orders()
-            .iter()
-            .map(OrderPair::from_prost)
-            .collect();
         let limit = if node.limit == 0 {
             None
         } else {
