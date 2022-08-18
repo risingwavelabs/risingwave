@@ -308,6 +308,19 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::Pause => stream.pause_source(),
                             Mutation::Resume => stream.resume_source(),
+                            Mutation::Update { vnode_bitmaps, .. } => {
+                                // Update row id generator if vnode mapping is changed.
+                                if let Some(vnode_bitmaps) = vnode_bitmaps.get(&self.actor_id) {
+                                    let vnode_id =
+                                        vnode_bitmaps.next_set_bit(0).unwrap_or(0) as u32;
+                                    if self.row_id_generator.vnode_id != vnode_id {
+                                        self.row_id_generator = RowIdGenerator::with_epoch(
+                                            vnode_id,
+                                            *UNIX_SINGULARITY_DATE_EPOCH,
+                                        );
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
