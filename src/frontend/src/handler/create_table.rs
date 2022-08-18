@@ -113,6 +113,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
 
 /// Binds table constraints given the binding results from column definitions.
 /// It returns the columns together with `pk_column_ids`.
+// TODO(#4726): Once `row_id` is optional, also return `Option<RowIdIndex>`.
 pub fn bind_sql_table_constraints(
     column_descs: &[ColumnDesc],
     pk_column_id_from_columns: Option<ColumnId>,
