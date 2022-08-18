@@ -436,11 +436,28 @@ impl Parser {
                     UnaryOperator::Minus
                 };
                 let mut sub_expr = self.parse_subexpr(Self::PLUS_MINUS_PREC)?;
-                // TODO: Deal with nested unary exp: -(-(-(1))) => -1
-                // Tracked by: <https://github.com/singularity-data/risingwave/issues/4344>
+                while let Expr::Nested(expr1) = sub_expr {
+                    sub_expr = *expr1;
+                }
                 if let Expr::Value(Value::Number(ref mut s, _)) = sub_expr {
                     if tok == Token::Minus {
-                        *s = format!("-{}", s);
+                        // If we need to optimize for case of existing negative prefix,
+                        // we can opt to follow doNegateFloat here:
+                        // <https://github.com/postgres/postgres/blob/08909e3aee6182a988da5bf5c1b543910ee096c7/src/backend/parser/gram.y#L19128>
+                        // and simply increment the pointer, avoiding O(n) reallocation.
+                        // However this alternate approach might require unsafe rust
+                        // and some unstable features at the moment
+                        // (`#![feature(vec_into_raw_parts)]`).
+                        // Another alternative would be to refactor `Number`
+                        // to reserve a space for sign, however that means it can no longer
+                        // purely use a string as internal representation,
+                        // which adds complication downstream.
+                        let mut s_iter = s.chars();
+                        if s_iter.next().unwrap() == '-' {
+                            *s = s_iter.collect()
+                        } else {
+                            *s = format!("-{}", s);
+                        }
                     }
                     return Ok(sub_expr);
                 }
@@ -3419,6 +3436,32 @@ mod tests {
             assert_eq!(parser.next_token(), Token::EOF);
             assert_eq!(parser.next_token(), Token::EOF);
             parser.prev_token();
+        });
+    }
+
+    #[test]
+    fn test_neg_exprs() {
+        let min_bigint_expr = "-9223372036854775808";
+        run_parser_method(min_bigint_expr, |parser| {
+            assert_eq!(
+                parser.parse_subexpr(Parser::PLUS_MINUS_PREC).unwrap(),
+                Expr::Value(Value::Number("-9223372036854775808".to_string(), false))
+            )
+        });
+        let nested_min_bigint_expr = "-(-(-9223372036854775808))";
+        run_parser_method(nested_min_bigint_expr, |parser| {
+            assert_eq!(
+                parser.parse_subexpr(Parser::PLUS_MINUS_PREC).unwrap(),
+                Expr::Value(Value::Number("-9223372036854775808".to_string(), false))
+            )
+        });
+
+        let nested_float_expr = "-(-(-1.01))";
+        run_parser_method(nested_float_expr, |parser| {
+            assert_eq!(
+                parser.parse_subexpr(Parser::PLUS_MINUS_PREC).unwrap(),
+                Expr::Value(Value::Number("-1.01".to_string(), false))
+            )
         });
     }
 }

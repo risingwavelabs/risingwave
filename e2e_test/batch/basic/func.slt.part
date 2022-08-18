@@ -224,6 +224,11 @@ select pg_typeof('123');
 ----
 unknown
 
+query I
+select pg_typeof(-(-(-(9223372036854775808))));
+----
+bigint
+
 query T
 select pg_typeof(round(null));
 ----
