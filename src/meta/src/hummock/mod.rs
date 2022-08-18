@@ -52,7 +52,7 @@ use crate::MetaOpts;
 pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    vacuum_trigger: Arc<VacuumTrigger<S>>,
+    vacuum_trigger: Arc<VacuumManager<S>>,
     notification_manager: NotificationManagerRef,
     compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
@@ -151,7 +151,7 @@ where
 
 /// Starts a task to periodically vacuum hummock.
 pub fn start_vacuum_scheduler<S>(
-    vacuum: Arc<VacuumTrigger<S>>,
+    vacuum: Arc<VacuumManager<S>>,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>)
 where
@@ -184,7 +184,7 @@ where
 }
 
 pub fn start_full_gc_scheduler<S>(
-    vacuum: Arc<VacuumTrigger<S>>,
+    vacuum: Arc<VacuumManager<S>>,
     interval: Duration,
     sst_retention_time: Duration,
 ) -> (JoinHandle<()>, Sender<()>)
@@ -204,7 +204,7 @@ where
                     return;
                 }
             }
-            if let Err(err) = vacuum.run_full_gc(sst_retention_time).await {
+            if let Err(err) = vacuum.start_full_gc(sst_retention_time).await {
                 tracing::warn!("Full GC error {:#?}", err);
             }
         }
