@@ -227,9 +227,9 @@ impl LocalStreamManager {
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        let (local_sst_info, need_sync) = dispatch_state_store!(self.state_store(), store, {
+        let (local_sst_info, sync_succeed) = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
-                Ok((_, ssts, need_sync)) => (ssts, need_sync),
+                Ok(sync_result) => (sync_result.uncommitted_ssts, sync_result.sync_succeed),
                 // TODO: Handle sync failure by propagating it back to global barrier manager
                 Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
@@ -238,7 +238,7 @@ impl LocalStreamManager {
             }
         });
         timer.observe_duration();
-        (local_sst_info, need_sync)
+        (local_sst_info, sync_succeed)
     }
 
     pub async fn clear_storage_buffer(&self) {
@@ -288,6 +288,7 @@ impl LocalStreamManager {
         let barrier = &Barrier {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
+            checkpoint: true,
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;

@@ -56,7 +56,7 @@ use crate::manager::{
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 mod command;
 mod info;
@@ -202,16 +202,20 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     env: MetaSrvEnv<S>,
 }
-
+/// Post-processing information for barriers.
 type CheckpointPost<S> = (
     Arc<CommandContext<S>>,
     SmallVec<[Notifier; 1]>,
     Vec<CreateMviewProgress>,
 );
+
+/// Post-processing information for barriers and previously uncommitted ssts
 struct UncommittedMessages<S: MetaStore> {
     uncommitted_checkpoint_post: VecDeque<CheckpointPost<S>>,
+    /// Ssts that need to commit with next checkpoint.
     uncommitted_ssts: Vec<LocalSstableInfo>,
-    uncommitted_work_id: HashMap<HummockSstableId, WorkerId>,
+    /// Work_ids that need to commit with next checkpoint.
+    uncommitted_work_ids: HashMap<HummockSstableId, WorkerId>,
 }
 
 impl<S> Default for UncommittedMessages<S>
@@ -222,7 +226,7 @@ where
         Self {
             uncommitted_checkpoint_post: Default::default(),
             uncommitted_ssts: Default::default(),
-            uncommitted_work_id: Default::default(),
+            uncommitted_work_ids: Default::default(),
         }
     }
 }
@@ -247,6 +251,7 @@ struct CheckpointControl<S: MetaStore> {
 
     metrics: Arc<MetaMetrics>,
 
+    /// Messages that needs to be completed or processed with checkpoints
     uncommitted_messages: UncommittedMessages<S>,
 }
 
@@ -266,7 +271,7 @@ where
         }
     }
 
-    fn add_uncommitted_states(
+    fn add_uncommitted_messages(
         &mut self,
         resps: &Vec<BarrierCompleteResponse>,
         checkpoint_post: CheckpointPost<S>,
@@ -275,7 +280,7 @@ where
             resp.synced_sstables.iter().cloned().for_each(|grouped| {
                 let sst = grouped.sst.expect("field not None");
                 self.uncommitted_messages
-                    .uncommitted_work_id
+                    .uncommitted_work_ids
                     .insert(sst.id, resp.worker_id);
                 self.uncommitted_messages
                     .uncommitted_ssts
@@ -398,7 +403,7 @@ where
     fn complete(
         &mut self,
         prev_epoch: u64,
-        result: MetaResult<Vec<BarrierCompleteResponse>>,
+        result: Vec<BarrierCompleteResponse>,
     ) -> Vec<EpochNode<S>> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
         let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
@@ -407,9 +412,10 @@ where
             .iter_mut()
             .find(|x| x.command_ctx.prev_epoch.0 == prev_epoch)
         {
+            let checkpoint = result.iter().all(|node| node.checkpoint);
             assert!(matches!(node.state, InFlight));
             node.wait_commit_timer = Some(wait_commit_timer);
-            node.state = Completed(result);
+            node.state = Completed((result, checkpoint));
         };
         // Find all continuous nodes with 'Complete' starting from first node
         let index = self
@@ -497,7 +503,7 @@ enum BarrierEpochState {
     InFlight,
 
     /// This barrier is completed or failed.
-    Completed(MetaResult<Vec<BarrierCompleteResponse>>),
+    Completed((Vec<BarrierCompleteResponse>, bool)),
 }
 
 impl<S> GlobalBarrierManager<S>
@@ -711,6 +717,7 @@ where
                     mutation,
                     // TODO(chi): add distributed tracing
                     span: vec![],
+                    checkpoint: true,
                 };
                 async move {
                     let client = self.env.stream_client_pool().get(node).await?;
@@ -720,7 +727,6 @@ where
                         barrier: Some(barrier),
                         actor_ids_to_send,
                         actor_ids_to_collect,
-                        need_sync: true,
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::inject_barrier",
@@ -780,8 +786,15 @@ where
         tracker: &mut CreateMviewProgressTracker,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
+        if let Err(err) = result {
+            let fail_node = checkpoint_control.fail();
+            tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
+            self.do_recovery(err, fail_node.into_iter(), state, tracker)
+                .await;
+            return;
+        }
         // change the state is Complete
-        let mut complete_nodes = checkpoint_control.complete(prev_epoch, result);
+        let mut complete_nodes = checkpoint_control.complete(prev_epoch, result.unwrap());
         // try commit complete nodes
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
@@ -801,36 +814,46 @@ where
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.fail().into_iter());
-            let mut new_epoch = Epoch::from(INVALID_EPOCH);
-            for node in fail_nodes {
-                if let Some(timer) = node.timer {
-                    timer.observe_duration();
-                }
-                if let Some(wait_commit_timer) = node.wait_commit_timer {
-                    wait_commit_timer.observe_duration();
-                }
-                node.notifiers
-                    .into_iter()
-                    .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
-                new_epoch = node.command_ctx.prev_epoch;
+            self.do_recovery(err, fail_nodes, state, tracker).await;
+        }
+    }
+
+    async fn do_recovery(
+        &self,
+        err: MetaError,
+        fail_nodes: impl IntoIterator<Item = EpochNode<S>>,
+        state: &mut BarrierManagerState,
+        tracker: &mut CreateMviewProgressTracker,
+    ) {
+        let mut new_epoch = Epoch::from(INVALID_EPOCH);
+        for node in fail_nodes {
+            if let Some(timer) = node.timer {
+                timer.observe_duration();
             }
-            if self.enable_recovery {
-                // If failed, enter recovery mode.
-                let (new_epoch, actors_to_track, create_mview_progress) =
-                    self.recovery(new_epoch).await;
-                *tracker = CreateMviewProgressTracker::default();
-                tracker.add(new_epoch, actors_to_track, vec![]);
-                for progress in &create_mview_progress {
-                    tracker.update(progress);
-                }
-                state.in_flight_prev_epoch = new_epoch;
-                state
-                    .update_inflight_prev_epoch(self.env.meta_store())
-                    .await
-                    .unwrap();
-            } else {
-                panic!("failed to execute barrier: {:?}", err);
+            if let Some(wait_commit_timer) = node.wait_commit_timer {
+                wait_commit_timer.observe_duration();
             }
+            node.notifiers
+                .into_iter()
+                .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
+            new_epoch = node.command_ctx.prev_epoch;
+        }
+        if self.enable_recovery {
+            // If failed, enter recovery mode.
+            let (new_epoch, actors_to_track, create_mview_progress) =
+                self.recovery(new_epoch).await;
+            *tracker = CreateMviewProgressTracker::default();
+            tracker.add(new_epoch, actors_to_track, vec![]);
+            for progress in &create_mview_progress {
+                tracker.update(progress);
+            }
+            state.in_flight_prev_epoch = new_epoch;
+            state
+                .update_inflight_prev_epoch(self.env.meta_store())
+                .await
+                .unwrap();
+        } else {
+            panic!("failed to execute barrier: {:?}", err);
         }
     }
 
@@ -843,12 +866,11 @@ where
     ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
         match &node.state {
-            Completed(Ok(resps)) => {
+            Completed((resps, checkpoint)) => {
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
                 // See https://github.com/singularity-data/risingwave/issues/1251
-                node.timer.take().unwrap().observe_duration();
 
                 let notifiers = take(&mut node.notifiers);
                 let command_ctx = node.command_ctx.clone();
@@ -857,17 +879,17 @@ where
                     .flat_map(|r| r.create_mview_progress.clone())
                     .collect_vec();
                 checkpoint_control
-                    .add_uncommitted_states(resps, (command_ctx, notifiers, create_mv_progress));
+                    .add_uncommitted_messages(resps, (command_ctx, notifiers, create_mv_progress));
 
                 // If not sync , we can't notify collection completion
-                if resps.iter().all(|node| node.need_sync) {
+                if *checkpoint {
                     let mut uncommitted_states = checkpoint_control.get_uncommitted_states();
                     if prev_epoch != INVALID_EPOCH {
                         self.hummock_manager
                             .commit_epoch(
                                 prev_epoch,
                                 uncommitted_states.uncommitted_ssts,
-                                uncommitted_states.uncommitted_work_id,
+                                uncommitted_states.uncommitted_work_ids,
                             )
                             .await?;
                     }
@@ -888,13 +910,9 @@ where
                         }
                     }
                 }
-
+                node.timer.take().unwrap().observe_duration();
+                node.wait_commit_timer.take().unwrap().observe_duration();
                 Ok(())
-            }
-
-            Completed(Err(err)) => {
-                tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
-                Err(err.clone())
             }
 
             InFlight => unreachable!(),

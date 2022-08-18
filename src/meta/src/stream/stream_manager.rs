@@ -960,7 +960,7 @@ mod tests {
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
             Ok(Response::new(BarrierCompleteResponse {
-                need_sync: true,
+                checkpoint: true,
                 ..Default::default()
             }))
         }

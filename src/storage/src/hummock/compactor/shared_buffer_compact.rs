@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -39,6 +39,7 @@ use crate::monitor::StoreLocalStatistic;
 pub async fn compact(
     context: Arc<Context>,
     payload: UploadTaskPayload,
+    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
@@ -63,12 +64,14 @@ pub async fn compact(
     for (id, group_payload) in grouped_payload {
         let id_copy = id;
         futures.push(
-            compact_shared_buffer(context.clone(), group_payload).map_ok(move |results| {
-                results
-                    .into_iter()
-                    .map(move |result| (id_copy, result))
-                    .collect_vec()
-            }),
+            compact_shared_buffer(context.clone(), group_payload, sst_watermark_epoch).map_ok(
+                move |results| {
+                    results
+                        .into_iter()
+                        .map(move |result| (id_copy, result))
+                        .collect_vec()
+                },
+            ),
         );
     }
     // Note that the output is reordered compared with input `payload`.
@@ -84,6 +87,7 @@ pub async fn compact(
 async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
+    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<SstableInfo>> {
     let mut start_user_keys = payload
         .iter()
@@ -144,7 +148,12 @@ async fn compact_shared_buffer(
 
     let mut local_stats = StoreLocalStatistic::default();
     for (split_index, key_range) in splits.into_iter().enumerate() {
-        let compactor = SharedBufferCompactRunner::new(split_index, key_range, context.clone());
+        let compactor = SharedBufferCompactRunner::new(
+            split_index,
+            key_range,
+            context.clone(),
+            sst_watermark_epoch,
+        );
         let iter = build_ordered_merge_iter::<ForwardIter>(
             &payload,
             sstable_store.clone(),
@@ -205,7 +214,12 @@ pub struct SharedBufferCompactRunner {
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new(split_index: usize, key_range: KeyRange, context: Arc<Context>) -> Self {
+    pub fn new(
+        split_index: usize,
+        key_range: KeyRange,
+        context: Arc<Context>,
+        sst_watermark_epoch: HummockEpoch,
+    ) -> Self {
         let sstable_store = context.sstable_store.clone();
         let options = context.options.as_ref().into();
         let compactor = Compactor::new(
@@ -215,7 +229,7 @@ impl SharedBufferCompactRunner {
             key_range,
             CachePolicy::Fill,
             false,
-            u64::MAX,
+            sst_watermark_epoch,
         );
         Self {
             compactor,

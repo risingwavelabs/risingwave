@@ -45,7 +45,6 @@ pub struct LocalVersion {
 
 #[derive(Debug, Clone)]
 pub enum SyncUncommittedData {
-    NoData,
     /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
     /// as `Syncing`.
     Syncing(Vec<KeyIndexedUncommittedData>),
@@ -60,9 +59,6 @@ impl SyncUncommittedData {
         B: AsRef<[u8]>,
     {
         match self {
-            SyncUncommittedData::NoData => {
-                vec![]
-            }
             SyncUncommittedData::Syncing(task) => {
                 let local_data_iter = task
                     .iter()
@@ -147,6 +143,17 @@ impl LocalVersion {
         self.shared_buffer.range_mut(epoch_range)
     }
 
+    /// Returns all shared buffer less than or equal to epoch
+    pub fn scan_shared_buffer<R>(
+        &self,
+        epoch_range: R,
+    ) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)>
+    where
+        R: RangeBounds<u64>,
+    {
+        self.shared_buffer.range(epoch_range)
+    }
+
     pub fn add_sync_state(
         &mut self,
         sync_epoch: Vec<HummockEpoch>,
@@ -158,7 +165,7 @@ impl LocalVersion {
             .find(|(epoch, _)| epoch == &sync_epoch);
         match &node {
             None => {
-                assert_matches!(sync_uncommitted_data, SyncUncommittedData::NoData);
+                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
                 if let Some(last) = self.sync_uncommitted_data.last() {
                     assert!(
                         last.0.first().lt(&sync_epoch.first()),
@@ -170,9 +177,6 @@ impl LocalVersion {
                 self.sync_uncommitted_data
                     .push((sync_epoch, sync_uncommitted_data));
                 return;
-            }
-            Some((_, SyncUncommittedData::NoData)) => {
-                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
             }
             Some((_, SyncUncommittedData::Syncing(_))) => {
                 assert_matches!(sync_uncommitted_data, SyncUncommittedData::Synced(_));
@@ -263,7 +267,7 @@ impl LocalVersion {
                         .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
-                            node.0.last().le(&Some(&read_epoch))
+                            node.0.first().le(&Some(&read_epoch))
                                 && node.0.first().ge(&Some(&smallest_uncommitted_epoch))
                         })
                         .map(|(_, value)| value.get_overlap_data(key_range))

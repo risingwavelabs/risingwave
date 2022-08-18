@@ -174,7 +174,6 @@ async fn test_update_uncommitted_ssts() {
                 .take_uncommitted_data()
                 .unwrap();
 
-            local_version_guard.add_sync_state(vec![epochs[0]], SyncUncommittedData::NoData);
             local_version_guard.add_sync_state(
                 vec![epochs[0]],
                 SyncUncommittedData::Syncing(vec![payload.clone()]),
@@ -190,7 +189,7 @@ async fn test_update_uncommitted_ssts() {
         };
         // Check uncommitted ssts
         let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, vec![epochs[0]])
+            .run_sync_upload_task(payload, vec![epochs[0]], epochs[0])
             .await
             .unwrap();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);
@@ -225,7 +224,6 @@ async fn test_update_uncommitted_ssts() {
                 .unwrap()
                 .take_uncommitted_data()
                 .unwrap();
-            local_version_guard.add_sync_state(vec![epochs[1]], SyncUncommittedData::NoData);
             local_version_guard.add_sync_state(
                 vec![epochs[1]],
                 SyncUncommittedData::Syncing(vec![payload.clone()]),
@@ -241,7 +239,7 @@ async fn test_update_uncommitted_ssts() {
         };
 
         let epoch_uncommitted_ssts = local_version_manager
-            .run_sync_upload_task(payload, vec![epochs[1]])
+            .run_sync_upload_task(payload, vec![epochs[1]], epochs[1])
             .await
             .unwrap();
         assert_eq!(epoch_uncommitted_ssts.len(), 1);

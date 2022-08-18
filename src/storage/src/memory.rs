@@ -24,6 +24,7 @@ use lazy_static::lazy_static;
 use parking_lot::RwLock;
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -246,7 +247,10 @@ impl StateStore for MemoryStateStore {
     fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
-            Ok((0, vec![], true))
+            Ok(SyncResult {
+                sync_succeed: true,
+                ..Default::default()
+            })
         }
     }
 
