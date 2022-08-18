@@ -36,7 +36,7 @@ pub struct LogicalUpdate {
     pub base: PlanBase,
     table_source_name: String, // explain-only
     source_id: TableId,        // TODO: use SourceId
-    table_id: TableId,
+    associated_mview_id: TableId,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
 }
@@ -47,7 +47,7 @@ impl LogicalUpdate {
         input: PlanRef,
         table_source_name: String,
         source_id: TableId,
-        table_id: TableId,
+        associated_mview_id: TableId,
         exprs: Vec<ExprImpl>,
     ) -> Self {
         let ctx = input.ctx();
@@ -59,7 +59,7 @@ impl LogicalUpdate {
             base,
             table_source_name,
             source_id,
-            table_id,
+            associated_mview_id,
             input,
             exprs,
         }
@@ -97,8 +97,8 @@ impl LogicalUpdate {
     }
 
     #[must_use]
-    pub fn table_id(&self) -> TableId {
-        self.table_id
+    pub fn associated_mview_id(&self) -> TableId {
+        self.associated_mview_id
     }
 
     pub fn exprs(&self) -> &[ExprImpl] {
@@ -116,7 +116,7 @@ impl PlanTreeNodeUnary for LogicalUpdate {
             input,
             self.table_source_name.clone(),
             self.source_id,
-            self.table_id,
+            self.associated_mview_id,
             self.exprs.clone(),
         )
     }

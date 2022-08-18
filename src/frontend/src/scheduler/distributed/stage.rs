@@ -431,13 +431,13 @@ impl StageRunner {
         let vnode_mapping = match node_body {
             Insert(insert_node) => self
                 .worker_node_manager
-                .get_table_mapping(&insert_node.table_id.into()),
+                .get_table_mapping(&insert_node.associated_mview_id.into()),
             Update(update_node) => self
                 .worker_node_manager
-                .get_table_mapping(&update_node.table_id.into()),
+                .get_table_mapping(&update_node.associated_mview_id.into()),
             Delete(delete_node) => self
                 .worker_node_manager
-                .get_table_mapping(&delete_node.table_id.into()),
+                .get_table_mapping(&delete_node.associated_mview_id.into()),
             _ => None,
         };
 

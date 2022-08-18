@@ -34,7 +34,7 @@ pub struct LogicalDelete {
     pub base: PlanBase,
     table_source_name: String, // explain-only
     source_id: TableId,        // TODO: use SourceId
-    table_id: TableId,
+    associated_mview_id: TableId,
     input: PlanRef,
 }
 
@@ -55,7 +55,7 @@ impl LogicalDelete {
             base,
             table_source_name,
             source_id,
-            table_id,
+            associated_mview_id: table_id,
             input,
         }
     }
@@ -81,8 +81,8 @@ impl LogicalDelete {
     }
 
     #[must_use]
-    pub fn table_id(&self) -> TableId {
-        self.table_id
+    pub fn associated_mview_id(&self) -> TableId {
+        self.associated_mview_id
     }
 }
 
@@ -96,7 +96,7 @@ impl PlanTreeNodeUnary for LogicalDelete {
             input,
             self.table_source_name.clone(),
             self.source_id,
-            self.table_id,
+            self.associated_mview_id,
         )
     }
 }
