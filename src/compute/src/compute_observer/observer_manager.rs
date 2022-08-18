@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
@@ -21,11 +21,16 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
 };
 use risingwave_pb::catalog::{Source, Table};
+use risingwave_pb::hummock::pin_version_response;
+use risingwave_pb::hummock::pin_version_response::HummockVersionDeltas;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
+use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 
 pub struct ComputeObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+
+    local_version_manager: Weak<LocalVersionManager>,
 
     version: u64,
 }
@@ -52,7 +57,15 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 self.handle_source_notification(resp.operation(), source_catalog);
             }
 
-            Info::HummockVersionDeltas(_) => { // TODO: handle deltas so that we don't need `pin_worker`
+            Info::HummockVersionDeltas(hummock_version_deltas) => {
+                if let Some(local_version_manager) = self.local_version_manager.upgrade() {
+                    local_version_manager.try_update_pinned_version(
+                        None,
+                        pin_version_response::Payload::VersionDeltas(HummockVersionDeltas {
+                            delta: hummock_version_deltas.version_deltas,
+                        }),
+                    );
+                };
             }
 
             _ => {
@@ -67,6 +80,16 @@ impl ObserverNodeImpl for ComputeObserverNode {
         match resp.info {
             Some(Info::Snapshot(snapshot)) => {
                 self.handle_catalog_snapshot(snapshot.tables);
+
+                if let Some(local_version_manager) = self.local_version_manager.upgrade() {
+                    local_version_manager.try_update_pinned_version(
+                        None,
+                        pin_version_response::Payload::PinnedVersion(
+                            snapshot.hummock_version.unwrap(),
+                        ),
+                    );
+                };
+
                 self.version = resp.version;
             }
             _ => {
@@ -83,9 +106,13 @@ impl ObserverNodeImpl for ComputeObserverNode {
 }
 
 impl ComputeObserverNode {
-    pub fn new(filter_key_extractor_manager: FilterKeyExtractorManagerRef) -> Self {
+    pub fn new(
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        local_version_manager: Weak<LocalVersionManager>,
+    ) -> Self {
         Self {
             filter_key_extractor_manager,
+            local_version_manager,
             version: 0,
         }
     }

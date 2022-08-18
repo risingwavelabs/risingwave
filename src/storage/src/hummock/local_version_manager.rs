@@ -294,7 +294,9 @@ impl LocalVersionManager {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = old_version.pinned_version().version();
                 for version_delta in version_deltas.delta {
-                    version_to_apply.apply_version_delta(&version_delta);
+                    if version_to_apply.id == version_delta.prev_id {
+                        version_to_apply.apply_version_delta(&version_delta);
+                    }
                 }
                 version_to_apply
             }
