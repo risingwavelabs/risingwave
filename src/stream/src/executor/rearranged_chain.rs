@@ -18,9 +18,10 @@ use futures::channel::{mpsc, oneshot};
 use futures::stream::select_with_strategy;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
+use qcell::{QCell, QCellOwner};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use tokio::sync::Mutex;
+use static_rc::StaticRc;
 
 use super::error::StreamExecutorError;
 use super::{
@@ -155,9 +156,11 @@ impl RearrangedChainExecutor {
                 .unwrap();
 
             // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
-            let upstream = Arc::new(Mutex::new(upstream));
+            let mut owner = QCellOwner::new();
+            let upstream = StaticRc::<_, 2, 2>::new(QCell::new(&owner, upstream));
+            let (upstream1, upstream2) = StaticRc::<_, 2, 2>::split::<1, 1>(upstream);
             let rearranged_barrier = Box::pin(
-                Self::rearrange_barrier(upstream.clone(), upstream_tx, stop_rearrange_rx)
+                Self::rearrange_barrier(&mut owner, upstream1, upstream_tx, stop_rearrange_rx)
                     .map(|result| result.map(RearrangedMessage::RearrangedBarrier)),
             );
 
@@ -235,9 +238,8 @@ impl RearrangedChainExecutor {
                 yield msg;
             }
 
-            // Now we take back the remaining upstream. There should be no contention since
-            // `rearranged` stream is already dropped.
-            let mut remaining_upstream = upstream.try_lock().unwrap();
+            // Now we take back the remaining upstream.
+            let remaining_upstream = owner.rw(&upstream2);
 
             // Consume remaining upstream.
             tracing::trace!(actor = self.actor_id, "begin to consume remaining upstream");
@@ -264,15 +266,16 @@ impl RearrangedChainExecutor {
     ///
     /// Check `execute_inner` for more details.
     #[try_stream(ok = Barrier, error = StreamExecutorError)]
-    async fn rearrange_barrier<U>(
-        upstream: Arc<Mutex<U>>,
+    async fn rearrange_barrier<'a, U>(
+        owner: &'a mut QCellOwner,
+        upstream: StaticRc<QCell<U>, 1, 2>,
         upstream_tx: mpsc::UnboundedSender<RearrangedMessage>,
         mut stop_rearrange_rx: oneshot::Receiver<()>,
     ) where
-        U: MessageStream + std::marker::Unpin,
+        U: MessageStream + std::marker::Unpin + 'a,
     {
         // There should be no contention since `upstream` is used only after this stream finishes.
-        let mut upstream = upstream.try_lock().unwrap();
+        let upstream = owner.rw(&upstream);
 
         loop {
             use futures::future::{select, Either};
