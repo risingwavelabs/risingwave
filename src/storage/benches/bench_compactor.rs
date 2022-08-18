@@ -162,7 +162,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
     sstable_store: Arc<CompactorSstableStore>,
 ) {
     let global_table_id = AtomicU64::new(32);
-    let mut builder = CapacitySplitTableBuilder::new(
+    let mut builder = CapacitySplitTableBuilder::new_for_test(
         LocalTableBuilderFactory {
             global_table_id,
             options: SstableBuilderOptions {

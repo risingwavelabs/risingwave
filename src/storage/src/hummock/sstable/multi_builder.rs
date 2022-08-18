@@ -14,7 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{Epoch, FullKey};
+use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
@@ -23,6 +24,7 @@ use crate::hummock::compactor::TaskProgressTracker;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{CachePolicy, HummockResult, SstableBuilder, SstableStoreWrite};
+use crate::monitor::StateStoreMetrics;
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
@@ -53,6 +55,10 @@ pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
     sstable_store: Arc<dyn SstableStoreWrite>,
 
     tracker: Option<MemoryTracker>,
+
+    /// Statistics.
+    pub stats: Arc<StateStoreMetrics>,
+
     task_progress: Option<TaskProgressTracker>,
 }
 
@@ -62,6 +68,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
         builder_factory: F,
         policy: CachePolicy,
         sstable_store: Arc<dyn SstableStoreWrite>,
+        stats: Arc<StateStoreMetrics>,
         task_progress: Option<TaskProgressTracker>,
     ) -> Self {
         Self {
@@ -71,7 +78,25 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             policy,
             sstable_store,
             tracker: None,
-            task_progress,
+            stats,
+            task_progress
+        }
+    }
+
+    pub fn new_for_test(
+        builder_factory: F,
+        policy: CachePolicy,
+        sstable_store: Arc<dyn SstableStoreWrite>,
+    ) -> Self {
+        Self {
+            builder_factory,
+            sealed_builders: Vec::new(),
+            current_builder: None,
+            policy,
+            sstable_store,
+            tracker: None,
+            task_progress: None,
+            stats: Arc::new(StateStoreMetrics::unused()),
         }
     }
 
@@ -93,7 +118,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
         &mut self,
         user_key: Vec<u8>,
         value: HummockValue<&[u8]>,
-        epoch: Epoch,
+        epoch: HummockEpoch,
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
         let full_key = FullKey::from_user_key(user_key, epoch);
@@ -140,6 +165,17 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             let (sst_id, data, meta, table_ids) = builder.finish();
             let sstable_store = self.sstable_store.clone();
             let bloom_filter_size = meta.bloom_filter.len();
+
+            if bloom_filter_size != 0 {
+                self.stats
+                    .sstable_bloom_filter_size
+                    .observe(bloom_filter_size as _);
+            }
+
+            self.stats
+                .sstable_meta_size
+                .observe(meta.encoded_size() as _);
+
             let sst_info = SstableInfo {
                 id: sst_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -236,7 +272,7 @@ mod tests {
                 estimate_bloom_filter_capacity: 0,
             },
         );
-        let builder = CapacitySplitTableBuilder::new(
+        let builder = CapacitySplitTableBuilder::new_for_test(
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
@@ -261,7 +297,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mut builder = CapacitySplitTableBuilder::new(
+        let mut builder = CapacitySplitTableBuilder::new_for_test(
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
@@ -285,7 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_seal() {
-        let mut builder = CapacitySplitTableBuilder::new(
+        let mut builder = CapacitySplitTableBuilder::new_for_test(
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
@@ -325,7 +361,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
-        let mut builder = CapacitySplitTableBuilder::new(
+        let mut builder = CapacitySplitTableBuilder::new_for_test(
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),

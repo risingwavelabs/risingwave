@@ -21,12 +21,13 @@ pub struct LocalSimpleAggExecutorBuilder;
 
 impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LocalSimpleAgg)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
@@ -34,7 +35,8 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
             .try_collect()?;
 
         Ok(LocalSimpleAggExecutor::new(
-            params.input.remove(0),
+            params.actor_context,
+            input,
             agg_calls,
             params.pk_indices,
             params.executor_id,

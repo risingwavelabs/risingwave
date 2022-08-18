@@ -53,12 +53,10 @@ pub struct SortAggExecutor {
 impl BoxedExecutorBuilder for SortAggExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 1,
-            "Sort aggregation executor should have only 1 child!"
-        );
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
         let sort_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::SortAgg
@@ -92,7 +90,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             agg_states,
             group_key,
             sorted_groupers,
-            child: inputs.remove(0),
+            child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
             output_size_limit: DEFAULT_CHUNK_BUFFER_SIZE,
