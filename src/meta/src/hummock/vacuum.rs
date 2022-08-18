@@ -206,6 +206,7 @@ where
     }
 
     pub async fn complete_full_gc(&self, sst_ids: Vec<HummockSstableId>) -> Result<usize> {
+        tracing::info!("SST full scan returns {} SSTs", sst_ids.len());
         let spin_interval =
             Duration::from_secs(self.env.opts.collect_gc_watermark_spin_interval_sec);
         let watermark = collect_global_gc_watermark(
