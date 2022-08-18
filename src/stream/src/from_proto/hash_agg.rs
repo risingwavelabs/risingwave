@@ -22,15 +22,18 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use super::agg_call::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
-use crate::executor::{HashAggExecutor, PkIndices};
+use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
+use crate::task::ActorId;
 
-struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
+pub struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
-struct HashAggExecutorDispatcherArgs<S: StateStore> {
+pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
+    ctx: ActorContextRef,
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
     pk_indices: PkIndices,
+    actor_id: ActorId,
     executor_id: u64,
     state_tables: Vec<RowBasedStateTable<S>>,
     state_table_col_mappings: Vec<Vec<usize>>,
@@ -42,9 +45,11 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(HashAggExecutor::<K, S>::new(
+            args.ctx,
             args.input,
             args.agg_calls,
             args.pk_indices,
+            args.actor_id,
             args.executor_id,
             args.key_indices,
             args.state_tables,
@@ -58,7 +63,7 @@ pub struct HashAggExecutorBuilder;
 
 impl ExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
@@ -79,7 +84,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
             .collect();
-        let input = params.input.remove(0);
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let keys = key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
@@ -91,10 +96,12 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             generate_state_tables_from_proto(store, &node.internal_tables, Some(vnodes.into()));
 
         let args = HashAggExecutorDispatcherArgs {
+            ctx: params.actor_context,
             input,
             agg_calls,
             key_indices,
             pk_indices: params.pk_indices,
+            actor_id: params.actor_id,
             executor_id: params.executor_id,
             state_tables,
             state_table_col_mappings,

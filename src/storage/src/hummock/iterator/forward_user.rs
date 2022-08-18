@@ -15,7 +15,8 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
+use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
@@ -131,10 +132,10 @@ pub struct UserIterator {
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
     /// Only reads values if `ts <= self.read_epoch`.
-    read_epoch: Epoch,
+    read_epoch: HummockEpoch,
 
     /// Only reads values if `ts > self.min_epoch`. use for ttl
-    min_epoch: Epoch,
+    min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
     _version: Option<Arc<PinnedVersion>>,
@@ -148,7 +149,7 @@ impl UserIterator {
         iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new(iterator, key_range, Epoch::MAX, 0, None)
+        Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     #[cfg(test)]

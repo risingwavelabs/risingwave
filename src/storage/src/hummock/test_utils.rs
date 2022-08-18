@@ -29,7 +29,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef,
+    SstableStoreRef, SstableStoreWrite,
 };
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
@@ -100,8 +100,8 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
     }
 }
 
-pub fn default_sst_writer_from_opt(opt: &SstableBuilderOptions) -> InMemWriter {
-    InMemWriter::from(opt)
+pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
+    InMemWriter::new_from_options(1, opt)
 }
 
 /// Generates sstable data and metadata from given `kv_iter`
@@ -109,7 +109,7 @@ pub fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta, Vec<u32>) {
-    let mut b = SstableBuilder::new_for_test(0, default_sst_writer_from_opt(&opts), opts);
+    let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).unwrap();
     }

@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_hummock_sdk::HummockSstableId;
 use tokio::task::JoinHandle;
+use zstd::zstd_safe::WriteBuf;
 
 use super::SstableMeta;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    CachePolicy, HummockResult, SstableBuilderOptions, SstableStoreRef, SstableStreamingUploader,
+    CachePolicy, HummockResult, SstableBuilderOptions, SstableStoreWrite, SstableStreamingUploader,
 };
 
 /// A consumer of SST data.
@@ -42,15 +45,21 @@ pub trait SstableWriter: Send {
 
 /// Append SST data to a buffer.
 pub struct InMemWriter {
+    sst_id: HummockSstableId,
     buf: BytesMut,
 }
 
 /// Append SST data to a buffer. Used for tests and benchmarks.
 impl InMemWriter {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(sst_id: HummockSstableId, capacity: usize) -> Self {
         Self {
+            sst_id,
             buf: BytesMut::with_capacity(capacity),
         }
+    }
+
+    pub fn new_from_options(sst_id: HummockSstableId, options: &SstableBuilderOptions) -> Self {
+        Self::new(sst_id, options.capacity + options.block_capacity)
     }
 }
 
@@ -65,10 +74,17 @@ impl SstableWriter for InMemWriter {
     fn finish(
         mut self,
         meta: SstableMeta,
-        _tracker: Option<MemoryTracker>,
+        tracker: Option<MemoryTracker>,
     ) -> HummockResult<Self::Output> {
         self.buf.put_slice(&get_size_footer(&meta).to_le_bytes());
-        Ok((self.buf.freeze(), meta))
+        let data = self.buf.freeze();
+        if let Some(mut tracker) = tracker {
+            if !tracker.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as u64) {
+                tracing::debug!("failed to allocate increase memory for meta file, sst id: {}, file size: {}, meta size: {}",
+                            self.sst_id, data.capacity(), meta.encoded_size());
+            }
+        }
+        Ok((data, meta))
     }
 
     fn data_len(&self) -> usize {
@@ -76,31 +92,25 @@ impl SstableWriter for InMemWriter {
     }
 }
 
-impl From<&SstableBuilderOptions> for InMemWriter {
-    fn from(options: &SstableBuilderOptions) -> InMemWriter {
-        InMemWriter::new(options.capacity + options.block_capacity)
-    }
-}
-
 /// Upload sst data to `SstableStore` as a whole on calling `finish`.
 /// The upload is finished when the returned `JoinHandle` is joined.
 pub struct BatchUploadWriter {
-    sstable_store: SstableStoreRef,
     sst_id: HummockSstableId,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     policy: CachePolicy,
     buf: BytesMut,
 }
 
 impl BatchUploadWriter {
     pub fn new(
-        sstable_store: SstableStoreRef,
         sst_id: HummockSstableId,
+        sstable_store: Arc<dyn SstableStoreWrite>,
         policy: CachePolicy,
         capacity: usize,
     ) -> Self {
         Self {
-            sstable_store,
             sst_id,
+            sstable_store,
             policy,
             buf: BytesMut::with_capacity(capacity),
         }
@@ -123,12 +133,21 @@ impl SstableWriter for BatchUploadWriter {
         self.buf.put_slice(&get_size_footer(&meta).to_le_bytes());
         let data = self.buf.freeze();
         let join_handle = tokio::spawn(async move {
-            let ret = self
-                .sstable_store
-                .put_sst(self.sst_id, meta, data, self.policy)
-                .await;
-            drop(tracker);
-            ret
+            if let Some(mut tracker) = tracker {
+                if !tracker.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as u64)
+                {
+                    tracing::debug!("failed to allocate increase memory for meta file, sst id: {}, file size: {}, meta size: {}",
+                                self.sst_id, data.capacity(), meta.encoded_size());
+                }
+                let ret = self
+                    .sstable_store
+                    .put_sst(self.sst_id, meta, data, self.policy)
+                    .await;
+                drop(tracker);
+                ret
+            } else {
+                Ok(())
+            }
         });
         Ok(join_handle)
     }
@@ -141,14 +160,20 @@ impl SstableWriter for BatchUploadWriter {
 /// Upload sst blocks to the streaming uploader of `SstableStore`.
 /// The upload is finished when the returned `JoinHandle` is joined.
 pub struct StreamingUploadWriter {
-    sstable_store: SstableStoreRef,
+    sst_id: HummockSstableId,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     uploader: SstableStreamingUploader,
     data_len: usize,
 }
 
 impl StreamingUploadWriter {
-    pub fn new(sstable_store: SstableStoreRef, uploader: SstableStreamingUploader) -> Self {
+    pub fn new(
+        sst_id: HummockSstableId,
+        sstable_store: Arc<dyn SstableStoreWrite>,
+        uploader: SstableStreamingUploader,
+    ) -> Self {
         Self {
+            sst_id,
             sstable_store,
             uploader,
             data_len: 0,
@@ -171,12 +196,23 @@ impl SstableWriter for StreamingUploadWriter {
     ) -> HummockResult<Self::Output> {
         self.uploader.upload_size_footer(get_size_footer(&meta))?;
         let join_handle = tokio::spawn(async move {
-            let ret = self
-                .sstable_store
-                .finish_put_sst_stream(self.uploader, meta)
-                .await;
-            drop(tracker);
-            ret
+            let uploader_memory_usage = self.uploader.get_memory_usage();
+            if let Some(mut tracker) = tracker {
+                if !tracker
+                    .try_increase_memory(uploader_memory_usage as u64 + meta.encoded_size() as u64)
+                {
+                    tracing::debug!("failed to allocate increase memory for meta file, sst id: {}, data size: {}, meta size: {}",
+                                self.sst_id, uploader_memory_usage, meta.encoded_size());
+                }
+                let ret = self
+                    .sstable_store
+                    .finish_put_sst_stream(self.uploader, meta)
+                    .await;
+                drop(tracker);
+                ret
+            } else {
+                Ok(())
+            }
         });
         Ok(join_handle)
     }
@@ -209,13 +245,13 @@ impl From<&SstableBuilderOptions> for InMemWriterBuilder {
 impl SstableWriterBuilder for InMemWriterBuilder {
     type Writer = InMemWriter;
 
-    async fn build(&self, _sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
-        Ok(InMemWriter::new(self.capacity))
+    async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
+        Ok(InMemWriter::new(sst_id, self.capacity))
     }
 }
 
 pub struct BatchUploadWriterBuilder {
-    sstable_store: SstableStoreRef,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     policy: CachePolicy,
     capacity: usize,
 }
@@ -223,7 +259,7 @@ pub struct BatchUploadWriterBuilder {
 impl BatchUploadWriterBuilder {
     pub fn new(
         opt: &SstableBuilderOptions,
-        sstable_store: SstableStoreRef,
+        sstable_store: Arc<dyn SstableStoreWrite>,
         policy: CachePolicy,
     ) -> BatchUploadWriterBuilder {
         BatchUploadWriterBuilder {
@@ -240,8 +276,8 @@ impl SstableWriterBuilder for BatchUploadWriterBuilder {
 
     async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
         Ok(BatchUploadWriter::new(
-            self.sstable_store.clone(),
             sst_id,
+            self.sstable_store.clone(),
             self.policy,
             self.capacity,
         ))
@@ -249,13 +285,13 @@ impl SstableWriterBuilder for BatchUploadWriterBuilder {
 }
 
 pub struct StreamingUploadWriterBuilder {
-    sstable_store: SstableStoreRef,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     policy: CachePolicy,
 }
 
 impl StreamingUploadWriterBuilder {
     pub fn new(
-        sstable_store: SstableStoreRef,
+        sstable_store: Arc<dyn SstableStoreWrite>,
         policy: CachePolicy,
     ) -> StreamingUploadWriterBuilder {
         Self {
@@ -275,6 +311,7 @@ impl SstableWriterBuilder for StreamingUploadWriterBuilder {
             .put_sst_stream(sst_id, self.policy)
             .await?;
         Ok(StreamingUploadWriter::new(
+            sst_id,
             self.sstable_store.clone(),
             uploader,
         ))

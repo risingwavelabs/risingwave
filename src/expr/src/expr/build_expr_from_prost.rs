@@ -44,16 +44,16 @@ fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, Data
 
 pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
-    ensure!(children.len() == 1);
-    let child_expr = expr_build_from_prost(&children[0])?;
+    let [child]: [_; 1] = children.try_into().unwrap();
+    let child_expr = expr_build_from_prost(&child)?;
     new_unary_expr(prost.get_expr_type().unwrap(), ret_type, child_expr)
 }
 
 pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
-    ensure!(children.len() == 2);
-    let left_expr = expr_build_from_prost(&children[0])?;
-    let right_expr = expr_build_from_prost(&children[1])?;
+    let [left_child, right_child]: [_; 2] = children.try_into().unwrap();
+    let left_expr = expr_build_from_prost(&left_child)?;
+    let right_expr = expr_build_from_prost(&right_child)?;
     Ok(new_binary_expr(
         prost.get_expr_type().unwrap(),
         ret_type,
@@ -64,9 +64,9 @@ pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 
 pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
-    ensure!(children.len() == 2);
-    let left_expr = expr_build_from_prost(&children[0])?;
-    let right_expr = expr_build_from_prost(&children[1])?;
+    let [left_child, right_child]: [_; 2] = children.try_into().unwrap();
+    let left_expr = expr_build_from_prost(&left_child)?;
+    let right_expr = expr_build_from_prost(&right_child)?;
     Ok(new_nullable_binary_expr(
         prost.get_expr_type().unwrap(),
         ret_type,
@@ -95,9 +95,9 @@ pub fn build_overlay_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 
 pub fn build_repeat_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
-    ensure!(children.len() == 2);
-    let left_expr = expr_build_from_prost(&children[0])?;
-    let right_expr = expr_build_from_prost(&children[1])?;
+    let [left_child, right_child]: [_; 2] = children.try_into().unwrap();
+    let left_expr = expr_build_from_prost(&left_child)?;
+    let right_expr = expr_build_from_prost(&right_child)?;
     Ok(new_repeat(left_expr, right_expr, ret_type))
 }
 
@@ -171,8 +171,8 @@ pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 pub fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     // TODO: add encoding length expr
-    ensure!(children.len() == 1);
-    let child = expr_build_from_prost(&children[0])?;
+    let [child]: [_; 1] = children.try_into().unwrap();
+    let child = expr_build_from_prost(&child)?;
     Ok(new_length_default(child, ret_type))
 }
 

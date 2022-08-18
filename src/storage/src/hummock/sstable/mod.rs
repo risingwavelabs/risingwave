@@ -18,7 +18,6 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
 
 pub use block::*;
 mod block_iterator;
@@ -31,7 +30,7 @@ pub mod writer;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
@@ -57,7 +56,6 @@ const VERSION: u32 = 1;
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
-    pub blocks: Vec<Arc<Block>>,
 }
 
 impl Debug for Sstable {
@@ -71,25 +69,7 @@ impl Debug for Sstable {
 
 impl Sstable {
     pub fn new(id: HummockSstableId, meta: SstableMeta) -> Self {
-        Self {
-            id,
-            meta,
-            blocks: vec![],
-        }
-    }
-
-    pub fn new_with_data(
-        id: HummockSstableId,
-        meta: SstableMeta,
-        data: Bytes,
-    ) -> HummockResult<Self> {
-        let mut blocks = vec![];
-        for block_meta in &meta.block_metas {
-            let end_offset = (block_meta.offset + block_meta.len) as usize;
-            let block = Block::decode(&data[block_meta.offset as usize..end_offset])?;
-            blocks.push(Arc::new(block));
-        }
-        Ok(Self { id, meta, blocks })
+        Self { id, meta }
     }
 
     pub fn has_bloom_filter(&self) -> bool {
@@ -116,8 +96,7 @@ impl Sstable {
 
     #[inline]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size() +
-            self.blocks.iter().map(|block|block.len() + block.restart_point_len() * 4).sum::<usize>()
+        8 /* id */ + self.meta.encoded_size()
     }
 
     #[cfg(test)]

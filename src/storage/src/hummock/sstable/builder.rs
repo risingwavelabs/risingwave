@@ -110,6 +110,7 @@ where
     raw_value: BytesMut,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     last_bloom_filter_key_length: usize,
+    add_bloom_filter_key_counts: usize,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
@@ -134,6 +135,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 FullKeyFilterKeyExtractor::default(),
             )),
             last_bloom_filter_key_length: 0,
+            add_bloom_filter_key_counts: 0,
         }
     }
 
@@ -161,6 +163,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             sstable_id,
             filter_key_extractor,
             last_bloom_filter_key_length: 0,
+            add_bloom_filter_key_counts: 0,
         }
     }
 
@@ -251,6 +254,14 @@ impl<W: SstableWriter> SstableBuilder<W> {
             version: VERSION,
         };
 
+        tracing::trace!(
+            "meta_size {} bloom_filter_size {}  add_key_counts {} add_bloom_filter_counts {}",
+            meta.encoded_size(),
+            meta.bloom_filter.len(),
+            self.key_count,
+            self.add_bloom_filter_key_counts
+        );
+
         Ok(SstableBuilderOutput::<W> {
             sstable_id: self.sstable_id,
             meta,
@@ -296,8 +307,8 @@ pub(super) mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, default_sst_writer_from_opt, gen_default_test_sstable,
-        test_key_of, test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_default_test_sstable, mock_sst_writer, test_key_of,
+        test_value_of, TEST_KEYS_COUNT,
     };
 
     #[tokio::test]
@@ -312,7 +323,7 @@ pub(super) mod tests {
             estimate_bloom_filter_capacity: 0,
         };
 
-        let b = SstableBuilder::new_for_test(0, default_sst_writer_from_opt(&opt), opt);
+        let b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
 
         b.finish().unwrap();
     }
@@ -320,7 +331,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn test_smallest_key_and_largest_key() {
         let opt = default_builder_opt_for_test();
-        let mut b = SstableBuilder::new_for_test(0, default_sst_writer_from_opt(&opt), opt);
+        let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)))

@@ -14,19 +14,22 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
+use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{Epoch, FullKey};
+use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 
 use super::{
     BatchUploadWriterBuilder, SstableWriter, SstableWriterBuilder, StreamingUploadWriterBuilder,
 };
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
+    SstableStoreWrite,
 };
+use crate::monitor::StateStoreMetrics;
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
@@ -67,6 +70,9 @@ where
     >,
 
     tracker: Option<MemoryTracker>,
+
+    /// Statistics.
+    pub stats: Arc<StateStoreMetrics>,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -74,12 +80,23 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(builder_factory: F) -> Self {
+    pub fn new(builder_factory: F, stats: Arc<StateStoreMetrics>) -> Self {
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
             tracker: None,
+            stats,
+        }
+    }
+
+    pub fn new_for_test(builder_factory: F) -> Self {
+        Self {
+            builder_factory,
+            sst_outputs: Vec::new(),
+            current_builder: None,
+            tracker: None,
+            stats: Arc::new(StateStoreMetrics::unused()),
         }
     }
 
@@ -101,7 +118,7 @@ where
         &mut self,
         user_key: Vec<u8>,
         value: HummockValue<&[u8]>,
-        epoch: Epoch,
+        epoch: HummockEpoch,
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
         let full_key = FullKey::from_user_key(user_key, epoch);
@@ -150,6 +167,16 @@ where
 
             let bloom_filter_size = meta.bloom_filter.len();
 
+            if bloom_filter_size != 0 {
+                self.stats
+                    .sstable_bloom_filter_size
+                    .observe(bloom_filter_size as _);
+            }
+
+            self.stats
+                .sstable_meta_size
+                .observe(meta.encoded_size() as _);
+
             let sst_info = SstableInfo {
                 id: builder_output.sstable_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -167,7 +194,7 @@ where
                 sst_info,
                 writer_output,
                 bloom_filter_size,
-            })
+            });
         }
         Ok(())
     }
@@ -187,7 +214,7 @@ where
 /// and the sealer will upload it to object store.
 pub fn get_writer_builder_for_batch_upload(
     opt: &SstableBuilderOptions,
-    sstable_store: SstableStoreRef,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     policy: CachePolicy,
 ) -> BatchUploadWriterBuilder {
     BatchUploadWriterBuilder::new(opt, sstable_store, policy)
@@ -196,7 +223,7 @@ pub fn get_writer_builder_for_batch_upload(
 /// The writer will upload blocks of data to object store
 /// and the sealer will finish the streaming upload.
 pub fn get_writer_builder_for_streaming_upload(
-    sstable_store: SstableStoreRef,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     policy: CachePolicy,
 ) -> StreamingUploadWriterBuilder {
     StreamingUploadWriterBuilder::new(sstable_store, policy)
@@ -269,7 +296,7 @@ mod tests {
         };
         let builder_factory =
             LocalTableBuilderFactory::new(1001, mock_sst_writer_builder(&opts), opts);
-        let builder = CapacitySplitTableBuilder::new(builder_factory);
+        let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
         let results = builder.finish().unwrap();
         assert!(results.is_empty());
     }
@@ -288,7 +315,7 @@ mod tests {
         };
         let builder_factory =
             LocalTableBuilderFactory::new(1001, mock_sst_writer_builder(&opts), opts);
-        let mut builder = CapacitySplitTableBuilder::new(builder_factory);
+        let mut builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
 
         for i in 0..table_capacity {
             builder
@@ -308,7 +335,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_seal() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::new(LocalTableBuilderFactory::new(
+        let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
             1001,
             mock_sst_writer_builder(&opts),
             opts,
@@ -348,7 +375,7 @@ mod tests {
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
         let opts = default_builder_opt_for_test();
-        let mut builder = CapacitySplitTableBuilder::new(LocalTableBuilderFactory::new(
+        let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
             1001,
             mock_sst_writer_builder(&opts),
             opts,

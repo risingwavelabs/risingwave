@@ -24,10 +24,12 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::SstableInfo;
-use risingwave_storage::hummock::compactor::{Compactor, DummyCompactionFilter};
+use risingwave_storage::hummock::compactor::{
+    Compactor, ConcatSstableIterator, DummyCompactionFilter,
+};
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, ConcatSstableIterator, Forward, HummockIterator, HummockIteratorUnion,
-    MultiSstIterator, UnorderedMergeIteratorInner,
+    ConcatIterator, Forward, HummockIterator, HummockIteratorUnion, MultiSstIterator,
+    UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::multi_builder::{
     get_writer_builder_for_batch_upload, CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -36,8 +38,9 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, InMemWriter, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableMeta, SstableStore, SstableWriter, TieredCache,
+    CachePolicy, CompactorSstableStore, CompressionAlgorithm, InMemWriter, MemoryLimiter,
+    SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
+    SstableStoreWrite, SstableWriter, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -70,7 +73,7 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
     };
-    let writer = InMemWriter::from(&opt);
+    let writer = InMemWriter::new_from_options(sstable_id, &opt);
     let mut builder = SstableBuilder::new_for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
@@ -132,7 +135,10 @@ fn bench_table_scan(c: &mut Criterion) {
     });
 }
 
-async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store: SstableStoreRef) {
+async fn compact<I: HummockIterator<Direction = Forward>>(
+    iter: I,
+    sstable_store: Arc<CompactorSstableStore>,
+) {
     let opt = SstableBuilderOptions {
         capacity: 32 * 1024 * 1024,
         block_capacity: 64 * 1024,
@@ -143,12 +149,15 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
     };
     let writer_builder =
         get_writer_builder_for_batch_upload(&opt, sstable_store, CachePolicy::NotFill);
-    let mut builder =
-        CapacitySplitTableBuilder::new(LocalTableBuilderFactory::new(32, writer_builder, opt));
+    let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
+        32,
+        writer_builder,
+        opt,
+    ));
 
     Compactor::compact_and_build_sst(
         &mut builder,
-        KeyRange::inf(),
+        &KeyRange::inf(),
         iter,
         false,
         0,
@@ -227,26 +236,26 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 )),
             ];
             let iter = MultiSstIterator::new(sub_iters, stats.clone());
-            async move { compact(iter, sstable_store1).await }
+            let sstable_store = Arc::new(CompactorSstableStore::new(
+                sstable_store1,
+                MemoryLimiter::unlimit(),
+            ));
+            async move { compact(iter, sstable_store).await }
         });
     });
+    let sstable_store = Arc::new(CompactorSstableStore::new(
+        sstable_store.clone(),
+        MemoryLimiter::unlimit(),
+    ));
     c.bench_function("bench_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {
-            let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
-                ConcatSstableIterator::new(
-                    level1.clone(),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                ),
-                ConcatSstableIterator::new(
-                    level2.clone(),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                ),
+                ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), sstable_store.clone()),
+                ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), sstable_store.clone()),
             ];
             let iter = UnorderedMergeIteratorInner::new(sub_iters, stats.clone());
+            let sstable_store1 = sstable_store.clone();
             async move { compact(iter, sstable_store1).await }
         });
     });

@@ -57,6 +57,10 @@ impl StreamingUploader for InMemStreamingUploader {
             Ok(())
         }
     }
+
+    fn get_memory_usage(&self) -> u64 {
+        self.buf.capacity() as u64
+    }
 }
 
 /// In-memory object storage, useful for testing.

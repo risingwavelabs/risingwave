@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,6 +21,7 @@ use futures::pin_mut;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
+use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
@@ -87,10 +88,13 @@ impl OperatorInfoStatus {
     }
 }
 
-/// Shared by all operators in the stream.
+/// Shared by all operators of an actor.
 #[derive(Default)]
 pub struct ActorContext {
     pub info: Vec<OperatorInfo>,
+
+    /// TODO: report errors and prompt the user.
+    pub errors: HashMap<String, Vec<ExprError>>,
 }
 
 pub type ActorContextRef = Arc<Mutex<ActorContext>>;
@@ -98,6 +102,14 @@ pub type ActorContextRef = Arc<Mutex<ActorContext>>;
 impl ActorContext {
     pub fn create() -> ActorContextRef {
         Arc::new(Mutex::new(Self::default()))
+    }
+
+    pub fn on_compute_error(&mut self, err: ExprError, identity: &str) {
+        log::error!("Compute error: {}, executor: {identity}", err);
+        self.errors
+            .entry(identity.to_owned())
+            .or_default()
+            .push(err);
     }
 }
 

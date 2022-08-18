@@ -108,6 +108,8 @@ pub trait StreamingUploader: Send + Sync {
     fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
     async fn finish(self: Box<Self>) -> ObjectResult<()>;
+
+    fn get_memory_usage(&self) -> u64;
 }
 
 /// The implementation must be thread-safe.
@@ -284,6 +286,10 @@ impl MonitoredStreamingUploader {
             .with_label_values(&["streaming_upload"])
             .observe(self.operation_size as f64);
         self.inner.finish().await
+    }
+
+    pub fn get_memory_usage(&self) -> u64 {
+        self.inner.get_memory_usage()
     }
 }
 

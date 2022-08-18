@@ -283,8 +283,7 @@ impl StreamFragmenter {
             _ => unreachable!(),
         };
 
-        let arrange_1 = node.input.remove(1);
-        let arrange_0 = node.input.remove(0);
+        let [arrange_0, arrange_1]: [_; 2] = std::mem::take(&mut node.input).try_into().unwrap();
 
         // TODO: when distribution key is added to catalog, chain and delta join won't have any
         // exchange in-between. Then we can safely remove this function.
