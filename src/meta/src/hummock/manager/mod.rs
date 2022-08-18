@@ -215,7 +215,7 @@ where
                         return;
                     }
                 }
-                for (context_id, mut task) in compactor_manager.get_timed_out_tasks() {
+                for (context_id, mut task) in compactor_manager.get_expired_tasks() {
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
                         let _ = compactor.cancel_task(task.task_id).await;
                     }

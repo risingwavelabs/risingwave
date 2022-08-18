@@ -227,8 +227,8 @@ impl CompactorManager {
             guard.compactors.retain(|c| *c != context_id);
             guard.compactor_map.remove(&context_id);
         }
-        // Cancel any existing task from the heartbeats table that has not been externally
-        // cancelled.
+        // Any existing task from the heartbeats table that has not been externally
+        // cancelled will be eventually purged
         tracing::info!("Removed compactor session {}", context_id);
     }
 
@@ -236,7 +236,7 @@ impl CompactorManager {
         self.inner.read().compactor_map.get(&context_id).cloned()
     }
 
-    pub fn get_timed_out_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
+    pub fn get_expired_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
@@ -279,10 +279,6 @@ impl CompactorManager {
     }
 
     pub fn remove_task_heartbeat(&self, context_id: HummockContextId, task_id: u64) {
-        let _now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Clock may have gone backwards")
-            .as_secs();
         let mut guard = self.task_heartbeats.write();
         let mut garbage_collect = false;
         if let Some(heartbeats) = guard.get_mut(&context_id) {
