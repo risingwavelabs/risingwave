@@ -1566,15 +1566,9 @@ impl DataChunkMutator {
 impl BoxedExecutorBuilder for HashJoinExecutor<()> {
     async fn new_boxed_executor<C: BatchTaskContext>(
         context: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 2,
-            "HashJoinExecutor should have 2 children!"
-        );
-
-        let left_child = inputs.remove(0);
-        let right_child = inputs.remove(0);
+        let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();
 
         let hash_join_node = try_match_expand!(
             context.plan_node().get_node_body().unwrap(),

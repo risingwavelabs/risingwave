@@ -29,7 +29,7 @@ pub struct HashJoinExecutorBuilder;
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
@@ -38,8 +38,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
-        let source_l = params.input.remove(0);
-        let source_r = params.input.remove(0);
+        let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         let table_l = node.get_left_table()?;
         let table_r = node.get_right_table()?;

@@ -60,7 +60,7 @@ pub struct HashAggExecutorBuilder;
 
 impl ExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
@@ -81,7 +81,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
             .collect();
-        let input = params.input.remove(0);
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let keys = key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
