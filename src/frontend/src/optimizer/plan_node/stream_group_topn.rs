@@ -34,8 +34,8 @@ pub struct StreamGroupTopN {
     order: Order,
 }
 
-#[allow(dead_code)]
 impl StreamGroupTopN {
+    #[allow(dead_code)]
     pub fn new(
         input: PlanRef,
         group_key: Vec<usize>,

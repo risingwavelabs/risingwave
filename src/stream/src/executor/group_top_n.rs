@@ -246,14 +246,13 @@ mod tests {
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Message};
 
@@ -353,24 +352,6 @@ mod tests {
         }
 
         assert_eq!(lhs_message, rhs_message);
-    }
-    fn create_in_memory_state_table(
-        data_types: &[DataType],
-        order_types: &[OrderType],
-        pk_indices: &[usize],
-    ) -> RowBasedStateTable<MemoryStateStore> {
-        let column_descs = data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
-            .collect_vec();
-        RowBasedStateTable::new_without_distribution(
-            MemoryStateStore::new(),
-            TableId::new(0),
-            column_descs,
-            order_types.to_vec(),
-            pk_indices.to_vec(),
-        )
     }
 
     #[tokio::test]
