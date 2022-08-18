@@ -66,15 +66,18 @@ message FilterNode {
 message InsertNode {
   uint32 table_source_id = 1;
   repeated int32 column_ids = 2;
+  uint32 table_id = 3;
 }
 
 message DeleteNode {
   uint32 table_source_id = 1;
+  uint32 table_id = 2;
 }
 
 message UpdateNode {
   uint32 table_source_id = 1;
   repeated expr.ExprNode exprs = 2;
+  uint32 table_id = 3;
 }
 
 message ValuesNode {

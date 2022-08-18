@@ -74,6 +74,7 @@ impl ToBatchProst for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Delete(DeleteNode {
             table_source_id: self.logical.source_id().table_id(),
+            table_id: self.logical.table_id().table_id(),
         })
     }
 }

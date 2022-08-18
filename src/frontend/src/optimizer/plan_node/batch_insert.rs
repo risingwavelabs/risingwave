@@ -73,6 +73,7 @@ impl ToBatchProst for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Insert(InsertNode {
             table_source_id: self.logical.source_id().table_id(),
+            table_id: self.logical.table_id().table_id(),
             column_ids: vec![], // unused
         })
     }
