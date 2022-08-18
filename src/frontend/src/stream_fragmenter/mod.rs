@@ -336,12 +336,16 @@ impl StreamFragmenter {
             NodeBody::TopN(top_n_node) => {
                 if let Some(table) = &mut top_n_node.table {
                     table.id = state.gen_table_id();
+                } else {
+                    panic!("TopNNode's table shouldn't be None");
                 }
             }
 
             NodeBody::GroupTopN(group_top_n_node) => {
                 if let Some(table) = &mut group_top_n_node.table {
                     table.id = state.gen_table_id();
+                } else {
+                    panic!("GroupTopNNode's table shouldn't be None");
                 }
             }
 

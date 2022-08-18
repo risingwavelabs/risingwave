@@ -118,6 +118,9 @@ impl ToStreamProst for StreamGroupTopN {
         use risingwave_pb::stream_plan::*;
         let group_key = self.group_key.iter().map(|idx| *idx as u32).collect();
 
+        if self.limit == 0 {
+            panic!("topN's limit shouldn't be 0.");
+        }
         let group_topn_node = GroupTopNNode {
             limit: self.limit as u64,
             offset: self.offset as u64,
@@ -147,7 +150,7 @@ impl fmt::Display for StreamGroupTopN {
         builder
             .field("limit", &format_args!("{}", self.limit))
             .field("offset", &format_args!("{}", self.offset))
-            .field("group key", &format_args!("{:?}", self.group_key))
+            .field("group_key", &format_args!("{:?}", self.group_key))
             .finish()
     }
 }
