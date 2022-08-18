@@ -24,14 +24,13 @@ pub struct DynamicFilterExecutorBuilder;
 
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::DynamicFilter)?;
-        let source_r = params.input.remove(1);
-        let source_l = params.input.remove(0);
+        let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
         let key_l = node.get_left_key() as usize;
 
         let vnodes = Arc::new(
@@ -65,6 +64,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             RowBasedStateTable::from_table_catalog(node.get_right_table()?, store, None);
 
         Ok(Box::new(DynamicFilterExecutor::new(
+            params.actor_context,
             source_l,
             source_r,
             key_l,
@@ -74,7 +74,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             state_table_l,
             state_table_r,
             is_right_table_writer,
-            params.actor_id,
             params.executor_stats,
         )))
     }

@@ -39,9 +39,9 @@ pub use iterator::ConcatSstableIterator;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
+use risingwave_hummock_sdk::key::{get_epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
@@ -451,7 +451,7 @@ impl Compactor {
         kr: &KeyRange,
         mut iter: impl HummockIterator<Direction = Forward>,
         gc_delete_keys: bool,
-        watermark: Epoch,
+        watermark: HummockEpoch,
         mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()> {
         if !kr.left.is_empty() {

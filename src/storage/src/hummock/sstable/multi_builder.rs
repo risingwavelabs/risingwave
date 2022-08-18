@@ -14,7 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{Epoch, FullKey};
+use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
@@ -111,7 +112,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
         &mut self,
         user_key: Vec<u8>,
         value: HummockValue<&[u8]>,
-        epoch: Epoch,
+        epoch: HummockEpoch,
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
         let full_key = FullKey::from_user_key(user_key, epoch);
