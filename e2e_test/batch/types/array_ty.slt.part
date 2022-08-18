@@ -16,7 +16,7 @@ select ARRAY[null];
 ----
 {NULL}
 
-statement error
+statement ok
 select ARRAY[];
 
 statement ok
