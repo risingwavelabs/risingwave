@@ -210,8 +210,7 @@ where
     }
 }
 
-/// The writer will generate an entire SST in memory
-/// and the sealer will upload it to object store.
+/// The writer will buffer SST data in memory and upload it to `SstableStore` on finish.
 pub fn get_writer_builder_for_batch_upload(
     opt: &SstableBuilderOptions,
     sstable_store: Arc<dyn SstableStoreWrite>,
@@ -220,8 +219,7 @@ pub fn get_writer_builder_for_batch_upload(
     BatchUploadWriterBuilder::new(opt, sstable_store, policy)
 }
 
-/// The writer will upload blocks of data to object store
-/// and the sealer will finish the streaming upload.
+/// The writer will upload blocks of data to object store in a pipelined manner.
 pub fn get_writer_builder_for_streaming_upload(
     sstable_store: Arc<dyn SstableStoreWrite>,
     policy: CachePolicy,

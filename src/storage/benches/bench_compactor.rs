@@ -105,16 +105,18 @@ async fn scan_all_table(sstable_store: SstableStoreRef) {
 
 fn bench_table_build(c: &mut Criterion) {
     c.bench_function("bench_table_build", |b| {
-        b.iter(|| build_table(0, 0..(MAX_KEY_COUNT as u64), 1));
+        b.iter(|| {
+            let _ = build_table(0, 0..(MAX_KEY_COUNT as u64), 1);
+        });
     });
 }
 
 fn bench_table_scan(c: &mut Criterion) {
+    let (data, meta) = build_table(0, 0..(MAX_KEY_COUNT as u64), 1);
     let sstable_store = mock_sstable_store();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .build()
         .unwrap();
-    let (data, meta) = build_table(0, 0..(MAX_KEY_COUNT as u64), 1);
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
         sstable_store1
