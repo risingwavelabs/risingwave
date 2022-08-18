@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
 use self::util::handle_with_properties;
@@ -62,13 +62,12 @@ pub async fn handle(
             statement,
             verbose,
             trace,
-            describe_alias,
-            analyze,
             distsql,
+            ..
         } => {
             if distsql {
                 return Err(
-                    ErrorCode::NotImplemented(format!("explain distsql"), None.into()).into(),
+                    ErrorCode::NotImplemented("explain distsql".to_string(), None.into()).into(),
                 );
             }
 
