@@ -640,7 +640,6 @@ impl Compactor {
             self.sstable_store.clone(),
             self.context.stats.clone(),
             progress_tracker,
-            
         );
 
         // Monitor time cost building shared buffer to SSTs.

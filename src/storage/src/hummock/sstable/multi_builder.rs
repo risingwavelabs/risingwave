@@ -79,7 +79,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             sstable_store,
             tracker: None,
             stats,
-            task_progress
+            task_progress,
         }
     }
 
