@@ -906,17 +906,16 @@ mod tests {
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (tx, rx) = channel(16);
+        let actor_id = 233;
         let input = Box::new(ReceiverExecutor::new(
             schema.clone(),
             vec![],
             LocalInput::for_test(rx),
-            ActorContext::create(),
-            0,
+            ActorContext::create(actor_id),
             0,
             0,
             Arc::new(StreamingMetrics::unused()),
         ));
-        let actor_id = 233;
         let ctx = Arc::new(SharedContext::for_test());
         let dispatcher_id = 666;
         let metrics = Arc::new(StreamingMetrics::unused());
