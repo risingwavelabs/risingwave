@@ -145,6 +145,16 @@ impl Utf8Array {
         }
         builder.finish()
     }
+
+    /// Retrieve the ownership of the single string value. Panics if there're multiple or no values.
+    pub fn into_single_value(self) -> Option<String> {
+        assert_eq!(self.len(), 1);
+        if !self.is_null(0) {
+            Some(unsafe { String::from_utf8_unchecked(self.data) })
+        } else {
+            None
+        }
+    }
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
