@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-
+use async_stack_trace::StackTrace;
 use bytes::BufMut;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
-use crate::{error::{StorageError, StorageResult}, keyspace::StripPrefixIterator};
+use crate::{error::{StorageError, StorageResult}, keyspace::StripPrefixIterator, row_serde::row_serde_util::parse_raw_key_to_vnode_and_key, StateStoreIter};
 use crate::row_serde::row_serde_util::{deserialize, serialize, serialize_pk};
 use crate::row_serde::ColumnDescMapping;
 use crate::storage_value::StorageValue;
@@ -458,19 +458,12 @@ impl<S: StateStore> StateTable<S> {
         Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter, self.mapping).into_stream())
     }
 
-    fn get_read_option(&self, epoch: u64) -> ReadOptions {
-        ReadOptions {
-            epoch,
-            table_id: Some(self.keyspace.table_id()),
-            retention_seconds: self.table_option.retention_seconds,
-        }
-    }
 }
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Row>>;
 pub type RowBasedRowStream<'a, S> = RowStream<'a, S>;
 
-struct StateTableRowIter<M, C> {
+struct StateTableRowIter<'a,  M,C > {
     mem_table_iter: M,
     state_store_iter: C,
     
@@ -481,12 +474,12 @@ struct StateTableRowIter<M, C> {
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
 /// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
-impl<'a, M, C> StateTableRowIter<'a,  M, C>
+impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, state_store_iter: StripPrefixIterator<S::Iter>, mapping: Arc<ColumnDescMapping>) -> Self {
+    fn new(mem_table_iter: M, state_store_iter: C, mapping: Arc<ColumnDescMapping>) -> Self {
         Self {
             mem_table_iter,
             state_store_iter,
@@ -502,7 +495,7 @@ where
     /// `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok =  Row, error = StorageError)]
     async fn into_stream(self) {
-        let state_store_iter = self.state_store_iter.fuse().peekable();
+        let state_store_iter = self.state_store_iter.peekable();
         pin_mut!(state_store_iter);
 
         let mut mem_table_iter = self.mem_table_iter.fuse().peekable();
@@ -581,6 +574,25 @@ where
                     return Err(state_store_iter.next().await.unwrap().unwrap_err());
                 }
             }
+        }
+    }
+
+
+    /// Yield a row with its primary key.
+    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    async fn storage_into_stream(mut self) {
+        while let Some((key, value)) = self
+            .state_store_iter
+            .next()
+            .stack_trace("storage_table_iter_next")
+            .await?
+        {
+            let (_, pk_bytes) = parse_raw_key_to_vnode_and_key(key);
+            let row = 
+                deserialize( self.mapping.clone(), value)
+                .map_err(err)?;
+
+            yield (pk_bytes.to_vec(), row)
         }
     }
 }
