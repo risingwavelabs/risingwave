@@ -205,7 +205,7 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
                     Box::new(LiteralExpression::new(build_type.clone(), datum.clone())),
                 )?;
 
-                let datum = cast_expr.eval_row(&Row(vec![]))?;
+                let datum = cast_expr.eval_row(Row::empty())?;
                 datum.unwrap()
             };
 
@@ -578,9 +578,9 @@ pub struct LookupJoinExecutorBuilder {}
 impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "LookupJoinExecutor should have 1 child!");
+        let [build_child]: [_; 1] = inputs.try_into().unwrap();
 
         let lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -599,7 +599,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&x| x as usize)
             .collect();
 
-        let build_child = inputs.remove(0);
         let build_side_data_types = build_child.schema().data_types();
 
         let table_desc = lookup_join_node.get_probe_side_table_desc()?;
