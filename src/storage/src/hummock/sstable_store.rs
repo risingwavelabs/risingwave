@@ -439,7 +439,7 @@ pub trait SstableStoreWrite: Send + Sync {
         policy: CachePolicy,
     ) -> HummockResult<()>;
 
-    async fn put_sst_stream(
+    async fn create_put_sst_stream(
         &self,
         sst_id: HummockSstableId,
         policy: CachePolicy,
@@ -482,7 +482,7 @@ impl SstableStoreWrite for SstableStore {
         Ok(())
     }
 
-    async fn put_sst_stream(
+    async fn create_put_sst_stream(
         &self,
         sst_id: HummockSstableId,
         policy: CachePolicy,
@@ -610,7 +610,7 @@ mod tests {
             .unwrap();
 
         let mut uploader = sstable_store
-            .put_sst_stream(1, CachePolicy::NotFill)
+            .create_put_sst_stream(1, CachePolicy::NotFill)
             .await
             .unwrap();
         for block in blocks {

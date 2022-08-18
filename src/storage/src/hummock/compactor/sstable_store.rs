@@ -178,14 +178,14 @@ impl SstableStoreWrite for CompactorSstableStore {
             .await
     }
 
-    async fn put_sst_stream(
+    async fn create_put_sst_stream(
         &self,
         sst_id: HummockSstableId,
         _policy: CachePolicy,
     ) -> HummockResult<SstableStreamingUploader> {
         // TODO: fill cache for L0
         self.sstable_store
-            .put_sst_stream(sst_id, CachePolicy::NotFill)
+            .create_put_sst_stream(sst_id, CachePolicy::NotFill)
             .await
     }
 

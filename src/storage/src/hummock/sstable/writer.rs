@@ -316,7 +316,7 @@ impl SstableWriterBuilder for StreamingUploadWriterBuilder {
         async move {
             let uploader = self
                 .sstable_store
-                .put_sst_stream(sst_id, self.policy)
+                .create_put_sst_stream(sst_id, self.policy)
                 .await?;
             Ok(StreamingUploadWriter::new(
                 sst_id,
