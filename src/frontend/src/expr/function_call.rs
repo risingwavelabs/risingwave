@@ -215,6 +215,11 @@ impl FunctionCall {
                 inputs: vec![child],
             }
             .into())
+        } 
+        // Handle `unknown` arrays
+        else if let ExprImpl::FunctionCall(mut func) = child && func.is_unknown_array() {
+            func.return_type = target;
+            Ok(ExprImpl::FunctionCall(func))
         } else {
             Err(ErrorCode::BindError(format!(
                 "cannot cast type \"{}\" to \"{}\" in {:?} context",
@@ -236,6 +241,19 @@ impl FunctionCall {
             return_type,
             inputs,
         }
+    }
+
+    /// Check whether self is an `unknown` array.
+    ///
+    /// An array is `unknown` if it satisfies any of the following conditions:
+    /// - it is empty.
+    /// - it contains only NULLs or `unknown` arrays.
+    pub fn is_unknown_array(&self) -> bool {
+        self.func_type == ExprType::Array
+            && self.inputs.iter().all(|elem| {
+                elem.is_null()
+                    || matches!(elem, ExprImpl::FunctionCall(func) if func.is_unknown_array())
+            })
     }
 
     pub fn decompose(self) -> (ExprType, Vec<ExprImpl>, DataType) {
