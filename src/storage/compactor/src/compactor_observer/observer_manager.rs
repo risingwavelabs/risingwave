@@ -51,6 +51,8 @@ impl ObserverNodeImpl for CompactorObserverNode {
                 self.handle_source_notification(resp.operation(), source_catalog);
             }
 
+            Info::HummockVersionDeltas(_) => {}
+
             _ => {
                 panic!("error type notification");
             }
@@ -67,7 +69,7 @@ impl ObserverNodeImpl for CompactorObserverNode {
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be frontend snapshot, but get {:?}",
+                    "the first notify should be compactor snapshot, but get {:?}",
                     resp
                 ))
                 .into())

@@ -20,9 +20,9 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
-use risingwave_hummock_sdk::key::{Epoch, FullKey};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -102,9 +102,12 @@ async fn compact_shared_buffer(
         let buffer_per_split = start_user_keys.len() / split_num;
         for i in 1..split_num {
             key_split_append(
-                &FullKey::from_user_key_slice(start_user_keys[i * buffer_per_split], Epoch::MAX)
-                    .into_inner()
-                    .into(),
+                &FullKey::from_user_key_slice(
+                    start_user_keys[i * buffer_per_split],
+                    HummockEpoch::MAX,
+                )
+                .into_inner()
+                .into(),
             );
         }
     }

@@ -15,7 +15,8 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
+use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
@@ -52,10 +53,10 @@ pub struct BackwardUserIterator {
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
     /// Only reads values if `epoch <= self.read_epoch`.
-    read_epoch: Epoch,
+    read_epoch: HummockEpoch,
 
     /// Only reads values if `ts > self.min_epoch`. use for ttl
-    min_epoch: Epoch,
+    min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
     _version: Option<Arc<PinnedVersion>>,
@@ -70,7 +71,7 @@ impl BackwardUserIterator {
         >,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::with_epoch(iterator, key_range, Epoch::MAX, 0, None)
+        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
@@ -938,7 +939,7 @@ mod tests {
         assert_eq!(num_kvs, num_puts);
     }
 
-    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Reverse<Epoch>, HummockValue<Vec<u8>>>>;
+    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Vec<u8>>>>;
 
     async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
         // We first generate the key value pairs.
@@ -953,7 +954,7 @@ mod tests {
             let mut prev_time = 500;
             let num_updates = rng.gen_range(1..10usize);
             for _ in 0..num_updates {
-                let time: Epoch = rng.gen_range(prev_time..=(prev_time + 1000));
+                let time: HummockEpoch = rng.gen_range(prev_time..=(prev_time + 1000));
                 let is_delete = rng.gen_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
