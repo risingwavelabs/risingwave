@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -93,10 +92,11 @@ impl ToStreamProst for StreamTopN {
             let topn_node = TopNNode {
                 limit: self.logical.limit() as u64,
                 offset: self.logical.offset() as u64,
-                table: Some(self.logical.infer_internal_table_catalog().to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                )),
+                table: Some(
+                    self.logical
+                        .infer_internal_table_catalog()
+                        .to_state_table_prost(),
+                ),
             };
             ProstStreamNode::TopN(topn_node)
         }

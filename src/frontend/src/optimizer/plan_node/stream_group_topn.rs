@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
@@ -123,10 +122,7 @@ impl ToStreamProst for StreamGroupTopN {
             limit: self.limit as u64,
             offset: self.offset as u64,
             group_key,
-            table: Some(self.infer_internal_table_catalog().to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            )),
+            table: Some(self.infer_internal_table_catalog().to_state_table_prost()),
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)

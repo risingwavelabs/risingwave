@@ -138,6 +138,14 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
+    pub fn to_state_table_prost(&self) -> ProstTable {
+        use risingwave_common::catalog::{DatabaseId, SchemaId};
+        self.to_prost(
+            SchemaId::placeholder() as u32,
+            DatabaseId::placeholder() as u32,
+        )
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
             id: self.id.table_id as u32,
