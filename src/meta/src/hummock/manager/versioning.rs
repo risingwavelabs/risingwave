@@ -23,7 +23,7 @@ use risingwave_pb::hummock::{
 };
 
 #[derive(Default)]
-pub(super) struct Versioning {
+pub(crate) struct Versioning {
     // Volatile states below
 
     // Newest version

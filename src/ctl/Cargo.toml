@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 bytes = "1"
+chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

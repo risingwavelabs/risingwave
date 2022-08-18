@@ -122,7 +122,7 @@ pub async fn compute_node_serve(
         meta_client.clone(),
         client_addr.clone(),
         Box::new(compute_observer_node),
-        WorkerType::Compactor,
+        WorkerType::ComputeNode,
     )
     .await;
 
