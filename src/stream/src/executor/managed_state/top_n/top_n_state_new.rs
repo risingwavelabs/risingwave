@@ -209,11 +209,8 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
 
     // use std::collections::BTreeMap;
     use super::*;

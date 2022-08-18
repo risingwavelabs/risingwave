@@ -416,12 +416,10 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
 mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
