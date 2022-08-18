@@ -62,11 +62,11 @@ pub struct TableCatalog {
     /// All columns in this table
     pub columns: Vec<ColumnCatalog>,
 
-    /// Key used as materialize's storage key prefix, including MV order columns and pk.
+    /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
     pub order_key: Vec<FieldOrder>,
 
-    /// Primary key columns indices.
-    pub pk: Vec<usize>,
+    /// Primary key of the Materialize operator's output.
+    pub stream_key: Vec<usize>,
 
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
@@ -119,7 +119,7 @@ impl TableCatalog {
                 .iter()
                 .map(FieldOrder::to_order_pair)
                 .collect(),
-            pk: self.pk.clone(),
+            pk: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
@@ -146,7 +146,7 @@ impl TableCatalog {
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
             order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
-            pk: self.pk.iter().map(|x| *x as _).collect(),
+            pk: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
@@ -205,7 +205,7 @@ impl From<ProstTable> for TableCatalog {
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
-            pk: tb.pk.iter().map(|x| *x as _).collect(),
+            stream_key: tb.pk.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
             properties: tb.properties,
@@ -329,7 +329,7 @@ mod tests {
                         is_hidden: false
                     }
                 ],
-                pk: vec![0],
+                stream_key: vec![0],
                 order_key: vec![FieldOrder {
                     index: 0,
                     direct: Direction::Asc,
