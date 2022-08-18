@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
+use risingwave_common::util::sync::on_sync_point;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -113,6 +114,9 @@ where
                     break 'compaction_trigger;
                 }
             };
+            on_sync_point("BEFORE_SCHEDULE_COMPACTION_TASK")
+                .await
+                .unwrap();
             self.pick_and_assign(compaction_group, request_channel.clone())
                 .await;
         }

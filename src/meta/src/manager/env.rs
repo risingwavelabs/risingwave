@@ -74,7 +74,7 @@ pub struct MetaOpts {
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
     /// Threshold used by worker node to filter out new SSTs when scanning object store.
-    pub sst_retention_time_sec: u64,
+    pub min_sst_retention_time_sec: u64,
     /// Compaction scheduler retries compactor selection with this interval.
     pub compactor_selection_retry_interval_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
@@ -89,7 +89,7 @@ impl Default for MetaOpts {
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
             vacuum_interval_sec: 30,
-            sst_retention_time_sec: 3600 * 24 * 7,
+            min_sst_retention_time_sec: 3600 * 24 * 7,
             compactor_selection_retry_interval_sec: 5,
             collect_gc_watermark_spin_interval_sec: 5,
         }

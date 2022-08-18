@@ -90,6 +90,13 @@ impl MetaNodeService {
             }
         }
 
+        cmd.arg("--vacuum-interval-sec")
+            .arg(format!("{}", config.vacuum_interval_sec))
+            .arg("--collect-gc-watermark-spin-interval-sec")
+            .arg(format!("{}", config.collect_gc_watermark_spin_interval_sec))
+            .arg("--min-sst-retention-time-sec")
+            .arg(format!("{}", config.min_sst_retention_time_sec));
+
         Ok(())
     }
 }

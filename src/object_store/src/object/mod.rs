@@ -83,7 +83,7 @@ pub struct BlockLocation {
     pub size: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
     // Full path
     pub key: String,

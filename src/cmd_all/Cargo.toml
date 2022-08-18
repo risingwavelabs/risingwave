@@ -11,6 +11,7 @@ anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 log = { version = "0.4", features = ["release_max_level_info"] }
 risedev = { path = "../risedevtool" }
+risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }

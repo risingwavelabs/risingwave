@@ -1,0 +1,33 @@
+include e2e_test/tpch/create_tables.slt.part
+
+include e2e_test/tpch/insert_customer.slt.part
+include e2e_test/tpch/insert_lineitem.slt.part
+include e2e_test/tpch/insert_nation.slt.part
+include e2e_test/tpch/insert_orders.slt.part
+include e2e_test/tpch/insert_part.slt.part
+include e2e_test/tpch/insert_partsupp.slt.part
+include e2e_test/tpch/insert_region.slt.part
+include e2e_test/tpch/insert_supplier.slt.part
+
+include e2e_test/streaming/tpch/create_views.slt.part
+
+include e2e_test/streaming/tpch/q1.slt.part
+include e2e_test/streaming/tpch/q2.slt.part
+include e2e_test/streaming/tpch/q3.slt.part
+include e2e_test/streaming/tpch/q4.slt.part
+include e2e_test/streaming/tpch/q5.slt.part
+include e2e_test/streaming/tpch/q6.slt.part
+include e2e_test/streaming/tpch/q7.slt.part
+include e2e_test/streaming/tpch/q8.slt.part
+include e2e_test/streaming/tpch/q9.slt.part
+include e2e_test/streaming/tpch/q10.slt.part
+include e2e_test/streaming/tpch/q11.slt.part
+include e2e_test/streaming/tpch/q12.slt.part
+include e2e_test/streaming/tpch/q13.slt.part
+include e2e_test/streaming/tpch/q14.slt.part
+include e2e_test/streaming/tpch/q17.slt.part
+include e2e_test/streaming/tpch/q18.slt.part
+include e2e_test/streaming/tpch/q19.slt.part
+include e2e_test/streaming/tpch/q20.slt.part
+include e2e_test/streaming/tpch/q22.slt.part
+

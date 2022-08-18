@@ -38,6 +38,7 @@ use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+use risingwave_common::util::sync::on_sync_point;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, FullKey};
@@ -259,6 +260,7 @@ impl Compactor {
         // Sort by split/key range index.
         output_ssts.sort_by_key(|(split_index, _)| *split_index);
 
+        on_sync_point("BEFORE_COMPACT_REPORT").await.unwrap();
         // After a compaction is done, mutate the compaction task.
         Self::compact_done(
             &mut compact_task,
@@ -267,6 +269,7 @@ impl Compactor {
             compact_success,
         )
         .await;
+        on_sync_point("AFTER_COMPACT_REPORT").await.unwrap();
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
             "Finished compaction task in {:?}ms: \n{}",

@@ -181,7 +181,10 @@ where
     /// 3. Meta node decides which SSTs to delete. See `VacuumManager::complete_full_gc`.
     pub async fn start_full_gc(&self, sst_retention_time: Duration) -> Result<()> {
         // Set a minimum sst_retention_time to avoid deleting SSTs of on-going write op.
-        let sst_retention_time = std::cmp::max(sst_retention_time, Duration::from_secs(3600 * 3));
+        let sst_retention_time = cmp::max(
+            sst_retention_time,
+            Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
+        );
         tracing::info!(
             "run full GC with sst_retention_time = {} secs",
             sst_retention_time.as_secs()
