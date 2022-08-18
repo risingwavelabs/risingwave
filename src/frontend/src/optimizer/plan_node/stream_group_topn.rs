@@ -24,7 +24,6 @@ use crate::optimizer::property::{Distribution, Order, OrderDisplay};
 use crate::{PlanRef, TableCatalog};
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct StreamGroupTopN {
     pub base: PlanBase,
     input: PlanRef,
@@ -35,7 +34,6 @@ pub struct StreamGroupTopN {
 }
 
 impl StreamGroupTopN {
-    #[allow(dead_code)]
     pub fn new(
         input: PlanRef,
         group_key: Vec<usize>,

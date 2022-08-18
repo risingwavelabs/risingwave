@@ -81,7 +81,6 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub fn total_count(&self) -> usize {
         self.total_count
     }
@@ -102,7 +101,6 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     /// if `num_limit` is None, it will scan with no limit.
     /// this function only used in tests
     #[cfg(test)]
-    #[allow(dead_code)]
     pub async fn find_range(
         &self,
         pk_prefix: Option<&Row>,
