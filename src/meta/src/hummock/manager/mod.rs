@@ -40,7 +40,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::RwLockWriteGuard;
+use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
@@ -839,6 +839,20 @@ where
                 )?;
             }
             versioning.current_version = new_version;
+
+            self.env
+                .notification_manager()
+                .notify_compute_asynchronously(
+                    Operation::Add,
+                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                        version_deltas: vec![versioning
+                            .hummock_version_deltas
+                            .last_key_value()
+                            .unwrap()
+                            .1
+                            .clone()],
+                    }),
+                );
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -1018,6 +1032,19 @@ where
                 Operation::Update,
                 Info::HummockSnapshot(HummockSnapshot { epoch }),
             );
+        self.env
+            .notification_manager()
+            .notify_compute_asynchronously(
+                Operation::Add,
+                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                    version_deltas: vec![versioning
+                        .hummock_version_deltas
+                        .last_key_value()
+                        .unwrap()
+                        .1
+                        .clone()],
+                }),
+            );
 
         drop(versioning_guard);
 
@@ -1132,6 +1159,11 @@ where
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
+    }
+
+    #[named]
+    pub(crate) async fn get_read_guard(&self) -> RwLockReadGuard<Versioning> {
+        read_lock!(self, versioning).await
     }
 
     pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
