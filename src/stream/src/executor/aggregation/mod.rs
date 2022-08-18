@@ -393,9 +393,7 @@ pub fn agg_call_filter_res(
         );
         let data_chunk = DataChunk::new(columns.to_owned(), vis);
         if let Bool(filter_res) = filter
-            .eval_infallible(&data_chunk, |err| {
-                ctx.lock().on_compute_error(err, identity)
-            })
+            .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, identity))
             .as_ref()
         {
             Ok(Some(filter_res.to_bitmap()))

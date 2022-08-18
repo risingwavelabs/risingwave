@@ -30,7 +30,7 @@ pub use value::*;
 
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
-use crate::executor::error::StreamExecutorResult;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
 
@@ -225,6 +225,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 state_table_col_mapping,
                 row_count.unwrap(),
             )))),
+            AggKind::ArrayAgg => Err(StreamExecutorError::not_implemented(
+                "ArrayAgg is not implemented yet",
+                4657,
+            )),
         }
     }
 }
