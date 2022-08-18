@@ -751,8 +751,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         if !append_only_matched_rows.is_empty() {
                             // Since join key contains pk and pk is unique, there should be only
                             // one row if matched
-                            debug_assert_eq!(1, append_only_matched_rows.len());
-                            let row = append_only_matched_rows.remove(0);
+                            let [row]: [_; 1] = append_only_matched_rows.try_into().unwrap();
                             let pk = row.row_by_indices(&side_match.pk_indices);
                             side_match.ht.delete(key, pk, row)?;
                         } else {
