@@ -39,6 +39,8 @@ use crate::stream_fragmenter::StreamFragmenterV2;
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
+/// If a column is marked as `primary key`, its `ColumnId` is also returned.
+/// This primary key is not combined with table constraints yet.
 pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
@@ -109,6 +111,8 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
     Ok((column_descs, pk_column_id))
 }
 
+/// Binds table constraints given the binding results from column definitions.
+/// It returns the columns together with `pk_column_ids`.
 pub fn bind_sql_table_constraints(
     column_descs: &[ColumnDesc],
     pk_column_id_from_columns: Option<ColumnId>,
@@ -280,6 +284,7 @@ mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
+    use super::*;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
@@ -331,5 +336,71 @@ mod tests {
         };
 
         assert_eq!(columns, expected_columns);
+    }
+
+    #[test]
+    fn test_bind_primary_key() {
+        for (sql, expected) in [
+            ("create table t (v1 int, v2 int)", Ok(&[0] as &[_])),
+            ("create table t (v1 int primary key, v2 int)", Ok(&[1])),
+            ("create table t (v1 int, v2 int primary key)", Ok(&[2])),
+            (
+                "create table t (v1 int primary key, v2 int primary key)",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int primary key primary key, v2 int)",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int, v2 int, primary key (v1))",
+                Ok(&[1]),
+            ),
+            (
+                "create table t (v1 int, primary key (v2), v2 int)",
+                Ok(&[2]),
+            ),
+            (
+                "create table t (primary key (v2, v1), v1 int, v2 int)",
+                Ok(&[2, 1]),
+            ),
+            (
+                "create table t (v1 int, primary key (v1), v2 int, primary key (v1))",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int primary key, primary key (v1), v2 int)",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int, primary key (V3), v2 int)",
+                Err("column \"v3\" named in key does not exist"),
+            ),
+        ] {
+            let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
+            let risingwave_sqlparser::ast::Statement::CreateTable {
+                    columns,
+                    constraints,
+                    ..
+                } = ast.remove(0) else { panic!("test case should be create table") };
+            let actual: Result<_> = (|| {
+                let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+                let (_, pk_column_ids) = bind_sql_table_constraints(
+                    &column_descs,
+                    pk_column_id_from_columns,
+                    constraints,
+                )?;
+                Ok(pk_column_ids)
+            })();
+            match (expected, actual) {
+                (Ok(expected), Ok(actual)) => assert_eq!(expected, actual, "sql: {sql}"),
+                (Ok(_), Err(actual)) => panic!("sql: {sql}\nunexpected error: {actual:?}"),
+                (Err(_), Ok(actual)) => panic!("sql: {sql}\nexpects error but got: {actual:?}"),
+                (Err(expected), Err(actual)) => assert!(
+                    actual.to_string().contains(expected),
+                    "sql: {sql}\nexpected: {expected:?}\nactual: {actual:?}"
+                ),
+            }
+        }
     }
 }
