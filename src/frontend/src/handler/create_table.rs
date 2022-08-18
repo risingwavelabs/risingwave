@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -110,9 +111,59 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
 
 pub fn bind_sql_table_constraints(
     column_descs: &[ColumnDesc],
-    _pk_column_id_from_columns: Option<ColumnId>,
-    _constraints: Vec<TableConstraint>,
+    pk_column_id_from_columns: Option<ColumnId>,
+    constraints: Vec<TableConstraint>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<i32>)> {
+    let mut pk_column_names = vec![];
+    for constraint in constraints {
+        match constraint {
+            TableConstraint::Unique {
+                name: _,
+                columns,
+                is_primary: true,
+            } => {
+                if !pk_column_names.is_empty() {
+                    return Err(ErrorCode::BindError(
+                        "multiple primary keys are not allowed".into(),
+                    )
+                    .into());
+                }
+                pk_column_names = columns;
+            }
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("table constraint \"{}\"", constraint),
+                    None.into(),
+                )
+                .into())
+            }
+        }
+    }
+    let pk_column_ids = match (pk_column_id_from_columns, pk_column_names.is_empty()) {
+        (Some(_), false) => {
+            return Err(ErrorCode::BindError("multiple primary keys are not allowed".into()).into())
+        }
+        (None, true) => vec![0],
+        (Some(cid), true) => vec![cid.get_id()],
+        (None, false) => {
+            let name_to_id = column_descs
+                .iter()
+                .map(|c| (c.name.as_str(), c.column_id.get_id()))
+                .collect::<HashMap<_, _>>();
+            pk_column_names
+                .iter()
+                .map(|ident| {
+                    let name = ident.real_value();
+                    name_to_id.get(name.as_str()).copied().ok_or_else(|| {
+                        ErrorCode::BindError(format!(
+                            "column \"{name}\" named in key does not exist"
+                        ))
+                    })
+                })
+                .try_collect()?
+        }
+    };
+
     let columns_catalog = column_descs
         .iter()
         .enumerate()
@@ -121,7 +172,7 @@ pub fn bind_sql_table_constraints(
             is_hidden: i == 0, // the row id column is hidden
         })
         .collect_vec();
-    Ok((columns_catalog, vec![0]))
+    Ok((columns_catalog, pk_column_ids))
 }
 
 pub(crate) fn gen_create_table_plan(
