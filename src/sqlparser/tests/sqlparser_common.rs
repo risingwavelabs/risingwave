@@ -1741,18 +1741,21 @@ fn run_explain_analyze(
     expected_verbose: bool,
     expected_analyze: bool,
     expected_trace: bool,
+    expected_distsql: bool,
 ) {
-    match verified_stmt(query) {
+    match one_statement_parses_to(query, "") {
         Statement::Explain {
             describe_alias: _,
             analyze,
             verbose,
             trace,
             statement,
+            distsql,
         } => {
             assert_eq!(verbose, expected_verbose);
             assert_eq!(analyze, expected_analyze);
             assert_eq!(trace, expected_trace);
+            assert_eq!(distsql, expected_distsql);
             assert_eq!("SELECT sqrt(id) FROM foo", statement.to_string());
         }
         _ => panic!("Unexpected Statement, must be Explain"),
@@ -1761,10 +1764,17 @@ fn run_explain_analyze(
 
 #[test]
 fn parse_explain_analyze_with_simple_select() {
-    run_explain_analyze("EXPLAIN SELECT sqrt(id) FROM foo", false, false, false);
+    run_explain_analyze(
+        "EXPLAIN SELECT sqrt(id) FROM foo",
+        false,
+        false,
+        false,
+        false,
+    );
     run_explain_analyze(
         "EXPLAIN VERBOSE SELECT sqrt(id) FROM foo",
         true,
+        false,
         false,
         false,
     );
@@ -1773,12 +1783,20 @@ fn parse_explain_analyze_with_simple_select() {
         false,
         true,
         false,
+        false,
     );
-    run_explain_analyze("EXPLAIN TRACE SELECT sqrt(id) FROM foo", false, false, true);
+    run_explain_analyze(
+        "EXPLAIN TRACE SELECT sqrt(id) FROM foo",
+        false,
+        false,
+        true,
+        false,
+    );
     run_explain_analyze(
         "EXPLAIN ANALYZE VERBOSE SELECT sqrt(id) FROM foo",
         true,
         true,
+        false,
         false,
     );
 
@@ -1786,6 +1804,15 @@ fn parse_explain_analyze_with_simple_select() {
         "EXPLAIN VERBOSE TRACE SELECT sqrt(id) FROM foo",
         true,
         false,
+        true,
+        false,
+    );
+
+    run_explain_analyze(
+        "EXPLAIN DISTSQL TRACE VERBOSE SELECT sqrt(id) FROM foo",
+        true,
+        false,
+        true,
         true,
     );
 }

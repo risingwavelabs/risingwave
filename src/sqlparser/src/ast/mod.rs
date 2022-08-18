@@ -935,6 +935,8 @@ pub enum Statement {
         verbose: bool,
         // Trace plan transformation of the optimizer step by step
         trace: bool,
+        // give distributed plan fragments
+        distsql: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
@@ -960,6 +962,7 @@ impl fmt::Display for Statement {
                 analyze,
                 trace,
                 statement,
+                distsql,
             } => {
                 if *describe_alias {
                     write!(f, "DESCRIBE ")?;
@@ -973,6 +976,10 @@ impl fmt::Display for Statement {
 
                 if *verbose {
                     write!(f, "VERBOSE ")?;
+                }
+
+                if *distsql {
+                    write!(f, "DISTSQL ")?;
                 }
 
                 if *trace {

@@ -2360,10 +2360,24 @@ impl Parser {
     }
 
     pub fn parse_explain(&mut self, describe_alias: bool) -> Result<Statement, ParserError> {
-        let analyze = self.parse_keyword(Keyword::ANALYZE);
-        let verbose = self.parse_keyword(Keyword::VERBOSE);
-        let trace = self.parse_keyword(Keyword::TRACE);
-
+        let mut analyze = false;
+        let mut distsql = false;
+        let mut verbose = false;
+        let mut trace = false;
+        while let Some(keyword) = self.parse_one_of_keywords(&[
+            Keyword::ANALYZE,
+            Keyword::DISTSQL,
+            Keyword::VERBOSE,
+            Keyword::TRACE,
+        ]) {
+            match keyword {
+                Keyword::ANALYZE => analyze = true,
+                Keyword::DISTSQL => distsql = true,
+                Keyword::VERBOSE => verbose = true,
+                Keyword::TRACE => trace = true,
+                _ => unreachable!("{}", keyword),
+            }
+        }
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
             describe_alias,
@@ -2371,6 +2385,7 @@ impl Parser {
             verbose,
             trace,
             statement: Box::new(statement),
+            distsql,
         })
     }
 

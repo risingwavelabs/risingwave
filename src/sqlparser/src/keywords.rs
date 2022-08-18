@@ -182,6 +182,7 @@ define_keywords!(
     DIRECTORY,
     DISCONNECT,
     DISTINCT,
+    DISTSQL,
     DOUBLE,
     DROP,
     DYNAMIC,
