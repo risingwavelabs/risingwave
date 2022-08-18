@@ -172,10 +172,15 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     #[async_recursion]
     async fn try_build(&self) -> Result<BoxedExecutor> {
         let mut inputs = Vec::with_capacity(self.plan_node.children.len());
+        // println!("how many child: {:?}", self.plan_node.children.len());
         for input_node in &self.plan_node.children {
             let input = self.clone_for_plan(input_node).build().await?;
             inputs.push(input);
         }
+
+        // if let NodeBody::Exchange(e) =  self.plan_node().get_node_body().as_ref().unwrap() {
+        //     println!("build exchange");
+        // }
 
         let real_executor = build_executor! { self, inputs,
             NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
@@ -204,6 +209,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Union => UnionExecutor,
         }
         .await?;
+
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)) as BoxedExecutor)
     }

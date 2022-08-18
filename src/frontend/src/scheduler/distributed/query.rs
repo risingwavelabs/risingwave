@@ -13,17 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::default::Default;
 use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
+use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_common::bail;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst,
 };
+use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::oneshot::Sender;
@@ -31,9 +34,6 @@ use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, warn};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use risingwave_batch::executor::ExecutorBuilder;
-use risingwave_pb::common::HostAddress;
-use std::default::Default;
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -236,6 +236,10 @@ impl QueryRunner {
                 self.query.query_id,
                 stage_id
             );
+            println!(
+                "Query stage {:?}-{:?} started.",
+                self.query.query_id, stage_id
+            );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
 
@@ -247,6 +251,9 @@ impl QueryRunner {
                         self.query.query_id,
                         stage_id
                     );
+                    println!(                        "Query stage {:?}-{:?} scheduled.",
+                                                     self.query.query_id,
+                                                     stage_id);
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
                     if stages_with_table_scan.is_empty() {
@@ -264,11 +271,12 @@ impl QueryRunner {
                     if self.scheduled_stages_count == self.stage_executions.len() - 1 {
                         // Now all non-root stages have been scheduled, send root stage info.
                         self.send_root_stage_info().await;
+                        break;
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
                             if self.all_children_scheduled(parent).await
-                                            // Do not schedule same stage twice.
-                                            && self.stage_executions[parent].is_pending().await
+                                // Do not schedule same stage twice.
+                                && self.stage_executions[parent].is_pending().await && *parent != self.query.stage_graph.root_stage_id
                             {
                                 self.stage_executions[parent].start().await;
                             }
@@ -303,7 +311,6 @@ impl QueryRunner {
     }
 
     async fn send_root_stage_info(&mut self) {
-
         let root_task_output_id = {
             let root_task_id_prost = TaskIdProst {
                 query_id: self.query.query_id.clone().id,
@@ -393,7 +400,12 @@ impl QueryRunner {
         let plan_node_prost =
             Self::convert_plan_node(root_stage, &root_stage.stage.root, ROOT_TASK_ID);
         let exchange_info = root_stage.stage.exchange_info.clone();
-
+        println!("----------- Create Plan Fragment ----------");
+        // println!("exchange info for the plan: {:?}", exchange_info);
+        // println!("The plan: {:?}", plan_node_prost);
+        // println!("child for plan node prost: {:?}", plan_node_prost.children.len());
+        // println!("child for child for plan node prost: {:?}", plan_node_prost.children[0].children.len());
+        println!("----------- Create Plan Fragment ----------");
         PlanFragment {
             root: Some(plan_node_prost),
             exchange_info: Some(exchange_info),
@@ -416,6 +428,10 @@ impl QueryRunner {
                     })
                     .unwrap();
                 let exchange_sources = child_stage.all_exchange_sources_for(task_id);
+                println!(
+                    "get source exchange for self.stage.id {:?} as {:?}",
+                    child_stage.stage.id, exchange_sources
+                );
 
                 match &execution_plan_node.node {
                     NodeBody::Exchange(_exchange_node) => {
@@ -447,7 +463,7 @@ impl QueryRunner {
                 }
             }
             PlanNodeType::BatchSeqScan => {
-                unreachable!("Scan can not be the root fragment");
+                unreachable!("Scan can not in the root fragment");
             }
             _ => {
                 let children = execution_plan_node

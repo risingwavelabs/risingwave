@@ -23,6 +23,7 @@ use futures_async_stream::{for_await, try_stream};
 use log::debug;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
@@ -183,13 +184,21 @@ impl QueryResultFetcher {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run_local(self, execution_context: ExecutionContextRef) {
+    async fn run_local(self, execution_context: ExecutionContextRef, query_id: QueryId) {
         let plan_node = self.root_fragment.unwrap().root.unwrap();
-        let task_id = risingwave_batch::task::TaskId::from(&self.task_output_id.task_id.unwrap());
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, execution_context.to_batch_task(), self.epoch);
+        let task_id = TaskIdBatch {
+            query_id: query_id.id.clone(),
+            stage_id: 0,
+            task_id: 0,
+        };
+        let executor = ExecutorBuilder::new(
+            &plan_node,
+            &task_id,
+            execution_context.to_batch_task(),
+            self.epoch,
+        );
+        // println!("start to build executor");
         let executor = executor.build().await?;
-
-        println!("yield chunk");
         #[for_await]
         for chunk in executor.execute() {
             yield chunk?;

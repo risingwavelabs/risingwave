@@ -58,7 +58,6 @@ impl TaskService for BatchServiceImpl {
             plan,
             epoch,
         } = request.into_inner();
-
         let res = self
             .mgr
             .fire_task(
@@ -117,6 +116,11 @@ impl TaskService for BatchServiceImpl {
             plan,
             task_id
         );
+        println!(
+            "local execute request: plan:{:?} with task id:{:?}",
+            plan,
+            task_id
+        );
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch)?;
         let task = Arc::new(task);
 
@@ -134,7 +138,7 @@ impl TaskService for BatchServiceImpl {
             // therefore we would only have one data output.
             output_id: 0,
         };
-
+        // println!("local execute to get data for {:?}", pb_task_output_id);
         let mut output = task.get_task_output(&pb_task_output_id).map_err(|e| {
             error!(
                 "failed to get task output of Task {:?} in local execution mode",

@@ -80,6 +80,7 @@ impl BatchManager {
     ) -> Result<()> {
         let task_id = TaskOutputId::try_from(pb_task_output_id)?;
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
+        // println!("get_data for exchange service remotely");
         let mut task_output = self.take_output(pb_task_output_id)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());

@@ -232,7 +232,6 @@ impl StageExecution {
     /// When this method is called, all tasks should have been scheduled, and their `worker_node`
     /// should have been set.
     pub fn all_exchange_sources_for(&self, output_id: u32) -> Vec<ExchangeSource> {
-        println!("get source exchange for self.stage.id {:?}", self.stage.id);
         self.tasks
             .iter()
             .map(|(task_id, status_holder)| {
@@ -526,6 +525,7 @@ impl StageRunner {
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
+        println!("Create Task for Task Id : {:?}", task_id);
         let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch)
             .await
