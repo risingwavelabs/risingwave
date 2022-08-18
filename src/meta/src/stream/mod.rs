@@ -76,6 +76,16 @@ pub fn record_table_vnode_mappings(
             fragment.state_table_ids.push(node.table_id_l);
             fragment.state_table_ids.push(node.table_id_h);
         }
+        NodeBody::GroupTopN(node) => {
+            fragment
+                .state_table_ids
+                .push(node.table.as_ref().unwrap().id);
+        }
+        NodeBody::TopN(node) => {
+            fragment
+                .state_table_ids
+                .push(node.table.as_ref().unwrap().id);
+        }
         _ => {}
     }
     let input_nodes = stream_node.get_input();

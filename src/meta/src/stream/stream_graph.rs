@@ -620,9 +620,38 @@ impl StreamGraphBuilder {
                         node.table_id_l += table_id_offset;
                         node.table_id_h += table_id_offset;
 
-                        // TODO add catalog::Table to TopNNode
+                        // TODO add catalog::Table to AppendOnlyTopN
                         check_and_fill_internal_table(node.table_id_l, None);
                         check_and_fill_internal_table(node.table_id_h, None);
+                    }
+                    NodeBody::TopN(node) => {
+                        if let Some(table) = &mut node.table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                fragment_id.as_global_id(),
+                                table.id,
+                                "TopN",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
+                    }
+
+                    NodeBody::GroupTopN(node) => {
+                        if let Some(table) = &mut node.table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                fragment_id.as_global_id(),
+                                table.id,
+                                "TopN",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
                     }
 
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
