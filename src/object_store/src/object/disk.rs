@@ -27,7 +27,7 @@ use tokio::io::AsyncWriteExt;
 
 use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
-    StoreMediaTypeE,
+    StoreMediaType,
 };
 
 pub(super) mod utils {
@@ -339,8 +339,8 @@ impl ObjectStore for DiskObjectStore {
         Ok(list_result)
     }
 
-    fn store_media_type(&self) -> StoreMediaTypeE {
-        StoreMediaTypeE::Disk
+    fn store_media_type(&self) -> StoreMediaType {
+        StoreMediaType::Disk
     }
 }
 
