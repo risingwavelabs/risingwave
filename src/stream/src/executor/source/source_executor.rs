@@ -310,6 +310,8 @@ impl<S: StateStore> SourceExecutor<S> {
                             Mutation::Resume => stream.resume_source(),
                             Mutation::Update { vnode_bitmaps, .. } => {
                                 // Update row id generator if vnode mapping is changed.
+                                // Note that: since update barrier will only occurs between pause
+                                // and resume barrier, duplicated row id won't be generated.
                                 if let Some(vnode_bitmaps) = vnode_bitmaps.get(&self.actor_id) {
                                     let vnode_id =
                                         vnode_bitmaps.next_set_bit(0).unwrap_or(0) as u32;
