@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
+use futures::Future;
 use risingwave_hummock_sdk::HummockSstableId;
 use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
@@ -43,13 +44,12 @@ pub trait SstableWriter: Send {
     fn data_len(&self) -> usize;
 }
 
-/// Append SST data to a buffer.
+/// Append SST data to a buffer. Used for tests and benchmarks.
 pub struct InMemWriter {
     sst_id: HummockSstableId,
     buf: BytesMut,
 }
 
-/// Append SST data to a buffer. Used for tests and benchmarks.
 impl InMemWriter {
     pub fn new(sst_id: HummockSstableId, capacity: usize) -> Self {
         Self {
@@ -222,11 +222,13 @@ impl SstableWriter for StreamingUploadWriter {
     }
 }
 
-#[async_trait::async_trait]
-pub trait SstableWriterBuilder: Send + Sync {
+pub trait SstableWriterBuilder: Send + Sync + 'static {
     type Writer: SstableWriter;
+    type BuildFuture<'a>: Future<Output = HummockResult<Self::Writer>> + Send + 'a
+    where
+        Self: 'a;
 
-    async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer>;
+    fn build(&self, sst_id: HummockSstableId) -> Self::BuildFuture<'_>;
 }
 
 pub struct InMemWriterBuilder {
@@ -241,12 +243,13 @@ impl From<&SstableBuilderOptions> for InMemWriterBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl SstableWriterBuilder for InMemWriterBuilder {
     type Writer = InMemWriter;
 
-    async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
-        Ok(InMemWriter::new(sst_id, self.capacity))
+    type BuildFuture<'a> = impl Future<Output = HummockResult<Self::Writer>> + 'a;
+
+    fn build(&self, sst_id: HummockSstableId) -> Self::BuildFuture<'_> {
+        async move { Ok(InMemWriter::new(sst_id, self.capacity)) }
     }
 }
 
@@ -270,17 +273,20 @@ impl BatchUploadWriterBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl SstableWriterBuilder for BatchUploadWriterBuilder {
     type Writer = BatchUploadWriter;
 
-    async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
-        Ok(BatchUploadWriter::new(
-            sst_id,
-            self.sstable_store.clone(),
-            self.policy,
-            self.capacity,
-        ))
+    type BuildFuture<'a> = impl Future<Output = HummockResult<Self::Writer>> + 'a;
+
+    fn build(&self, sst_id: HummockSstableId) -> Self::BuildFuture<'_> {
+        async move {
+            Ok(BatchUploadWriter::new(
+                sst_id,
+                self.sstable_store.clone(),
+                self.policy,
+                self.capacity,
+            ))
+        }
     }
 }
 
@@ -301,20 +307,23 @@ impl StreamingUploadWriterBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl SstableWriterBuilder for StreamingUploadWriterBuilder {
     type Writer = StreamingUploadWriter;
 
-    async fn build(&self, sst_id: HummockSstableId) -> HummockResult<Self::Writer> {
-        let uploader = self
-            .sstable_store
-            .put_sst_stream(sst_id, self.policy)
-            .await?;
-        Ok(StreamingUploadWriter::new(
-            sst_id,
-            self.sstable_store.clone(),
-            uploader,
-        ))
+    type BuildFuture<'a> = impl Future<Output = HummockResult<Self::Writer>> + 'a;
+
+    fn build(&self, sst_id: HummockSstableId) -> Self::BuildFuture<'_> {
+        async move {
+            let uploader = self
+                .sstable_store
+                .put_sst_stream(sst_id, self.policy)
+                .await?;
+            Ok(StreamingUploadWriter::new(
+                sst_id,
+                self.sstable_store.clone(),
+                uploader,
+            ))
+        }
     }
 }
 
