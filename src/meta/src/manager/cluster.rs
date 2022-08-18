@@ -37,7 +37,7 @@ pub type WorkerId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct WorkerKey(pub HostAddress);
 
 impl PartialEq<Self> for WorkerKey {
