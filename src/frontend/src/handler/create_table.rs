@@ -129,10 +129,11 @@ pub(crate) fn gen_create_table_plan(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
     let (columns, pk_column_ids) =
-        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, vec![])?;
+        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, constraints)?;
     if pk_column_ids != [0] {
         return Err(ErrorCode::NotImplemented(
             "specifying primary key for table".into(),
@@ -189,12 +190,18 @@ pub async fn handle_create_table(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {
-        let (plan, source, table) =
-            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let (plan, source, table) = gen_create_table_plan(
+            &session,
+            context.into(),
+            table_name.clone(),
+            columns,
+            constraints,
+        )?;
         let graph = StreamFragmenterV2::build_graph(plan);
 
         (graph, source, table)
