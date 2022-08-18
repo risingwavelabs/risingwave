@@ -654,7 +654,7 @@ impl StreamGraphBuilder {
                         }
                     }
 
-                    NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+                    NodeBody::GlobalSimpleAgg(node) => {
                         assert_eq!(node.internal_tables.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
                         for table in &mut node.internal_tables {

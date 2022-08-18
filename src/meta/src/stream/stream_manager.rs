@@ -189,8 +189,10 @@ where
 
                     if is_singleton {
                         // Directly find the singleton actor id.
-                        assert!(upstream_parallel_actor_mapping.len() == 1);
-                        *upstream_parallel_actor_mapping.values().next().unwrap()
+                        *upstream_parallel_actor_mapping
+                            .values()
+                            .exactly_one()
+                            .unwrap()
                     } else {
                         // 2. use our actor id to get parallel unit id of the chain actor
                         let parallel_unit_id = self.locations.actor_locations[&actor_id].id;

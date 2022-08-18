@@ -3196,9 +3196,9 @@ dependencies = [
 
 [[package]]
 name = "minstant"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cb320648b7883b43ce5dfbc5c6f4a84038194c3f67b4fcb7d05c994e6006557"
+checksum = "bc5dcfca9a0725105ac948b84cfeb69c3942814c696326743797215413f854b9"
 dependencies = [
  "ctor",
  "libc",
@@ -4660,7 +4660,6 @@ dependencies = [
  "tracing",
  "twox-hash",
  "url",
- "value-encoding",
  "workspace-hack",
 ]
 
@@ -4734,6 +4733,7 @@ dependencies = [
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
+ "pprof",
  "prometheus",
  "prost 0.11.0",
  "rand 0.8.5",
@@ -4837,6 +4837,7 @@ version = "0.1.11"
 dependencies = [
  "anyhow",
  "bytes",
+ "chrono",
  "clap 3.2.15",
  "comfy-table",
  "futures",
@@ -4887,7 +4888,6 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "toml",
- "value-encoding",
  "workspace-hack",
 ]
 
@@ -5165,10 +5165,12 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "clap 3.2.15",
+ "futures",
  "glob",
  "madsim",
  "madsim-tokio",
  "madsim-tokio-postgres",
+ "rand 0.8.5",
  "risingwave_compactor",
  "risingwave_compute",
  "risingwave_frontend",
@@ -5343,7 +5345,6 @@ dependencies = [
  "tracing",
  "twox-hash",
  "uuid",
- "value-encoding",
  "workspace-hack",
  "zstd",
 ]
@@ -5409,7 +5410,6 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
- "value-encoding",
  "workspace-hack",
 ]
 
@@ -5885,13 +5885,13 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.5.5"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f92dff6ab30d218f0d92b2378485ec7c13b1d341f065b018dfb42819ce35fdc"
+checksum = "e8542cf2a7953bd81552feca326255648e481876fcf0c5667a79817ca6f7b7b6"
 dependencies = [
  "async-trait",
  "difference",
- "futures-lite",
+ "futures",
  "glob",
  "humantime",
  "itertools",
@@ -6682,19 +6682,6 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
-
-[[package]]
-name = "value-encoding"
-version = "0.1.11"
-dependencies = [
- "bytes",
- "memcomparable",
- "rand 0.8.5",
- "rust_decimal",
- "serde",
- "thiserror",
- "workspace-hack",
-]
 
 [[package]]
 name = "vcpkg"

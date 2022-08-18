@@ -24,12 +24,18 @@ pub struct TopNExecutorNewBuilder;
 
 impl ExecutorBuilder for TopNExecutorNewBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
+        let order_pairs: Vec<_> = node
+            .get_column_orders()
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
         let limit = if node.limit == 0 {
             None
         } else {
@@ -50,7 +56,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             .map(|idx| *idx as usize)
             .collect();
         Ok(TopNExecutor::new(
-            params.input.remove(0),
+            input,
             order_pairs,
             (node.offset as usize, limit),
             params.pk_indices,

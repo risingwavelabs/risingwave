@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -65,8 +66,13 @@ where
         self.env.idle_manager().record_activity();
         let _req = request.into_inner();
 
-        self.barrier_manager.flush().await?;
-        Ok(Response::new(FlushResponse { status: None }))
+        let max_committed_epoch = self.barrier_manager.flush().await?;
+        Ok(Response::new(FlushResponse {
+            status: None,
+            snapshot: Some(HummockSnapshot {
+                epoch: max_committed_epoch,
+            }),
+        }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

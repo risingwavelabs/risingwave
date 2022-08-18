@@ -79,6 +79,10 @@ message HummockVersionDelta {
   bool trivial_move = 6;
 }
 
+message HummockVersionDeltas {
+  repeated HummockVersionDelta version_deltas = 1;
+}
+
 message HummockSnapshot {
   uint64 epoch = 1;
 }
@@ -90,9 +94,13 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  bool is_delta_response = 2;
-  repeated HummockVersionDelta version_deltas = 3;
-  HummockVersion pinned_version = 4;
+  message HummockVersionDeltas {
+    repeated HummockVersionDelta delta = 1;
+  }
+  oneof payload {
+    HummockVersionDeltas version_deltas = 2;
+    HummockVersion pinned_version = 3;
+  }
 }
 
 message UnpinVersionBeforeRequest {
@@ -308,6 +316,14 @@ message ReportFullScanTaskResponse {
   common.Status status = 1;
 }
 
+message TriggerFullGCRequest {
+  uint64 sst_retention_time_sec = 1;
+}
+
+message TriggerFullGCResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -323,6 +339,7 @@ service HummockManagerService {
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
+  rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
 }
 
 service CompactorService {}

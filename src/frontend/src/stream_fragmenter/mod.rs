@@ -320,7 +320,7 @@ impl StreamFragmenter {
                 }
             }
 
-            NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
+            NodeBody::GlobalSimpleAgg(node) => {
                 for table in &mut node.internal_tables {
                     table.id = state.gen_table_id();
                 }

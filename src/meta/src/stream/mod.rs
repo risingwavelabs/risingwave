@@ -51,7 +51,7 @@ pub fn record_table_vnode_mappings(
                 fragment.state_table_ids.push(table.id);
             }
         }
-        NodeBody::LocalSimpleAgg(node) | NodeBody::GlobalSimpleAgg(node) => {
+        NodeBody::GlobalSimpleAgg(node) => {
             for table in &node.internal_tables {
                 fragment.state_table_ids.push(table.id);
             }

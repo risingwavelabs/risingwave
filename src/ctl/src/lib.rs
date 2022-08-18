@@ -49,6 +49,12 @@ enum Commands {
     Bench(BenchCommands),
     /// Commands for tracing the compute nodes
     Trace,
+    // TODO(yuhao): profile other nodes
+    /// Commands for profilng the compute nodes
+    Profile {
+        #[clap(short, long = "sleep")]
+        sleep: u64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -74,6 +80,12 @@ enum HummockCommands {
 
         #[clap(short, long = "level", default_value_t = 1)]
         level: u32,
+    },
+    /// trigger a full GC for SSTs that is not in version and with timestamp <= now -
+    /// sst_retention_time_sec.
+    TriggerFullGc {
+        #[clap(short, long = "sst_retention_time_sec", default_value_t = 259200)]
+        sst_retention_time_sec: u64,
     },
 }
 
@@ -120,6 +132,9 @@ pub async fn start(opts: CliOpts) -> Result<()> {
             cmd_impl::hummock::trigger_manual_compaction(compaction_group_id, table_id, level)
                 .await?
         }
+        Commands::Hummock(HummockCommands::TriggerFullGc {
+            sst_retention_time_sec,
+        }) => cmd_impl::hummock::trigger_full_gc(sst_retention_time_sec).await?,
         Commands::Table(TableCommands::Scan { mv_name }) => cmd_impl::table::scan(mv_name).await?,
         Commands::Table(TableCommands::ScanById { table_id }) => {
             cmd_impl::table::scan_id(table_id).await?
@@ -130,6 +145,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
         Commands::Trace => cmd_impl::trace::trace().await?,
+        Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
     }
     Ok(())
 }
