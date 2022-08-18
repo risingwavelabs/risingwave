@@ -18,6 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
+use super::type_inference::array_cast_ok;
 use super::{align_types, cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
 
@@ -215,9 +216,9 @@ impl FunctionCall {
                 inputs: vec![child],
             }
             .into())
-        } 
+        }
         // Handle `unknown` arrays
-        else if let ExprImpl::FunctionCall(mut func) = child && func.is_unknown_array() {
+        else if let ExprImpl::FunctionCall(mut func) = child && func.is_unknown_array() && array_cast_ok(&func.return_type, &target) {
             func.return_type = target;
             Ok(ExprImpl::FunctionCall(func))
         } else {
@@ -248,7 +249,7 @@ impl FunctionCall {
     /// An array is `unknown` if it satisfies any of the following conditions:
     /// - it is empty.
     /// - it contains only NULLs or `unknown` arrays.
-    pub fn is_unknown_array(&self) -> bool {
+    fn is_unknown_array(&self) -> bool {
         self.func_type == ExprType::Array
             && self.inputs.iter().all(|elem| {
                 elem.is_null()

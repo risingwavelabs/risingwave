@@ -87,6 +87,25 @@ impl From<&CastContext> for String {
     }
 }
 
+/// Check whether casting from array `source` to array `target` is ok.
+///
+/// NOTE: for now we can cast an unknown array with nesting depth `a` to any other array types with
+/// nesting depth `b` such that `b` >= `a`.
+pub fn array_cast_ok(source: &DataType, target: &DataType) -> bool {
+    match (source, target) {
+        (
+            &DataType::List {
+                datatype: ref child_source,
+            },
+            &DataType::List {
+                datatype: ref child_target,
+            },
+        ) => array_cast_ok(child_source, child_target),
+        (&DataType::List { .. }, target) if !matches!(target, &DataType::List { .. }) => false,
+        _ => true,
+    }
+}
+
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     cast_ok_base(source.into(), target.into(), allows)
