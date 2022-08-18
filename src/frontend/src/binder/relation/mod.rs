@@ -339,7 +339,11 @@ impl Binder {
                         )]
                         .into_iter();
 
-                        self.bind_table_to_context(columns, "unnest".to_string(), None)?;
+                        self.bind_table_to_context(
+                            columns,
+                            tf.function_type.name().to_string(),
+                            alias,
+                        )?;
 
                         return Ok(Relation::TableFunction(Box::new(tf)));
                     }
@@ -379,6 +383,12 @@ impl Binder {
                     self.pop_and_merge_lateral_context()?;
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
+            }
+            TableFactor::NestedJoin(table_with_joins) => {
+                self.push_lateral_context();
+                let bound_join = self.bind_table_with_joins(*table_with_joins)?;
+                self.pop_and_merge_lateral_context()?;
+                Ok(bound_join)
             }
 
             // TODO: if and when we allow nested joins (binding table factors which are themselves

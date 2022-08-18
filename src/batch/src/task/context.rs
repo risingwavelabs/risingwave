@@ -61,7 +61,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
             .ok_or_else(|| InternalError("State store not found".to_string()))?)
     }
 
-    fn stats(&self) -> Arc<BatchMetrics>;
+    fn stats(&self) -> Option<Arc<BatchMetrics>>;
 }
 
 /// Batch task context on compute node.
@@ -93,8 +93,8 @@ impl BatchTaskContext for ComputeNodeContext {
         Some(self.env.state_store())
     }
 
-    fn stats(&self) -> Arc<BatchMetrics> {
-        self.env.stats()
+    fn stats(&self) -> Option<Arc<BatchMetrics>> {
+        Some(self.env.stats())
     }
 }
 

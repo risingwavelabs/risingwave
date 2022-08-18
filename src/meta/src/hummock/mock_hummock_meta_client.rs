@@ -180,6 +180,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             .await;
         Ok(())
     }
+
+    async fn trigger_full_gc(&self, _sst_retention_time_sec: u64) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 impl MockHummockMetaClient {

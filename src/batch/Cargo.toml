@@ -86,3 +86,6 @@ harness = false
 name = "order_by"
 harness = false
 
+[[bench]]
+name = "top_n"
+harness = false
