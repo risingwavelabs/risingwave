@@ -200,7 +200,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
-            let batch_stats = source.context().stats();
+            let batch_stats = source.context().stats().unwrap();
             let table = RowBasedStorageTable::new_partial(
                 state_store.clone(),
                 table_id,
