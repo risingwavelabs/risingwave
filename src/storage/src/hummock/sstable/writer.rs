@@ -133,21 +133,20 @@ impl SstableWriter for BatchUploadWriter {
         self.buf.put_slice(&get_size_footer(&meta).to_le_bytes());
         let data = self.buf.freeze();
         let join_handle = tokio::spawn(async move {
-            if let Some(mut tracker) = tracker {
-                if !tracker.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as u64)
-                {
+            let tracker = tracker.map(|mut t| {
+                if !t.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as u64) {
                     tracing::debug!("failed to allocate increase memory for meta file, sst id: {}, file size: {}, meta size: {}",
-                                self.sst_id, data.capacity(), meta.encoded_size());
+                                    self.sst_id, data.capacity(), meta.encoded_size());
                 }
-                let ret = self
-                    .sstable_store
-                    .put_sst(self.sst_id, meta, data, self.policy)
-                    .await;
-                drop(tracker);
-                ret
-            } else {
-                Ok(())
-            }
+                t
+            });
+
+            let ret = self
+                .sstable_store
+                .put_sst(self.sst_id, meta, data, self.policy)
+                .await;
+            drop(tracker);
+            ret
         });
         Ok(join_handle)
     }
@@ -197,22 +196,19 @@ impl SstableWriter for StreamingUploadWriter {
         self.uploader.upload_size_footer(get_size_footer(&meta))?;
         let join_handle = tokio::spawn(async move {
             let uploader_memory_usage = self.uploader.get_memory_usage();
-            if let Some(mut tracker) = tracker {
-                if !tracker
-                    .try_increase_memory(uploader_memory_usage as u64 + meta.encoded_size() as u64)
-                {
-                    tracing::debug!("failed to allocate increase memory for meta file, sst id: {}, data size: {}, meta size: {}",
-                                self.sst_id, uploader_memory_usage, meta.encoded_size());
+            let tracker = tracker.map(|mut t| {
+                if !t.try_increase_memory(uploader_memory_usage as u64 + meta.encoded_size() as u64) {
+                    tracing::debug!("failed to allocate increase memory for meta file, sst id: {}, file size: {}, meta size: {}",
+                                    self.sst_id, uploader_memory_usage, meta.encoded_size());
                 }
-                let ret = self
-                    .sstable_store
-                    .finish_put_sst_stream(self.uploader, meta)
-                    .await;
-                drop(tracker);
-                ret
-            } else {
-                Ok(())
-            }
+                t
+            });
+            let ret = self
+                .sstable_store
+                .finish_put_sst_stream(self.uploader, meta)
+                .await;
+            drop(tracker);
+            ret
         });
         Ok(join_handle)
     }
@@ -329,4 +325,123 @@ impl SstableWriterBuilder for StreamingUploadWriterBuilder {
 
 fn get_size_footer(meta: &SstableMeta) -> u32 {
     meta.block_metas.len() as u32
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use rand::{Rng, SeedableRng};
+
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::sstable::VERSION;
+    use crate::hummock::{
+        BatchUploadWriter, BlockMeta, CachePolicy, InMemWriter, SstableMeta, SstableStoreWrite,
+        SstableWriter, StreamingUploadWriter,
+    };
+
+    fn get_sst() -> (Bytes, Vec<Bytes>, SstableMeta) {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        let mut buffer: Vec<u8> = vec![0; 5000];
+        rng.fill(&mut buffer[..]);
+        buffer.extend((5_u32).to_le_bytes());
+        let data = Bytes::from(buffer);
+
+        let mut blocks = Vec::with_capacity(5);
+        let mut block_metas = Vec::with_capacity(5);
+        for i in 0..5 {
+            block_metas.push(BlockMeta {
+                smallest_key: Vec::new(),
+                len: 1000,
+                offset: i * 1000,
+            });
+            blocks.push(data.slice((i * 1000) as usize..((i + 1) * 1000) as usize));
+        }
+        let meta = SstableMeta {
+            block_metas,
+            bloom_filter: Vec::new(),
+            estimated_size: 0,
+            key_count: 0,
+            smallest_key: Vec::new(),
+            largest_key: Vec::new(),
+            version: VERSION,
+        };
+
+        (data, blocks, meta)
+    }
+
+    #[test]
+    fn test_in_mem_writer() {
+        let (data, blocks, meta) = get_sst();
+        let mut writer = InMemWriter::new(1, 0);
+        blocks.into_iter().for_each(|b| {
+            writer.write_block(&b[..]).unwrap();
+        });
+        let (output_data, output_meta) = writer.finish(meta.clone(), None).unwrap();
+        assert_eq!(output_data, data);
+        assert_eq!(output_meta, meta);
+    }
+
+    #[tokio::test]
+    async fn test_batch_upload_writer() {
+        let (data, blocks, meta) = get_sst();
+        let sstable_store = mock_sstable_store();
+        let mut writer = BatchUploadWriter::new(1, sstable_store.clone(), CachePolicy::NotFill, 0);
+        blocks.into_iter().for_each(|b| {
+            writer.write_block(&b[..]).unwrap();
+        });
+        writer
+            .finish(meta.clone(), None)
+            .unwrap()
+            .await
+            .unwrap()
+            .unwrap();
+        let object_store = sstable_store.store();
+        let output_data = object_store
+            .read(&sstable_store.get_sst_data_path(1), None)
+            .await
+            .unwrap();
+        let output_meta = SstableMeta::decode(
+            &mut &object_store
+                .read(&sstable_store.get_sst_meta_path(1), None)
+                .await
+                .unwrap()[..],
+        )
+        .unwrap();
+        assert_eq!(output_data, data);
+        assert_eq!(output_meta, meta);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_upload_writer() {
+        let (data, blocks, meta) = get_sst();
+        let sstable_store = mock_sstable_store();
+        let uploader = sstable_store
+            .create_put_sst_stream(1, CachePolicy::NotFill)
+            .await
+            .unwrap();
+        let mut writer = StreamingUploadWriter::new(1, sstable_store.clone(), uploader);
+        blocks.into_iter().for_each(|b| {
+            writer.write_block(&b[..]).unwrap();
+        });
+        writer
+            .finish(meta.clone(), None)
+            .unwrap()
+            .await
+            .unwrap()
+            .unwrap();
+        let object_store = sstable_store.store();
+        let output_data = object_store
+            .read(&sstable_store.get_sst_data_path(1), None)
+            .await
+            .unwrap();
+        let output_meta = SstableMeta::decode(
+            &mut &object_store
+                .read(&sstable_store.get_sst_meta_path(1), None)
+                .await
+                .unwrap()[..],
+        )
+        .unwrap();
+        assert_eq!(output_data, data);
+        assert_eq!(output_meta, meta);
+    }
 }
