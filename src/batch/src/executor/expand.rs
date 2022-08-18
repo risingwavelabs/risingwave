@@ -84,9 +84,8 @@ impl ExpandExecutor {
 impl BoxedExecutorBuilder for ExpandExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1);
         let expand_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Expand
@@ -104,7 +103,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             })
             .collect_vec();
 
-        let input = inputs.remove(0);
+        let [input]: [_; 1] = inputs.try_into().unwrap();
         let schema = {
             let mut fields = input.schema().clone().into_fields();
             fields.extend(fields.clone());

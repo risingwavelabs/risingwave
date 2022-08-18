@@ -68,15 +68,10 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
                 old_iter.collect_local_statistic(&mut self.stats);
             }
         } else {
-            let table = if self.read_options.prefetch {
-                self.sstable_store
-                    .load_table(self.tables[idx].id, true, &mut self.stats)
-                    .await?
-            } else {
-                self.sstable_store
-                    .sstable(self.tables[idx].id, &mut self.stats)
-                    .await?
-            };
+            let table = self
+                .sstable_store
+                .sstable(self.tables[idx].id, &mut self.stats)
+                .await?;
             let mut sstable_iter =
                 TI::create(table, self.sstable_store.clone(), self.read_options.clone());
 

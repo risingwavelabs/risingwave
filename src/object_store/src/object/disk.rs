@@ -25,7 +25,9 @@ use futures::future::try_join_all;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
-use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
+use super::{
+    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+};
 
 pub(super) mod utils {
     use std::fs::Metadata;
@@ -173,15 +175,23 @@ impl DiskObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let mut file =
-            utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
-        file.write_all(&obj)
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
-        file.flush()
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
-        Ok(())
+        if obj.is_empty() {
+            Err(ObjectError::internal("upload empty object"))
+        } else {
+            let mut file =
+                utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
+            file.write_all(&obj)
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
+            file.flush()
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
+            Ok(())
+        }
+    }
+
+    async fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
+        unimplemented!("streaming upload is not implemented for disk object store");
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {

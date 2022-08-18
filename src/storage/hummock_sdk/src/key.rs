@@ -19,17 +19,17 @@ use std::{ptr, u64};
 use bytes::{Buf, BufMut, BytesMut};
 
 use super::version_cmp::VersionedComparator;
+use crate::HummockEpoch;
 
-pub type Epoch = u64;
-const EPOCH_LEN: usize = std::mem::size_of::<Epoch>();
+const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = 5;
 
 /// Converts user key to full key by appending `u64::MAX - epoch` to the user key.
 ///
 /// In this way, the keys can be comparable even with the epoch, and a key with a larger
 /// epoch will be smaller and thus be sorted to an upper position.
-pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: Epoch) -> Vec<u8> {
-    let res = (Epoch::MAX - epoch).to_be();
+pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
+    let res = (HummockEpoch::MAX - epoch).to_be();
     user_key.reserve(EPOCH_LEN);
     let buf = user_key.chunk_mut();
 
@@ -58,15 +58,15 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
 
 /// Extracts epoch part from key
 #[inline(always)]
-pub fn get_epoch(full_key: &[u8]) -> Epoch {
-    let mut epoch: Epoch = 0;
+pub fn get_epoch(full_key: &[u8]) -> HummockEpoch {
+    let mut epoch: HummockEpoch = 0;
 
     // TODO: check whether this hack improves performance
     unsafe {
         let src = &full_key[full_key.len() - EPOCH_LEN..];
         ptr::copy_nonoverlapping(src.as_ptr(), &mut epoch as *mut _ as *mut u8, EPOCH_LEN);
     }
-    Epoch::MAX - Epoch::from_be(epoch)
+    HummockEpoch::MAX - HummockEpoch::from_be(epoch)
 }
 
 /// Extract user key without epoch part
@@ -85,7 +85,7 @@ pub fn get_table_id(full_key: &[u8]) -> Option<u32> {
     }
 }
 
-pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (Option<u32>, Epoch) {
+pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (Option<u32>, HummockEpoch) {
     match get_table_id(full_key) {
         Some(table_id) => {
             let epoch = get_epoch(full_key);

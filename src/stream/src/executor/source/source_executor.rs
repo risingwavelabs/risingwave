@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
@@ -41,7 +41,8 @@ use crate::executor::*;
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
 pub struct SourceExecutor<S: StateStore> {
-    actor_id: ActorId,
+    ctx: ActorContextRef,
+
     source_id: TableId,
     source_desc: SourceDesc,
 
@@ -68,7 +69,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     split_state_store: SourceStateHandler<S>,
 
-    state_cache: HashMap<String, SplitImpl>,
+    state_cache: HashMap<SplitId, SplitImpl>,
 
     #[expect(dead_code)]
     /// Expected barrier latency
@@ -78,7 +79,7 @@ pub struct SourceExecutor<S: StateStore> {
 impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        actor_id: ActorId,
+        ctx: ActorContextRef,
         source_id: TableId,
         source_desc: SourceDesc,
         vnodes: Bitmap,
@@ -96,7 +97,7 @@ impl<S: StateStore> SourceExecutor<S> {
         // Using vnode range start for row id generator.
         let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
-            actor_id,
+            ctx,
             source_id,
             source_desc,
             row_id_generator: RowIdGenerator::with_epoch(
@@ -223,7 +224,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     state,
                     self.column_ids.clone(),
                     self.source_desc.metrics.clone(),
-                    SourceContext::new(self.actor_id as u32, self.source_id),
+                    SourceContext::new(self.ctx.id as u32, self.source_id),
                 )
                 .await
                 .map(SourceStreamReaderImpl::Connector),
@@ -244,7 +245,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
-                if let Some(splits) = splits.get(&self.actor_id) {
+                if let Some(splits) = splits.get(&self.ctx.id) {
                     self.stream_source_splits = splits.clone();
                 }
             }
@@ -287,11 +288,11 @@ impl<S: StateStore> SourceExecutor<S> {
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::SourceChangeSplit(mapping) => {
-                                if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
+                                if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
                                     if let Some(target_state) = self.get_diff(target_splits) {
                                         log::info!(
                                             "actor {:?} apply source split change to {:?}",
-                                            self.actor_id,
+                                            self.ctx.id,
                                             target_state
                                         );
 
@@ -322,13 +323,13 @@ impl<S: StateStore> SourceExecutor<S> {
                     } = chunk_with_state?;
 
                     if let Some(mapping) = split_offset_mapping {
-                        let state: HashMap<String, SplitImpl> = mapping
+                        let state: HashMap<_, _> = mapping
                             .iter()
                             .map(|(split, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_splits
                                     .iter()
-                                    .filter(|origin_split| origin_split.id().as_str() == split)
+                                    .filter(|origin_split| &origin_split.id() == split)
                                     .collect_vec();
 
                                 if origin_split_impl.is_empty() {
@@ -484,7 +485,7 @@ mod tests {
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
-            0x3f3f3f,
+            ActorContext::create(0x3f3f3f),
             table_id,
             source_desc,
             vnodes,
@@ -602,7 +603,7 @@ mod tests {
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
-            0x3f3f3f,
+            ActorContext::create(0x3f3f3f),
             table_id,
             source_desc,
             vnodes,
@@ -715,7 +716,6 @@ mod tests {
             Schema::new(fields)
         };
 
-        let actor_id = ActorId::default();
         let source_desc = source_manager.get_source(&source_table_id)?;
         let mem_state_store = MemoryStateStore::new();
         let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
@@ -726,7 +726,7 @@ mod tests {
         let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let source_exec = SourceExecutor::new(
-            actor_id,
+            ActorContext::create(0),
             source_table_id,
             source_desc,
             vnodes,

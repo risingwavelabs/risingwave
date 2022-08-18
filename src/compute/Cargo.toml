@@ -7,6 +7,7 @@ version = "0.1.11"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+async_stack_trace = { path = "../utils/async_stack_trace" }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -26,6 +27,7 @@ memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
+pprof = { version = "0.10", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 prost = "0.11"
 rdkafka = { version = "0.28", features = ["cmake-build"] }

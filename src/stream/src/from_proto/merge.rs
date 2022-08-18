@@ -40,7 +40,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 new_input(
                     &stream.context,
                     stream.streaming_metrics.clone(),
-                    params.actor_id,
+                    actor_context.id,
                     params.fragment_id,
                     upstream_actor_id,
                     upstream_fragment_id,
@@ -55,7 +55,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 inputs.into_iter().next().unwrap(),
                 actor_context,
                 x_node.operator_id,
-                params.actor_id,
+                upstream_fragment_id,
                 stream.streaming_metrics.clone(),
             )
             .boxed())
@@ -63,12 +63,11 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             Ok(MergeExecutor::new(
                 schema,
                 params.pk_indices,
-                params.actor_id,
+                actor_context,
                 params.fragment_id,
                 upstream_fragment_id,
                 inputs,
                 stream.context.clone(),
-                actor_context,
                 x_node.operator_id,
                 stream.streaming_metrics.clone(),
             )

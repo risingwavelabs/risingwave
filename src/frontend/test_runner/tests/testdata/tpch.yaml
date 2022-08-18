@@ -124,14 +124,12 @@
                   BatchScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], pk_columns: [l_returnflag, l_linestatus] }
-      StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(sum(lineitem.l_quantity)), sum(sum(lineitem.l_extendedprice)), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), sum(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)))), RoundDigit((sum(sum(lineitem.l_quantity)) / sum(count(lineitem.l_quantity))), 4:Int32), RoundDigit((sum(sum(lineitem.l_extendedprice)) / sum(count(lineitem.l_extendedprice))), 4:Int32), RoundDigit((sum(sum(lineitem.l_discount)) / sum(count(lineitem.l_discount))), 4:Int32), sum(count)] }
-        StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(count), sum(sum(lineitem.l_quantity)), sum(sum(lineitem.l_extendedprice)), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), sum(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)))), sum(sum(lineitem.l_quantity)), sum(count(lineitem.l_quantity)), sum(sum(lineitem.l_extendedprice)), sum(count(lineitem.l_extendedprice)), sum(sum(lineitem.l_discount)), sum(count(lineitem.l_discount)), sum(count)] }
+      StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32), RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32), RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32), count] }
+        StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
           StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
-            StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus, Vnode(lineitem._row_id)], aggs: [count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
-              StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)), lineitem.l_discount, lineitem._row_id, Vnode(lineitem._row_id)] }
-                StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)), lineitem.l_discount, lineitem._row_id] }
-                  StreamFilter { predicate: (lineitem.l_shipdate <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
-                    StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
+            StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)), lineitem.l_discount, lineitem._row_id] }
+              StreamFilter { predicate: (lineitem.l_shipdate <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
+                StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
 - id: tpch_q2
   before:
   - create_tables
@@ -279,14 +277,14 @@
                 BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
                   BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp._row_id(hidden), part._row_id(hidden), supplier._row_id(hidden), part.p_partkey(hidden), nation._row_id(hidden), region._row_id(hidden)], pk_columns: [partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id, region._row_id], order_descs: [s_acctbal, n_name, s_name, p_partkey, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id, region._row_id] }
+    StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, partsupp._row_id(hidden), part._row_id(hidden), supplier._row_id(hidden), nation._row_id(hidden), region._row_id(hidden)], pk_columns: [partsupp._row_id, part._row_id, supplier._row_id, nation._row_id, region._row_id], order_descs: [s_acctbal, n_name, s_name, p_partkey, partsupp._row_id, part._row_id, supplier._row_id, nation._row_id, region._row_id] }
       StreamTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
         StreamExchange { dist: Single }
-          StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id, region._row_id] }
+          StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id, nation._row_id, region._row_id] }
             StreamExchange { dist: HashShard(nation.n_regionkey) }
-              StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey, nation._row_id] }
+              StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey, partsupp._row_id, part._row_id, supplier._row_id, nation._row_id] }
                 StreamExchange { dist: HashShard(supplier.s_nationkey) }
-                  StreamHashJoin { type: Inner, predicate: part.p_partkey = part.p_partkey AND partsupp.ps_supplycost = min(min(partsupp.ps_supplycost)), output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey] }
+                  StreamHashJoin { type: Inner, predicate: part.p_partkey = part.p_partkey AND partsupp.ps_supplycost = min(partsupp.ps_supplycost), output: [part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id, part.p_partkey] }
                     StreamExchange { dist: HashShard(part.p_partkey) }
                       StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, partsupp._row_id, part._row_id, supplier._row_id] }
                         StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
@@ -299,33 +297,29 @@
                                   StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr, part._row_id, part.p_type, part.p_size], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
                         StreamExchange { dist: HashShard(supplier.s_suppkey) }
                           StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
-                    StreamProject { exprs: [part.p_partkey, min(min(partsupp.ps_supplycost))] }
-                      StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(count), min(min(partsupp.ps_supplycost))] }
-                        StreamHashAgg { group_key: [part.p_partkey, Vnode(part.p_partkey)], aggs: [count, min(partsupp.ps_supplycost)] }
-                          StreamProject { exprs: [part.p_partkey, partsupp.ps_supplycost, partsupp._row_id, supplier._row_id, nation._row_id, region._row_id, Vnode(part.p_partkey)] }
-                            StreamHashJoin { type: LeftOuter, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost, partsupp._row_id, supplier._row_id, nation._row_id, region._row_id] }
-                              StreamProject { exprs: [part.p_partkey] }
-                                StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(count)] }
-                                  StreamExchange { dist: HashShard(part.p_partkey) }
-                                    StreamHashAgg { group_key: [part.p_partkey, Vnode(part._row_id)], aggs: [count] }
-                                      StreamProject { exprs: [part.p_partkey, part._row_id, Vnode(part._row_id)] }
-                                        StreamTableScan { table: part, columns: [part.p_partkey, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
-                              StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                                StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp._row_id, supplier._row_id, nation._row_id, region._row_id] }
-                                  StreamExchange { dist: HashShard(nation.n_regionkey) }
-                                    StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp._row_id, supplier._row_id, nation._row_id] }
-                                      StreamExchange { dist: HashShard(supplier.s_nationkey) }
-                                        StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp._row_id, supplier._row_id] }
-                                          StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                                            StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
-                                          StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                                            StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey, supplier._row_id], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
-                                      StreamExchange { dist: HashShard(nation.n_nationkey) }
-                                        StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey, nation._row_id], pk: [nation._row_id], distribution: UpstreamHashShard(nation._row_id) }
-                                  StreamExchange { dist: HashShard(region.r_regionkey) }
-                                    StreamProject { exprs: [region.r_regionkey, region._row_id] }
-                                      StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                                        StreamTableScan { table: region, columns: [region.r_regionkey, region._row_id, region.r_name], pk: [region._row_id], distribution: UpstreamHashShard(region._row_id) }
+                    StreamProject { exprs: [part.p_partkey, min(partsupp.ps_supplycost)] }
+                      StreamHashAgg { group_key: [part.p_partkey], aggs: [count, min(partsupp.ps_supplycost)] }
+                        StreamHashJoin { type: LeftOuter, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost, partsupp._row_id, supplier._row_id, nation._row_id, region._row_id] }
+                          StreamProject { exprs: [part.p_partkey] }
+                            StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+                              StreamExchange { dist: HashShard(part.p_partkey) }
+                                StreamTableScan { table: part, columns: [part.p_partkey, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
+                          StreamExchange { dist: HashShard(partsupp.ps_partkey) }
+                            StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp._row_id, supplier._row_id, nation._row_id, region._row_id] }
+                              StreamExchange { dist: HashShard(nation.n_regionkey) }
+                                StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey, partsupp._row_id, supplier._row_id, nation._row_id] }
+                                  StreamExchange { dist: HashShard(supplier.s_nationkey) }
+                                    StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp._row_id, supplier._row_id] }
+                                      StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+                                        StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
+                                      StreamExchange { dist: HashShard(supplier.s_suppkey) }
+                                        StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey, supplier._row_id], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
+                                  StreamExchange { dist: HashShard(nation.n_nationkey) }
+                                    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey, nation._row_id], pk: [nation._row_id], distribution: UpstreamHashShard(nation._row_id) }
+                              StreamExchange { dist: HashShard(region.r_regionkey) }
+                                StreamProject { exprs: [region.r_regionkey, region._row_id] }
+                                  StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
+                                    StreamTableScan { table: region, columns: [region.r_regionkey, region._row_id, region.r_name], pk: [region._row_id], distribution: UpstreamHashShard(region._row_id) }
                 StreamExchange { dist: HashShard(nation.n_nationkey) }
                   StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation._row_id], pk: [nation._row_id], distribution: UpstreamHashShard(nation._row_id) }
             StreamExchange { dist: HashShard(region.r_regionkey) }
@@ -1456,22 +1450,18 @@
                         BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [c_count, custdist], pk_columns: [c_count], order_descs: [custdist, c_count] }
-      StreamProject { exprs: [sum(count(orders.o_orderkey)), sum(count)] }
-        StreamHashAgg { group_key: [sum(count(orders.o_orderkey))], aggs: [sum(count), sum(count)] }
-          StreamExchange { dist: HashShard(sum(count(orders.o_orderkey))) }
-            StreamHashAgg { group_key: [sum(count(orders.o_orderkey)), Vnode(customer.c_custkey)], aggs: [count, count] }
-              StreamProject { exprs: [sum(count(orders.o_orderkey)), customer.c_custkey, Vnode(customer.c_custkey)] }
-                StreamProject { exprs: [sum(count(orders.o_orderkey)), customer.c_custkey] }
-                  StreamHashAgg { group_key: [customer.c_custkey], aggs: [sum(count), sum(count(orders.o_orderkey))] }
-                    StreamHashAgg { group_key: [customer.c_custkey, Vnode(customer.c_custkey)], aggs: [count, count(orders.o_orderkey)] }
-                      StreamProject { exprs: [customer.c_custkey, orders.o_orderkey, customer._row_id, orders._row_id, Vnode(customer.c_custkey)] }
-                        StreamHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, orders.o_orderkey, customer._row_id, orders._row_id] }
-                          StreamExchange { dist: HashShard(customer.c_custkey) }
-                            StreamTableScan { table: customer, columns: [customer.c_custkey, customer._row_id], pk: [customer._row_id], distribution: UpstreamHashShard(customer._row_id) }
-                          StreamExchange { dist: HashShard(orders.o_custkey) }
-                            StreamProject { exprs: [orders.o_orderkey, orders.o_custkey, orders._row_id] }
-                              StreamFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
-                                StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders._row_id, orders.o_comment], pk: [orders._row_id], distribution: UpstreamHashShard(orders._row_id) }
+      StreamProject { exprs: [count(orders.o_orderkey), count] }
+        StreamHashAgg { group_key: [count(orders.o_orderkey)], aggs: [count, count] }
+          StreamExchange { dist: HashShard(count(orders.o_orderkey)) }
+            StreamProject { exprs: [count(orders.o_orderkey), customer.c_custkey] }
+              StreamHashAgg { group_key: [customer.c_custkey], aggs: [count, count(orders.o_orderkey)] }
+                StreamHashJoin { type: LeftOuter, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, orders.o_orderkey, customer._row_id, orders._row_id] }
+                  StreamExchange { dist: HashShard(customer.c_custkey) }
+                    StreamTableScan { table: customer, columns: [customer.c_custkey, customer._row_id], pk: [customer._row_id], distribution: UpstreamHashShard(customer._row_id) }
+                  StreamExchange { dist: HashShard(orders.o_custkey) }
+                    StreamProject { exprs: [orders.o_orderkey, orders.o_custkey, orders._row_id] }
+                      StreamFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
+                        StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders._row_id, orders.o_comment], pk: [orders._row_id], distribution: UpstreamHashShard(orders._row_id) }
 - id: tpch_q14
   before:
   - create_tables
@@ -1621,35 +1611,31 @@
                           BatchFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
                             BatchScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, supplier._row_id(hidden), lineitem.l_suppkey(hidden)], pk_columns: [supplier._row_id, lineitem.l_suppkey], order_descs: [s_suppkey, supplier._row_id, lineitem.l_suppkey] }
-      StreamExchange { dist: HashShard(supplier._row_id, lineitem.l_suppkey) }
-        StreamHashJoin { type: Inner, predicate: sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))) = max(max(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), supplier._row_id, lineitem.l_suppkey] }
-          StreamExchange { dist: HashShard(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))) }
-            StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), supplier._row_id, lineitem.l_suppkey] }
+    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, supplier._row_id(hidden)], pk_columns: [supplier._row_id], order_descs: [s_suppkey, supplier._row_id] }
+      StreamExchange { dist: HashShard(supplier._row_id) }
+        StreamHashJoin { type: Inner, predicate: sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) = max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), supplier._row_id] }
+          StreamExchange { dist: HashShard(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))) }
+            StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), supplier._row_id, lineitem.l_suppkey] }
               StreamExchange { dist: HashShard(supplier.s_suppkey) }
                 StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, supplier._row_id], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
-              StreamProject { exprs: [lineitem.l_suppkey, sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
-                StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+              StreamProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+                StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
                   StreamExchange { dist: HashShard(lineitem.l_suppkey) }
-                    StreamHashAgg { group_key: [lineitem.l_suppkey, Vnode(lineitem._row_id)], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
-                      StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id, Vnode(lineitem._row_id)] }
-                        StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id] }
-                          StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                            StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
-          StreamExchange { dist: HashShard(max(max(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))))) }
-            StreamProject { exprs: [max(max(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))))] }
-              StreamGlobalSimpleAgg { aggs: [sum(count), max(max(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))))] }
+                    StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id] }
+                      StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                        StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
+          StreamExchange { dist: HashShard(max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))) }
+            StreamProject { exprs: [max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
+              StreamGlobalSimpleAgg { aggs: [sum(count), max(max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
                 StreamExchange { dist: Single }
-                  StreamHashAgg { group_key: [Vnode(lineitem.l_suppkey)], aggs: [count, max(sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
-                    StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), lineitem.l_suppkey, Vnode(lineitem.l_suppkey)] }
-                      StreamProject { exprs: [sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), lineitem.l_suppkey] }
-                        StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+                  StreamHashAgg { group_key: [Vnode(lineitem.l_suppkey)], aggs: [count, max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
+                    StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey, Vnode(lineitem.l_suppkey)] }
+                      StreamProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), lineitem.l_suppkey] }
+                        StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
                           StreamExchange { dist: HashShard(lineitem.l_suppkey) }
-                            StreamHashAgg { group_key: [lineitem.l_suppkey, Vnode(lineitem._row_id)], aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
-                              StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id, Vnode(lineitem._row_id)] }
-                                StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id] }
-                                  StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                                    StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
+                            StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id] }
+                              StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                                StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
 - id: tpch_q16
   before:
   - create_tables
@@ -1729,28 +1715,26 @@
                             BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
-      StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, sum(count(partsupp.ps_suppkey) filter((part.p_size = 0:Int64)))] }
-        StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [sum(count), sum(count(partsupp.ps_suppkey) filter((part.p_size = 0:Int64)))] }
+      StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey) filter((part.p_size = 0:Int64))] }
+        StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(partsupp.ps_suppkey) filter((part.p_size = 0:Int64))] }
           StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
-            StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, Vnode(part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size)], aggs: [count, count(partsupp.ps_suppkey) filter((part.p_size = 0:Int64))] }
-              StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size, Vnode(part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size)] }
-                StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size] }
-                  StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size], aggs: [count] }
-                    StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size) }
-                      StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size, partsupp._row_id, part._row_id, flag] }
-                        StreamExpand { column_subsets: [[part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]] }
-                          StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp._row_id, part._row_id] }
-                            StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                              StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp._row_id, part._row_id] }
-                                StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                                  StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
-                                StreamExchange { dist: HashShard(part.p_partkey) }
-                                  StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-                                    StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
-                            StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                              StreamProject { exprs: [supplier.s_suppkey, supplier._row_id] }
-                                StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                                  StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier._row_id, supplier.s_comment], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
+            StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size] }
+              StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size], aggs: [count] }
+                StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size) }
+                  StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size, partsupp._row_id, part._row_id, flag] }
+                    StreamExpand { column_subsets: [[part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]] }
+                      StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp._row_id, part._row_id] }
+                        StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+                          StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp._row_id, part._row_id] }
+                            StreamExchange { dist: HashShard(partsupp.ps_partkey) }
+                              StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
+                            StreamExchange { dist: HashShard(part.p_partkey) }
+                              StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
+                                StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
+                        StreamExchange { dist: HashShard(supplier.s_suppkey) }
+                          StreamProject { exprs: [supplier.s_suppkey, supplier._row_id] }
+                            StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
+                              StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier._row_id, supplier.s_comment], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
 - id: tpch_q17
   before:
   - create_tables
@@ -1830,7 +1814,7 @@
           StreamExchange { dist: Single }
             StreamStatelessLocalSimpleAgg { aggs: [count, sum(lineitem.l_extendedprice)] }
               StreamProject { exprs: [lineitem.l_extendedprice, lineitem._row_id, part._row_id, part.p_partkey] }
-                StreamFilter { predicate: (lineitem.l_quantity < (0.2:Decimal * (sum(sum(lineitem.l_quantity)) / sum(count(lineitem.l_quantity))))) }
+                StreamFilter { predicate: (lineitem.l_quantity < (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))) }
                   StreamHashJoin { type: Inner, predicate: part.p_partkey = part.p_partkey, output: all }
                     StreamExchange { dist: HashShard(part.p_partkey) }
                       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem._row_id, part._row_id] }
@@ -1840,19 +1824,15 @@
                           StreamProject { exprs: [part.p_partkey, part._row_id] }
                             StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
                               StreamTableScan { table: part, columns: [part.p_partkey, part._row_id, part.p_brand, part.p_container], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
-                    StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(sum(lineitem.l_quantity)) / sum(count(lineitem.l_quantity))))] }
-                      StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(count), sum(sum(lineitem.l_quantity)), sum(count(lineitem.l_quantity))] }
-                        StreamHashAgg { group_key: [part.p_partkey, Vnode(part.p_partkey)], aggs: [count, sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
-                          StreamProject { exprs: [part.p_partkey, lineitem.l_quantity, lineitem._row_id, Vnode(part.p_partkey)] }
-                            StreamHashJoin { type: LeftOuter, predicate: part.p_partkey = lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem._row_id] }
-                              StreamProject { exprs: [part.p_partkey] }
-                                StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(count)] }
-                                  StreamExchange { dist: HashShard(part.p_partkey) }
-                                    StreamHashAgg { group_key: [part.p_partkey, Vnode(part._row_id)], aggs: [count] }
-                                      StreamProject { exprs: [part.p_partkey, part._row_id, Vnode(part._row_id)] }
-                                        StreamTableScan { table: part, columns: [part.p_partkey, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
-                              StreamExchange { dist: HashShard(lineitem.l_partkey) }
-                                StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem._row_id], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
+                    StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))] }
+                      StreamHashAgg { group_key: [part.p_partkey], aggs: [count, sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
+                        StreamHashJoin { type: LeftOuter, predicate: part.p_partkey = lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem._row_id] }
+                          StreamProject { exprs: [part.p_partkey] }
+                            StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+                              StreamExchange { dist: HashShard(part.p_partkey) }
+                                StreamTableScan { table: part, columns: [part.p_partkey, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
+                          StreamExchange { dist: HashShard(lineitem.l_partkey) }
+                            StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem._row_id], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
 - id: tpch_q18
   before:
   - create_tables
@@ -1945,28 +1925,24 @@
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], pk_columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], order_descs: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey] }
       StreamTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0 }
         StreamExchange { dist: Single }
-          StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(sum(lineitem.l_quantity))] }
-            StreamHashAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [sum(count), sum(sum(lineitem.l_quantity))] }
-              StreamHashAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, Vnode(orders.o_orderkey)], aggs: [count, sum(lineitem.l_quantity)] }
-                StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, customer._row_id, orders._row_id, lineitem._row_id, Vnode(orders.o_orderkey)] }
-                  StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, customer._row_id, orders._row_id, lineitem._row_id] }
-                    StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, customer._row_id, orders._row_id, lineitem._row_id] }
-                      StreamExchange { dist: HashShard(orders.o_orderkey) }
-                        StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, customer._row_id, orders._row_id] }
-                          StreamExchange { dist: HashShard(customer.c_custkey) }
-                            StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer._row_id], pk: [customer._row_id], distribution: UpstreamHashShard(customer._row_id) }
-                          StreamExchange { dist: HashShard(orders.o_custkey) }
-                            StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate, orders._row_id], pk: [orders._row_id], distribution: UpstreamHashShard(orders._row_id) }
-                      StreamExchange { dist: HashShard(lineitem.l_orderkey) }
-                        StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem._row_id], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
-                    StreamProject { exprs: [lineitem.l_orderkey] }
-                      StreamFilter { predicate: (sum(sum(lineitem.l_quantity)) > 1:Int32) }
-                        StreamProject { exprs: [lineitem.l_orderkey, sum(sum(lineitem.l_quantity))] }
-                          StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [sum(count), sum(sum(lineitem.l_quantity))] }
-                            StreamExchange { dist: HashShard(lineitem.l_orderkey) }
-                              StreamHashAgg { group_key: [lineitem.l_orderkey, Vnode(lineitem._row_id)], aggs: [count, sum(lineitem.l_quantity)] }
-                                StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_quantity, lineitem._row_id, Vnode(lineitem._row_id)] }
-                                  StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem._row_id], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
+          StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
+            StreamHashAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [count, sum(lineitem.l_quantity)] }
+              StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, customer._row_id, orders._row_id, lineitem._row_id] }
+                StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, customer._row_id, orders._row_id, lineitem._row_id] }
+                  StreamExchange { dist: HashShard(orders.o_orderkey) }
+                    StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, customer._row_id, orders._row_id] }
+                      StreamExchange { dist: HashShard(customer.c_custkey) }
+                        StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer._row_id], pk: [customer._row_id], distribution: UpstreamHashShard(customer._row_id) }
+                      StreamExchange { dist: HashShard(orders.o_custkey) }
+                        StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate, orders._row_id], pk: [orders._row_id], distribution: UpstreamHashShard(orders._row_id) }
+                  StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                    StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem._row_id], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
+                StreamProject { exprs: [lineitem.l_orderkey] }
+                  StreamFilter { predicate: (sum(lineitem.l_quantity) > 1:Int32) }
+                    StreamProject { exprs: [lineitem.l_orderkey, sum(lineitem.l_quantity)] }
+                      StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [count, sum(lineitem.l_quantity)] }
+                        StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+                          StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem._row_id], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
 - id: tpch_q19
   before:
   - create_tables
@@ -2174,7 +2150,7 @@
                     StreamTableScan { table: nation, columns: [nation.n_nationkey, nation._row_id, nation.n_name], pk: [nation._row_id], distribution: UpstreamHashShard(nation._row_id) }
           StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
             StreamProject { exprs: [partsupp.ps_suppkey, partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey] }
-              StreamFilter { predicate: (partsupp.ps_availqty > (0.5:Decimal * sum(sum(lineitem.l_quantity)))) }
+              StreamFilter { predicate: (partsupp.ps_availqty > (0.5:Decimal * sum(lineitem.l_quantity))) }
                 StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = partsupp.ps_partkey AND partsupp.ps_suppkey = partsupp.ps_suppkey, output: all }
                   StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     StreamHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
@@ -2184,21 +2160,17 @@
                         StreamProject { exprs: [part.p_partkey, part._row_id] }
                           StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
                             StreamTableScan { table: part, columns: [part.p_partkey, part._row_id, part.p_name], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
-                  StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(sum(lineitem.l_quantity)))] }
-                    StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(count), sum(sum(lineitem.l_quantity))] }
-                      StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey, Vnode(partsupp.ps_partkey, partsupp.ps_suppkey)], aggs: [count, sum(lineitem.l_quantity)] }
-                        StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem._row_id, Vnode(partsupp.ps_partkey, partsupp.ps_suppkey)] }
-                          StreamHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem._row_id] }
-                            StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
-                              StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(count)] }
-                                StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                                  StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey, Vnode(partsupp._row_id)], aggs: [count] }
-                                    StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id, Vnode(partsupp._row_id)] }
-                                      StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
-                            StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
-                              StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem._row_id] }
-                                StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                                  StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
+                  StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))] }
+                    StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count, sum(lineitem.l_quantity)] }
+                      StreamHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem._row_id] }
+                        StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
+                          StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
+                            StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                              StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
+                        StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
+                          StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem._row_id] }
+                            StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                              StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem._row_id, lineitem.l_shipdate], pk: [lineitem._row_id], distribution: UpstreamHashShard(lineitem._row_id) }
 - id: tpch_q21
   before:
   - create_tables

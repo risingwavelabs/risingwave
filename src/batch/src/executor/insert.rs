@@ -127,9 +127,10 @@ impl InsertExecutor {
 impl BoxedExecutorBuilder for InsertExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "Insert executor should 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
         let insert_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Insert
@@ -143,7 +144,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .context()
                 .source_manager_ref()
                 .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
-            inputs.remove(0),
+            child,
         )))
     }
 }
@@ -158,7 +159,7 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{MemSourceManager, SourceManager, StreamSourceReader};
+    use risingwave_source::{MemSourceManager, SourceManager};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use risingwave_storage::*;
@@ -254,14 +255,14 @@ mod tests {
         let chunk = reader.next().await?;
 
         // Row id column
-        assert!(chunk.chunk.columns()[0]
+        assert!(chunk.columns()[0]
             .array()
             .as_int64()
             .iter()
             .all(|x| x.is_none()));
 
         assert_eq!(
-            chunk.chunk.columns()[1]
+            chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()
@@ -270,7 +271,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.chunk.columns()[2]
+            chunk.columns()[2]
                 .array()
                 .as_int32()
                 .iter()
@@ -289,7 +290,7 @@ mod tests {
         )
         .unwrap()
         .into();
-        assert_eq!(*chunk.chunk.columns()[3].array(), array);
+        assert_eq!(*chunk.columns()[3].array(), array);
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.

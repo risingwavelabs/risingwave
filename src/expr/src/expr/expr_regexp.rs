@@ -61,7 +61,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
         let RexNode::Constant(pattern_value) = pattern_node.get_rex_node().unwrap() else {
             return Err(ExprError::UnsupportedFunction("non-constant pattern in regexp_match".to_string()))
         };
-        let pattern_scalar = ScalarImpl::bytes_to_scalar(
+        let pattern_scalar = ScalarImpl::from_proto_bytes(
             pattern_value.get_body(),
             pattern_node.get_return_type().unwrap(),
         )?;

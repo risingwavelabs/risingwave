@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{
     SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    pin_version_response, CompactTask, CompactionGroup, HummockSnapshot,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -65,7 +65,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
+    ) -> Result<pin_version_response::Payload> {
         self.hummock_manager
             .pin_version(self.context_id, last_pinned)
             .await
@@ -150,7 +150,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    async fn subscribe_compact_tasks(
+        &self,
+        _max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
         unimplemented!()
     }
 
@@ -176,6 +179,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             .extend_ssts_to_delete_from_scan(&sst_ids)
             .await;
         Ok(())
+    }
+
+    async fn trigger_full_gc(&self, _sst_retention_time_sec: u64) -> Result<()> {
+        unimplemented!()
     }
 }
 

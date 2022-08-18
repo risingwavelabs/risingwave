@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
@@ -58,12 +59,16 @@ async fn test_hummock_pin_unpin() {
         .unwrap()
         .is_empty());
     for _ in 0..2 {
-        let hummock_version = hummock_manager
+        let hummock_version = match hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap()
-            .2
-            .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
         assert_eq!(version_id, hummock_version.id);
@@ -143,18 +148,9 @@ async fn test_unpin_snapshot_before() {
 
 #[tokio::test]
 async fn test_hummock_compaction_task() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_num = 2;
-
-    // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager.list_parallel_units().await;
-    env.hash_mapping_manager()
-        .build_fragment_hash_mapping(1, &parallel_units);
-    for table_id in 1..sst_num + 2 {
-        env.hash_mapping_manager()
-            .set_fragment_state_table(1, table_id as u32);
-    }
 
     // No compaction task available.
     let task = hummock_manager
@@ -187,7 +183,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(
@@ -219,7 +215,7 @@ async fn test_hummock_compaction_task() {
         .unwrap()
         .unwrap();
     hummock_manager
-        .assign_compaction_task(&compact_task, context_id, async { true })
+        .assign_compaction_task(&compact_task, context_id)
         .await
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
@@ -258,12 +254,16 @@ async fn test_hummock_table() {
     .await
     .unwrap();
 
-    let pinned_version = hummock_manager
+    let pinned_version = match hummock_manager
         .pin_version(context_id, u64::MAX)
         .await
         .unwrap()
-        .2
-        .unwrap();
+    {
+        Payload::VersionDeltas(_) => {
+            unreachable!("should get full version")
+        }
+        Payload::PinnedVersion(version) => version,
+    };
     let levels =
         pinned_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
     assert_eq!(
@@ -308,12 +308,16 @@ async fn test_hummock_transaction() {
         )
         .await;
         // Get tables before committing epoch1. No tables should be returned.
-        let pinned_version = hummock_manager
+        let pinned_version = match hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap()
-            .2
-            .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
@@ -330,12 +334,16 @@ async fn test_hummock_transaction() {
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
-        let pinned_version = hummock_manager
+        let pinned_version = match hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap()
-            .2
-            .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -360,12 +368,16 @@ async fn test_hummock_transaction() {
         .await;
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
-        let pinned_version = hummock_manager
+        let pinned_version = match hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap()
-            .2
-            .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -385,12 +397,16 @@ async fn test_hummock_transaction() {
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let pinned_version = hummock_manager
+        let pinned_version = match hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
             .unwrap()
-            .2
-            .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -566,12 +582,16 @@ async fn test_hummock_manager_basic() {
         );
 
         // should pin latest because u64::MAX
-        let version = hummock_manager
+        let version = match hummock_manager
             .pin_version(context_id_1, HummockVersionId::MAX)
             .await
             .unwrap()
-            .2
-            .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
@@ -584,12 +604,16 @@ async fn test_hummock_manager_basic() {
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
-        let version = hummock_manager
+        let version = match hummock_manager
             .pin_version(context_id_2, INVALID_EPOCH)
             .await
             .unwrap()
-            .2
-            .unwrap();
+        {
+            Payload::VersionDeltas(_) => {
+                unreachable!("should get full version")
+            }
+            Payload::PinnedVersion(version) => version,
+        };
         assert_eq!(version.id, FIRST_VERSION_ID + 2);
         // pinned by context_id_1
         assert_eq!(
@@ -851,18 +875,8 @@ async fn test_invalid_sst_id() {
 
 #[tokio::test]
 async fn test_trigger_manual_compaction() {
-    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let sst_num = 2;
-
-    // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager.list_parallel_units().await;
-    env.hash_mapping_manager()
-        .build_fragment_hash_mapping(1, &parallel_units);
-    for table_id in 1..sst_num + 2 {
-        env.hash_mapping_manager()
-            .set_fragment_state_table(1, table_id as u32);
-    }
 
     {
         let option = ManualCompactionOption::default();
@@ -879,7 +893,7 @@ async fn test_trigger_manual_compaction() {
 
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
-    let receiver = compactor_manager_ref.add_compactor(context_id);
+    let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
     {
         let option = ManualCompactionOption::default();
         let result = hummock_manager
@@ -902,7 +916,7 @@ async fn test_trigger_manual_compaction() {
     }
 
     compactor_manager_ref.remove_compactor(context_id);
-    let _receiver = compactor_manager_ref.add_compactor(context_id);
+    let _receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
 
     {
         let option = ManualCompactionOption {
