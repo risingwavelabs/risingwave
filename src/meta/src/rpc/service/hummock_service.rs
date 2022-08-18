@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
@@ -261,15 +261,24 @@ where
         }
 
         // get internal_table_id by fragment_manager
-        let table_id = TableId::new(request.table_id);
-        if let Ok(table_frgament) = self
-            .fragment_manager
-            .select_table_fragments_by_table_id(&table_id)
-            .await
-        {
-            option.internal_table_id = HashSet::from_iter(table_frgament.internal_table_ids());
+        if request.table_id >= NON_RESERVED_PG_CATALOG_TABLE_ID as u32 {
+            // We need to make sure to use the correct table_id to filter sst
+            let table_id = TableId::new(request.table_id);
+            if let Ok(table_frgament) = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&table_id)
+                .await
+            {
+                option.internal_table_id = HashSet::from_iter(table_frgament.internal_table_ids());
+            }
+            option.internal_table_id.insert(request.table_id); // need to handle outter table_id
+                                                               // (mv)
         }
-        option.internal_table_id.insert(request.table_id); // need to handle outter table_id (mv)
+
+        assert!(option
+            .internal_table_id
+            .iter()
+            .all(|table_id| *table_id >= (NON_RESERVED_PG_CATALOG_TABLE_ID as u32)),);
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",

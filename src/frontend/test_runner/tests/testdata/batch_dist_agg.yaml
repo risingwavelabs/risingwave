@@ -2,8 +2,8 @@
 - id: create_tables
   sql: |
     /* T: UpstreamHash(row_id); Tk: UpstreamHash(k); S: single distribution */
-    create table T  (k int, v int, o int);
-    create index Tk on T(k) include(k, v, o);
+    create table T  (k int, v int, o int, s varchar);
+    create index Tk on T(k) include(k, v, o, s);
     create materialized view S as select * from T order by o limit 100;
 - id: agg_on_single
   before:
@@ -65,17 +65,17 @@
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from T;
+    select string_agg(s, ',' order by o) as a1 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
-    BatchSimpleAgg { aggs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
 - id: extreme_count_on_T
   before:
   - create_tables
@@ -94,32 +94,32 @@
   before:
   - create_tables
   sql: |
-    select count(v) as a1, string_agg(v, ',' order by o) as a2 from T;
+    select count(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
-    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
 - id: extreme_string_agg_on_T
   before:
   - create_tables
   sql: |
-    select max(v) as a1, string_agg(v, ',' order by o) as a2 from T;
+    select max(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
-    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
 - id: extreme_on_T_by_k
   before:
   - create_tables

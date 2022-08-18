@@ -67,15 +67,17 @@
     insert into t select v1 from t;
   batch_plan: |
     BatchInsert { table: t }
-      BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     /* insert into select with cast */
     create table t (v1 time, v2 int, v3 real);
     insert into t select timestamp '2020-01-01 01:02:03', 11, 4.5 from t;
   batch_plan: |
     BatchInsert { table: t }
-      BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
-        BatchScan { table: t, columns: [], distribution: SomeShard }
+      BatchExchange { order: [], dist: Single }
+        BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
+          BatchScan { table: t, columns: [], distribution: SomeShard }
 - sql: |
     /* insert into select with cast error */
     create table t (v1 timestamp, v2 real);
@@ -87,3 +89,17 @@
     create table t (v1 int, v2 real);
     insert into t select 2, 3, 4.5 from t;
   binder_error: 'Bind error: INSERT has more expressions than target columns'
+- sql: |
+    /* insert with join */
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    create table t3 (e int, f int);
+    insert into t1 select c, e from t2 join t3 on t2.d = t3.f
+  batch_plan: |
+    BatchInsert { table: t1 }
+      BatchExchange { order: [], dist: Single }
+        BatchHashJoin { type: Inner, predicate: t2.d = t3.f, output: [t2.c, t3.e] }
+          BatchExchange { order: [], dist: HashShard(t2.d) }
+            BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
+          BatchExchange { order: [], dist: HashShard(t3.f) }
+            BatchScan { table: t3, columns: [t3.e, t3.f], distribution: SomeShard }

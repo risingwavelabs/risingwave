@@ -197,7 +197,8 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::SingleValue
-                    | AggKind::ApproxCountDistinct => (),
+                    | AggKind::ApproxCountDistinct
+                    | AggKind::ArrayAgg => (),
                     AggKind::Count => {
                         indices_of_count.push(i);
                         agg_call.agg_kind = AggKind::Sum;
