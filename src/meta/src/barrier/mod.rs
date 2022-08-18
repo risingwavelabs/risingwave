@@ -787,6 +787,7 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         if let Err(err) = result {
+            fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.fail();
             tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
             self.do_recovery(err, fail_node.into_iter(), state, tracker)
@@ -810,7 +811,6 @@ where
         }
         // Handle the error node and the nodes after it
         if let Some(err) = err_msg {
-            fail_point!("inject_barrier_err_success");
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.fail().into_iter());
