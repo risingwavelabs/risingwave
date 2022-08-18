@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::{Source, Table};
@@ -151,6 +152,8 @@ where
         struct Env<'a> {
             /// Records what's the corresponding actor of each parallel unit of one table.
             upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
+            /// Records each upstream mview actor's vnode mapping info.
+            upstream_vnode_mapping_info: &'a HashMap<TableId, Vec<(ActorId, Option<Bitmap>)>>,
             /// Records what's the actors on each worker of one table.
             tables_worker_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             /// Schedule information of all actors.
@@ -166,39 +169,36 @@ where
                 &mut self,
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
+                vnode_mapping: &Option<Bitmap>,
                 same_worker_node_as_upstream: bool,
                 is_singleton: bool,
             ) -> MetaResult<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream, is_singleton)?;
+                        self.resolve_chain_node_inner(input, actor_id, vnode_mapping, same_worker_node_as_upstream, is_singleton)?;
                     }
                     return Ok(());
                 };
 
                 // get upstream table id
                 let table_id = TableId::new(chain.table_id);
-
-                // FIXME: We assume that the chain node is always on the same parallel unit as its
-                // upstream materialize node here to find the upstream actor.
                 let upstream_actor_id = {
-                    // 1. use table id to get upstream parallel_unit -> actor_id mapping
-                    let upstream_parallel_actor_mapping =
-                        &self.upstream_parallel_unit_info[&table_id];
+                    // 1. use table id to get upstream vnode mapping info: [(actor_id,
+                    // option(vnode_mapping))]
+                    let upstream_vnode_mapping_info = &self.upstream_vnode_mapping_info[&table_id];
 
                     if is_singleton {
                         // Directly find the singleton actor id.
-                        *upstream_parallel_actor_mapping
-                            .values()
-                            .exactly_one()
-                            .unwrap()
+                        upstream_vnode_mapping_info.iter().exactly_one().unwrap().0
                     } else {
-                        // 2. use our actor id to get parallel unit id of the chain actor
-                        let parallel_unit_id = self.locations.actor_locations[&actor_id].id;
-                        // 3. and use chain actor's parallel unit id to get the corresponding
-                        // upstream actor id
-                        upstream_parallel_actor_mapping[&parallel_unit_id]
+                        // 2. find the upstream actor id by vnode mapping.
+                        assert!(vnode_mapping.is_some());
+                        upstream_vnode_mapping_info
+                            .iter()
+                            .find(|(_, bitmap)| bitmap == vnode_mapping)
+                            .unwrap()
+                            .0
                     }
                 };
 
@@ -282,6 +282,11 @@ where
             .get_sink_parallel_unit_ids(dependent_table_ids)
             .await?;
 
+        let upstream_vnode_mapping_info = &self
+            .fragment_manager
+            .get_sink_vnode_mapping_info(dependent_table_ids)
+            .await?;
+
         let tables_worker_actors = &self
             .fragment_manager
             .get_tables_worker_actors(dependent_table_ids)
@@ -289,6 +294,7 @@ where
 
         let mut env = Env {
             upstream_parallel_unit_info,
+            upstream_vnode_mapping_info,
             tables_worker_actors,
             locations,
             dispatchers,
@@ -304,6 +310,7 @@ where
                 env.resolve_chain_node_inner(
                     stream_node,
                     actor.actor_id,
+                    &actor.vnode_bitmap.as_ref().map(Bitmap::from),
                     actor.same_worker_node_as_upstream,
                     is_singleton,
                 )?;

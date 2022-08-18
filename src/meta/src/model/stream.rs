@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
@@ -315,6 +316,21 @@ impl TableFragments {
             });
         });
         actor_map
+    }
+
+    pub fn sink_vnode_mapping_info(&self) -> Vec<(ActorId, Option<Bitmap>)> {
+        self.fragments
+            .values()
+            .filter(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .flat_map(|fragment| {
+                fragment.actors.iter().map(|actor| {
+                    (
+                        actor.actor_id,
+                        actor.vnode_bitmap.as_ref().map(Bitmap::from),
+                    )
+                })
+            })
+            .collect_vec()
     }
 
     pub fn parallel_unit_sink_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {

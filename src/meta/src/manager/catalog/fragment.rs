@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
@@ -517,6 +518,26 @@ where
                         .insert(*table_id, table_fragment.worker_actor_ids());
                     info.table_sink_actor_ids
                         .insert(*table_id, table_fragment.sink_actor_ids());
+                }
+                None => {
+                    bail!("table_fragment not exist: id={}", table_id);
+                }
+            }
+        }
+        Ok(info)
+    }
+
+    pub async fn get_sink_vnode_mapping_info(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Bitmap>)>>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut info: HashMap<TableId, Vec<(ActorId, Option<Bitmap>)>> = HashMap::new();
+
+        for table_id in table_ids {
+            match map.get(table_id) {
+                Some(table_fragment) => {
+                    info.insert(*table_id, table_fragment.sink_vnode_mapping_info());
                 }
                 None => {
                     bail!("table_fragment not exist: id={}", table_id);

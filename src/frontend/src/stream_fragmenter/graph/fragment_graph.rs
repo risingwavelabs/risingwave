@@ -40,6 +40,9 @@ pub struct StreamFragment {
 
     /// Number of table ids (stateful states) for this fragment.
     pub table_ids_cnt: u32,
+
+    /// Mark the dependent table id of this fragment.
+    pub dependent_table_id: Option<u32>,
 }
 
 /// An edge between the nodes in the fragment graph.
@@ -66,6 +69,7 @@ impl StreamFragment {
             is_singleton: false,
             node: None,
             table_ids_cnt: 0,
+            dependent_table_id: None,
         }
     }
 
@@ -76,6 +80,7 @@ impl StreamFragment {
             fragment_type: self.fragment_type as i32,
             is_singleton: self.is_singleton,
             table_ids_cnt: self.table_ids_cnt,
+            dependent_table_id: self.dependent_table_id.unwrap_or(0),
         }
     }
 }
