@@ -278,7 +278,7 @@ where
         assert!(option
             .internal_table_id
             .iter()
-            .all(|table_id| *table_id > (NON_RESERVED_PG_CATALOG_TABLE_ID as u32)),);
+            .all(|table_id| *table_id >= (NON_RESERVED_PG_CATALOG_TABLE_ID as u32)),);
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
