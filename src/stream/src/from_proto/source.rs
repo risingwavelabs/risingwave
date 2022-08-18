@@ -32,7 +32,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         stream
             .context
             .lock_barrier_manager()
-            .register_sender(params.actor_id, sender);
+            .register_sender(params.actor_context.id, sender);
 
         let source_id = TableId::new(node.table_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
@@ -58,7 +58,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .expect("vnodes not set for source executor");
 
         Ok(Box::new(SourceExecutor::new(
-            params.actor_id,
+            params.actor_context,
             source_id,
             source_desc,
             vnodes,

@@ -197,6 +197,9 @@ impl PlanAggCall {
             AggKind::Avg => {
                 panic!("Avg aggregation should have been rewritten to Sum+Count")
             }
+            AggKind::ArrayAgg => {
+                panic!("2-phase ArrayAgg is not supported yet")
+            }
         };
         PlanAggCall {
             agg_kind: total_agg_kind,
@@ -397,7 +400,7 @@ impl LogicalAgg {
         for (agg_idx, agg_call) in self.agg_calls.iter().enumerate() {
             let mut column_mapping = vec![];
             let state_table = match agg_call.agg_kind {
-                AggKind::Min | AggKind::Max | AggKind::StringAgg => {
+                AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::ArrayAgg => {
                     if !in_append_only {
                         let mut sort_column_set = BTreeSet::new();
                         let sort_keys = {
@@ -408,7 +411,7 @@ impl LogicalAgg {
                                 AggKind::Max => {
                                     vec![(OrderType::Descending, agg_call.inputs[0].index)]
                                 }
-                                AggKind::StringAgg => agg_call
+                                AggKind::StringAgg | AggKind::ArrayAgg => agg_call
                                     .order_by_fields
                                     .iter()
                                     .map(|o| {
@@ -422,7 +425,7 @@ impl LogicalAgg {
                         };
 
                         let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg => agg_call
+                            AggKind::StringAgg | AggKind::ArrayAgg => agg_call
                                 .inputs
                                 .iter()
                                 .map(|i| i.index)

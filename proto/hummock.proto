@@ -79,6 +79,10 @@ message HummockVersionDelta {
   bool trivial_move = 6;
 }
 
+message HummockVersionDeltas {
+  repeated HummockVersionDelta version_deltas = 1;
+}
+
 message HummockSnapshot {
   uint64 epoch = 1;
 }
