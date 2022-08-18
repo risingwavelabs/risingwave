@@ -47,12 +47,9 @@ pub struct TopNExecutor {
 impl BoxedExecutorBuilder for TopNExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 1,
-            "TopNExecutor should have only one child!"
-        );
+        let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let top_n_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::TopN)?;
@@ -63,7 +60,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
             .map(OrderPair::from_prost)
             .collect();
         Ok(Box::new(Self::new(
-            inputs.remove(0),
+            child,
             order_pairs,
             top_n_node.get_offset() as usize,
             top_n_node.get_limit() as usize,

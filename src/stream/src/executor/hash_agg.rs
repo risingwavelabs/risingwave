@@ -31,7 +31,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
-use super::{expect_first_barrier, Executor, PkIndicesRef, StreamExecutorResult};
+use super::{expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult};
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::{
     generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -61,6 +61,8 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
 struct HashAggExecutorExtra<S: StateStore> {
     /// The id of the actor that this executor belongs to.
     actor_id: ActorId,
+
+    ctx: ActorContextRef,
 
     /// See [`Executor::schema`].
     schema: Schema,
@@ -112,6 +114,7 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
@@ -133,6 +136,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input,
             extra: HashAggExecutorExtra {
                 actor_id,
+                ctx,
                 schema,
                 pk_indices,
                 identity: format!("HashAggExecutor {:X}", executor_id),
@@ -203,15 +207,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     async fn apply_chunk(
-        &mut HashAggExecutorExtra::<S> {
+        HashAggExecutorExtra::<S> {
+            actor_id: _,
+            ref ctx,
+            ref identity,
             ref key_indices,
             ref agg_calls,
             ref input_pk_indices,
             ref _input_schema,
             ref schema,
-            ref mut state_tables,
+            state_tables,
             ref state_table_col_mappings,
-            ..
+            pk_indices: _,
         }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
         chunk: StreamChunk,
@@ -290,7 +297,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(agg_calls.iter())
                 .zip_eq(state_tables.iter_mut())
             {
-                let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
+                let vis_map = agg_call_filter_res(
+                    ctx,
+                    identity,
+                    agg_call,
+                    &columns,
+                    Some(vis_map),
+                    capacity,
+                )?;
                 agg_state
                     .apply_chunk(&ops, vis_map.as_ref(), &column_refs, epoch, state_table)
                     .await?;
@@ -457,7 +471,7 @@ mod tests {
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::create_state_table;
     use crate::executor::test_utils::*;
-    use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
+    use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
     use crate::task::ActorId;
 
     fn new_boxed_hash_agg_executor(
@@ -484,6 +498,7 @@ mod tests {
             .unzip();
 
         HashAggExecutor::<SerializedKey, MemoryStateStore>::new(
+            ActorContext::create(),
             input,
             agg_calls,
             pk_indices,

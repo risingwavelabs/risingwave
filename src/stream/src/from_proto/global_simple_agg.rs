@@ -23,12 +23,13 @@ pub struct GlobalSimpleAggExecutorBuilder;
 
 impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GlobalSimpleAgg)?;
+        let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
@@ -43,7 +44,8 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
 
         Ok(GlobalSimpleAggExecutor::new(
-            params.input.remove(0),
+            params.actor_context,
+            input,
             agg_calls,
             params.pk_indices,
             params.executor_id,
