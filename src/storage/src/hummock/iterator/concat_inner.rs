@@ -161,6 +161,9 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        stats.add(&self.stats)
+        stats.add(&self.stats);
+        if let Some(iter) = &self.sstable_iter {
+            iter.collect_local_statistic(stats);
+        }
     }
 }
