@@ -17,7 +17,7 @@ downcast-rs = "1.2"
 dyn-clone = "1.0.4"
 enum-as-inner = "0.5"
 fixedbitset = "0.4.1"
-futures = "0.3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
 lazy_static = "1"
@@ -54,8 +54,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tonic = { version = "0.2", package = "madsim-tonic" }
-tracing = { version = "0.1" }
+tonic = { version = "0.2.1", package = "madsim-tonic" }
+tracing = "0.1"
 uuid = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 

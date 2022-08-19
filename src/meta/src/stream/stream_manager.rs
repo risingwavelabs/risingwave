@@ -961,7 +961,10 @@ mod tests {
             &self,
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
-            Ok(Response::new(BarrierCompleteResponse::default()))
+            Ok(Response::new(BarrierCompleteResponse {
+                checkpoint: true,
+                ..Default::default()
+            }))
         }
     }
 
