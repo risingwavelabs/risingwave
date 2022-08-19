@@ -210,15 +210,15 @@ pub fn spawn_data_generation_stream(
 
     #[cfg(not(madsim))]
     std::thread::Builder::new()
-         .name("risingwave-data-generation".to_string())
-         .spawn(move || {
-             tokio::runtime::Builder::new_current_thread()
-                 .enable_all()
-                 .build()
-                 .unwrap()
-                 .block_on(future);
-         })
-         .unwrap();
+        .name("risingwave-data-generation".to_string())
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(future);
+        })
+        .unwrap();
 
     // Note: madsim does not support creating multiple runtime, so we just run it in current
     // runtime.
