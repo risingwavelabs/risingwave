@@ -25,9 +25,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    ActorMapping, Dispatcher, DispatcherType, FragmentType, StreamNode,
-};
+use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -158,7 +156,7 @@ where
             /// mapping info of one table.
             upstream_fragment_vnode_info: &'a HashMap<TableId, FragmentVNodeInfo>,
             /// Records each upstream mview actor's vnode bitmap info.
-            upstream_vnode_bitmap_info: &'a mut HashMap<TableId, BTreeMap<ActorId, Option<Buffer>>>,
+            upstream_vnode_bitmap_info: &'a mut HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>,
             /// Records what's the actors on each worker of one table.
             tables_worker_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             /// Schedule information of all actors.
@@ -179,13 +177,14 @@ where
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
                 fragment_id: FragmentId,
+                upstream_actor_idx: usize,
                 _same_worker_node_as_upstream: bool,
                 is_singleton: bool,
             ) -> MetaResult<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id, fragment_id, _same_worker_node_as_upstream, is_singleton)?;
+                        self.resolve_chain_node_inner(input, actor_id, fragment_id, upstream_actor_idx, _same_worker_node_as_upstream, is_singleton)?;
                     }
                     return Ok(());
                 };
@@ -196,17 +195,17 @@ where
                     .insert(fragment_id, table_id);
                 // 1. use table id to get upstream vnode mapping info: [(actor_id,
                 // option(vnode_bitmap))]
-                let upstream_vnode_mapping_info =
-                    &mut self.upstream_vnode_bitmap_info.get_mut(&table_id).unwrap();
+                let upstream_vnode_mapping_info = &self.upstream_vnode_bitmap_info[&table_id];
 
-                if is_singleton {
-                    // The upstream fragment should also be singleton.
-                    assert_eq!(upstream_vnode_mapping_info.len(), 1);
-                }
-                // Assign a upstream actor id to this chain node.
-                let (upstream_actor_id, upstream_vnode_bitmap) = upstream_vnode_mapping_info
-                    .pop_first()
-                    .expect("upstream actor not found");
+                let (upstream_actor_id, upstream_vnode_bitmap) = {
+                    if is_singleton {
+                        // The upstream fragment should also be singleton.
+                        upstream_vnode_mapping_info.iter().exactly_one().unwrap()
+                    } else {
+                        // Assign a upstream actor id to this chain node.
+                        &upstream_vnode_mapping_info[upstream_actor_idx]
+                    }
+                };
 
                 // Here we force schedule the chain node to the same parallel unit as its upstream,
                 // so `same_worker_node_as_upstream` is not used here. If we want to
@@ -217,14 +216,14 @@ where
                     .get(&table_id)
                     .unwrap()
                     .actor_parallel_unit_maps
-                    .get(&upstream_actor_id)
+                    .get(upstream_actor_id)
                     .unwrap()
                     .clone();
                 self.locations
                     .actor_locations
                     .insert(actor_id, upstream_parallel_unit);
                 self.actor_vnode_bitmaps
-                    .insert(actor_id, upstream_vnode_bitmap);
+                    .insert(actor_id, upstream_vnode_bitmap.clone());
 
                 // fill upstream node-actor info for later use
                 let upstream_table_worker_actors =
@@ -235,7 +234,7 @@ where
                     .flat_map(|(worker_id, actor_ids)| {
                         actor_ids.iter().map(|actor_id| (*worker_id, *actor_id))
                     })
-                    .filter(|(_, actor_id)| upstream_actor_id == *actor_id)
+                    .filter(|(_, actor_id)| upstream_actor_id == actor_id)
                     .into_group_map();
                 for (worker_id, actor_ids) in chain_upstream_worker_actors {
                     self.upstream_worker_actors
@@ -255,7 +254,7 @@ where
                 let Some(NodeBody::Merge(ref mut merge)) = merge_stream_node.node_body else {
                     unreachable!("chain's input[0] should always be merge");
                 };
-                merge.upstream_actor_id.push(upstream_actor_id);
+                merge.upstream_actor_id.push(*upstream_actor_id);
 
                 // finally, we should also build dispatcher infos here.
                 //
@@ -264,7 +263,7 @@ where
                 // `NoShuffle` dispatcher here.
                 // TODO: support different parallel unit and distribution for new MV.
                 self.dispatchers
-                    .entry(upstream_actor_id)
+                    .entry(*upstream_actor_id)
                     .or_default()
                     .push(Dispatcher {
                         r#type: DispatcherType::NoShuffle as _,
@@ -313,12 +312,13 @@ where
             let is_singleton =
                 fragment.get_distribution_type()? == FragmentDistributionType::Single;
 
-            for actor in &mut fragment.actors {
+            for (idx, actor) in &mut fragment.actors.iter_mut().enumerate() {
                 let stream_node = actor.nodes.as_mut().unwrap();
                 env.resolve_chain_node_inner(
                     stream_node,
                     actor.actor_id,
                     fragment.fragment_id,
+                    idx,
                     actor.same_worker_node_as_upstream,
                     is_singleton,
                 )?;

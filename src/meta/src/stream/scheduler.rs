@@ -24,7 +24,6 @@ use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::FragmentType;
 
 use crate::manager::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::model::ActorId;

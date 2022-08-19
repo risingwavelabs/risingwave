@@ -536,9 +536,9 @@ where
     pub async fn get_sink_vnode_bitmap_info(
         &self,
         table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, BTreeMap<ActorId, Option<Buffer>>>> {
+    ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>> {
         let map = &self.core.read().await.table_fragments;
-        let mut info: HashMap<TableId, BTreeMap<ActorId, Option<Buffer>>> = HashMap::new();
+        let mut info: HashMap<TableId, Vec<(ActorId, Option<Buffer>)>> = HashMap::new();
 
         for table_id in table_ids {
             match map.get(table_id) {

@@ -337,7 +337,7 @@ impl TableFragments {
     }
 
     /// Returns sink actor vnode bitmap infos.
-    pub fn sink_vnode_bitmap_info(&self) -> BTreeMap<ActorId, Option<Buffer>> {
+    pub fn sink_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
         self.fragments
             .values()
             .filter(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
@@ -347,7 +347,7 @@ impl TableFragments {
                     .iter()
                     .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
             })
-            .collect()
+            .collect_vec()
     }
 
     pub fn sink_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
