@@ -17,7 +17,7 @@ downcast-rs = "1.2"
 dyn-clone = "1.0.4"
 enum-as-inner = "0.5"
 fixedbitset = "0.4.1"
-futures = "0.3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
 lazy_static = "1"
