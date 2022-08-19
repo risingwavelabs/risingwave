@@ -13,72 +13,52 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::pin::Pin;
+
+use futures::future::RemoteHandle;
+use futures::FutureExt;
 
 use crate::hummock::compactor::CompactOutput;
-use crate::hummock::{HummockError, HummockResult};
-
-type CompactionRequest = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+use crate::hummock::HummockResult;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 pub struct CompactionExecutor {
-    requests: tokio::sync::mpsc::UnboundedSender<CompactionRequest>,
     // TODO: graceful shutdown
     #[cfg(not(madsim))]
-    _runtime_thread: std::thread::JoinHandle<()>,
+    runtime: tokio::runtime::Runtime,
 }
 
 impl CompactionExecutor {
     #[cfg(not(madsim))]
     pub fn new(worker_threads_num: Option<usize>) -> Self {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        Self {
-            requests: tx,
-            _runtime_thread: std::thread::spawn(move || {
-                let mut builder = tokio::runtime::Builder::new_multi_thread();
-                if let Some(worker_threads_num) = worker_threads_num {
-                    builder.worker_threads(worker_threads_num);
-                }
-                let runtime = builder.enable_all().build().unwrap();
-                runtime.block_on(async {
-                    while let Some(request) = rx.recv().await {
-                        tokio::spawn(request);
-                    }
-                });
-            }),
-        }
+        let runtime = {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            builder.thread_name("risingwave-compaction");
+            if let Some(worker_threads_num) = worker_threads_num {
+                builder.worker_threads(worker_threads_num);
+            }
+            builder.enable_all().build().unwrap()
+        };
+
+        Self { runtime }
     }
 
     // FIXME: simulation doesn't support new thread or tokio runtime.
     //        this is a workaround to make it compile.
     #[cfg(madsim)]
     pub fn new(_worker_threads_num: Option<usize>) -> Self {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            while let Some(request) = rx.recv().await {
-                tokio::spawn(request);
-            }
-        });
-        Self { requests: tx }
+        Self
     }
 
-    pub fn send_request<T>(
-        &self,
-        t: T,
-    ) -> HummockResult<tokio::sync::oneshot::Receiver<HummockResult<CompactOutput>>>
+    /// Send a request to the executor, returns a [`RemoteHandle`] to retrieve the result.
+    pub fn send_request<T>(&self, t: T) -> RemoteHandle<HummockResult<CompactOutput>>
     where
         T: Future<Output = HummockResult<CompactOutput>> + Send + 'static,
     {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let compaction_request = Box::pin(async move {
-            let result = t.await;
-            if tx.send(result).is_err() {
-                tracing::warn!("Compaction request output ignored: receiver dropped.");
-            }
-        });
-        self.requests
-            .send(compaction_request)
-            .map_err(HummockError::compaction_executor)?;
-        Ok(rx)
+        let (t, handle) = t.remote_handle();
+        #[cfg(not(madsim))]
+        let _ = self.runtime.spawn(t);
+        #[cfg(madsim)]
+        let _ = tokio::spawn(t);
+        handle
     }
 }

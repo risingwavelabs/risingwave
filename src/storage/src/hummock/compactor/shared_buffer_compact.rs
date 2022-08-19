@@ -160,7 +160,7 @@ async fn compact_shared_buffer(
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
 
         let split_task = async move { compactor.run(iter, multi_filter_key_extractor).await };
-        let rx = Compactor::request_execution(compaction_executor, split_task)?;
+        let rx = Compactor::request_execution(compaction_executor, split_task);
         compaction_futures.push(rx);
     }
     local_stats.report(stats.as_ref());
@@ -168,7 +168,7 @@ async fn compact_shared_buffer(
     let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
     let mut err = None;
     while let Some(future_result) = buffered.next().await {
-        match future_result.unwrap() {
+        match future_result {
             Ok((split_index, ssts)) => {
                 output_ssts.push((split_index, ssts));
             }
