@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 
 use crate::source::error::{SourceError, SourceResult};
@@ -55,12 +56,10 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             Some("earliest") => PulsarEnumeratorOffset::Earliest,
             Some("latest") => PulsarEnumeratorOffset::Latest,
             None => PulsarEnumeratorOffset::Earliest,
-            _ => {
-                return Err(SourceError::into_source_error(
-                    "properties `startup_mode` only support earliest and latest or leave it empty"
-                        .to_string(),
-                ));
-            }
+            _ => bail!(
+                "properties `startup_mode` only support earliest and latest or leave it empty"
+                    .to_string(),
+            ),
         };
 
         if let Some(s) = properties.time_offset {
@@ -83,11 +82,11 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
         // note: may check topic exists by get stats
         if topic_metadata.partitions < 0 {
-            SourceError::into_source_error(format!(
+            bail!(
                 "illegal metadata {:?} for pulsar topic {}",
                 topic_metadata.partitions,
                 self.topic.to_string()
-            ));
+            );
         }
 
         let splits = if topic_metadata.partitions > 0 {

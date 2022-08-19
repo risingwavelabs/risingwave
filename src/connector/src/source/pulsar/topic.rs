@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 use urlencoding::encode;
 
@@ -59,9 +60,7 @@ impl Topic {
 
     pub fn sub_topic(&self, partition: i32) -> SourceResult<Topic> {
         if partition < 0 {
-            return Err(SourceError::into_source_error(
-                "invalid partition index number".to_string(),
-            ));
+            bail!("invalid partition index number".to_string(),);
         }
 
         if self.topic.contains(PARTITIONED_TOPIC_SUFFIX) {
@@ -111,13 +110,11 @@ pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
                 PERSISTENT_DOMAIN, PUBLIC_TENANT, DEFAULT_NAMESPACE, parts[0],
             ),
             3 => format!("{}://{}", PERSISTENT_DOMAIN, topic),
-            _ => {
-                return Err(SourceError::into_source_error(format!(
-                    "Invalid short topic name '{}', \
+            _ => bail!(
+                "Invalid short topic name '{}', \
                 it should be in the format of <tenant>/<namespace>/<topic> or <topic>",
-                    topic
-                )));
-            }
+                topic
+            ),
         };
     }
 
@@ -125,22 +122,20 @@ pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
 
     let domain = match parts[0] {
         PERSISTENT_DOMAIN | NON_PERSISTENT_DOMAIN => parts[0],
-        _ => {
-            return Err(SourceError::into_source_error(format!(
+        _ => bail!(
                 "The domain only can be specified as 'persistent' or 'non-persistent'. Input domain is '{}'",
                 parts[0]
-            )));
-        }
+            ),
     };
 
     let rest = parts[1];
     let parts: Vec<&str> = rest.splitn(3, '/').collect();
 
     if parts.len() != 3 {
-        return Err(SourceError::into_source_error(format!(
+        bail!(
             "invalid topic name '{}', it should be in the format of <tenant>/<namespace>/<topic>",
             rest
-        )));
+        );
     }
 
     let parsed_topic = Topic {
@@ -152,9 +147,7 @@ pub fn parse_topic(topic: &str) -> SourceResult<Topic> {
     };
 
     if parsed_topic.topic.is_empty() {
-        return Err(SourceError::into_source_error(
-            "topic name cannot be empty".to_string(),
-        ));
+        bail!("topic name cannot be empty".to_string(),);
     }
 
     Ok(parsed_topic)

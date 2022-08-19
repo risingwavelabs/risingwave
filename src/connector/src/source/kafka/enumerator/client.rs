@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
+use risingwave_common::bail;
 
 use crate::source::base::SplitEnumerator;
 use crate::source::error::{SourceError, SourceResult};
@@ -63,9 +64,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             Some("latest") => KafkaEnumeratorOffset::Latest,
             None => KafkaEnumeratorOffset::Earliest,
             _ => {
-                return Err(SourceError::into_source_error(
+                bail!(
                     "properties `scan_startup_mode` only support earliest and latest or leave it empty".to_string()
-                ));
+                );
             }
         };
 
@@ -90,10 +91,11 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
     async fn list_splits(&mut self) -> SourceResult<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition().map_err(|e| {
-            SourceError::into_source_error(format!(
+            anyhow::anyhow!(
                 "failed to fetch metadata from kafka ({}): {}",
-                self.broker_address, e
-            ))
+                self.broker_address,
+                e
+            )
         })?;
 
         let mut start_offsets = self
@@ -216,19 +218,11 @@ impl KafkaSplitEnumerator {
 
         let topic_meta = match metadata.topics() {
             [meta] => meta,
-            _ => {
-                return Err(SourceError::into_source_error(format!(
-                    "topic {} not found",
-                    self.topic
-                )))
-            }
+            _ => bail!("topic {} not found", self.topic),
         };
 
         if topic_meta.partitions().is_empty() {
-            return Err(SourceError::into_source_error(format!(
-                "topic {} not found",
-                self.topic
-            )));
+            bail!("topic {} not found", self.topic);
         }
 
         Ok(topic_meta

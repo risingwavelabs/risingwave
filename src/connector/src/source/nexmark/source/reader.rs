@@ -15,8 +15,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use risingwave_common::bail;
 
-use crate::source::error::{SourceError, SourceResult};
+use crate::source::error::SourceResult;
 use crate::source::nexmark::config::NexmarkConfig;
 use crate::source::nexmark::source::event::EventType;
 use crate::source::nexmark::source::generator::NexmarkEventGenerator;
@@ -56,12 +57,7 @@ impl SplitReader for NexmarkSplitReader {
             "Person" => EventType::Person,
             "Auction" => EventType::Auction,
             "Bid" => EventType::Bid,
-            _ => {
-                return Err(SourceError::into_source_error(format!(
-                    "Unknown table type {} found",
-                    event_type_string
-                )))
-            }
+            _ => bail!("Unknown table type {} found", event_type_string),
         };
 
         let use_real_time = properties.use_real_time;

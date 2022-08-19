@@ -143,6 +143,8 @@ pub enum ErrorCode {
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
+    #[error("Source error: {0}")]
+    SourceError(BoxedError),
 
     #[error("Permission denied: {0}")]
     PermissionDenied(String),

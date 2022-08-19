@@ -73,9 +73,7 @@ impl SplitReader for KafkaSplitReader {
         let consumer: StreamConsumer = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
-            .map_err(|e| {
-                SourceError::into_source_error(format!("consumer creation failed {}", e))
-            })?;
+            .map_err(|e| anyhow::anyhow!("consumer creation failed {}", e))?;
 
         if let Some(splits) = state {
             log::debug!("Splits for kafka found! {:?}", splits);

@@ -15,6 +15,7 @@
 use async_trait::async_trait;
 use aws_sdk_kinesis::model::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
+use risingwave_common::bail;
 
 use crate::source::error::{SourceError, SourceResult};
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
@@ -57,12 +58,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
                 .map_err(|e| SourceError::sdk_error(e.to_string()))?;
             match list_shard_output.shards {
                 Some(shard) => shard_collect.extend(shard),
-                None => {
-                    return Err(SourceError::into_source_error(format!(
-                        "no shards in stream {}",
-                        &self.stream_name
-                    )));
-                }
+                None => bail!("no shards in stream {}", &self.stream_name),
             }
 
             match list_shard_output.next_token {

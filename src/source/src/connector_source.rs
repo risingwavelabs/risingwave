@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::Result;
-use risingwave_connector::source::error::{SourceError, SourceResult};
+use risingwave_connector::source::error::SourceResult;
 use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitId, SplitMetaData,
     SplitReaderImpl,
@@ -155,7 +155,7 @@ impl InnerConnectorSourceReader {
                 }
             }
 
-            match chunk.map_err(|e| SourceError::into_source_error(e.to_string())) {
+            match chunk {
                 Err(e) => {
                     tracing::error!("connector reader {} error happened {}", id, e.to_string());
                     output.send(Err(e)).await.ok();
@@ -271,15 +271,13 @@ impl ConnectorSourceReader {
             .handles
             .as_mut()
             .and_then(|handles| handles.remove(&split_id))
-            .ok_or_else(|| {
-                SourceError::into_source_error(format!("could not find split {}", split_id))
-            })
+            .ok_or_else(|| anyhow::anyhow!("could not find split {}", split_id))
             .unwrap();
         handle.stop_tx.send(()).unwrap();
         handle
             .join_handle
             .await
-            .map_err(|e| SourceError::into_source_error(e.to_string()))
+            .map_err(|e| anyhow::anyhow!(e).into())
     }
 }
 
@@ -299,10 +297,8 @@ impl ConnectorSource {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .ok_or_else(|| {
-                        SourceError::into_source_error(format!(
-                            "Failed to find column id: {} in source: {:?}",
-                            id, self
-                        ))
+                        anyhow::anyhow!("Failed to find column id: {} in source: {:?}", id, self)
+                            .into()
                     })
                     .map(|col| col.clone())
             })

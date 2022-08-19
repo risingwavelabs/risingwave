@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use rdkafka::error::KafkaError;
 use risingwave_common::array::ArrayError;
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::ProstFieldNotFound;
 
 pub type SourceResult<T> = std::result::Result<T, SourceError>;
@@ -82,10 +83,6 @@ impl std::fmt::Debug for SourceError {
 }
 
 impl SourceError {
-    pub fn into_source_error(s: String) -> Self {
-        SourceErrorInner::Internal(anyhow::anyhow!(s)).into()
-    }
-
     pub fn send_error(s: String) -> Self {
         SourceErrorInner::SendError(s).into()
     }
@@ -156,5 +153,11 @@ impl From<pulsar::Error> for SourceError {
 impl From<std::io::Error> for SourceError {
     fn from(a: std::io::Error) -> Self {
         SourceErrorInner::IoError(a).into()
+    }
+}
+
+impl From<SourceError> for RwError {
+    fn from(source_error: SourceError) -> Self {
+        ErrorCode::SourceError(source_error.into()).into()
     }
 }

@@ -21,9 +21,10 @@ use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
 use http::Uri;
 use maplit::hashmap;
+use risingwave_common::bail;
 use serde::{Deserialize, Serialize};
 
-use crate::source::error::{SourceError, SourceResult};
+use crate::source::error::SourceResult;
 use crate::source::kinesis::KinesisProperties;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -103,9 +104,7 @@ impl AwsConfigInfo {
             properties.credentials_secret_access_key,
         );
         if access_key.is_some() ^ secret_key.is_some() {
-            return Err(
-                SourceError::into_source_error("Both Kinesis credential access key and Kinesis secret key should be provided or not provided at the same time.".to_string())
-            );
+            bail!("Both Kinesis credential access key and Kinesis secret key should be provided or not provided at the same time.");
         } else if let (Some(access), Some(secret)) = (access_key, secret_key) {
             credentials = Some(AwsCredentials {
                 access_key_id: access,
