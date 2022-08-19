@@ -24,7 +24,7 @@ use crate::hummock::HummockResult;
 pub struct CompactionExecutor {
     // TODO: graceful shutdown
     #[cfg(not(madsim))]
-    runtime: tokio::runtime::Runtime,
+    runtime: &'static tokio::runtime::Runtime,
 }
 
 impl CompactionExecutor {
@@ -39,14 +39,16 @@ impl CompactionExecutor {
             builder.enable_all().build().unwrap()
         };
 
-        Self { runtime }
+        Self {
+            runtime: Box::leak(Box::new(runtime)),
+        }
     }
 
     // FIXME: simulation doesn't support new thread or tokio runtime.
     //        this is a workaround to make it compile.
     #[cfg(madsim)]
     pub fn new(_worker_threads_num: Option<usize>) -> Self {
-        Self
+        Self {}
     }
 
     /// Send a request to the executor, returns a [`RemoteHandle`] to retrieve the result.

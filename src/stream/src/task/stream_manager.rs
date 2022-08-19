@@ -30,7 +30,6 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -51,7 +50,7 @@ lazy_static::lazy_static! {
 pub type ActorHandle = JoinHandle<()>;
 
 pub struct LocalStreamManagerCore {
-    runtime: Runtime,
+    runtime: &'static tokio::runtime::Runtime,
 
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
@@ -380,7 +379,7 @@ impl LocalStreamManagerCore {
             .unwrap();
 
         Self {
-            runtime,
+            runtime: Box::leak(Box::new(runtime)),
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
