@@ -176,7 +176,7 @@ impl dyn PlanNode {
             identity: format!("{}", self),
             node_body: node,
             operator_id: self.id().0 as u64,
-            pk_indices: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }

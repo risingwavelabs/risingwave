@@ -52,7 +52,7 @@ use crate::MetaOpts;
 pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    vacuum_trigger: Arc<VacuumTrigger<S>>,
+    vacuum_manager: Arc<VacuumManager<S>>,
     notification_manager: NotificationManagerRef,
     compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
@@ -63,15 +63,9 @@ where
     vec![
         start_compaction_scheduler(compaction_scheduler),
         start_vacuum_scheduler(
-            vacuum_trigger.clone(),
+            vacuum_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
-        // TODO #4037: enable full GC after watermark id introduced by #4369 is actually used.
-        // start_full_gc_scheduler(
-        //     vacuum_trigger,
-        //     Duration::from_secs(meta_opts.full_sst_gc_interval_sec),
-        //     Duration::from_secs(meta_opts.sst_retention_time_sec),
-        // ),
         subscribe_cluster_membership_change(
             hummock_manager,
             compactor_manager,
@@ -151,7 +145,7 @@ where
 
 /// Starts a task to periodically vacuum hummock.
 pub fn start_vacuum_scheduler<S>(
-    vacuum: Arc<VacuumTrigger<S>>,
+    vacuum: Arc<VacuumManager<S>>,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>)
 where
@@ -183,8 +177,11 @@ where
     (join_handle, shutdown_tx)
 }
 
+// As we have supported manual full GC in risectl,
+// this auto full GC scheduler is not used for now.
+#[allow(unused)]
 pub fn start_full_gc_scheduler<S>(
-    vacuum: Arc<VacuumTrigger<S>>,
+    vacuum: Arc<VacuumManager<S>>,
     interval: Duration,
     sst_retention_time: Duration,
 ) -> (JoinHandle<()>, Sender<()>)
@@ -204,7 +201,7 @@ where
                     return;
                 }
             }
-            if let Err(err) = vacuum.run_full_gc(sst_retention_time).await {
+            if let Err(err) = vacuum.start_full_gc(sst_retention_time).await {
                 tracing::warn!("Full GC error {:#?}", err);
             }
         }

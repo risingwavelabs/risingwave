@@ -39,7 +39,7 @@ impl StreamFragmenter {
             operator_id: state.gen_operator_id() as u64,
             identity: "Exchange (Lookup and Merge)".into(),
             fields: upstream.fields.clone(),
-            pk_indices: upstream.pk_indices.clone(),
+            stream_key: upstream.stream_key.clone(),
             node_body: Some(NodeBody::Exchange(ExchangeNode {
                 strategy: Some(Self::dispatch_no_shuffle()),
             })),
@@ -58,14 +58,14 @@ impl StreamFragmenter {
     fn build_lookup_for_delta_join(
         state: &mut BuildFragmentGraphState,
         (exchange_node_arrangement, exchange_node_stream): (&StreamNode, &StreamNode),
-        (output_fields, output_pk_indices): (Vec<ProstField>, Vec<u32>),
+        (output_fields, output_stream_key): (Vec<ProstField>, Vec<u32>),
         lookup_node: LookupNode,
     ) -> StreamNode {
         StreamNode {
             operator_id: state.gen_operator_id() as u64,
             identity: "Lookup".into(),
             fields: output_fields,
-            pk_indices: output_pk_indices,
+            stream_key: output_stream_key,
             node_body: Some(NodeBody::Lookup(lookup_node)),
             input: vec![
                 exchange_node_arrangement.clone(),
@@ -113,7 +113,7 @@ impl StreamFragmenter {
         let lookup_0 = Self::build_lookup_for_delta_join(
             state,
             (&exchange_a1l0, &exchange_a0l0),
-            (node.fields.clone(), node.pk_indices.clone()),
+            (node.fields.clone(), node.stream_key.clone()),
             LookupNode {
                 stream_key: delta_join_node.right_key.clone(),
                 arrange_key: delta_join_node.left_key.clone(),
@@ -156,7 +156,7 @@ impl StreamFragmenter {
         let lookup_1 = Self::build_lookup_for_delta_join(
             state,
             (&exchange_a0l1, &exchange_a1l1),
-            (node.fields.clone(), node.pk_indices.clone()),
+            (node.fields.clone(), node.stream_key.clone()),
             LookupNode {
                 stream_key: delta_join_node.left_key.clone(),
                 arrange_key: delta_join_node.right_key.clone(),
@@ -238,7 +238,7 @@ impl StreamFragmenter {
             operator_id: state.gen_operator_id() as u64,
             identity: "Union".into(),
             fields: node.fields.clone(),
-            pk_indices: node.pk_indices.clone(),
+            stream_key: node.stream_key.clone(),
             node_body: Some(NodeBody::LookupUnion(LookupUnionNode { order: vec![1, 0] })),
             input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
             append_only: node.append_only,
