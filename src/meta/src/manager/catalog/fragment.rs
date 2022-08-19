@@ -18,11 +18,10 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -530,9 +529,9 @@ where
     pub async fn get_sink_vnode_mapping_info(
         &self,
         table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Bitmap>)>>> {
+    ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>> {
         let map = &self.core.read().await.table_fragments;
-        let mut info: HashMap<TableId, Vec<(ActorId, Option<Bitmap>)>> = HashMap::new();
+        let mut info: HashMap<TableId, Vec<(ActorId, Option<Buffer>)>> = HashMap::new();
 
         for table_id in table_ids {
             match map.get(table_id) {

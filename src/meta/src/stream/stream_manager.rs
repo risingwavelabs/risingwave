@@ -17,11 +17,10 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::{Source, Table};
-use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
+use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
@@ -153,7 +152,7 @@ where
             /// Records what's the corresponding actor of each parallel unit of one table.
             upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
             /// Records each upstream mview actor's vnode mapping info.
-            upstream_vnode_mapping_info: &'a HashMap<TableId, Vec<(ActorId, Option<Bitmap>)>>,
+            upstream_vnode_mapping_info: &'a HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>,
             /// Records what's the actors on each worker of one table.
             tables_worker_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             /// Schedule information of all actors.
@@ -169,7 +168,7 @@ where
                 &mut self,
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
-                vnode_mapping: &Option<Bitmap>,
+                vnode_mapping: &Option<Buffer>,
                 same_worker_node_as_upstream: bool,
                 is_singleton: bool,
             ) -> MetaResult<()> {
@@ -310,7 +309,7 @@ where
                 env.resolve_chain_node_inner(
                     stream_node,
                     actor.actor_id,
-                    &actor.vnode_bitmap.as_ref().map(Bitmap::from),
+                    &actor.vnode_bitmap,
                     actor.same_worker_node_as_upstream,
                     is_singleton,
                 )?;

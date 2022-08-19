@@ -15,10 +15,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::types::ParallelUnitId;
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
+use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -318,17 +317,16 @@ impl TableFragments {
         actor_map
     }
 
-    pub fn sink_vnode_mapping_info(&self) -> Vec<(ActorId, Option<Bitmap>)> {
+    /// Returns sink actor vnode mapping infos.
+    pub fn sink_vnode_mapping_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
         self.fragments
             .values()
             .filter(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
             .flat_map(|fragment| {
-                fragment.actors.iter().map(|actor| {
-                    (
-                        actor.actor_id,
-                        actor.vnode_bitmap.as_ref().map(Bitmap::from),
-                    )
-                })
+                fragment
+                    .actors
+                    .iter()
+                    .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
             })
             .collect_vec()
     }
@@ -346,7 +344,7 @@ impl TableFragments {
             .collect()
     }
 
-    /// Generate toplogical order of fragments. If `index(a) < index(b)` in vec, then a is the
+    /// Generate topological order of fragments. If `index(a) < index(b)` in vec, then a is the
     /// downstream of b.
     pub fn generate_topological_order(&self) -> Vec<FragmentId> {
         let mut actionable_fragment_id = VecDeque::new();

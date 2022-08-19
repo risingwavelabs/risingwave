@@ -183,7 +183,6 @@ where
             // FIXME(Kexiang): select appropriate parallel_units, currently only support
             // `parallel_degree < parallel_units.size()`
             parallel_units.truncate(fragment.actors.len());
-            // parallel_units.shuffle(&mut rand::thread_rng());
 
             // Build vnode mapping according to the parallel units.
             let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
