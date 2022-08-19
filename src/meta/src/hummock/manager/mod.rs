@@ -1111,7 +1111,7 @@ where
         let mut new_hummock_version = old_version;
         new_hummock_version.id = new_version_id;
         new_version_delta.id = new_version_id;
-        if max_current_epoch <= new_hummock_version.max_current_epoch{
+        if max_current_epoch <= new_hummock_version.max_current_epoch {
             return Err(anyhow::anyhow!(
                 "Epoch {} <= max_current_epoch {}",
                 max_current_epoch,
