@@ -18,14 +18,16 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
+use risingwave_pb::stream_plan::{
+    ActorMapping, Dispatcher, DispatcherType, FragmentType, StreamNode,
+};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -37,10 +39,10 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{
-    ClusterManagerRef, DatabaseId, FragmentManagerRef, MetaSrvEnv, NotificationManagerRef,
-    Relation, SchemaId, WorkerId,
+    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv,
+    NotificationManagerRef, Relation, SchemaId, WorkerId,
 };
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, Scheduler, SourceManagerRef};
 use crate::MetaResult;
@@ -64,6 +66,8 @@ pub struct CreateMaterializedViewContext {
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
     pub internal_table_id_map: HashMap<u32, Option<Table>>,
+    /// Chain fragment set, used to determine when to schedule a chain fragment.
+    pub colocate_fragment_set: HashSet<FragmentId>,
     /// SchemaId of mview
     pub schema_id: SchemaId,
     /// DatabaseId of mview
@@ -145,20 +149,26 @@ where
         dependent_table_ids: &HashSet<TableId>,
         dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
         upstream_worker_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
-        locations: &ScheduledLocations,
+        locations: &mut ScheduledLocations,
+        colocate_fragment_set: &HashSet<FragmentId>,
     ) -> MetaResult<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
-            /// Records what's the corresponding actor of each parallel unit of one table.
-            upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
-            /// Records each upstream mview actor's vnode mapping info.
-            upstream_vnode_mapping_info: &'a HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>,
+            /// Records what's the corresponding parallel unit of each actor and mview vnode
+            /// mapping info of one table.
+            upstream_fragment_vnode_info: &'a HashMap<TableId, FragmentVNodeInfo>,
+            /// Records each upstream mview actor's vnode bitmap info.
+            upstream_vnode_bitmap_info: &'a mut HashMap<TableId, BTreeMap<ActorId, Option<Buffer>>>,
             /// Records what's the actors on each worker of one table.
             tables_worker_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             /// Schedule information of all actors.
-            locations: &'a ScheduledLocations,
+            locations: &'a mut ScheduledLocations,
             /// New dispatchers for this mview.
             dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
+            /// New vnode bitmaps for chain actors.
+            actor_vnode_bitmaps: &'a mut HashMap<ActorId, Option<Buffer>>,
+            /// Record fragment upstream table id of each fragment.
+            fragment_upstream_table_mapping: &'a mut HashMap<FragmentId, TableId>,
             /// Upstream Materialize actor ids grouped by worker id.
             upstream_worker_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
@@ -168,60 +178,53 @@ where
                 &mut self,
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
-                vnode_mapping: &Option<Buffer>,
-                same_worker_node_as_upstream: bool,
+                fragment_id: FragmentId,
+                _same_worker_node_as_upstream: bool,
                 is_singleton: bool,
             ) -> MetaResult<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id, vnode_mapping, same_worker_node_as_upstream, is_singleton)?;
+                        self.resolve_chain_node_inner(input, actor_id, fragment_id, _same_worker_node_as_upstream, is_singleton)?;
                     }
                     return Ok(());
                 };
 
                 // get upstream table id
                 let table_id = TableId::new(chain.table_id);
-                let upstream_actor_id = {
-                    // 1. use table id to get upstream vnode mapping info: [(actor_id,
-                    // option(vnode_mapping))]
-                    let upstream_vnode_mapping_info = &self.upstream_vnode_mapping_info[&table_id];
+                self.fragment_upstream_table_mapping
+                    .insert(fragment_id, table_id);
+                // 1. use table id to get upstream vnode mapping info: [(actor_id,
+                // option(vnode_bitmap))]
+                let upstream_vnode_mapping_info =
+                    &mut self.upstream_vnode_bitmap_info.get_mut(&table_id).unwrap();
 
-                    if is_singleton {
-                        // Directly find the singleton actor id.
-                        upstream_vnode_mapping_info.iter().exactly_one().unwrap().0
-                    } else {
-                        // 2. find the upstream actor id by vnode mapping.
-                        assert!(vnode_mapping.is_some());
-                        upstream_vnode_mapping_info
-                            .iter()
-                            .find(|(_, bitmap)| bitmap == vnode_mapping)
-                            .unwrap()
-                            .0
-                    }
-                };
-
-                // The current implementation already ensures chain and upstream are on the same
-                // worker node. So we do a sanity check here, in case that the logic get changed but
-                // `same_worker_node` constraint is not satisfied.
-                if same_worker_node_as_upstream {
-                    // Parallel unit id is a globally unique id across all worker nodes. It can be
-                    // seen as something like CPU core id. Therefore, we verify that actor's unit id
-                    // == upstream's unit id.
-
-                    let actor_parallel_unit_id =
-                        self.locations.actor_locations.get(&actor_id).unwrap().id;
-
-                    assert_eq!(
-                        *self
-                            .upstream_parallel_unit_info
-                            .get(&table_id)
-                            .unwrap()
-                            .get(&actor_parallel_unit_id)
-                            .unwrap(),
-                        upstream_actor_id
-                    );
+                if is_singleton {
+                    // The upstream fragment should also be singleton.
+                    assert_eq!(upstream_vnode_mapping_info.len(), 1);
                 }
+                // Assign a upstream actor id to this chain node.
+                let (upstream_actor_id, upstream_vnode_bitmap) = upstream_vnode_mapping_info
+                    .pop_first()
+                    .expect("upstream actor not found");
+
+                // Here we force schedule the chain node to the same parallel unit as its upstream,
+                // so `same_worker_node_as_upstream` is not used here. If we want to
+                // support different parallel units, we need to keep the vnode bitmap and assign a
+                // new parallel unit with some other strategies.
+                let upstream_parallel_unit = self
+                    .upstream_fragment_vnode_info
+                    .get(&table_id)
+                    .unwrap()
+                    .actor_parallel_unit_maps
+                    .get(&upstream_actor_id)
+                    .unwrap()
+                    .clone();
+                self.locations
+                    .actor_locations
+                    .insert(actor_id, upstream_parallel_unit);
+                self.actor_vnode_bitmaps
+                    .insert(actor_id, upstream_vnode_bitmap);
 
                 // fill upstream node-actor info for later use
                 let upstream_table_worker_actors =
@@ -276,14 +279,14 @@ where
             }
         }
 
-        let upstream_parallel_unit_info = &self
+        let upstream_fragment_vnode_info = &self
             .fragment_manager
-            .get_sink_parallel_unit_ids(dependent_table_ids)
+            .get_sink_fragment_vnode_info(dependent_table_ids)
             .await?;
 
-        let upstream_vnode_mapping_info = &self
+        let upstream_vnode_bitmap_info = &mut self
             .fragment_manager
-            .get_sink_vnode_mapping_info(dependent_table_ids)
+            .get_sink_vnode_bitmap_info(dependent_table_ids)
             .await?;
 
         let tables_worker_actors = &self
@@ -292,15 +295,21 @@ where
             .await?;
 
         let mut env = Env {
-            upstream_parallel_unit_info,
-            upstream_vnode_mapping_info,
+            upstream_fragment_vnode_info,
+            upstream_vnode_bitmap_info,
             tables_worker_actors,
             locations,
             dispatchers,
+            actor_vnode_bitmaps: &mut Default::default(),
+            fragment_upstream_table_mapping: &mut Default::default(),
             upstream_worker_actors,
         };
 
         for fragment in table_fragments.fragments.values_mut() {
+            if !colocate_fragment_set.contains(&fragment.fragment_id) {
+                continue;
+            }
+
             let is_singleton =
                 fragment.get_distribution_type()? == FragmentDistributionType::Single;
 
@@ -309,11 +318,24 @@ where
                 env.resolve_chain_node_inner(
                     stream_node,
                     actor.actor_id,
-                    &actor.vnode_bitmap,
+                    fragment.fragment_id,
                     actor.same_worker_node_as_upstream,
                     is_singleton,
                 )?;
+                // setup actor vnode bitmap.
+                actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
             }
+            // setup fragment vnode mapping.
+            let upstream_table_id = env
+                .fragment_upstream_table_mapping
+                .get(&fragment.fragment_id)
+                .unwrap();
+            fragment.vnode_mapping = env
+                .upstream_fragment_vnode_info
+                .get(upstream_table_id)
+                .unwrap()
+                .vnode_mapping
+                .clone();
         }
         Ok(())
     }
@@ -339,6 +361,7 @@ where
             dependent_table_ids,
             table_properties,
             internal_table_id_map,
+            colocate_fragment_set,
             affiliated_source,
             ..
         }: &mut CreateMaterializedViewContext,
@@ -358,7 +381,7 @@ where
 
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
-        let locations = {
+        let mut locations = {
             // List all running worker nodes.
             let workers = self
                 .cluster_manager
@@ -374,13 +397,14 @@ where
             // Create empty locations.
             let mut locations = ScheduledLocations::with_workers(workers);
 
-            // Schedule each fragment(actors) to nodes, recorded in `locations`.
+            // Schedule each fragment(actors) to nodes except chain, recorded in `locations`.
             // Vnode mapping in fragment will be filled in as well.
             let topological_order = table_fragments.generate_topological_order();
             for fragment_id in topological_order {
                 let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
-                self.scheduler.schedule(fragment, &mut locations).await?;
-                table_fragments.update_table_fragment_map(fragment_id);
+                if !colocate_fragment_set.contains(&fragment_id) {
+                    self.scheduler.schedule(fragment, &mut locations).await?;
+                }
             }
 
             locations
@@ -394,7 +418,8 @@ where
             dependent_table_ids,
             dispatchers,
             upstream_worker_actors,
-            &locations,
+            &mut locations,
+            colocate_fragment_set,
         )
         .await?;
 

@@ -454,8 +454,8 @@ message StreamFragmentGraph {
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;
-    // Mark the dependent table id of this fragment.
-    uint32 dependent_table_id = 6;
+    // Mark the upstream table ids of this fragment.
+    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {

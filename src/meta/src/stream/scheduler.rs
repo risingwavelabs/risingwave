@@ -24,8 +24,8 @@ use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::stream_plan::FragmentType;
 
-use super::record_table_vnode_mappings;
 use crate::manager::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
@@ -238,11 +238,7 @@ where
             data,
             ..Default::default()
         });
-        // Looking at the first actor is enough, since all actors in one fragment have identical
-        // state table id.
-        let actor = fragment.actors.first().unwrap();
-        let stream_node = actor.get_nodes()?.clone();
-        record_table_vnode_mappings(&stream_node, fragment)?;
+
         Ok(vnode_mapping)
     }
 

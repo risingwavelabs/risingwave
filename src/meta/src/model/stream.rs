@@ -119,6 +119,16 @@ impl TableFragments {
         self.table_id
     }
 
+    /// Returns sink fragment vnode mapping.
+    pub fn sink_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
+        self.fragments
+            .values()
+            .find(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
+            .unwrap()
+            .vnode_mapping
+            .clone()
+    }
+
     /// Update state of all actors
     pub fn update_actors_state(&mut self, state: ActorState) {
         for actor_status in self.actor_status.values_mut() {
@@ -317,8 +327,17 @@ impl TableFragments {
         actor_map
     }
 
-    /// Returns sink actor vnode mapping infos.
-    pub fn sink_vnode_mapping_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
+    /// Returns fragment vnode mapping.
+    pub fn fragment_vnode_mapping(&self, fragment_id: FragmentId) -> Option<ParallelUnitMapping> {
+        if let Some(fragment) = self.fragments.get(&fragment_id) {
+            fragment.vnode_mapping.clone()
+        } else {
+            None
+        }
+    }
+
+    /// Returns sink actor vnode bitmap infos.
+    pub fn sink_vnode_bitmap_info(&self) -> BTreeMap<ActorId, Option<Buffer>> {
         self.fragments
             .values()
             .filter(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
@@ -328,17 +347,20 @@ impl TableFragments {
                     .iter()
                     .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
             })
-            .collect_vec()
+            .collect()
     }
 
-    pub fn parallel_unit_sink_actor_id(&self) -> BTreeMap<ParallelUnitId, ActorId> {
+    pub fn sink_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
         let sink_actor_ids = self.sink_actor_ids();
         sink_actor_ids
             .iter()
             .map(|actor_id| {
                 (
-                    self.actor_status[actor_id].get_parallel_unit().unwrap().id,
                     *actor_id,
+                    self.actor_status[actor_id]
+                        .get_parallel_unit()
+                        .unwrap()
+                        .clone(),
                 )
             })
             .collect()
@@ -423,15 +445,6 @@ impl TableFragments {
         assert_eq!(result.len(), self.fragments.len());
 
         result
-    }
-
-    /// Update table fragment map, this should be called after fragment scheduled.
-    pub fn update_table_fragment_map(&mut self, fragment_id: FragmentId) {
-        if let Some(fragment) = self.fragments.get(&fragment_id) {
-            for table_id in &fragment.state_table_ids {
-                self.table_to_fragment_map.insert(*table_id, fragment_id);
-            }
-        }
     }
 
     /// Returns the internal table ids without the mview table.

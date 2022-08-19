@@ -29,8 +29,8 @@ pub use stream_manager::*;
 
 use crate::MetaResult;
 
-/// Record vnode mapping for stateful operators in meta.
-pub fn record_table_vnode_mappings(
+/// Record internal table ids for stateful operators in meta.
+pub fn record_internal_state_tables(
     stream_node: &StreamNode,
     fragment: &mut Fragment,
 ) -> MetaResult<()> {
@@ -80,7 +80,7 @@ pub fn record_table_vnode_mappings(
     }
     let input_nodes = stream_node.get_input();
     for input_node in input_nodes {
-        record_table_vnode_mappings(input_node, fragment)?;
+        record_internal_state_tables(input_node, fragment)?;
     }
     Ok(())
 }

@@ -207,7 +207,7 @@ impl StreamFragmenter {
                 state
                     .dependent_table_ids
                     .insert(TableId::new(node.table_id));
-                current_fragment.dependent_table_id = Some(node.table_id);
+                current_fragment.upstream_table_ids.push(node.table_id);
                 current_fragment.is_singleton = node.is_singleton;
             }
 

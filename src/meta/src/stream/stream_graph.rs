@@ -38,6 +38,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
+use crate::stream::record_internal_state_tables;
 use crate::MetaResult;
 
 /// Id of an Actor, maybe local or global
@@ -828,8 +829,19 @@ impl ActorGraphBuilder {
     where
         S: MetaStore,
     {
-        self.generate_graph_inner(id_gen_manager, fragment_manager, ctx)
-            .await
+        let mut graph = self
+            .generate_graph_inner(id_gen_manager, fragment_manager, ctx)
+            .await?;
+
+        // Record internal state table ids.
+        for fragment in graph.values_mut() {
+            // Looking at the first actor is enough, since all actors in one fragment have
+            // identical state table id.
+            let actor = fragment.actors.first().unwrap();
+            let stream_node = actor.get_nodes()?.clone();
+            record_internal_state_tables(&stream_node, fragment)?;
+        }
+        Ok(graph)
     }
 
     /// Build a stream graph by duplicating each fragment as parallel actors.
@@ -910,7 +922,7 @@ impl ActorGraphBuilder {
         &self,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-        ctx: &CreateMaterializedViewContext,
+        ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // poped out from the heap will be the top-most node in plan, or the sink in stream graph.)
@@ -958,18 +970,25 @@ impl ActorGraphBuilder {
         fragment_id: GlobalFragmentId,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
-        ctx: &CreateMaterializedViewContext,
+        ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
 
         let parallel_degree = if current_fragment.is_singleton {
             1
-        } else if current_fragment.dependent_table_id != 0 {
+        } else if !current_fragment.upstream_table_ids.is_empty() {
             // set fragment parallelism to the parallelism of its dependent table.
             let upstream_actors = ctx
                 .table_sink_map
-                .get(&TableId::new(current_fragment.dependent_table_id))
+                .get(&TableId::from(
+                    *current_fragment
+                        .upstream_table_ids
+                        .iter()
+                        .exactly_one()
+                        .unwrap(),
+                ))
                 .expect("upstream actor should exist");
+            ctx.colocate_fragment_set.insert(fragment_id.as_global_id());
             upstream_actors.len() as u32
         } else {
             self.default_parallelism
