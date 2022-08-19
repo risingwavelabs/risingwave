@@ -187,9 +187,7 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
-        let mut reader = source
-            .stream_reader(vec![0.into(), 1.into()])
-            .await?;
+        let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor::new(
