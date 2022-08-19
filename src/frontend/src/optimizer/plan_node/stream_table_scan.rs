@@ -56,6 +56,7 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.logical_pk.clone(),
+            logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().appendonly,
         );

@@ -34,11 +34,14 @@ use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::managed_state::dynamic_filter::RangeCache;
 use super::monitor::StreamingMetrics;
-use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
-use crate::common::StreamChunkBuilder;
+use super::{
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+};
+use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
+    ctx: ActorContextRef,
     source_l: Option<BoxedExecutor>,
     source_r: Option<BoxedExecutor>,
     key_l: usize,
@@ -48,7 +51,6 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     range_cache: RangeCache<S>,
     right_table: RowBasedStateTable<S>,
     is_right_table_writer: bool,
-    actor_id: u64,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
 }
@@ -56,6 +58,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
 impl<S: StateStore> DynamicFilterExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        ctx: ActorContextRef,
         source_l: BoxedExecutor,
         source_r: BoxedExecutor,
         key_l: usize,
@@ -65,7 +68,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         mut state_table_l: RowBasedStateTable<S>,
         mut state_table_r: RowBasedStateTable<S>,
         is_right_table_writer: bool,
-        actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         // TODO: enable sanity check for dynamic filter <https://github.com/singularity-data/risingwave/issues/3893>
@@ -74,6 +76,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let schema = source_l.schema().clone();
         Self {
+            ctx,
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
@@ -83,7 +86,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
             right_table: state_table_r,
             is_right_table_writer,
-            actor_id,
             metrics,
             schema,
         }
@@ -100,11 +102,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         let mut last_res = false;
 
-        let eval_results = if let Some(cond) = condition {
-            Some(cond.eval(data_chunk)?)
-        } else {
-            None
-        };
+        let eval_results = condition.map(|cond| {
+            cond.eval_infallible(data_chunk, |err| {
+                self.ctx.on_compute_error(err, self.identity())
+            })
+        });
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
             let left_val = row.value_at(self.key_l).to_owned_datum();
@@ -253,7 +255,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
-            self.actor_id,
+            self.ctx.id,
             self.metrics.clone(),
         );
 
@@ -348,6 +350,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     prev_epoch_value = Some(curr);
 
+                    // Update the vnode bitmap for the left state table if asked.
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                        self.range_cache
+                            .state_table
+                            .update_vnode_bitmap(vnode_bitmap);
+                    }
+
                     yield Message::Barrier(barrier);
                 }
             }
@@ -383,6 +392,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
+    use crate::executor::ActorContext;
 
     fn create_in_memory_state_table() -> (
         RowBasedStateTable<MemoryStateStore>,
@@ -419,6 +429,7 @@ mod tests {
 
         let (mem_state_l, mem_state_r) = create_in_memory_state_table();
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
+            ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),
             0,
@@ -428,7 +439,6 @@ mod tests {
             mem_state_l,
             mem_state_r,
             true,
-            1,
             Arc::new(StreamingMetrics::unused()),
         );
         (tx_l, tx_r, Box::new(executor).execute())

@@ -27,7 +27,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef,
+    SstableStoreRef, SstableStoreWrite,
 };
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
@@ -103,7 +103,7 @@ pub fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta, Vec<u32>) {
-    let mut b = SstableBuilder::new(0, opts);
+    let mut b = SstableBuilder::new_for_test(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }

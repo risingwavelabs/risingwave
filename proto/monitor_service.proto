@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package monitor_service;
+
+option optimize_for = SPEED;
+
+message StackTraceRequest {}
+
+message StackTraceResponse {
+  map<uint32, string> actor_traces = 1;
+  map<string, string> rpc_traces = 2;
+}
+
+message ProfilingRequest {
+  // How long the profiling should last.
+  uint64 sleep_s = 1;
+}
+
+message ProfilingResponse {
+  bytes result = 1;
+}
+
+service MonitorService {
+  rpc StackTrace(StackTraceRequest) returns (StackTraceResponse);
+  rpc Profiling(ProfilingRequest) returns (ProfilingResponse);
+}

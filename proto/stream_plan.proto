@@ -50,8 +50,10 @@ message UpdateMutation {
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
   // Merge updates for each downstream actor.
   map<uint32, MergeUpdate> actor_merge_update = 2;
-
-  repeated uint32 dropped_actors = 3;
+  // Vnode bitmap updates for each actor.
+  map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
+  // All actors to be dropped in this update.
+  repeated uint32 dropped_actors = 4;
 }
 
 message SourceChangeSplitMutation {

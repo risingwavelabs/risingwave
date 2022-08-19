@@ -190,6 +190,13 @@ impl TestCase {
             }
         }
 
+        let test_case_copy = self.clone();
+        let _ = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |e| {
+            println!("Panic on {:?}\n{}", test_case_copy, e);
+            std::process::abort();
+        }));
+
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
@@ -276,11 +283,12 @@ impl TestCase {
                     name,
                     columns,
                     with_options,
+                    constraints,
                     ..
                 } => {
                     context.with_properties =
                         handle_with_properties("handle_create_table", with_options.clone())?;
-                    create_table::handle_create_table(context, name, columns).await?;
+                    create_table::handle_create_table(context, name, columns, constraints).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,

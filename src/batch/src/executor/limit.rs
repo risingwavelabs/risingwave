@@ -41,9 +41,9 @@ pub struct LimitExecutor {
 impl BoxedExecutorBuilder for LimitExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "LimitExecutor should have only 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let limit_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Limit)?;
@@ -52,7 +52,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
         let offset = limit_node.get_offset() as usize;
 
         Ok(Box::new(Self {
-            child: inputs.remove(0),
+            child,
             limit,
             offset,
             identity: source.plan_node().get_identity().clone(),

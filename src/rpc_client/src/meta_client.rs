@@ -401,10 +401,10 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<()> {
+    pub async fn flush(&self) -> Result<HummockEpoch> {
         let request = FlushRequest::default();
-        self.inner.flush(request).await?;
-        Ok(())
+        let resp = self.inner.flush(request).await?;
+        Ok(resp.snapshot.unwrap().epoch)
     }
 
     pub async fn list_table_fragments(
@@ -442,17 +442,13 @@ impl HummockMetaClient for MetaClient {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
+    ) -> Result<pin_version_response::Payload> {
         let req = PinVersionRequest {
             context_id: self.worker_id(),
             last_pinned,
         };
         let resp = self.inner.pin_version(req).await?;
-        Ok((
-            resp.is_delta_response,
-            resp.version_deltas,
-            resp.pinned_version,
-        ))
+        Ok(resp.payload.unwrap())
     }
 
     async fn unpin_version(&self) -> Result<()> {
@@ -531,9 +527,13 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
+            max_concurrent_task_number,
         };
         self.inner.subscribe_compact_tasks(req).await
     }
@@ -574,6 +574,15 @@ impl HummockMetaClient for MetaClient {
         };
 
         self.inner.trigger_manual_compaction(req).await?;
+        Ok(())
+    }
+
+    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+        self.inner
+            .trigger_full_gc(TriggerFullGcRequest {
+                sst_retention_time_sec,
+            })
+            .await?;
         Ok(())
     }
 }
@@ -681,6 +690,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
+            ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

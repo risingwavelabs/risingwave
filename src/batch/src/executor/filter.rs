@@ -83,9 +83,9 @@ impl FilterExecutor {
 impl BoxedExecutorBuilder for FilterExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1);
+        let [input]: [_; 1] = inputs.try_into().unwrap();
 
         let filter_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -96,7 +96,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
         let expr = build_from_prost(expr_node)?;
         Ok(Box::new(Self::new(
             expr,
-            inputs.remove(0),
+            input,
             source.plan_node().get_identity().clone(),
         )))
     }

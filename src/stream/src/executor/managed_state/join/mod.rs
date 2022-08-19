@@ -21,8 +21,8 @@ use std::sync::Arc;
 use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
-pub use join_entry_state::JoinEntryState;
-use risingwave_common::array::Row;
+pub(super) use join_entry_state::JoinEntryState;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -33,6 +33,7 @@ use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::ActorId;
 
 type DegreeType = u64;
 /// This is a row with a match degree
@@ -103,11 +104,48 @@ impl JoinRow {
             degree,
         }
     }
+
+    pub fn encode(&self) -> StreamExecutorResult<EncodedJoinRow> {
+        Ok(EncodedJoinRow {
+            row: self.row.serialize()?,
+            degree: self.degree,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct EncodedJoinRow {
+    pub row: Vec<u8>,
+    degree: DegreeType,
+}
+
+impl EncodedJoinRow {
+    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow> {
+        let deserializer = RowDeserializer::new(data_types.to_vec());
+        let row = deserializer.deserialize(self.row.as_ref())?;
+        Ok(JoinRow {
+            row,
+            degree: self.degree,
+        })
+    }
+
+    pub fn inc_degree(&mut self) -> DegreeType {
+        self.degree += 1;
+        self.degree
+    }
+
+    pub fn dec_degree(&mut self) -> StreamExecutorResult<DegreeType> {
+        if self.degree == 0 {
+            bail!("Tried to decrement zero join row degree");
+        }
+        self.degree -= 1;
+        Ok(self.degree)
+    }
 }
 
 type PkType = Row;
 
-pub type StateValueType = JoinRow;
+pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
 type JoinHashMapInner<K> =
@@ -125,7 +163,7 @@ pub struct JoinHashMapMetrics {
 }
 
 impl JoinHashMapMetrics {
-    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: u64, side: &'static str) -> Self {
+    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: ActorId, side: &'static str) -> Self {
         Self {
             metrics,
             actor_id: actor_id.to_string(),
@@ -157,14 +195,16 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
     // itself. Use the field is safe iff the struct is constructed with [`moveit`](https://crates.io/crates/moveit)'s way.
     inner: JoinHashMapInner<K>,
-    /// Data types of the columns
+    /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
+    /// Data types of all columns
+    col_data_types: Vec<DataType>,
     /// Indices of the primary keys
     pk_indices: Vec<usize>,
     /// Current epoch
     current_epoch: u64,
     /// State table
-    state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: RowBasedStateTable<S>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -176,19 +216,16 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         target_cap: usize,
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
-        mut data_types: Vec<DataType>,
+        data_types: Vec<DataType>,
         state_table: RowBasedStateTable<S>,
         metrics: Arc<StreamingMetrics>,
-        actor_id: u64,
+        actor_id: ActorId,
         side: &'static str,
     ) -> Self {
         let join_key_data_types = join_key_indices
             .iter()
             .map(|idx| data_types[*idx].clone())
             .collect_vec();
-
-        // Put the degree to the last column of the table.
-        data_types.push(DataType::Int64);
 
         let alloc = StatsAlloc::new(Global).shared();
         Self {
@@ -198,6 +235,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 alloc.clone(),
             ),
             join_key_data_types,
+            col_data_types: data_types,
             pk_indices,
             current_epoch: 0,
             state_table,
@@ -292,7 +330,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let row = row?.into_owned();
             let pk = row.by_indices(&self.pk_indices);
 
-            cached.insert(pk, JoinRow::from_row(row));
+            cached.insert(pk, JoinRow::from_row(row).encode()?);
         }
         Ok(JoinEntryState::with_cached(cached))
     }
@@ -306,7 +344,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Insert a key
     pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
         if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.insert(pk, value.clone());
+            entry.insert(pk, value.encode()?);
         }
 
         // If no cache maintained, only update the flush buffer.
@@ -330,19 +368,19 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.put(key.clone(), state);
     }
 
-    pub fn inc_degree(&mut self, join_row: &mut JoinRow) -> StreamExecutorResult<()> {
-        let old_row = join_row.clone().into_row();
+    pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
+        let old_row = join_row.decode(&self.col_data_types)?.into_row();
         join_row.inc_degree();
-        let new_row = join_row.clone().into_row();
+        let new_row = join_row.decode(&self.col_data_types)?.into_row();
 
         self.state_table.update(old_row, new_row)?;
         Ok(())
     }
 
-    pub fn dec_degree(&mut self, join_row: &mut JoinRow) -> StreamExecutorResult<()> {
-        let old_row = join_row.clone().into_row();
+    pub fn dec_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
+        let old_row = join_row.decode(&self.col_data_types)?.into_row();
         join_row.dec_degree()?;
-        let new_row = join_row.clone().into_row();
+        let new_row = join_row.decode(&self.col_data_types)?.into_row();
 
         self.state_table.update(old_row, new_row)?;
         Ok(())

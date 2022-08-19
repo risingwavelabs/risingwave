@@ -19,14 +19,13 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
-use auto_enums::auto_enum;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::env_var_is_true;
+use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -100,9 +99,6 @@ pub struct ExecutorParams {
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
 
-    /// Id of the actor.
-    pub actor_id: ActorId,
-
     /// FragmentId of the actor
     pub fragment_id: FragmentId,
 
@@ -124,7 +120,7 @@ impl Debug for ExecutorParams {
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
             .field("input", &self.input.len())
-            .field("actor_id", &self.actor_id)
+            .field("actor_id", &self.actor_context.id)
             .finish_non_exhaustive()
     }
 }
@@ -229,8 +225,8 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let local_sst_info = dispatch_state_store!(self.state_store(), store, {
-            match store.sync(Some(epoch)).await {
-                Ok(_) => store.get_uncommitted_ssts(epoch),
+            match store.sync(epoch).await {
+                Ok((_, ssts)) => ssts,
                 // TODO: Handle sync failure by propagating it back to global barrier manager
                 Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
@@ -425,7 +421,6 @@ impl LocalStreamManagerCore {
     fn create_nodes_inner(
         &mut self,
         fragment_id: FragmentId,
-        actor_id: ActorId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
         env: StreamEnvironment,
@@ -443,7 +438,6 @@ impl LocalStreamManagerCore {
             .map(|(input_pos, input)| {
                 self.create_nodes_inner(
                     fragment_id,
-                    actor_id,
                     input,
                     input_pos,
                     env.clone(),
@@ -462,7 +456,7 @@ impl LocalStreamManagerCore {
 
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
-        let executor_id = unique_executor_id(actor_id, node.operator_id);
+        let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
 
         let executor_params = ExecutorParams {
@@ -472,7 +466,6 @@ impl LocalStreamManagerCore {
             operator_id,
             op_info,
             input,
-            actor_id,
             fragment_id,
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
@@ -482,7 +475,7 @@ impl LocalStreamManagerCore {
         let executor = create_executor(executor_params, self, node, store)?;
         let executor = Self::wrap_executor_for_debug(
             executor,
-            actor_id,
+            actor_context.id,
             executor_id,
             input_pos,
             self.streaming_metrics.clone(),
@@ -494,7 +487,6 @@ impl LocalStreamManagerCore {
     fn create_nodes(
         &mut self,
         fragment_id: FragmentId,
-        actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
@@ -503,7 +495,6 @@ impl LocalStreamManagerCore {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
                 fragment_id,
-                actor_id,
                 node,
                 0,
                 env,
@@ -534,7 +525,7 @@ impl LocalStreamManagerCore {
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
-            let actor_context = Arc::new(Mutex::new(ActorContext::default()));
+            let actor_context = ActorContext::create(actor_id);
             let vnode_bitmap = actor
                 .get_vnode_bitmap()
                 .ok()
@@ -542,7 +533,6 @@ impl LocalStreamManagerCore {
                 .transpose()?;
             let executor = self.create_nodes(
                 actor.fragment_id,
-                actor_id,
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
@@ -566,16 +556,13 @@ impl LocalStreamManagerCore {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 };
-                #[auto_enum(Future)]
-                let traced = match env_var_is_true("RW_ASYNC_STACK_TRACE") {
-                    true => trace_reporter.trace(
-                        actor,
-                        format!("Actor {actor_id}"),
-                        false,
-                        Duration::from_millis(1000),
-                    ),
-                    false => actor,
-                };
+                let traced = trace_reporter.optional_trace(
+                    actor,
+                    format!("Actor {actor_id}"),
+                    true,
+                    Duration::from_millis(1000),
+                    *ENABLE_ASYNC_STACK_TRACE,
+                );
                 let instrumented = monitor.instrument(traced);
                 tokio::spawn(instrumented)
             };

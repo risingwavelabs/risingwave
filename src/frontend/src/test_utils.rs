@@ -30,7 +30,6 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable,
 };
-use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -201,11 +200,6 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         table.id = self.gen_id();
-        table.mapping = Some(ParallelUnitMapping {
-            table_id: table.id,
-            original_indices: [0, 10, 20].to_vec(),
-            data: [1, 2, 3].to_vec(),
-        });
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         Ok(())
@@ -239,11 +233,6 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
     ) -> Result<()> {
         index_table.id = self.gen_id();
-        index_table.mapping = Some(ParallelUnitMapping {
-            table_id: index_table.id,
-            original_indices: [0, 10, 20].to_vec(),
-            data: [1, 2, 3].to_vec(),
-        });
         self.catalog.write().create_table(&index_table);
         self.add_table_or_index_id(
             index_table.id,
@@ -597,8 +586,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(0)
     }
 
-    async fn flush(&self) -> RpcResult<()> {
-        Ok(())
+    async fn flush(&self) -> RpcResult<u64> {
+        Ok(0)
     }
 
     async fn list_table_fragments(

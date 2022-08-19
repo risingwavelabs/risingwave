@@ -20,9 +20,11 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
+use rand::seq::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBody::{Delete, Insert, Update};
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
@@ -178,6 +180,9 @@ impl StageExecution {
                 let mut holder = self.shutdown_rx.write().await;
                 *holder = Some(sender);
 
+                // Change state before spawn runner.
+                *s = StageState::Started;
+
                 spawn(async move {
                     if let Err(e) = runner.run(receiver).await {
                         error!("Stage failed: {:?}", e);
@@ -187,8 +192,6 @@ impl StageExecution {
                     }
                 });
 
-                // TODO: Should change state before spawn task.
-                *s = StageState::Started;
                 Ok(())
             }
             _ => {
@@ -334,7 +337,8 @@ impl StageRunner {
                     task_id: id,
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
-                futures.push(self.schedule_task(task_id, plan_fragment, None));
+                let worker = self.choose_worker(&plan_fragment)?;
+                futures.push(self.schedule_task(task_id, plan_fragment, worker));
             }
         }
 
@@ -393,24 +397,62 @@ impl StageRunner {
                                     break;
                                 }
 
-                                TaskStatusProst::Finished => {
-                                    // no-op
+                                TaskStatusProst::Finished | TaskStatusProst::Aborted => {
+                                    // if Finished, no-op
+                                    // if Aborted, still no-op cuz it means there must already have failed schedule.
                                 }
 
                                 status => {
+                                    // The remain possible variant is Pending, but now it won't be pushed from CN.
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }
                          } else {
-                        // After processing all stream status, we must have sent signal (Either Scheduled or
-                        // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
-                        assert!(sent_signal_to_next);
-                        break;
+                            // After processing all stream status, we must have sent signal (Either Scheduled or
+                            // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
+                            assert!(sent_signal_to_next);
+                            break;
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    fn choose_worker(&self, plan_fragment: &PlanFragment) -> SchedulerResult<Option<WorkerNode>> {
+        let node_body = plan_fragment
+            .root
+            .as_ref()
+            .expect("fail to get plan node")
+            .node_body
+            .as_ref()
+            .expect("fail to get node body");
+
+        let vnode_mapping = match node_body {
+            Insert(insert_node) => self
+                .worker_node_manager
+                .get_table_mapping(&insert_node.associated_mview_id.into()),
+            Update(update_node) => self
+                .worker_node_manager
+                .get_table_mapping(&update_node.associated_mview_id.into()),
+            Delete(delete_node) => self
+                .worker_node_manager
+                .get_table_mapping(&delete_node.associated_mview_id.into()),
+            _ => None,
+        };
+
+        let worker_node = match vnode_mapping {
+            Some(mut parallel_unit_ids) => {
+                parallel_unit_ids.dedup();
+                let candidates = self
+                    .worker_node_manager
+                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                Some(candidates.choose(&mut rand::thread_rng()).unwrap().clone())
+            }
+            None => None,
+        };
+
+        Ok(worker_node)
     }
 
     /// Write message into channel to notify query runner current stage have been scheduled.
@@ -574,6 +616,32 @@ impl StageRunner {
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
+                }
+            }
+            PlanNodeType::BatchLookupJoin => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::LookupJoin(node) => {
+                        let side_table_desc = node
+                            .probe_side_table_desc
+                            .as_ref()
+                            .expect("no side table desc");
+                        node.probe_side_vnode_mapping = self
+                            .worker_node_manager
+                            .get_table_mapping(&side_table_desc.table_id.into())
+                            .unwrap_or_default();
+                        node.worker_nodes = self.worker_node_manager.list_worker_nodes();
+                    }
+                    _ => unreachable!(),
+                }
+
+                let left_child =
+                    self.convert_plan_node(&execution_plan_node.children[0], task_id, partition);
+
+                PlanNodeProst {
+                    children: vec![left_child],
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(node_body),
                 }
             }
             _ => {
