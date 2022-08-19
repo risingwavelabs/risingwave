@@ -502,7 +502,7 @@ enum BarrierEpochState {
     /// This barrier is current in-flight on the stream graph of compute nodes.
     InFlight,
 
-    /// This barrier is completed or failed.
+    /// This barrier is completed or failed. Whether this barrier can do checkpoint
     Completed((Vec<BarrierCompleteResponse>, bool)),
 }
 
@@ -881,7 +881,7 @@ where
                 checkpoint_control
                     .add_uncommitted_messages(resps, (command_ctx, notifiers, create_mv_progress));
 
-                // If not sync , we can't notify collection completion
+                // If no checkpoint, we can't notify collection completion
                 if *checkpoint {
                     let mut uncommitted_states = checkpoint_control.get_uncommitted_states();
                     if prev_epoch != INVALID_EPOCH {

@@ -62,11 +62,12 @@ use crate::storage_value::StorageValue;
 
 #[derive(Default)]
 pub struct SyncResult {
-    /// The size of all synchronous shared buffers.
+    /// The size of all synced shared buffers.
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    /// If this epoch is sync, it will be false.
+    /// If this epoch had been synced, it will be false. So it may be false, if we sync multiple
+    /// epochs in one shot.
     pub sync_succeed: bool,
 }
 
@@ -522,11 +523,11 @@ impl LocalVersionManager {
         for result in join_all(join_handles).await {
             result.expect("should be able to join the flush handle")
         }
-        self.sync_shared_buffer_lt_epoch(epoch).await
+        self.sync_shared_buffer_le_epoch(epoch).await
     }
 
     /// Sync all shared buffer that less than epoch.
-    pub async fn sync_shared_buffer_lt_epoch(
+    pub async fn sync_shared_buffer_le_epoch(
         &self,
         epoch: HummockEpoch,
     ) -> HummockResult<SyncResult> {
