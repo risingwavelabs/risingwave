@@ -121,7 +121,7 @@ impl TableFragments {
 
     /// Returns sink fragment vnode mapping.
     /// Note that: the real sink fragment is also stored as `TableFragments`, it's possible that
-    /// there's no fragment with FragmentType::Sink exists.
+    /// there's no fragment with `FragmentType::Sink` exists.
     pub fn sink_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
         self.fragments
             .values()
