@@ -19,3 +19,9 @@ timeout 1m cargo make sslt --release -- './e2e_test/streaming/**/*.slt'
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, batch"
 timeout 30s cargo make sslt --release -- './e2e_test/batch/**/*.slt'
+
+echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
+timeout 1m cargo make sslt --release -- -j 16 './e2e_test/streaming/**/*.slt'
+
+echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
+timeout 30s cargo make sslt --release -- -j 16 './e2e_test/batch/**/*.slt'

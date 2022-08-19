@@ -18,10 +18,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
-use log::error;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
+use tracing::error;
 
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::plan_fragmenter::QueryId;
