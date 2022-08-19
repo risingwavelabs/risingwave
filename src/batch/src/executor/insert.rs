@@ -99,9 +99,7 @@ impl InsertExecutor {
             let columns = rowid_column.chain(child_columns).collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
-            let notifier = source
-                .write_chunk(chunk)
-                .map_err(|err| anyhow::anyhow!(err))?;
+            let notifier = source.write_chunk(chunk)?;
             notifiers.push(notifier);
         }
 
@@ -226,8 +224,7 @@ mod tests {
         let source = source_desc.source.as_table_v2().unwrap();
         let mut reader = source
             .stream_reader(vec![0.into(), 1.into(), 2.into(), 3.into()])
-            .await
-            .map_err(|err| anyhow::anyhow!(err))?;
+            .await?;
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(

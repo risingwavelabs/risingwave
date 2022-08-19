@@ -84,9 +84,7 @@ impl DeleteExecutor {
 
             let chunk = StreamChunk::from_parts(vec![Op::Delete; len], data_chunk);
 
-            let notifier = source
-                .write_chunk(chunk)
-                .map_err(|err| anyhow::anyhow!(err))?;
+            let notifier = source.write_chunk(chunk)?;
             notifiers.push(notifier);
         }
 
@@ -191,8 +189,7 @@ mod tests {
         let source = source_desc.source.as_table_v2().unwrap();
         let mut reader = source
             .stream_reader(vec![0.into(), 1.into()])
-            .await
-            .map_err(|err| anyhow::anyhow!(err))?;
+            .await?;
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor::new(

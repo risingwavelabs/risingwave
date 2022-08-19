@@ -134,9 +134,7 @@ impl UpdateExecutor {
 
             let stream_chunk = StreamChunk::new(ops, columns, None);
 
-            let notifier = source
-                .write_chunk(stream_chunk)
-                .map_err(|err| anyhow::anyhow!(err))?;
+            let notifier = source.write_chunk(stream_chunk)?;
             notifiers.push(notifier);
         }
 
@@ -253,10 +251,7 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
-        let mut reader = source
-            .stream_reader(vec![0.into(), 1.into()])
-            .await
-            .map_err(|err| anyhow::anyhow!(err))?;
+        let mut reader = source.stream_reader(vec![0.into(), 1.into()]).await?;
 
         // Update
         let update_executor = Box::new(UpdateExecutor::new(
