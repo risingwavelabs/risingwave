@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{align_types, ExprImpl};
+use crate::expr::{align_types, CorrelatedId, ExprImpl};
 
 #[derive(Debug, Clone)]
 pub struct BoundValues {
@@ -32,6 +32,25 @@ impl BoundValues {
     /// The schema returned of this [`BoundValues`].
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    pub fn is_correlated(&self) -> bool {
+        self.rows
+            .iter()
+            .flatten()
+            .any(|expr| expr.has_correlated_input_ref_by_depth())
+    }
+
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
+        let mut correlated_indices = vec![];
+        self.rows.iter_mut().flatten().for_each(|expr| {
+            correlated_indices
+                .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
+        });
+        correlated_indices
     }
 }
 
@@ -58,11 +77,23 @@ impl Binder {
         self.context.clause = None;
 
         let num_columns = bound[0].len();
-        if bound.iter().any(|row| row.len() != num_columns) {
-            return Err(
-                ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
-            );
+        // syntax check.
+        {
+            if bound.iter().any(|row| row.len() != num_columns) {
+                return Err(ErrorCode::BindError(
+                    "VALUES lists must all be the same length".into(),
+                )
+                .into());
+            }
+            if bound.iter().flatten().any(|expr| expr.has_subquery()) {
+                return Err(ErrorCode::NotImplemented(
+                    "VALUES is disallowed to have subqueries.".into(),
+                    None.into(),
+                )
+                .into());
+            }
         }
+
         // Calculate column types.
         let types = match expected_types {
             Some(types) => {
@@ -86,10 +117,18 @@ impl Binder {
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );
-        Ok(BoundValues {
+
+        let bound_values = BoundValues {
             rows: bound,
             schema,
-        })
+        };
+        if bound_values.is_correlated() {
+            return Err(ErrorCode::InternalError(
+                "Values is disallowed to have CorrelatedInputRef.".to_string(),
+            )
+            .into());
+        }
+        Ok(bound_values)
     }
 }
 

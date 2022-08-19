@@ -30,7 +30,7 @@ pub use value::*;
 
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
-use crate::executor::error::StreamExecutorResult;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
 
@@ -136,19 +136,19 @@ pub enum ManagedStateImpl<S: StateStore> {
 }
 
 impl<S: StateStore> ManagedStateImpl<S> {
-    pub async fn apply_batch(
+    pub async fn apply_chunk(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
+        columns: &[&ArrayImpl],
         epoch: u64,
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.apply_batch(ops, visibility, data),
+            Self::Value(state) => state.apply_chunk(ops, visibility, columns),
             Self::Table(state) => {
                 state
-                    .apply_batch(ops, visibility, data, epoch, state_table)
+                    .apply_chunk(ops, visibility, columns, epoch, state_table)
                     .await
             }
         }
@@ -188,53 +188,46 @@ impl<S: StateStore> ManagedStateImpl<S> {
         row_count: Option<usize>,
         pk_indices: PkIndices,
         is_row_count: bool,
-        pk: Option<&Row>,
+        group_key: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
+        assert!(
+            is_row_count || row_count.is_some(),
+            "should set row_count for value states other than row count agg call"
+        );
         match agg_call.kind {
+            AggKind::Avg
+            | AggKind::Count
+            | AggKind::Sum
+            | AggKind::ApproxCountDistinct
+            | AggKind::SingleValue => Ok(Self::Value(
+                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+            )),
+            // optimization: use single-value state for append-only min/max
+            AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
+                ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
+            )),
             AggKind::Max | AggKind::Min => {
-                assert!(
-                    row_count.is_some(),
-                    "should set row_count for value states other than AggKind::RowCount"
-                );
-
-                if agg_call.append_only {
-                    // optimization: use single-value state for append-only min/max
-                    Ok(Self::Value(
-                        ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-                    ))
-                } else {
-                    Ok(Self::Table(Box::new(GenericExtremeState::new(
-                        agg_call,
-                        pk,
-                        pk_indices,
-                        state_table_col_mapping,
-                        row_count.unwrap(),
-                        1024, // TODO: estimate a good cache size instead of hard-coding
-                    ))))
-                }
+                Ok(Self::Table(Box::new(GenericExtremeState::new(
+                    agg_call,
+                    group_key,
+                    pk_indices,
+                    state_table_col_mapping,
+                    row_count.unwrap(),
+                    1024, // TODO: estimate a good cache size instead of hard-coding
+                ))))
             }
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,
-                pk,
+                group_key,
                 pk_indices,
                 state_table_col_mapping,
                 row_count.unwrap(),
             )))),
-            // TODO: for append-only lists, we can create `ManagedValueState` instead of
-            // `ManagedExtremeState`.
-            AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
-                assert!(
-                    is_row_count || row_count.is_some(),
-                    "should set row_count for value states other than AggKind::RowCount"
-                );
-                Ok(Self::Value(
-                    ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-                ))
-            }
-            AggKind::SingleValue => Ok(Self::Value(
-                ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
+            AggKind::ArrayAgg => Err(StreamExecutorError::not_implemented(
+                "ArrayAgg is not implemented yet",
+                4657,
             )),
         }
     }

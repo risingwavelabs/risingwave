@@ -165,9 +165,10 @@ impl UpdateExecutor {
 impl BoxedExecutorBuilder for UpdateExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "Update executor should have 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
         let update_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Update
@@ -184,7 +185,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
         Ok(Box::new(Self::new(
             table_id,
             source.context().try_get_source_manager_ref()?,
-            inputs.remove(0),
+            child,
             exprs,
         )))
     }

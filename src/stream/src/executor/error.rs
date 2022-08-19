@@ -17,6 +17,7 @@ use std::backtrace::Backtrace;
 use either::Either;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
+use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_expr::ExprError;
 use risingwave_rpc_client::error::RpcError;
@@ -123,12 +124,13 @@ impl From<StorageError> for StreamExecutorError {
     }
 }
 
-// Chunk operation error.
+/// Chunk operation error.
 impl From<ArrayError> for StreamExecutorError {
     fn from(e: ArrayError) -> Self {
         StreamExecutorErrorInner::EvalError(Either::Left(e)).into()
     }
 }
+
 impl From<ExprError> for StreamExecutorError {
     fn from(e: ExprError) -> Self {
         StreamExecutorErrorInner::EvalError(Either::Right(e)).into()
@@ -166,6 +168,12 @@ impl From<StreamExecutorError> for RwError {
 impl From<ConnectorError> for StreamExecutorError {
     fn from(s: ConnectorError) -> Self {
         Self::connector_error(s)
+    }
+}
+
+impl From<ValueEncodingError> for StreamExecutorError {
+    fn from(e: ValueEncodingError) -> Self {
+        StreamExecutorErrorInner::SerdeError(Box::new(e)).into()
     }
 }
 

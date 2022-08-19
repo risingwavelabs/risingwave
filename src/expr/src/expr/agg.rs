@@ -18,7 +18,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::expr::agg_call::Type;
 
 /// Kind of aggregation function
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum AggKind {
     Min,
     Max,
@@ -28,6 +28,7 @@ pub enum AggKind {
     StringAgg,
     SingleValue,
     ApproxCountDistinct,
+    ArrayAgg,
 }
 
 impl std::fmt::Display for AggKind {
@@ -41,6 +42,7 @@ impl std::fmt::Display for AggKind {
             AggKind::StringAgg => write!(f, "string_agg"),
             AggKind::SingleValue => write!(f, "single_value"),
             AggKind::ApproxCountDistinct => write!(f, "approx_count_distinct"),
+            AggKind::ArrayAgg => write!(f, "array_agg"),
         }
     }
 }
@@ -58,7 +60,8 @@ impl TryFrom<Type> for AggKind {
             Type::StringAgg => Ok(AggKind::StringAgg),
             Type::SingleValue => Ok(AggKind::SingleValue),
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
-            _ => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
+            Type::ArrayAgg => Ok(AggKind::ArrayAgg),
+            Type::Unspecified => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
         }
     }
 }
@@ -74,6 +77,7 @@ impl AggKind {
             Self::StringAgg => Type::StringAgg,
             Self::SingleValue => Type::SingleValue,
             Self::ApproxCountDistinct => Type::ApproxCountDistinct,
+            Self::ArrayAgg => Type::ArrayAgg,
         }
     }
 }

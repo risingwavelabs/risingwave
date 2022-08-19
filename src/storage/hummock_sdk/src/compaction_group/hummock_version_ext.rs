@@ -310,6 +310,7 @@ impl HummockLevelsExt for Levels {
 pub trait HummockVersionDeltaExt {
     fn get_removed_sst_ids(&self) -> Vec<HummockSstableId>;
     fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId>;
+    fn get_sstableinfo_cnt(&self) -> usize;
 }
 
 impl HummockVersionDeltaExt for HummockVersionDelta {
@@ -335,6 +336,14 @@ impl HummockVersionDeltaExt for HummockVersionDelta {
             }
         }
         ret
+    }
+
+    fn get_sstableinfo_cnt(&self) -> usize {
+        self.level_deltas
+            .values()
+            .flat_map(|item| item.level_deltas.iter())
+            .map(|level_delta| level_delta.inserted_table_infos.len())
+            .sum()
     }
 }
 
