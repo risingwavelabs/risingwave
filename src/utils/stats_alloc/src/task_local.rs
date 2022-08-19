@@ -53,7 +53,7 @@ where
 
     #[inline(always)]
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        *self.bytes_in_use.get() -= layout.size();
+        *self.bytes_in_use.get() = (*self.bytes_in_use.get()).saturating_sub(layout.size());
         self.inner.deallocate(ptr, layout)
     }
 
@@ -76,7 +76,7 @@ where
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
         *self.bytes_in_use.get() += new_layout.size();
-        *self.bytes_in_use.get() -= old_layout.size();
+        *self.bytes_in_use.get() = (*self.bytes_in_use.get()).saturating_sub(old_layout.size());
         self.inner.grow(ptr, old_layout, new_layout)
     }
 
@@ -88,7 +88,7 @@ where
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
         *self.bytes_in_use.get() += new_layout.size();
-        *self.bytes_in_use.get() -= old_layout.size();
+        *self.bytes_in_use.get() = (*self.bytes_in_use.get()).saturating_sub(old_layout.size());
         self.inner.grow_zeroed(ptr, old_layout, new_layout)
     }
 
@@ -100,7 +100,7 @@ where
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
         *self.bytes_in_use.get() += new_layout.size();
-        *self.bytes_in_use.get() -= old_layout.size();
+        *self.bytes_in_use.get() = (*self.bytes_in_use.get()).saturating_sub(old_layout.size());
         self.inner.shrink(ptr, old_layout, new_layout)
     }
 }
@@ -118,12 +118,16 @@ unsafe impl Allocator for TaskLocalAllocator {
         &self,
         layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        TASK_LOCAL_ALLOC.with(|alloc| alloc.allocate(layout))
+        TASK_LOCAL_ALLOC
+            .try_with(|alloc| alloc.allocate(layout))
+            .unwrap_or_else(|_| Global.allocate(layout))
     }
 
     #[inline(always)]
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        TASK_LOCAL_ALLOC.with(|alloc| alloc.deallocate(ptr, layout))
+        TASK_LOCAL_ALLOC
+            .try_with(|alloc| alloc.deallocate(ptr, layout))
+            .unwrap_or_else(|_| Global.deallocate(ptr, layout))
     }
 
     #[inline(always)]
@@ -131,7 +135,9 @@ unsafe impl Allocator for TaskLocalAllocator {
         &self,
         layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        TASK_LOCAL_ALLOC.with(|alloc| alloc.allocate_zeroed(layout))
+        TASK_LOCAL_ALLOC
+            .try_with(|alloc| alloc.allocate_zeroed(layout))
+            .unwrap_or_else(|_| Global.allocate_zeroed(layout))
     }
 
     #[inline(always)]
@@ -141,7 +147,9 @@ unsafe impl Allocator for TaskLocalAllocator {
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        TASK_LOCAL_ALLOC.with(|alloc| alloc.grow(ptr, old_layout, new_layout))
+        TASK_LOCAL_ALLOC
+            .try_with(|alloc| alloc.grow(ptr, old_layout, new_layout))
+            .unwrap_or_else(|_| Global.grow(ptr, old_layout, new_layout))
     }
 
     #[inline(always)]
@@ -151,7 +159,9 @@ unsafe impl Allocator for TaskLocalAllocator {
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        TASK_LOCAL_ALLOC.with(|alloc| alloc.grow_zeroed(ptr, old_layout, new_layout))
+        TASK_LOCAL_ALLOC
+            .try_with(|alloc| alloc.grow_zeroed(ptr, old_layout, new_layout))
+            .unwrap_or_else(|_| Global.grow_zeroed(ptr, old_layout, new_layout))
     }
 
     #[inline(always)]
@@ -161,6 +171,8 @@ unsafe impl Allocator for TaskLocalAllocator {
         old_layout: std::alloc::Layout,
         new_layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        TASK_LOCAL_ALLOC.with(|alloc| alloc.shrink(ptr, old_layout, new_layout))
+        TASK_LOCAL_ALLOC
+            .try_with(|alloc| alloc.shrink(ptr, old_layout, new_layout))
+            .unwrap_or_else(|_| Global.shrink(ptr, old_layout, new_layout))
     }
 }
