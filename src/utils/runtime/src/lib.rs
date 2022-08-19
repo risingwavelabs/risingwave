@@ -250,5 +250,10 @@ where
         spawn_prof_thread(profile_path);
     }
 
-    builder.enable_all().build().unwrap().block_on(f)
+    builder
+        .thread_name("risingwave-main")
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(f)
 }

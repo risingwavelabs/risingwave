@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -50,6 +51,8 @@ lazy_static::lazy_static! {
 pub type ActorHandle = JoinHandle<()>;
 
 pub struct LocalStreamManagerCore {
+    runtime: Runtime,
+
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
@@ -369,7 +372,14 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
     ) -> Self {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .thread_name("risingwave-streaming-actor")
+            .enable_all()
+            .build()
+            .unwrap();
+
         Self {
+            runtime,
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
@@ -564,14 +574,14 @@ impl LocalStreamManagerCore {
                     *ENABLE_ASYNC_STACK_TRACE,
                 );
                 let instrumented = monitor.instrument(traced);
-                tokio::spawn(instrumented)
+                self.runtime.spawn(instrumented)
             };
             self.handles.insert(actor_id, handle);
 
             let actor_id_str = actor_id.to_string();
 
             let metrics = self.streaming_metrics.clone();
-            let task = tokio::spawn(async move {
+            let actor_monitor_task = self.runtime.spawn(async move {
                 loop {
                     metrics
                         .actor_execution_time
@@ -620,7 +630,8 @@ impl LocalStreamManagerCore {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });
-            self.actor_monitor_tasks.insert(actor_id, task);
+            self.actor_monitor_tasks
+                .insert(actor_id, actor_monitor_task);
         }
 
         Ok(())
