@@ -30,7 +30,6 @@ http-serde = "1.1.0"
 humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
-log = "0.4"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 mysql_async = "0.30"

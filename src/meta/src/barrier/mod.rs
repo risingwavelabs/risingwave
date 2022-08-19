@@ -22,7 +22,6 @@ use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::debug;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
@@ -41,6 +40,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{oneshot, watch, RwLock};
 use tokio::task::JoinHandle;
+use tracing::debug;
 use uuid::Uuid;
 
 use self::command::CommandContext;

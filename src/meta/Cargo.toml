@@ -24,7 +24,6 @@ hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"

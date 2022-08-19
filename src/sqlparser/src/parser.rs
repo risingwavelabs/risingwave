@@ -22,7 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
-use log::debug;
+use tracing::debug;
 
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};

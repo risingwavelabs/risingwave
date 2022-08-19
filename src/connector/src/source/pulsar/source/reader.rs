@@ -97,7 +97,7 @@ impl SplitReader for PulsarSplitReader {
         let service_url = &props.service_url;
         let topic = split.topic.to_string();
 
-        log::debug!("creating consumer for pulsar split topic {}", topic,);
+        tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
         let pulsar: Pulsar<_> = Pulsar::builder(service_url, TokioExecutor)
             .build()
