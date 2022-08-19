@@ -127,7 +127,7 @@ impl Binder {
                 "array index applied to type {}, which is not a composite type",
                 data_type
             ))
-            .into())
+            .into()),
         }
     }
 
