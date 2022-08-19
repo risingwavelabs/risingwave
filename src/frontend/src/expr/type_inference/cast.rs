@@ -105,11 +105,7 @@ fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> b
             &DataType::List {
                 datatype: ref target_source,
             },
-        ) => cast_ok(
-            child_source.as_ref().into(),
-            target_source.as_ref().into(),
-            allows,
-        ),
+        ) => cast_ok(child_source.as_ref(), target_source.as_ref(), allows),
         _ => false,
     }
 }

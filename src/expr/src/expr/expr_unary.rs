@@ -488,11 +488,8 @@ mod unary_list_expression {
                 (_, _) => {
                     return Err(::anyhow::private::must_use({
                         use ::anyhow::private::kind::*;
-                        let error =
-                            match "Do not support values in insert values executor".to_string() {
-                                error => (&error).anyhow_kind().new(error),
-                            };
-                        error
+                        let error = "Do not support values in insert values executor".to_string();
+                        (&error).anyhow_kind().new(error)
                     })
                     .into())
                 }
