@@ -20,6 +20,7 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
+use crate::expr::expr_unary::unary_list_expression::UnaryListExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
@@ -36,7 +37,7 @@ use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
-use crate::{ExprError, Result};
+use crate::{for_each_cast, ExprError, Result};
 
 /// This macro helps to create cast expression.
 /// It receives all the combinations of `gen_cast` and generates corresponding match cases
@@ -64,82 +65,6 @@ macro_rules! gen_cast_impl {
             _ => {
                 return Err(ExprError::Cast2($child.return_type(), $ret));
             }
-        }
-    };
-}
-
-macro_rules! gen_cast {
-    ($($x:tt, )* ) => {
-        gen_cast_impl! {
-            [$($x),*],
-
-            { varchar, date, str_to_date },
-            { varchar, time, str_to_time },
-            { varchar, interval, str_parse },
-            { varchar, timestamp, str_to_timestamp },
-            { varchar, timestampz, str_to_timestampz },
-            { varchar, int16, str_parse },
-            { varchar, int32, str_parse },
-            { varchar, int64, str_parse },
-            { varchar, float32, str_parse },
-            { varchar, float64, str_parse },
-            { varchar, decimal, str_parse },
-            { varchar, boolean, str_to_bool },
-
-            { boolean, varchar, general_to_string },
-            { int16, varchar, general_to_string },
-            { int32, varchar, general_to_string },
-            { int64, varchar, general_to_string },
-            { float32, varchar, general_to_string },
-            { float64, varchar, general_to_string },
-            { decimal, varchar, general_to_string },
-            { time, varchar, general_to_string },
-            { interval, varchar, general_to_string },
-            { date, varchar, general_to_string },
-            { timestamp, varchar, general_to_string },
-            { timestampz, varchar, timestampz_to_utc_string },
-
-            { boolean, int32, general_cast },
-            { int32, boolean, int32_to_bool },
-
-            { int16, int32, general_cast },
-            { int16, int64, general_cast },
-            { int16, float32, general_cast },
-            { int16, float64, general_cast },
-            { int16, decimal, general_cast },
-            { int32, int16, general_cast },
-            { int32, int64, general_cast },
-            { int32, float32, to_f32 }, // lossy
-            { int32, float64, general_cast },
-            { int32, decimal, general_cast },
-            { int64, int16, general_cast },
-            { int64, int32, general_cast },
-            { int64, float32, to_f32 }, // lossy
-            { int64, float64, to_f64 }, // lossy
-            { int64, decimal, general_cast },
-
-            { float32, float64, general_cast },
-            { float32, decimal, general_cast },
-            { float32, int16, to_i16 },
-            { float32, int32, to_i32 },
-            { float32, int64, to_i64 },
-            { float64, decimal, general_cast },
-            { float64, int16, to_i16 },
-            { float64, int32, to_i32 },
-            { float64, int64, to_i64 },
-            { float64, float32, to_f32 }, // lossy
-
-            { decimal, int16, dec_to_i16 },
-            { decimal, int32, dec_to_i32 },
-            { decimal, int64, dec_to_i64 },
-            { decimal, float32, to_f32 },
-            { decimal, float64, to_f64 },
-
-            { date, timestamp, general_cast },
-            { time, interval, general_cast },
-            { timestamp, date, timestamp_to_date },
-            { timestamp, time, timestamp_to_time },
-            { interval, time, interval_to_time },
         }
     };
 }
@@ -220,7 +145,20 @@ pub fn new_unary_expr(
     use crate::expr::data_types::*;
 
     let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
-        (ProstType::Cast, _, _) => gen_cast! { child_expr, return_type, },
+        (
+            ProstType::Cast,
+            DataType::List {
+                datatype: target_elem_type,
+            },
+            DataType::List {
+                datatype: source_elem_type,
+            },
+        ) => Box::new(UnaryListExpression::new(
+            child_expr,
+            return_type,
+            move |input| list_cast(input, &source_elem_type, &target_elem_type),
+        )),
+        (ProstType::Cast, _, _) => for_each_cast! { gen_cast_impl, child_expr, return_type, },
         (ProstType::BoolOut, _, DataType::Boolean) => {
             Box::new(UnaryExpression::<BoolArray, Utf8Array, _>::new(
                 child_expr,
@@ -375,6 +313,228 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
     ))
 }
 
+mod unary_list_expression {
+    use std::fmt;
+    use std::sync::Arc;
+
+    use itertools::{multizip, Itertools};
+    use risingwave_common::array::{
+        Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayRef, DataChunk,
+        ListArray, ListArrayBuilder, ListRef, ListValue, Row,
+    };
+    use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
+
+    use crate::expr::{BoxedExpression, Expression};
+
+    /// `UnaryListExpression` is almost the same as `UnaryExpression` but uses
+    /// `ListArrayBuilder::with_meta` to build list arrays.
+    ///
+    /// TODO: Unify `UnaryListExpression` and `UnaryExpression` in a macro and DRY.
+    pub struct UnaryListExpression<F: for<'a> Fn(ListRef<'a>) -> crate::Result<ListValue>> {
+        expr_ia1: BoxedExpression,
+        return_type: DataType,
+        func: F,
+    }
+    impl<F: for<'a> Fn(ListRef<'a>) -> crate::Result<ListValue> + Sized + Sync + Send> fmt::Debug
+        for UnaryListExpression<F>
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("UnaryExpression")
+                .field("func", &std::any::type_name::<F>())
+                .field("expr_ia1", &self.expr_ia1)
+                .field("return_type", &self.return_type)
+                .finish()
+        }
+    }
+    impl<F: for<'a> Fn(ListRef<'a>) -> crate::Result<ListValue> + Sized + Sync + Send> Expression
+        for UnaryListExpression<F>
+    {
+        fn return_type(&self) -> DataType {
+            self.return_type.clone()
+        }
+
+        fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+            let ret_ia1 = self.expr_ia1.eval_checked(data_chunk)?;
+            let arr_ia1: &ListArray = ret_ia1.as_ref().into();
+            let bitmap = data_chunk.get_visibility_ref();
+            let datatype = if let DataType::List { datatype } = self.return_type() {
+                datatype
+            } else {
+                unreachable!()
+            };
+            let mut output_array =
+                ListArrayBuilder::with_meta(data_chunk.capacity(), ArrayMeta::List { datatype });
+            Ok(Arc::new(match bitmap {
+                Some(bitmap) => {
+                    for ((v_ia1,), visible) in multizip((arr_ia1.iter(),)).zip_eq(bitmap.iter()) {
+                        if !visible {
+                            output_array.append_null()?;
+                            continue;
+                        }
+                        if let (Some(v_ia1),) = (v_ia1,) {
+                            let ret = (self.func)(v_ia1)?;
+                            let output = Some(ret.as_scalar_ref());
+                            output_array.append(output)?;
+                        } else {
+                            output_array.append(None)?;
+                        }
+                    }
+                    output_array.finish()?.into()
+                }
+                None => {
+                    for (v_ia1,) in multizip((arr_ia1.iter(),)) {
+                        if let (Some(v_ia1),) = (v_ia1,) {
+                            let ret = (self.func)(v_ia1)?;
+                            let output = Some(ret.as_scalar_ref());
+                            output_array.append(output)?;
+                        } else {
+                            output_array.append(None)?;
+                        }
+                    }
+                    output_array.finish()?.into()
+                }
+            }))
+        }
+
+        fn eval_row(&self, row: &Row) -> crate::Result<Datum> {
+            let datum_ia1 = self.expr_ia1.eval_row(row)?;
+            let mut builder_ia1 = self.expr_ia1.return_type().create_array_builder(1);
+            let ref_ia1 = &mut builder_ia1;
+            match (ref_ia1, datum_ia1) {
+                (ArrayBuilderImpl::Int16(inner), Some(ScalarImpl::Int16(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Int16(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Int32(inner), Some(ScalarImpl::Int32(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Int32(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Int64(inner), Some(ScalarImpl::Int64(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Int64(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Float32(inner), Some(ScalarImpl::Float32(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Float32(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Float64(inner), Some(ScalarImpl::Float64(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Float64(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Utf8(inner), Some(ScalarImpl::Utf8(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Utf8(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Bool(inner), Some(ScalarImpl::Bool(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Bool(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Decimal(inner), Some(ScalarImpl::Decimal(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Decimal(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Interval(inner), Some(ScalarImpl::Interval(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Interval(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::NaiveDate(inner), Some(ScalarImpl::NaiveDate(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::NaiveDate(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::NaiveDateTime(inner), Some(ScalarImpl::NaiveDateTime(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::NaiveDateTime(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::NaiveTime(inner), Some(ScalarImpl::NaiveTime(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::NaiveTime(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::Struct(inner), Some(ScalarImpl::Struct(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::Struct(inner), None) => {
+                    inner.append(None)?;
+                }
+                (ArrayBuilderImpl::List(inner), Some(ScalarImpl::List(v))) => {
+                    inner.append(Some(v.as_scalar_ref()))?;
+                }
+                (ArrayBuilderImpl::List(inner), None) => {
+                    inner.append(None)?;
+                }
+                (_, _) => {
+                    return Err(::anyhow::private::must_use({
+                        use ::anyhow::private::kind::*;
+                        let error =
+                            match "Do not support values in insert values executor".to_string() {
+                                error => (&error).anyhow_kind().new(error),
+                            };
+                        error
+                    })
+                    .into())
+                }
+            }
+            let arr_ia1 = builder_ia1.finish().map(Arc::new)?;
+            let arr_ia1: &ListArray = arr_ia1.as_ref().into();
+            let datatype = if let DataType::List { datatype } = self.return_type() {
+                datatype
+            } else {
+                unreachable!()
+            };
+            let mut output_array = ListArrayBuilder::with_meta(
+                1,
+                risingwave_common::array::ArrayMeta::List { datatype },
+            );
+            for (v_ia1,) in multizip((arr_ia1.iter(),)) {
+                if let (Some(v_ia1),) = (v_ia1,) {
+                    let ret = (self.func)(v_ia1)?;
+                    let output = Some(ret.as_scalar_ref());
+                    output_array.append(output)?;
+                } else {
+                    output_array.append(None)?;
+                }
+            }
+            let output_arrayimpl: ArrayImpl = output_array.finish()?.into();
+            Ok(output_arrayimpl.to_datum())
+        }
+    }
+
+    impl<F: for<'a> Fn(ListRef<'a>) -> crate::Result<ListValue> + Sized + Sync + Send>
+        UnaryListExpression<F>
+    {
+        #[allow(dead_code)]
+        pub fn new(expr_ia1: BoxedExpression, return_type: DataType, func: F) -> Self {
+            Self {
+                expr_ia1,
+                return_type,
+                func,
+            }
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
