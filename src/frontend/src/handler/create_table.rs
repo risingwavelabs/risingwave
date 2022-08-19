@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -22,7 +23,9 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan_common::ColumnCatalog;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
+use risingwave_sqlparser::ast::{
+    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, TableConstraint,
+};
 
 use super::create_source::make_prost_source;
 use crate::binder::{bind_data_type, bind_struct_field};
@@ -35,14 +38,20 @@ use crate::stream_fragmenter::StreamFragmenterV2;
 
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
-/// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.
-pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
+/// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
+/// If a column is marked as `primary key`, its `ColumnId` is also returned.
+/// This primary key is not combined with table constraints yet.
+pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
+    // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
+    let mut pk_column_id = None;
+
     let column_descs = {
         let mut column_descs = Vec::with_capacity(columns.len() + 1);
         // Put the hidden row id column in the first column. This is used for PK.
         column_descs.push(row_id_column_desc());
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
+            let column_id = ColumnId::new((i + 1) as i32);
             // Destruct to make sure all fields are properly handled rather than ignored.
             // Do NOT use `..` to ignore fields you do not want to deal with.
             // Reject them with a clear NotImplemented error.
@@ -59,13 +68,25 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
                 )
                 .into());
             }
-            if !options.is_empty() {
-                let s = options.iter().map(ToString::to_string).join(" ");
-                return Err(ErrorCode::NotImplemented(
-                    format!("column constraints \"{}\"", s),
-                    None.into(),
-                )
-                .into());
+            for option_def in options {
+                match option_def.option {
+                    ColumnOption::Unique { is_primary: true } => {
+                        if pk_column_id.is_some() {
+                            return Err(ErrorCode::BindError(
+                                "multiple primary keys are not allowed".into(),
+                            )
+                            .into());
+                        }
+                        pk_column_id = Some(column_id);
+                    }
+                    _ => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!("column constraints \"{}\"", option_def),
+                            None.into(),
+                        )
+                        .into())
+                    }
+                }
             }
             check_valid_column_name(&name.real_value())?;
             let field_descs = if let AstDataType::Struct(fields) = &data_type {
@@ -78,7 +99,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
             };
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
-                column_id: ColumnId::new((i + 1) as i32),
+                column_id,
                 name: name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
@@ -87,15 +108,76 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         column_descs
     };
 
+    Ok((column_descs, pk_column_id))
+}
+
+/// Binds table constraints given the binding results from column definitions.
+/// It returns the columns together with `pk_column_ids`.
+// TODO(#4726): Once `row_id` is optional, also return `Option<RowIdIndex>`.
+pub fn bind_sql_table_constraints(
+    column_descs: &[ColumnDesc],
+    pk_column_id_from_columns: Option<ColumnId>,
+    constraints: Vec<TableConstraint>,
+) -> Result<(Vec<ColumnCatalog>, Vec<i32>)> {
+    let mut pk_column_names = vec![];
+    for constraint in constraints {
+        match constraint {
+            TableConstraint::Unique {
+                name: _,
+                columns,
+                is_primary: true,
+            } => {
+                if !pk_column_names.is_empty() {
+                    return Err(ErrorCode::BindError(
+                        "multiple primary keys are not allowed".into(),
+                    )
+                    .into());
+                }
+                pk_column_names = columns;
+            }
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("table constraint \"{}\"", constraint),
+                    None.into(),
+                )
+                .into())
+            }
+        }
+    }
+    let pk_column_ids = match (pk_column_id_from_columns, pk_column_names.is_empty()) {
+        (Some(_), false) => {
+            return Err(ErrorCode::BindError("multiple primary keys are not allowed".into()).into())
+        }
+        (None, true) => vec![0],
+        (Some(cid), true) => vec![cid.get_id()],
+        (None, false) => {
+            let name_to_id = column_descs
+                .iter()
+                .map(|c| (c.name.as_str(), c.column_id.get_id()))
+                .collect::<HashMap<_, _>>();
+            pk_column_names
+                .iter()
+                .map(|ident| {
+                    let name = ident.real_value();
+                    name_to_id.get(name.as_str()).copied().ok_or_else(|| {
+                        ErrorCode::BindError(format!(
+                            "column \"{name}\" named in key does not exist"
+                        ))
+                    })
+                })
+                .try_collect()?
+        }
+    };
+
     let columns_catalog = column_descs
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(i, c)| ColumnCatalog {
             column_desc: c.to_protobuf().into(),
             is_hidden: i == 0, // the row id column is hidden
         })
         .collect_vec();
-    Ok(columns_catalog)
+    Ok((columns_catalog, pk_column_ids))
 }
 
 pub(crate) fn gen_create_table_plan(
@@ -103,12 +185,23 @@ pub(crate) fn gen_create_table_plan(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    let (columns, pk_column_ids) =
+        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, constraints)?;
+    if pk_column_ids != [0] {
+        return Err(ErrorCode::NotImplemented(
+            "specifying primary key for table".into(),
+            4256.into(),
+        )
+        .into());
+    }
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
-            columns: bind_sql_columns(columns)?,
+            columns,
             properties: context.inner().with_properties.clone(),
         }),
     )?;
@@ -153,12 +246,18 @@ pub async fn handle_create_table(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
     let (graph, source, table) = {
-        let (plan, source, table) =
-            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let (plan, source, table) = gen_create_table_plan(
+            &session,
+            context.into(),
+            table_name.clone(),
+            columns,
+            constraints,
+        )?;
         let graph = StreamFragmenterV2::build_graph(plan);
 
         (graph, source, table)
@@ -186,6 +285,7 @@ mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
+    use super::*;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
@@ -237,5 +337,71 @@ mod tests {
         };
 
         assert_eq!(columns, expected_columns);
+    }
+
+    #[test]
+    fn test_bind_primary_key() {
+        for (sql, expected) in [
+            ("create table t (v1 int, v2 int)", Ok(&[0] as &[_])),
+            ("create table t (v1 int primary key, v2 int)", Ok(&[1])),
+            ("create table t (v1 int, v2 int primary key)", Ok(&[2])),
+            (
+                "create table t (v1 int primary key, v2 int primary key)",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int primary key primary key, v2 int)",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int, v2 int, primary key (v1))",
+                Ok(&[1]),
+            ),
+            (
+                "create table t (v1 int, primary key (v2), v2 int)",
+                Ok(&[2]),
+            ),
+            (
+                "create table t (primary key (v2, v1), v1 int, v2 int)",
+                Ok(&[2, 1]),
+            ),
+            (
+                "create table t (v1 int, primary key (v1), v2 int, primary key (v1))",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int primary key, primary key (v1), v2 int)",
+                Err("multiple primary keys are not allowed"),
+            ),
+            (
+                "create table t (v1 int, primary key (V3), v2 int)",
+                Err("column \"v3\" named in key does not exist"),
+            ),
+        ] {
+            let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
+            let risingwave_sqlparser::ast::Statement::CreateTable {
+                    columns,
+                    constraints,
+                    ..
+                } = ast.remove(0) else { panic!("test case should be create table") };
+            let actual: Result<_> = (|| {
+                let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+                let (_, pk_column_ids) = bind_sql_table_constraints(
+                    &column_descs,
+                    pk_column_id_from_columns,
+                    constraints,
+                )?;
+                Ok(pk_column_ids)
+            })();
+            match (expected, actual) {
+                (Ok(expected), Ok(actual)) => assert_eq!(expected, actual, "sql: {sql}"),
+                (Ok(_), Err(actual)) => panic!("sql: {sql}\nunexpected error: {actual:?}"),
+                (Err(_), Ok(actual)) => panic!("sql: {sql}\nexpects error but got: {actual:?}"),
+                (Err(expected), Err(actual)) => assert!(
+                    actual.to_string().contains(expected),
+                    "sql: {sql}\nexpected: {expected:?}\nactual: {actual:?}"
+                ),
+            }
+        }
     }
 }

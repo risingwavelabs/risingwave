@@ -283,11 +283,12 @@ impl TestCase {
                     name,
                     columns,
                     with_options,
+                    constraints,
                     ..
                 } => {
                     context.with_properties =
                         handle_with_properties("handle_create_table", with_options.clone())?;
-                    create_table::handle_create_table(context, name, columns).await?;
+                    create_table::handle_create_table(context, name, columns, constraints).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
