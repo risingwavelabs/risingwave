@@ -131,3 +131,61 @@ impl ToStream for LogicalUnion {
         todo!()
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
+    use crate::session::OptimizerContext;
+
+    #[tokio::test]
+    async fn test_prune_union() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
+        ];
+        let values1 = LogicalValues::new(vec![], Schema { fields }, ctx);
+
+        let values2 = values1.clone();
+
+        let union = LogicalUnion::new(false, vec![values1.into(), values2.into()]);
+
+        // Perform the prune
+        let required_cols = vec![1, 2];
+        let plan = union.prune_col(&required_cols);
+
+        // Check the result
+        let union = plan.as_logical_union().unwrap();
+        assert_eq!(union.base.schema.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_union_to_batch() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
+        ];
+        let values1 = LogicalValues::new(vec![], Schema { fields }, ctx);
+
+        let values2 = values1.clone();
+
+        let union = LogicalUnion::new(false, vec![values1.into(), values2.into()]);
+
+        let plan = union.to_batch().unwrap();
+        let agg: &BatchHashAgg = plan.as_batch_hash_agg().unwrap();
+        let agg_input = agg.input();
+        let union = agg_input.as_batch_union().unwrap();
+
+        assert_eq!(union.inputs().len(), 2);
+    }
+}
