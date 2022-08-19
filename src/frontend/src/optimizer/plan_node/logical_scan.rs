@@ -29,6 +29,7 @@ use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::rule::IndexSelectionRule;
 use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -81,7 +82,7 @@ impl LogicalScan {
             .collect();
 
         let pk_indices = table_desc
-            .pk
+            .stream_key
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>();
@@ -434,8 +435,8 @@ impl PredicatePushdown for LogicalScan {
     }
 }
 
-impl ToBatch for LogicalScan {
-    fn to_batch(&self) -> Result<PlanRef> {
+impl LogicalScan {
+    fn to_batch_inner(&self) -> Result<PlanRef> {
         if self.predicate.always_true() {
             Ok(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
@@ -460,6 +461,28 @@ impl ToBatch for LogicalScan {
             assert_eq!(plan.schema(), self.schema());
             Ok(plan)
         }
+    }
+}
+
+impl ToBatch for LogicalScan {
+    fn to_batch(&self) -> Result<PlanRef> {
+        // index selection
+        if !self.indexes().is_empty() {
+            let index_selection_rule = IndexSelectionRule::create();
+            if let Some(applied) = index_selection_rule.apply(self.clone().into()) {
+                if let Some(scan) = applied.as_logical_scan() {
+                    // covering index
+                    return scan.to_batch();
+                } else if let Some(join) = applied.as_logical_join() {
+                    // index lookup join
+                    return join.to_batch_lookup_join();
+                } else {
+                    unreachable!();
+                }
+            }
+        }
+
+        self.to_batch_inner()
     }
 }
 

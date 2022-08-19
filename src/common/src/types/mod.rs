@@ -502,8 +502,8 @@ macro_rules! impl_convert {
                 impl ScalarImpl {
                     pub fn [<as_ $suffix_name>](&self) -> &$scalar {
                         match self {
-                        Self::$variant_name(ref scalar) => scalar,
-                        other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
+                            Self::$variant_name(ref scalar) => scalar,
+                            other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
                         }
                     }
 
@@ -866,7 +866,9 @@ impl ScalarImpl {
         body
     }
 
-    pub fn bytes_to_scalar(b: &Vec<u8>, data_type: &ProstDataType) -> ArrayResult<Self> {
+    /// This encoding should only be used in proto
+    /// TODO: replace with value encoding?
+    pub fn from_proto_bytes(b: &Vec<u8>, data_type: &ProstDataType) -> ArrayResult<Self> {
         let value = match data_type.get_type_name()? {
             TypeName::Boolean => ScalarImpl::Bool(
                 i8::from_be_bytes(
@@ -1057,18 +1059,18 @@ mod tests {
     fn test_protobuf_conversion() {
         let v = ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default());
         let actual =
-            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
                 .unwrap();
         assert_eq!(v, actual);
 
         let v = ScalarImpl::NaiveDate(NaiveDateWrapper::default());
         let actual =
-            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
         assert_eq!(v, actual);
 
         let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
         let actual =
-            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+            ScalarImpl::from_proto_bytes(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
         assert_eq!(v, actual);
     }
 }

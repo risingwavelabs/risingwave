@@ -20,7 +20,6 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray,
     NaiveDateTimeArray,
 };
-use risingwave_common::ensure;
 use risingwave_common::types::{CheckedAdd, Scalar, ScalarRef};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
@@ -126,10 +125,9 @@ where
 }
 
 pub fn new_generate_series(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
-    ensure!(prost.args.len() == 3);
     let return_type = DataType::from(prost.get_return_type().unwrap());
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
-    let (start, stop, step) = args.into_iter().collect_tuple().unwrap();
+    let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 
     match return_type {
         DataType::Timestamp => {

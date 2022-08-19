@@ -30,8 +30,9 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::TaskLocalAllocator;
 
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::ActorId;
 
 type DegreeType = u64;
 /// This is a row with a match degree
@@ -105,11 +106,7 @@ impl JoinRow {
 
     pub fn encode(&self) -> StreamExecutorResult<EncodedJoinRow> {
         Ok(EncodedJoinRow {
-            // TODO(yuhao): remove the `RwError` in value encoding.
-            row: self
-                .row
-                .serialize()
-                .map_err(StreamExecutorError::serde_error)?,
+            row: self.row.serialize()?,
             degree: self.degree,
         })
     }
@@ -124,10 +121,7 @@ pub struct EncodedJoinRow {
 impl EncodedJoinRow {
     fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow> {
         let deserializer = RowDeserializer::new(data_types.to_vec());
-        // TODO(yuhao): remove the `RwError` in value encoding.
-        let row = deserializer
-            .deserialize(self.row.as_ref())
-            .map_err(StreamExecutorError::serde_error)?;
+        let row = deserializer.deserialize(self.row.as_ref())?;
         Ok(JoinRow {
             row,
             degree: self.degree,
@@ -168,7 +162,7 @@ pub struct JoinHashMapMetrics {
 }
 
 impl JoinHashMapMetrics {
-    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: u64, side: &'static str) -> Self {
+    pub fn new(metrics: Arc<StreamingMetrics>, actor_id: ActorId, side: &'static str) -> Self {
         Self {
             metrics,
             actor_id: actor_id.to_string(),
@@ -206,7 +200,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Current epoch
     current_epoch: u64,
     /// State table
-    state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: RowBasedStateTable<S>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -221,7 +215,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         data_types: Vec<DataType>,
         state_table: RowBasedStateTable<S>,
         metrics: Arc<StreamingMetrics>,
-        actor_id: u64,
+        actor_id: ActorId,
         side: &'static str,
     ) -> Self {
         let join_key_data_types = join_key_indices

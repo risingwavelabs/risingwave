@@ -23,8 +23,6 @@ use prometheus::{
 pub struct StreamingMetrics {
     pub registry: Registry,
     pub executor_row_count: GenericCounterVec<AtomicU64>,
-    pub actor_processing_time: GenericGaugeVec<AtomicF64>,
-    pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
     pub actor_output_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
     pub actor_input_buffer_blocking_duration_ns: GenericCounterVec<AtomicU64>,
@@ -73,22 +71,6 @@ impl StreamingMetrics {
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
             &["source_id"],
-            registry
-        )
-        .unwrap();
-
-        let actor_processing_time = register_gauge_vec_with_registry!(
-            "stream_actor_processing_time",
-            "Time between merge node produces its first chunk in one epoch and barrier gets dispatched from actor_id",
-            &["actor_id", "merge_node_id"],
-            registry
-        )
-        .unwrap();
-
-        let actor_barrier_time = register_gauge_vec_with_registry!(
-            "stream_actor_barrier_time",
-            "Time between merge node produces a barrier and barrier gets dispatched from actor_id",
-            &["actor_id", "merge_node_id"],
             registry
         )
         .unwrap();
@@ -302,8 +284,6 @@ impl StreamingMetrics {
         Self {
             registry,
             executor_row_count,
-            actor_processing_time,
-            actor_barrier_time,
             actor_execution_time,
             actor_output_buffer_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
