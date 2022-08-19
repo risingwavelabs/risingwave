@@ -442,6 +442,7 @@ enum FragmentType {
   FRAGMENT_UNSPECIFIED = 0;
   OTHERS = 1;
   SOURCE = 2;
+  // TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now.
   SINK = 3;
 }
 

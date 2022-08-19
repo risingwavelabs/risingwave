@@ -973,6 +973,9 @@ impl ActorGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
+        if !current_fragment.upstream_table_ids.is_empty() {
+            ctx.colocate_fragment_set.insert(fragment_id.as_global_id());
+        }
 
         let parallel_degree = if current_fragment.is_singleton {
             1
@@ -988,7 +991,6 @@ impl ActorGraphBuilder {
                         .unwrap(),
                 ))
                 .expect("upstream actor should exist");
-            ctx.colocate_fragment_set.insert(fragment_id.as_global_id());
             upstream_actors.len() as u32
         } else {
             self.default_parallelism

@@ -120,13 +120,13 @@ impl TableFragments {
     }
 
     /// Returns sink fragment vnode mapping.
+    /// Note that: the real sink fragment is also stored as `TableFragments`, it's possible that
+    /// there's no fragment with FragmentType::Sink exists.
     pub fn sink_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
         self.fragments
             .values()
             .find(|fragment| fragment.fragment_type == FragmentType::Sink as i32)
-            .unwrap()
-            .vnode_mapping
-            .clone()
+            .and_then(|fragment| fragment.vnode_mapping.clone())
     }
 
     /// Update state of all actors
