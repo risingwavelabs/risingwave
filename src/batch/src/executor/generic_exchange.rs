@@ -80,6 +80,7 @@ impl CreateSource for DefaultCreateSource {
 
         if context.is_local_addr(&peer_addr) && prost_source.local_execute_plan.is_none() {
             trace!("Exchange locally [{:?}]", task_output_id);
+
             Ok(ExchangeSourceImpl::Local(LocalExchangeSource::create(
                 task_output_id.try_into()?,
                 context,
@@ -126,6 +127,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); prost_sources.len()];
         let mut sources: Vec<ExchangeSourceImpl> = vec![];
+
         for (prost_source, source_creator) in prost_sources.iter().zip_eq(source_creators) {
             let source = source_creator
                 .create_source(source.context.clone(), prost_source)

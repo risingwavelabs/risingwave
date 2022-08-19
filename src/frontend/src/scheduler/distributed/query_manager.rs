@@ -197,7 +197,7 @@ impl QueryResultFetcher {
             execution_context.to_batch_task(),
             self.epoch,
         );
-        // println!("start to build executor");
+
         let executor = executor.build().await?;
         #[for_await]
         for chunk in executor.execute() {

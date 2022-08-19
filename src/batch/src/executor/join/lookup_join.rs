@@ -169,7 +169,6 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             epoch: self.epoch,
         };
 
-        // let prost_task_id = self.task_id.clone();
         let prost_exchange_source = ProstExchangeSource {
             task_output_id: Some(TaskOutputId {
                 task_id: Some(ProstTaskId {
@@ -236,12 +235,10 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
     /// Builds and returns the `ExchangeExecutor` used for the probe side of the
     /// `LookupJoinExecutor`.
     async fn build_source(&self) -> Result<BoxedExecutor> {
-        println!("Enter build source");
         let mut sources = vec![];
         for id in self.pu_to_scan_range_mapping.keys() {
             sources.push(self.build_prost_exchange_source(id)?);
         }
-        println!("exchange sources for lookup join: {:?}", sources);
 
         if sources.is_empty() {
             return Ok(Box::new(DummyExecutor {
@@ -331,8 +328,6 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         ));
 
         while let Some(build_chunk) = build_side_stream.next().await {
-            println!("Start to execute probe side stream1");
-            // println!("we get build chunk");
             let build_chunk = build_chunk?.compact()?;
 
             // Group rows with the same key datums together
@@ -359,7 +354,6 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
             }
 
             let probe_child = self.probe_side_source.build_source().await?;
-            println!("Start to execute probe side stream2");
             let mut probe_side_stream = probe_child.execute();
 
             let mut probe_side_chunk_exists = true;
@@ -377,10 +371,8 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                 probe_side_chunk_exists = probe_side_chunk.is_some();
 
                 let probe_side_chunk = if let Some(chunk) = probe_side_chunk {
-                    println!("some for probe side chunk");
                     Some(chunk?.compact()?)
                 } else {
-                    println!("None for probe side chunk");
                     None
                 };
 

@@ -54,12 +54,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {
-        // println!(
-        //     "current: {:?}, peer: {:?} and they are equal: {:?}",
-        //     self.env.server_address(),
-        //     peer_addr,
-        //     is_local_address(self.env.server_address(), peer_addr)
-        // );
         is_local_address(self.env.server_address(), peer_addr)
     }
 
