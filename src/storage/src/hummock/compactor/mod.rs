@@ -85,7 +85,6 @@ where
     B: SstableWriterBuilder,
 {
     type Writer = <B as SstableWriterBuilder>::Writer;
-    type WriterBuilder = B;
 
     async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache

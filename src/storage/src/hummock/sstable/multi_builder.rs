@@ -33,17 +33,9 @@ use crate::monitor::StateStoreMetrics;
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
-    // We put `Writer` here to avoid horribly long return type of
-    // `CapacitySplitTableBuilder::finish` due to fully-qualified syntax.
     type Writer: SstableWriter;
-    type WriterBuilder: SstableWriterBuilder<Writer = Self::Writer>;
 
-    async fn open_builder(
-        &self,
-    ) -> HummockResult<(
-        MemoryTracker,
-        SstableBuilder<<Self::WriterBuilder as SstableWriterBuilder>::Writer>,
-    )>;
+    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<Self::Writer>)>;
 }
 
 pub struct SplitTableOutput<WO> {
@@ -58,16 +50,15 @@ pub struct SplitTableOutput<WO> {
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
 pub struct CapacitySplitTableBuilder<F>
 where
-    F: TableBuilderFactory
+    F: TableBuilderFactory,
 {
     /// When creating a new [`SstableBuilder`], caller use this factory to generate it.
     builder_factory: F,
 
-    sst_outputs: Vec<SplitTableOutput<<<<F as TableBuilderFactory>::WriterBuilder as SstableWriterBuilder>::Writer as SstableWriter>::Output>>,
+    sst_outputs:
+        Vec<SplitTableOutput<<<F as TableBuilderFactory>::Writer as SstableWriter>::Output>>,
 
-    current_builder: Option<
-        SstableBuilder<<<F as TableBuilderFactory>::WriterBuilder as SstableWriterBuilder>::Writer>,
-    >,
+    current_builder: Option<SstableBuilder<<F as TableBuilderFactory>::Writer>>,
 
     tracker: Option<MemoryTracker>,
 
@@ -258,7 +249,6 @@ where
     B: SstableWriterBuilder,
 {
     type Writer = <B as SstableWriterBuilder>::Writer;
-    type WriterBuilder = B;
 
     async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
         let id = self.next_id.fetch_add(1, SeqCst);
