@@ -15,16 +15,16 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops;
 
+use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
 use crate::hash::HashCode;
-use crate::types::{
-    deserialize_datum_from, deserialize_datum_not_null_from, hash_datum, serialize_datum_into,
-    serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
-};
-use crate::util::sort_util::OrderType;
+use crate::types::{hash_datum, DataType, Datum, DatumRef, ToOwnedDatum};
+use crate::util::value_encoding;
+use crate::util::value_encoding::{deserialize_datum, serialize_datum};
+
 impl DataChunk {
     /// Get an iterator for visible rows.
     pub fn rows(&self) -> impl Iterator<Item = RowRef> {
@@ -172,7 +172,7 @@ impl<'a> RowRef<'a> {
 
     /// Get the index of this row in the data chunk.
     #[must_use]
-    pub(super) fn index(&self) -> usize {
+    pub fn index(&self) -> usize {
         self.idx
     }
 }
@@ -249,49 +249,17 @@ impl Row {
         &EMPTY_ROW
     }
 
-    /// Serialize the row into a memcomparable bytes.
+    /// Serialize the row into value encoding bytes.
+    /// WARNING: If you want to serialize to a memcomparable format, use
+    /// [`crate::util::ordered::OrderedRow`]
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        for v in &self.0 {
-            serialize_datum_into(v, &mut serializer)?;
+    pub fn serialize(&self) -> value_encoding::Result<Vec<u8>> {
+        let mut result = vec![];
+        for cell in &self.0 {
+            result.extend(serialize_datum(cell)?);
         }
-        Ok(serializer.into_inner())
-    }
-
-    /// Serialize the row into a memcomparable bytes. All values must not be null.
-    pub fn serialize_not_null(&self) -> Result<Vec<u8>, memcomparable::Error> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        for v in &self.0 {
-            serialize_datum_not_null_into(v, &mut serializer)?;
-        }
-        Ok(serializer.into_inner())
-    }
-
-    /// Serialize the row into a memcomparable bytes based on the orderings.
-    pub fn serialize_with_order(
-        &self,
-        orders: &[OrderType],
-    ) -> Result<Vec<u8>, memcomparable::Error> {
-        assert_eq!(self.0.len(), orders.len());
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        for (order, datum) in orders.iter().zip_eq(self.0.iter()) {
-            serializer.set_reverse(*order == OrderType::Descending);
-            serialize_datum_into(datum, &mut serializer)?;
-        }
-        Ok(serializer.into_inner())
-    }
-
-    /// Serialize a datum in the row to a memcomparable bytes. The datum must not be null.
-    ///
-    /// !Panics
-    ///
-    /// * Panics when `datum_idx` is out of range.
-    pub fn serialize_datum(&self, datum_idx: usize) -> Result<Vec<u8>, memcomparable::Error> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        serialize_datum_into(&self.0[datum_idx], &mut serializer)?;
-        Ok(serializer.into_inner())
+        Ok(result)
     }
 
     /// Return number of cells in the row.
@@ -346,42 +314,13 @@ impl RowDeserializer {
         RowDeserializer { data_types: schema }
     }
 
-    /// Deserialize the row from a memcomparable bytes.
-    pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
+    /// Deserialize the row from value encoding bytes.
+    pub fn deserialize(&self, mut data: impl Buf) -> value_encoding::Result<Row> {
         let mut values = Vec::with_capacity(self.data_types.len());
-        let mut deserializer = memcomparable::Deserializer::new(data);
-        for ty in &self.data_types {
-            values.push(deserialize_datum_from(ty, &mut deserializer)?);
+        for typ in &self.data_types {
+            values.push(deserialize_datum(&mut data, typ)?);
         }
         Ok(Row(values))
-    }
-
-    /// Deserialize the row from a memcomparable bytes. All values are not null.
-    pub fn deserialize_not_null(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
-        let mut values = Vec::with_capacity(self.data_types.len());
-        let mut deserializer = memcomparable::Deserializer::new(data);
-        for ty in &self.data_types {
-            values.push(deserialize_datum_not_null_from(
-                ty.clone(),
-                &mut deserializer,
-            )?);
-        }
-        Ok(Row(values))
-    }
-
-    /// Deserialize a datum in the row to a memcomparable bytes. The datum must not be null.
-    ///
-    /// !Panics
-    ///
-    /// * Panics when `datum_idx` is out of range.
-    pub fn deserialize_datum(
-        &self,
-        data: &[u8],
-        datum_idx: usize,
-    ) -> Result<Datum, memcomparable::Error> {
-        let mut deserializer = memcomparable::Deserializer::new(data);
-        let datum = deserialize_datum_from(&self.data_types[datum_idx], &mut deserializer)?;
-        Ok(datum)
     }
 }
 
@@ -392,38 +331,7 @@ mod tests {
     use crate::util::hash_util::CRC32FastBuilder;
 
     #[test]
-    fn row_memcomparable_encode_decode_not_null() {
-        let row = Row(vec![
-            Some(ScalarImpl::Utf8("string".into())),
-            Some(ScalarImpl::Bool(true)),
-            Some(ScalarImpl::Int16(1)),
-            Some(ScalarImpl::Int32(2)),
-            Some(ScalarImpl::Int64(3)),
-            Some(ScalarImpl::Float32(4.0.into())),
-            Some(ScalarImpl::Float64(5.0.into())),
-            Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
-            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
-        ]);
-        let bytes = row.serialize_not_null().unwrap();
-        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 5 + 16);
-
-        let de = RowDeserializer::new(vec![
-            Ty::Varchar,
-            Ty::Boolean,
-            Ty::Int16,
-            Ty::Int32,
-            Ty::Int64,
-            Ty::Float32,
-            Ty::Float64,
-            Ty::Decimal,
-            Ty::Interval,
-        ]);
-        let row1 = de.deserialize_not_null(&bytes).unwrap();
-        assert_eq!(row, row1);
-    }
-
-    #[test]
-    fn row_memcomparable_encode_decode() {
+    fn row_value_encode_decode() {
         let row = Row(vec![
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
@@ -436,8 +344,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let bytes = row.serialize().unwrap();
-        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 5 + 16 + 9);
-
+        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 16 + 16 + 9);
         let de = RowDeserializer::new(vec![
             Ty::Varchar,
             Ty::Boolean,
@@ -449,7 +356,7 @@ mod tests {
             Ty::Decimal,
             Ty::Interval,
         ]);
-        let row1 = de.deserialize(&bytes).unwrap();
+        let row1 = de.deserialize(bytes.as_ref()).unwrap();
         assert_eq!(row, row1);
     }
 

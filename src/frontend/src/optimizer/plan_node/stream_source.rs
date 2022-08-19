@@ -32,7 +32,8 @@ impl StreamSource {
         let base = PlanBase::new_stream(
             logical.ctx(),
             logical.schema().clone(),
-            logical.pk_indices().to_vec(),
+            logical.logical_pk().to_vec(),
+            logical.functional_dependency().clone(),
             Distribution::SomeShard,
             logical.source_catalog().append_only,
         );

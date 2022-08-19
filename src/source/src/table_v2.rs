@@ -14,14 +14,11 @@
 
 use std::sync::RwLock;
 
-use async_trait::async_trait;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
-
-use crate::{StreamChunkWithState, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -78,16 +75,6 @@ impl TableSourceV2 {
 
         Ok(notifier_rx)
     }
-
-    /// Write stream chunk into table using `write_chunk`, and then block until a reader consumes
-    /// the chunk.
-    ///
-    /// Returns the cardinality of this chunk.
-    pub async fn blocking_write_chunk(&self, chunk: StreamChunk) -> Result<usize> {
-        let rx = self.write_chunk(chunk)?;
-        let written_cardinality = rx.await.unwrap();
-        Ok(written_cardinality)
-    }
 }
 
 // TODO: Currently batch read directly calls api from `ScannableTable` instead of using
@@ -108,9 +95,8 @@ pub struct TableV2StreamReader {
     column_indices: Vec<usize>,
 }
 
-#[async_trait]
-impl StreamSourceReader for TableV2StreamReader {
-    async fn next(&mut self) -> Result<StreamChunkWithState> {
+impl TableV2StreamReader {
+    pub async fn next(&mut self) -> Result<StreamChunk> {
         let (chunk, notifier) = self
             .rx
             .recv()
@@ -132,10 +118,7 @@ impl StreamSourceReader for TableV2StreamReader {
         // Notify about that we've taken the chunk.
         notifier.send(chunk.cardinality()).ok();
 
-        Ok(StreamChunkWithState {
-            chunk,
-            split_offset_mapping: None,
-        })
+        Ok(chunk)
     }
 }
 
@@ -198,9 +181,7 @@ mod tests {
                     vec![column_nonnull!(I64Array, [$i])],
                     None,
                 );
-                tokio::spawn(async move {
-                    source.blocking_write_chunk(chunk).await.unwrap();
-                })
+                source.write_chunk(chunk).unwrap();
             }};
         }
 
@@ -209,7 +190,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await?, chunk => {
-                    assert_eq!(chunk.chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }

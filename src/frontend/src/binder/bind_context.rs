@@ -141,21 +141,6 @@ impl BindContext {
         }
     }
 
-    pub fn get_group_id(&self, column_name: &String) -> Option<u32> {
-        if let Some(columns) = self
-            .indexs_of
-            .get(column_name) && columns.len() > 1
-        {
-            if let Some(group_id) = self.column_group_context.mapping.get(&columns[0]) {
-                let group = self.column_group_context.groups.get(group_id).unwrap();
-                if columns.iter().all(|idx| group.indices.contains(idx)) {
-                    return Some(*group_id);
-                }
-            }
-        }
-        None
-    }
-
     fn get_indices_with_group_id(&self, group_id: u32, column_name: &String) -> Result<Vec<usize>> {
         let group = self.column_group_context.groups.get(&group_id).unwrap();
         if let Some(name) = &group.column_name {
@@ -235,7 +220,7 @@ impl BindContext {
                 if group.non_nullable_column.is_none() {
                     group.non_nullable_column = non_nullable_column;
                 }
-                self.column_group_context.mapping.insert(right, group_id);
+                self.column_group_context.mapping.insert(left, group_id);
             }
             (Some(l_group_id), Some(r_group_id)) => {
                 if r_group_id == l_group_id {
@@ -306,7 +291,7 @@ impl BindContext {
             match self.range_of.entry(k) {
                 Entry::Occupied(e) => {
                     return Err(ErrorCode::InternalError(format!(
-                        "Duplicated table name while binding context {}",
+                        "Duplicated table name while merging adjacent contexts: {}",
                         e.key()
                     ))
                     .into());

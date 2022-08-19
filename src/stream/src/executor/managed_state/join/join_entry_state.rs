@@ -16,13 +16,13 @@ use std::collections::{btree_map, BTreeMap};
 
 use super::*;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
 /// We manages a `BTreeMap` in memory for all entries belonging to a join key.
@@ -48,18 +48,24 @@ impl JoinEntryState {
         self.cached.remove(&pk);
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn iter(&mut self) -> JoinEntryStateIter<'_> {
         self.cached.iter()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn values(&mut self) -> JoinEntryStateValues<'_> {
         self.cached.values()
     }
 
-    pub fn values_mut(&mut self) -> JoinEntryStateValuesMut<'_> {
-        self.cached.values_mut()
+    pub fn values_mut<'a, 'b: 'a>(
+        &'a mut self,
+        data_types: &'b [DataType],
+    ) -> impl Iterator<Item = (&'a mut EncodedJoinRow, StreamExecutorResult<JoinRow>)> + 'a {
+        self.cached.values_mut().map(|encoded| {
+            let decoded = encoded.decode(data_types);
+            (encoded, decoded)
+        })
     }
 }
 
@@ -76,6 +82,7 @@ mod tests {
         let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
+        let col_types = vec![DataType::Int64, DataType::Int64];
         let data_chunk = DataChunk::from_pretty(
             "I I
              3 4
@@ -88,15 +95,17 @@ mod tests {
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             let pk = Row(pk);
             let join_row = JoinRow { row, degree: 0 };
-            managed_state.insert(pk, join_row);
+            managed_state.insert(pk, join_row.encode().unwrap());
         }
 
-        for state in managed_state.iter().zip_eq(col1.iter().zip_eq(col2.iter())) {
-            let ((key, value), (d1, d2)) = state;
-            assert_eq!(key.0[0], Some(ScalarImpl::Int64(*d1)));
-            assert_eq!(value.row[0], Some(ScalarImpl::Int64(*d1)));
-            assert_eq!(value.row[1], Some(ScalarImpl::Int64(*d2)));
-            assert_eq!(value.degree, 0);
+        for ((_, matched_row), (d1, d2)) in managed_state
+            .values_mut(&col_types)
+            .zip_eq(col1.iter().zip_eq(col2.iter()))
+        {
+            let matched_row = matched_row.unwrap();
+            assert_eq!(matched_row.row[0], Some(ScalarImpl::Int64(*d1)));
+            assert_eq!(matched_row.row[1], Some(ScalarImpl::Int64(*d2)));
+            assert_eq!(matched_row.degree, 0);
         }
     }
 }

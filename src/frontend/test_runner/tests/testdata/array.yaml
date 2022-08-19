@@ -2,13 +2,13 @@
 - sql: |
     values (ARRAY['foo', 'bar']);
   logical_plan: |
-    LogicalValues { rows: [[Array('foo':Varchar, 'bar':Varchar)]], schema: Schema { fields: [:List { datatype: Varchar }] } }
+    LogicalValues { rows: [[Array('foo':Varchar, 'bar':Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Varchar }] } }
   batch_plan: |
     BatchValues { rows: [[Array('foo':Varchar, 'bar':Varchar)]] }
 - sql: |
     values (ARRAY[1, 2+3, 4*5+1]);
   logical_plan: |
-    LogicalValues { rows: [[Array(1:Int32, (2:Int32 + 3:Int32), ((4:Int32 * 5:Int32) + 1:Int32))]], schema: Schema { fields: [:List { datatype: Int32 }] } }
+    LogicalValues { rows: [[Array(1:Int32, (2:Int32 + 3:Int32), ((4:Int32 * 5:Int32) + 1:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:List { datatype: Int32 }] } }
   batch_plan: |
     BatchValues { rows: [[Array(1:Int32, (2:Int32 + 3:Int32), ((4:Int32 * 5:Int32) + 1:Int32))]] }
 - sql: |

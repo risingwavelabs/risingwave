@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -23,9 +24,8 @@ use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
-use crate::manager::MetaSrvEnv;
+use crate::manager::{FragmentManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -66,8 +66,13 @@ where
         self.env.idle_manager().record_activity();
         let _req = request.into_inner();
 
-        self.barrier_manager.flush().await?;
-        Ok(Response::new(FlushResponse { status: None }))
+        let max_epoch = self.barrier_manager.flush().await?;
+        Ok(Response::new(FlushResponse {
+            status: None,
+            snapshot: Some(HummockSnapshot {
+                epoch: Some(max_epoch),
+            }),
+        }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

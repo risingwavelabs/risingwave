@@ -24,9 +24,9 @@ use crate::error::meta_error_to_tonic;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumTrigger};
+use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
 
 pub struct HummockServiceImpl<S>
 where
@@ -72,16 +72,14 @@ where
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let (is_delta_response, version_deltas, pinned_version) = self
+        let payload = self
             .hummock_manager
             .pin_version(req.context_id, req.last_pinned)
             .await
             .map_err(meta_error_to_tonic)?;
         Ok(Response::new(PinVersionResponse {
             status: None,
-            is_delta_response,
-            version_deltas,
-            pinned_version,
+            payload: Some(payload),
         }))
     }
 
@@ -190,14 +188,17 @@ where
         &self,
         request: Request<SubscribeCompactTasksRequest>,
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
-        let context_id = request.into_inner().context_id;
+        let req = request.into_inner();
+        let context_id = req.context_id;
         // check_context and add_compactor as a whole is not atomic, but compactor_manager will
         // remove invalid compactor eventually.
         if !self.hummock_manager.check_context(context_id).await {
             return Err(anyhow::anyhow!("invalid hummock context {}", context_id))
                 .map_err(meta_error_to_tonic);
         }
-        let rx = self.compactor_manager.add_compactor(context_id);
+        let rx = self
+            .compactor_manager
+            .add_compactor(context_id, req.max_concurrent_task_number);
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 
@@ -296,5 +297,15 @@ where
             status: None,
             snapshot: Some(hummock_snapshot),
         }))
+    }
+
+    async fn report_full_scan_task(
+        &self,
+        request: Request<ReportFullScanTaskRequest>,
+    ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
+        self.hummock_manager
+            .extend_ssts_to_delete_from_scan(&request.into_inner().sst_ids)
+            .await;
+        Ok(Response::new(ReportFullScanTaskResponse { status: None }))
     }
 }

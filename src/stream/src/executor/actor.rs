@@ -16,14 +16,16 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
+use async_stack_trace::{SpanValue, StackTrace};
 use futures::pin_mut;
+use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::Result;
 use tokio_stream::StreamExt;
-use tracing_futures::Instrument;
 
 use super::monitor::StreamingMetrics;
 use super::{Message, StreamConsumer};
+use crate::executor::Epoch;
 use crate::task::{ActorId, SharedContext};
 
 pub struct OperatorInfo {
@@ -130,14 +132,14 @@ where
 
     pub async fn run(self) -> Result<()> {
         let span_name = format!("actor_poll_{:03}", self.id);
-        let mut span = tracing::trace_span!(
-            "actor_poll",
-            otel.name = span_name.as_str(),
-            // For the upstream trace pipe, its output is our input.
-            actor_id = self.id,
-            next = "Outbound",
-            epoch = -1
-        );
+        let mut span = {
+            let mut span = Span::enter_with_local_parent("actor_poll");
+            span.add_property(|| ("otel.name", span_name.to_string()));
+            span.add_property(|| ("next", self.id.to_string()));
+            span.add_property(|| ("next", "Outbound".to_string()));
+            span.add_property(|| ("epoch", (-1).to_string()));
+            span
+        };
 
         let actor_id_string = self.id.to_string();
         let operator_id_string = {
@@ -149,11 +151,22 @@ where
             res
         };
 
+        let mut last_epoch: Option<Epoch> = None;
+
         let stream = Box::new(self.consumer).execute();
         pin_mut!(stream);
 
         // Drive the streaming task with an infinite loop
-        while let Some(barrier) = stream.next().instrument(span).await.transpose()? {
+        while let Some(barrier) = stream
+            .next()
+            .in_span(span)
+            .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
+                format!("Epoch {}", e.curr).into()
+            }))
+            .await
+            .transpose()?
+        {
+            last_epoch = Some(barrier.epoch);
             {
                 // Calculate metrics
                 let prev_epoch = barrier.epoch.prev;
@@ -193,27 +206,14 @@ where
             }
 
             // Tracing related work
-            let span_parent = barrier.span;
-            if !span_parent.is_none() {
-                span = tracing::trace_span!(
-                    parent: span_parent,
-                    "actor_poll",
-                    otel.name = span_name.as_str(),
-                    // For the upstream trace pipe, its output is our input.
-                    actor_id = self.id,
-                    next = "Outbound",
-                    epoch = barrier.epoch.curr,
-                );
-            } else {
-                span = tracing::trace_span!(
-                    "actor_poll",
-                    otel.name = span_name.as_str(),
-                    // For the upstream trace pipe, its output is our input.
-                    actor_id = self.id,
-                    next = "Outbound",
-                    epoch = barrier.epoch.curr,
-                );
-            }
+            span = {
+                let mut span = Span::enter_with_local_parent("actor_poll");
+                span.add_property(|| ("otel.name", span_name.to_string()));
+                span.add_property(|| ("next", self.id.to_string()));
+                span.add_property(|| ("next", "Outbound".to_string()));
+                span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
+                span
+            };
         }
 
         tracing::error!(actor_id = self.id, "actor exit without stop barrier");

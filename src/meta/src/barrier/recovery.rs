@@ -20,12 +20,11 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
-use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
@@ -37,7 +36,7 @@ use uuid::Uuid;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
-use crate::cluster::WorkerId;
+use crate::manager::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
@@ -80,10 +79,12 @@ where
             let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
-            if self.enable_migrate {
+            {
                 // Migrate expired actors to newly joined node by changing actor_map
-                self.migrate_actors(&info).await?;
-                info = self.resolve_actor_info_for_recovery().await;
+                let migrated = self.migrate_actors(&info).await?;
+                if migrated {
+                    info = self.resolve_actor_info_for_recovery().await;
+                }
             }
 
             // Reset all compute nodes, stop and drop existing actors.
@@ -200,7 +201,7 @@ where
         (migrate_map, node_map)
     }
 
-    async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<()> {
+    async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
         debug!("start migrate actors.");
         // get expired workers
         let expired_workers = info
@@ -211,41 +212,39 @@ where
             .collect_vec();
         if expired_workers.is_empty() {
             debug!("no expired workers, skipping.");
-            return Ok(());
+            return Ok(false);
         }
         debug!("got expired workers {:#?}", expired_workers);
         let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
         // migrate actors in fragments, return updated fragments and pu to pu migrate plan
-        let (new_fragments, migrate_map) = self
+        let new_fragments = self
             .fragment_manager
             .migrate_actors(&migrate_map, &node_map)
             .await?;
-        debug!("got parallel unit migrate plan {:#?}", migrate_map);
-        // update mapping in table and notify frontends
-        let res = self
-            .catalog_manager
-            .update_table_mapping(&new_fragments, &migrate_map)
-            .await;
-        // update hash mapping
-        for fragments in new_fragments {
-            for (fragment_id, fragment) in fragments.fragments {
-                let mapping = fragment.vnode_mapping.as_ref().unwrap();
-                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
-                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+        debug!("notify mapping info to frontends");
+        for table_fragment in new_fragments {
+            for table_id in table_fragment
+                .internal_table_ids()
+                .into_iter()
+                .chain(std::iter::once(table_fragment.table_id().table_id))
+            {
+                let mapping = table_fragment
+                    .get_table_hash_mapping(table_id)
+                    .expect("no data distribution found");
                 self.env
-                    .hash_mapping_manager()
-                    .set_fragment_hash_mapping(fragment_id, vnode_mapping);
+                    .notification_manager()
+                    .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                    .await;
             }
         }
         debug!("migrate actors succeed.");
-        res
+        Ok(true)
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
     /// already.
     async fn sync_sources(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let sources = catalog_guard.list_sources().await?;
+        let sources = self.catalog_manager.list_sources().await?;
 
         let futures = info.node_map.iter().map(|(_, node)| {
             let request = SyncSourcesRequest {
@@ -253,7 +252,7 @@ where
             };
             async move {
                 let client = &self.env.stream_client_pool().get(node).await?;
-                client.to_owned().sync_sources(request).await?;
+                client.sync_sources(request).await?;
 
                 Ok::<_, MetaError>(())
             }
@@ -286,7 +285,6 @@ where
             let client = self.env.stream_client_pool().get(node).await?;
 
             client
-                .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos.clone(),
                 })
@@ -295,7 +293,6 @@ where
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
             client
-                .to_owned()
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: node_actors.get(node_id).cloned().unwrap_or_default(),
@@ -316,7 +313,6 @@ where
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client
-                .to_owned()
                 .build_actors(BuildActorsRequest {
                     request_id,
                     actor_id: actors.to_owned(),
@@ -338,7 +334,6 @@ where
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!("force stop actors: {}", worker_node.id);
             client
-                .to_owned()
                 .force_stop_actors(ForceStopActorsRequest {
                     request_id: Uuid::new_v4().to_string(),
                     epoch: Some(ProstEpoch {
@@ -347,7 +342,6 @@ where
                     }),
                 })
                 .await
-                .map_err(MetaError::from)
         });
 
         try_join_all(futures).await?;

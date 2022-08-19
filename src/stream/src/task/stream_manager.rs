@@ -18,12 +18,14 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use async_stack_trace::{StackTraceManager, StackTraceReport};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -69,6 +71,9 @@ pub struct LocalStreamManagerCore {
 
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
+
+    /// Manages the stack traces of all actors.
+    stack_trace_manager: StackTraceManager<ActorId>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -149,6 +154,29 @@ impl LocalStreamManager {
         Self::with_core(LocalStreamManagerCore::for_test())
     }
 
+    /// Print the traces of all actors periodically, used for debugging only.
+    pub fn spawn_print_trace(self: Arc<Self>) -> JoinHandle<!> {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
+                let mut core = self.core.lock();
+
+                for (k, trace) in core.stack_trace_manager.get_all() {
+                    println!(">> Actor {}\n\n{}", k, &*trace);
+                }
+            }
+        })
+    }
+
+    /// Get stack trace reports for all actors.
+    pub fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
+        let mut core = self.core.lock();
+        core.stack_trace_manager
+            .get_all()
+            .map(|(k, v)| (*k, v.clone()))
+            .collect()
+    }
+
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
     pub fn send_barrier(
         &self,
@@ -200,8 +228,8 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let local_sst_info = dispatch_state_store!(self.state_store(), store, {
-            match store.sync(Some(epoch)).await {
-                Ok(_) => store.get_uncommitted_ssts(epoch),
+            match store.sync(epoch).await {
+                Ok((_, ssts)) => ssts,
                 // TODO: Handle sync failure by propagating it back to global barrier manager
                 Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
@@ -251,13 +279,7 @@ impl LocalStreamManager {
         let (actor_ids_to_send, actor_ids_to_collect) = {
             let core = self.core.lock();
             let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
-            let actor_ids_to_collect = core
-                .context
-                .actor_infos
-                .read()
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
+            let actor_ids_to_collect = core.handles.keys().cloned().collect::<HashSet<_>>();
             (actor_ids_to_send, actor_ids_to_collect)
         };
         if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
@@ -266,7 +288,6 @@ impl LocalStreamManager {
         let barrier = &Barrier {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
-            span: tracing::Span::none(),
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
@@ -359,6 +380,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
+            stack_trace_manager: Default::default(),
         }
     }
 
@@ -534,15 +556,26 @@ impl LocalStreamManagerCore {
                 self.streaming_metrics.clone(),
                 actor_context,
             );
-            let monitor = tokio_metrics::TaskMonitor::new();
 
-            self.handles.insert(
-                actor_id,
-                tokio::spawn(monitor.instrument(async move {
+            let monitor = tokio_metrics::TaskMonitor::new();
+            let trace_reporter = self.stack_trace_manager.register(actor_id);
+
+            let handle = {
+                let actor = async move {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
-                })),
-            );
+                };
+                let traced = trace_reporter.optional_trace(
+                    actor,
+                    format!("Actor {actor_id}"),
+                    true,
+                    Duration::from_millis(1000),
+                    *ENABLE_ASYNC_STACK_TRACE,
+                );
+                let instrumented = monitor.instrument(traced);
+                tokio::spawn(instrumented)
+            };
+            self.handles.insert(actor_id, handle);
 
             let actor_id_str = actor_id.to_string();
 

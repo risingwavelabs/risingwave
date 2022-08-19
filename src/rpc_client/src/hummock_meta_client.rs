@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockAllEpoch, HummockVersion, HummockVersionDelta,
+    pin_version_response, CompactTask, CompactionGroup, HummockAllEpoch,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
@@ -27,7 +29,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)>;
+    ) -> Result<pin_version_response::Payload>;
     async fn unpin_version(&self) -> Result<()>;
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn pin_snapshot(&self) -> Result<HummockAllEpoch>;
@@ -42,7 +44,10 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()>;
-    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>>;
+    async fn subscribe_compact_tasks(
+        &self,
+        max_concurrent_task_number: u64,
+    ) -> Result<Streaming<SubscribeCompactTasksResponse>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>>;
     async fn trigger_manual_compaction(
@@ -51,4 +56,5 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
     ) -> Result<()>;
+    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()>;
 }

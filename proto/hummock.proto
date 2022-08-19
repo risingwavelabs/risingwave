@@ -97,9 +97,13 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  bool is_delta_response = 2;
-  repeated HummockVersionDelta version_deltas = 3;
-  HummockVersion pinned_version = 4;
+  message HummockVersionDeltas {
+    repeated HummockVersionDelta delta = 1;
+  }
+  oneof payload {
+    HummockVersionDeltas version_deltas = 2;
+    HummockVersion pinned_version = 3;
+  }
 }
 
 message UnpinVersionBeforeRequest {
@@ -159,7 +163,7 @@ message KeyRange {
 }
 
 message TableOption {
-  uint32 ttl = 1;
+  uint32 retention_seconds = 1;
 }
 
 message CompactTask {
@@ -259,15 +263,25 @@ message GetNewSstIdsResponse {
 
 message SubscribeCompactTasksRequest {
   uint32 context_id = 1;
+  uint64 max_concurrent_task_number = 2;
 }
 
 message SubscribeCompactTasksResponse {
-  CompactTask compact_task = 1;
-  VacuumTask vacuum_task = 2;
+  oneof task {
+    CompactTask compact_task = 1;
+    VacuumTask vacuum_task = 2;
+    FullScanTask full_scan_task = 3;
+  }
 }
 
+// Delete SSTs in object store
 message VacuumTask {
   repeated uint64 sstable_ids = 1;
+}
+
+// Scan object store to get candidate orphan SSTs.
+message FullScanTask {
+  uint64 sst_retention_time_sec = 1;
 }
 
 message ReportVacuumTaskRequest {
@@ -297,6 +311,14 @@ message TriggerManualCompactionResponse {
   common.Status status = 1;
 }
 
+message ReportFullScanTaskRequest {
+  repeated uint64 sst_ids = 1;
+}
+
+message ReportFullScanTaskResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -311,6 +333,7 @@ service HummockManagerService {
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
+  rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
 }
 
 service CompactorService {}

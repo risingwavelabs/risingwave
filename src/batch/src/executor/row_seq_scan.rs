@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
@@ -28,7 +28,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockVersionEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
-use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
+use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::row_serde::RowBasedSerde;
 use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
@@ -93,7 +93,7 @@ fn get_scan_bound(
         .iter()
         .map(|v| {
             let ty = pk_types.next().unwrap();
-            let scalar = ScalarImpl::bytes_to_scalar(v, &ty.to_protobuf()).unwrap();
+            let scalar = ScalarImpl::from_proto_bytes(v, &ty.to_protobuf()).unwrap();
             Some(scalar)
         })
         .collect_vec());
@@ -103,7 +103,7 @@ fn get_scan_bound(
 
     let bound_ty = pk_types.next().unwrap();
     let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-        let scalar = ScalarImpl::bytes_to_scalar(&bound.value, &bound_ty.to_protobuf()).unwrap();
+        let scalar = ScalarImpl::from_proto_bytes(&bound.value, &bound_ty.to_protobuf()).unwrap();
 
         let datum = Some(scalar);
         if bound.inclusive {
@@ -140,7 +140,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             NodeBody::RowSeqScan
         )?;
 
-        let table_desc: &CellBasedTableDesc = seq_scan_node.get_table_desc()?;
+        let table_desc: &StorageTableDesc = seq_scan_node.get_table_desc()?;
         let table_id = TableId {
             table_id: table_desc.table_id,
         };
@@ -192,8 +192,16 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             None => Distribution::all_vnodes(dist_key_indices),
         };
 
+        let table_option = TableOption {
+            retention_seconds: if table_desc.retention_seconds > 0 {
+                Some(table_desc.retention_seconds)
+            } else {
+                None
+            },
+        };
+
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
-            let batch_stats = source.context().stats();
+            let batch_stats = source.context().stats().unwrap();
             let table = RowBasedStorageTable::new_partial(
                 state_store.clone(),
                 table_id,
@@ -202,6 +210,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 order_types,
                 pk_indices,
                 distribution,
+                table_option,
             );
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 

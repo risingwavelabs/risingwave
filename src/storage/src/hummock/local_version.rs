@@ -12,24 +12,85 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-use parking_lot::lock_api::ArcRwLockReadGuard;
-use parking_lot::{RawRwLock, RwLock};
+use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use crate::hummock::shared_buffer::{
+    KeyIndexedUncommittedData, OrderSortedUncommittedData, UncommittedData,
+};
+use crate::hummock::utils::{filter_single_sst, range_overlap};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
-    shared_buffer: BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>>,
+    shared_buffer: BTreeMap<HummockEpoch, SharedBuffer>,
     pinned_version: Arc<PinnedVersion>,
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
+    // TODO: save uncommitted data that needs to be flushed to disk.
+    /// Save uncommitted data that needs to be synced or finished syncing.
+    pub sync_uncommitted_data: Vec<(HummockEpoch, SyncUncommittedData)>,
+    max_sync_epoch: u64,
+}
+
+#[derive(Debug, Clone)]
+pub enum SyncUncommittedData {
+    /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
+    /// as `Syncing`.
+    Syncing(KeyIndexedUncommittedData),
+    /// After we finish syncing, we changed `Syncing` to `Synced`.
+    Synced(Vec<UncommittedData>),
+}
+
+impl SyncUncommittedData {
+    pub fn get_overlap_data<R, B>(&self, key_range: &R) -> OrderSortedUncommittedData
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
+        match self {
+            SyncUncommittedData::Syncing(task) => {
+                let local_data_iter = task
+                    .iter()
+                    .filter(|(_, data)| match data {
+                        UncommittedData::Batch(batch) => {
+                            range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
+                        }
+                        UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                    })
+                    .map(|((_, order_index), data)| (*order_index, data.clone()));
+
+                let mut uncommitted_data = BTreeMap::new();
+                for (order_index, data) in local_data_iter {
+                    uncommitted_data
+                        .entry(order_index)
+                        .or_insert_with(Vec::new)
+                        .push(data);
+                }
+                uncommitted_data.into_values().rev().collect()
+            }
+            SyncUncommittedData::Synced(ssts) => vec![ssts
+                .iter()
+                .filter(|data| match data {
+                    UncommittedData::Batch(_) => {
+                        panic!("sync uncommitted states can't save batch")
+                    }
+                    UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                })
+                .cloned()
+                .collect()],
+        }
+    }
 }
 
 impl LocalVersion {
@@ -43,6 +104,8 @@ impl LocalVersion {
             shared_buffer: BTreeMap::default(),
             pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
             version_ids_in_use,
+            sync_uncommitted_data: Default::default(),
+            max_sync_epoch: 0,
         }
     }
 
@@ -50,34 +113,94 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn get_shared_buffer(&self, epoch: HummockEpoch) -> Option<&Arc<RwLock<SharedBuffer>>> {
+    pub fn get_min_unsynced_epoch(&self) -> Option<HummockEpoch> {
+        self.shared_buffer
+            .iter()
+            .find(|(key, _)| key > &&self.max_sync_epoch)
+            .map(|(key, _)| key)
+            .cloned()
+    }
+
+    pub fn set_max_sync_epoch(&mut self, epoch: HummockEpoch) {
+        self.max_sync_epoch = epoch;
+    }
+
+    pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
+        self.shared_buffer.get_mut(&epoch)
+    }
+
+    pub fn get_shared_buffer(&self, epoch: HummockEpoch) -> Option<&SharedBuffer> {
         self.shared_buffer.get(&epoch)
     }
 
-    pub fn iter_shared_buffer(
-        &self,
-    ) -> impl Iterator<Item = (&HummockEpoch, &Arc<RwLock<SharedBuffer>>)> {
+    pub fn add_sync_state(
+        &mut self,
+        sync_epoch: HummockEpoch,
+        sync_uncommitted_data: SyncUncommittedData,
+    ) {
+        let node = self
+            .sync_uncommitted_data
+            .iter_mut()
+            .find(|(epoch, _)| epoch == &sync_epoch);
+        match &node {
+            None => {
+                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
+                if let Some(last) = self.sync_uncommitted_data.last() {
+                    assert!(last.0 < sync_epoch)
+                }
+                self.sync_uncommitted_data
+                    .push((sync_epoch, sync_uncommitted_data));
+                return;
+            }
+            Some((_, SyncUncommittedData::Syncing(_))) => {
+                assert_matches!(sync_uncommitted_data, SyncUncommittedData::Synced(_));
+            }
+            Some((_, SyncUncommittedData::Synced(_))) => {
+                panic!("sync over, can't modify uncommitted sst state");
+            }
+        }
+        *node.unwrap() = (sync_epoch, sync_uncommitted_data);
+    }
+
+    pub fn iter_shared_buffer(&self) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)> {
         self.shared_buffer.iter()
+    }
+
+    pub fn iter_mut_shared_buffer(
+        &mut self,
+    ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)> {
+        self.shared_buffer.iter_mut()
     }
 
     pub fn new_shared_buffer(
         &mut self,
         epoch: HummockEpoch,
         global_upload_task_size: Arc<AtomicUsize>,
-    ) -> Arc<RwLock<SharedBuffer>> {
+    ) -> &mut SharedBuffer {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::new(global_upload_task_size))))
-            .clone()
+            .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
-    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
+    /// Returns epochs cleaned from shared buffer.
+    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) -> Vec<HummockEpoch> {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
+        let mut cleaned_epoch = vec![];
         if self.pinned_version.max_committed_epoch_for_checkpoint()
             < new_pinned_version.max_committed_epoch
         {
+            cleaned_epoch.append(
+                &mut self
+                    .shared_buffer
+                    .keys()
+                    .filter(|e| **e <= new_pinned_version.max_committed_epoch)
+                    .cloned()
+                    .collect_vec(),
+            );
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
+            self.sync_uncommitted_data
+                .retain(|(epoch, _)| epoch > &new_pinned_version.max_committed_epoch);
         }
 
         self.version_ids_in_use.insert(new_pinned_version.id);
@@ -87,11 +210,20 @@ impl LocalVersion {
             version: new_pinned_version,
             unpin_worker_tx: self.pinned_version.unpin_worker_tx.clone(),
         });
+        cleaned_epoch
     }
 
-    pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
+    pub fn read_filter<R, B>(
+        this: &RwLock<Self>,
+        read_epoch: HummockEpoch,
+        key_range: &R,
+    ) -> ReadVersion
+    where
+        R: RangeBounds<B>,
+        B: AsRef<[u8]>,
+    {
         use parking_lot::RwLockReadGuard;
-        let (pinned_version, shared_buffer) = {
+        let (pinned_version, (shared_buffer_datas, sync_uncommitted_datas)) = {
             let guard = this.read();
             let smallest_uncommitted_epoch =
                 guard.pinned_version.max_committed_epoch_for_checkpoint() + 1;
@@ -103,25 +235,36 @@ impl LocalVersion {
                         .shared_buffer
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
-                        .map(|(_, shared_buffer)| shared_buffer.clone())
+                        .map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
+                        .collect();
+                    let result_sync: Vec<OrderSortedUncommittedData> = guard
+                        .sync_uncommitted_data
+                        .iter()
+                        .filter(|&node| {
+                            node.0 <= read_epoch && node.0 >= smallest_uncommitted_epoch
+                        })
+                        .map(|(_, value)| value.get_overlap_data(key_range))
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
-                    result
+                    (result, result_sync)
                 } else {
                     RwLockReadGuard::unlock_fair(guard);
-                    Vec::new()
+                    (Vec::new(), Vec::new())
                 },
             )
         };
 
         ReadVersion {
-            shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
+            shared_buffer_datas,
             pinned_version,
+            sync_uncommitted_datas,
         }
     }
 
-    pub fn clear_shared_buffer(&mut self) {
+    pub fn clear_shared_buffer(&mut self) -> Vec<HummockEpoch> {
+        let cleaned_epochs = self.shared_buffer.keys().cloned().collect_vec();
         self.shared_buffer.clear();
+        cleaned_epochs
     }
 }
 
@@ -187,6 +330,7 @@ impl PinnedVersion {
 
 pub struct ReadVersion {
     /// The shared buffer is sorted by epoch descendingly
-    pub shared_buffer: Vec<ArcRwLockReadGuard<RawRwLock, SharedBuffer>>,
+    pub shared_buffer_datas: Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
     pub pinned_version: Arc<PinnedVersion>,
+    pub sync_uncommitted_datas: Vec<OrderSortedUncommittedData>,
 }

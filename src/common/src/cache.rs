@@ -1279,7 +1279,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_future_cancel() {
         let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(0, 5));
         // do not need sender because this receiver will be cancelled.
@@ -1302,10 +1302,10 @@ mod tests {
             polled: polled.clone(),
         };
         {
-            let handle = tokio::spawn(async move {
-                wrapper.await;
-            });
-            while !polled.load(Ordering::Acquire) {}
+            let handle = tokio::spawn(wrapper);
+            while !polled.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
             handle.await.unwrap();
         }
         assert!(cache.shards[0].lock().write_request.is_empty());

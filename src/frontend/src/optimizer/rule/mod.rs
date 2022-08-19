@@ -55,8 +55,12 @@ mod merge_multijoin;
 pub use merge_multijoin::*;
 mod apply_join;
 mod distinct_agg;
+mod index_selection;
+mod push_calculation_of_join;
 pub use apply_join::*;
 pub use distinct_agg::*;
+pub use index_selection::*;
+pub use push_calculation_of_join::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -77,6 +81,8 @@ macro_rules! for_all_rules {
             ,{PullUpCorrelatedPredicateRule}
             ,{ReorderMultiJoinRule}
             ,{TranslateApplyRule}
+            ,{PushCalculationOfJoinRule}
+            ,{IndexSelectionRule}
         }
     };
 }

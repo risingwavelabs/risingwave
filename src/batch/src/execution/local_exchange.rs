@@ -71,6 +71,10 @@ impl ExchangeSource for LocalExchangeSource {
             }
         }
     }
+
+    fn get_task_id(&self) -> TaskId {
+        self.task_id.clone()
+    }
 }
 
 #[cfg(test)]
@@ -130,7 +134,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));

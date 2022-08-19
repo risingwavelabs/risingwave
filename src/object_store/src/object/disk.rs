@@ -25,7 +25,9 @@ use futures::future::try_join_all;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
-use crate::object::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult, ObjectStore};
+use super::{
+    BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
+};
 
 pub(super) mod utils {
     use std::fs::Metadata;
@@ -173,15 +175,23 @@ impl DiskObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let mut file =
-            utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
-        file.write_all(&obj)
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
-        file.flush()
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
-        Ok(())
+        if obj.is_empty() {
+            Err(ObjectError::internal("upload empty object"))
+        } else {
+            let mut file =
+                utils::open_file(self.new_file_path(path)?.as_path(), false, true, true).await?;
+            file.write_all(&obj)
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to write {}", path), e))?;
+            file.flush()
+                .await
+                .map_err(|e| ObjectError::disk(format!("failed to flush {}", path), e))?;
+            Ok(())
+        }
+    }
+
+    async fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
+        unimplemented!("streaming upload is not implemented for disk object store");
     }
 
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -359,6 +369,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_simple_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -377,6 +388,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_multi_level_dir_upload() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -395,6 +407,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_all() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -411,6 +424,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_partial() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -436,6 +450,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_multi_block() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -468,6 +483,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_delete() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -485,6 +501,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_not_exists() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -494,6 +511,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_out_of_range() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
@@ -556,6 +574,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_list() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();

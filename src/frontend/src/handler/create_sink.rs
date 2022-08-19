@@ -29,7 +29,7 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::stream_fragmenter::StreamFragmenterV2;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
@@ -133,9 +133,8 @@ pub async fn handle_create_sink(
 
     let (sink, graph) = {
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
-        let stream_plan = plan.to_stream_prost();
 
-        (sink, StreamFragmenter::build_graph(stream_plan))
+        (sink, StreamFragmenterV2::build_graph(plan))
     };
 
     let catalog_writer = session.env().catalog_writer();
@@ -166,7 +165,7 @@ pub mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let sql = r#"CREATE SINK snk1 FROM mv1
-                    WITH (sink = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
+                    WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
                         mysql.password = '<password>');"#.to_string();
         frontend.run_sql(sql).await.unwrap();

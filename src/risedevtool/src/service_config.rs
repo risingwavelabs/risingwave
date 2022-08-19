@@ -27,6 +27,7 @@ pub struct ComputeNodeConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
@@ -96,6 +97,8 @@ pub struct CompactorConfig {
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
+    pub max_concurrent_task_number: u64,
+    pub compaction_worker_threads_number: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -266,7 +269,7 @@ pub struct RedisConfig {
 pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
-    FrontendV2(FrontendConfig),
+    Frontend(FrontendConfig),
     Compactor(CompactorConfig),
     Minio(MinioConfig),
     Etcd(EtcdConfig),
@@ -285,7 +288,7 @@ impl ServiceConfig {
         match self {
             Self::ComputeNode(c) => &c.id,
             Self::MetaNode(c) => &c.id,
-            Self::FrontendV2(c) => &c.id,
+            Self::Frontend(c) => &c.id,
             Self::Compactor(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Etcd(c) => &c.id,

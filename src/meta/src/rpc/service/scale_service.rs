@@ -27,11 +27,10 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::ClusterManagerRef;
-use crate::manager::CatalogManagerRef;
+use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, SourceManagerRef};
+use crate::stream::SourceManagerRef;
 
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_manager: BarrierManagerRef<S>,
@@ -72,14 +71,14 @@ where
 {
     #[cfg_attr(coverage, no_coverage)]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        self.ddl_lock.write().await;
+        let _ddl_lock = self.ddl_lock.write().await;
         self.barrier_manager.run_command(Command::pause()).await?;
         Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, no_coverage)]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        self.ddl_lock.write().await;
+        let _ddl_lock = self.ddl_lock.write().await;
         self.barrier_manager.run_command(Command::resume()).await?;
         Ok(Response::new(ResumeResponse {}))
     }
@@ -117,12 +116,7 @@ where
             })
             .collect();
 
-        let sources = self
-            .catalog_manager
-            .get_catalog_core_guard()
-            .await
-            .list_sources()
-            .await?;
+        let sources = self.catalog_manager.list_sources().await?;
 
         let mut stream_source_infos = HashMap::new();
         for source in sources {

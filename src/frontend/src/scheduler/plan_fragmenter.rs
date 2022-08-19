@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
@@ -164,7 +164,7 @@ impl Query {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TableScanInfo {
     /// Indicates the table partitions to be read by scan tasks. Unnecessary partitions are already
     /// pruned.
@@ -173,7 +173,7 @@ pub struct TableScanInfo {
     pub partitions: Option<HashMap<ParallelUnitId, PartitionInfo>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PartitionInfo {
     pub vnode_bitmap: Buffer,
     pub scan_ranges: Vec<ScanRangeProto>,
@@ -360,7 +360,7 @@ impl BatchPlanFragmenter {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
 
-        let table_scan_info = Self::collect_stage_table_scan(root.clone());
+        let table_scan_info = self.collect_stage_table_scan(root.clone());
         let parallelism = match root.distribution() {
             Distribution::Single => {
                 assert!(
@@ -442,7 +442,7 @@ impl BatchPlanFragmenter {
     /// If there are multiple scan nodes in this stage, they must have the same distribution, but
     /// maybe different vnodes partition. We just use the same partition for all
     /// the scan nodes.
-    fn collect_stage_table_scan(node: PlanRef) -> Option<TableScanInfo> {
+    fn collect_stage_table_scan(&self, node: PlanRef) -> Option<TableScanInfo> {
         if node.node_type() == PlanNodeType::BatchExchange {
             // Do not visit next stage.
             return None;
@@ -451,24 +451,25 @@ impl BatchPlanFragmenter {
         if let Some(scan_node) = node.as_batch_seq_scan() {
             Some({
                 let table_desc = scan_node.logical().table_desc();
-                let partitions = table_desc.vnode_mapping.as_ref().map(|vnode_mapping| {
-                    derive_partitions(scan_node.scan_ranges(), table_desc, vnode_mapping)
-                });
+                let partitions = self
+                    .worker_node_manager
+                    .get_table_mapping(&table_desc.table_id)
+                    .map(|vnode_mapping| {
+                        derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)
+                    });
                 TableScanInfo { partitions }
             })
         } else {
             node.inputs()
                 .into_iter()
-                .map(Self::collect_stage_table_scan)
+                .map(|n| self.collect_stage_table_scan(n))
                 .find_map(|o| o)
         }
     }
 }
 
 // TODO: let frontend store owner_mapping directly?
-fn vnode_mapping_to_owner_mapping(
-    vnode_mapping: Vec<ParallelUnitId>,
-) -> HashMap<ParallelUnitId, Buffer> {
+fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Buffer> {
     let mut m: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
     let num_vnodes = vnode_mapping.len();
     for (i, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
@@ -561,6 +562,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
+    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -615,7 +617,7 @@ mod tests {
                 ],
                 distribution_key: vec![],
                 appendonly: false,
-                vnode_mapping: Some(vec![]),
+                retention_seconds: TABLE_OPTION_DUMMY_RETAINTION_SECOND,
             }),
             vec![],
             ctx,

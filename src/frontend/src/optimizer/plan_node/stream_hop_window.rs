@@ -29,7 +29,7 @@ pub struct StreamHopWindow {
 impl StreamHopWindow {
     pub fn new(logical: LogicalHopWindow) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.pk_indices.to_vec();
+        let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
 
         let i2o = logical.i2o_col_mapping();
@@ -39,6 +39,7 @@ impl StreamHopWindow {
             ctx,
             logical.schema().clone(),
             pk_indices,
+            logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
         );
