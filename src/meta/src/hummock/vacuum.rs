@@ -256,6 +256,9 @@ where
     let mut worker_futures = vec![];
     for worker in &workers {
         // For each cluster node, its watermark is collected after waiting for 2 heartbeats.
+        // The first heartbeat may carry watermark took before the start of this method,
+        // which doesn't correctly guard target SSTs.
+        // The second heartbeat guarantees its watermark is took after the start of this method.
         let worker_id = worker.id;
         let cluster_manager_clone = cluster_manager.clone();
         worker_futures.push(tokio::spawn(async move {
