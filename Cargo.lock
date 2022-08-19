@@ -183,15 +183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-ringbuffer"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8560d41bc860fe61e04b9825e56ee96969dbbe1c3e76e4d59b204931413ff9c"
-dependencies = [
- "futures-io",
-]
-
-[[package]]
 name = "async-stream"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2958,29 +2949,29 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e10972c4f03edcdc8643fc4869cff71e724519eb9a697e1bdf241bfb27648262"
+checksum = "c22974df2eec970953226b378cc167992831227cfe783204b72a0f3f32fd6891"
 dependencies = [
  "ahash",
  "async-channel",
- "async-ringbuffer",
  "async-task",
  "bincode",
  "bytes",
  "downcast-rs",
- "env_logger",
- "futures",
+ "futures-util",
  "lazy_static",
  "libc",
- "log",
  "madsim-macros",
  "naive-timer",
  "rand 0.8.5",
  "serde",
+ "spin 0.9.4",
  "tokio",
  "tokio-util",
  "toml",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3031,16 +3022,15 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5eab4341e6898a2493f4911c716162dec78bca50db6a282a633aa60fc6e1af5b"
+checksum = "e4f9a94d5152ffebadc3ced26c8c9c5ba64ee1a2374669599f6b4cdd13cf4017"
 dependencies = [
  "async-stream",
- "futures",
- "log",
+ "futures-util",
  "madsim",
  "tonic 0.8.0",
- "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -5176,7 +5166,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "sqllogictest",
- "workspace-hack",
+ "tracing",
 ]
 
 [[package]]
@@ -6313,7 +6303,6 @@ checksum = "cc463cd8deddc3770d20f9852143d50bf6094e640b485cb2e189a2099085ff45"
 dependencies = [
  "bytes",
  "futures-core",
- "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",
