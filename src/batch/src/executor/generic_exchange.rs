@@ -32,7 +32,7 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<C>;
-use super::BatchMetrics;
+use super::BatchTaskMetrics;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ExchangeSourceImpl>,
@@ -44,7 +44,7 @@ pub struct GenericExchangeExecutor<C> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<Arc<BatchMetrics>>,
+    metrics: Option<Arc<BatchTaskMetrics>>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -130,7 +130,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             schema: Schema { fields },
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
-            metrics: source.context().stats(),
+            metrics: source.task_metrics(),
         }))
     }
 }
@@ -170,7 +170,7 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
 async fn data_chunk_stream(
     mut source: ExchangeSourceImpl,
-    metrics: Option<Arc<BatchMetrics>>,
+    metrics: Option<Arc<BatchTaskMetrics>>,
     target_id: TaskId,
 ) {
     loop {
@@ -180,6 +180,13 @@ async fn data_chunk_stream(
             }
             if let Some(metrics) = metrics.as_ref() {
                 let source_id = source.get_task_id();
+                metrics.add_record(
+                    "exchange_recv_row_number".to_string(),
+                    source_id.stage_id,
+                    target_id.stage_id,
+                    source_id.task_id,
+                    target_id.task_id,
+                );
                 metrics
                     .exchange_recv_row_number
                     .with_label_values(&[
@@ -236,7 +243,7 @@ mod tests {
         }
 
         let executor = Box::new(GenericExchangeExecutor::<ComputeNodeContext> {
-            metrics: context.stats(),
+            metrics: None,
             sources,
             context,
             schema: Schema {
