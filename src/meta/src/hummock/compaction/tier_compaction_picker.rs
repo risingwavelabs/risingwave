@@ -42,7 +42,7 @@ impl TierCompactionPicker {
     fn pick_overlapping_level(
         &self,
         l0: &OverlappingLevel,
-        level_handler: &mut LevelHandler,
+        level_handler: &LevelHandler,
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type == LevelType::Nonoverlapping as i32 {
@@ -110,7 +110,7 @@ impl TierCompactionPicker {
     fn pick_sharding_level(
         &self,
         l0: &OverlappingLevel,
-        level_handler: &mut LevelHandler,
+        level_handler: &LevelHandler,
     ) -> Option<CompactionInput> {
         // do not pick the first sub-level because we do not want to block the level compaction.
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -190,7 +190,7 @@ impl TierCompactionPicker {
     fn pick_trivial_move_file(
         &self,
         l0: &OverlappingLevel,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type == LevelType::Overlapping as i32 || idx + 1 >= l0.sub_levels.len() {
@@ -245,7 +245,7 @@ impl CompactionPicker for TierCompactionPicker {
     fn pick_compaction(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         let l0 = levels.l0.as_ref().unwrap();
         if l0.sub_levels.is_empty() {
@@ -256,10 +256,10 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(input);
         }
 
-        if let Some(input) = self.pick_overlapping_level(l0, &mut level_handlers[0]) {
+        if let Some(input) = self.pick_overlapping_level(l0, &level_handlers[0]) {
             return Some(input);
         }
 
-        self.pick_sharding_level(l0, &mut level_handlers[0])
+        self.pick_sharding_level(l0, &level_handlers[0])
     }
 }

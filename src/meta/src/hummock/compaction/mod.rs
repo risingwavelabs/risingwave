@@ -317,6 +317,6 @@ pub trait CompactionPicker {
     fn pick_compaction(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput>;
 }

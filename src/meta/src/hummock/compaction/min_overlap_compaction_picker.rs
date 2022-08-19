@@ -58,7 +58,7 @@ impl MinOverlappingPicker {
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
             let mut select_file_size = 0;
-            for (right, table) in select_tables[left..].iter().enumerate() {
+            for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handlers[self.level].is_pending_compact(&table.id) {
                     break;
                 }
@@ -99,7 +99,7 @@ impl CompactionPicker for MinOverlappingPicker {
     fn pick_compaction(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         assert!(self.level > 0);
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
@@ -180,9 +180,7 @@ pub mod tests {
         ];
 
         // pick a non-overlapping files. It means that this file could be trival move to next level.
-        let ret = picker
-            .pick_compaction(&levels, &mut level_handlers)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &level_handlers).unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -190,9 +188,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos.len(), 0);
         ret.add_pending_task(0, &mut level_handlers);
 
-        let ret = picker
-            .pick_compaction(&levels, &mut level_handlers)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &level_handlers).unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -201,9 +197,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
         ret.add_pending_task(1, &mut level_handlers);
 
-        let ret = picker
-            .pick_compaction(&levels, &mut level_handlers)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &level_handlers).unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
@@ -244,16 +238,14 @@ pub mod tests {
             levels,
             l0: Some(generate_l0_with_overlap(vec![])),
         };
-        let mut levels_handler = vec![
+        let levels_handler = vec![
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),
         ];
 
         // pick a non-overlapping files. It means that this file could be trival move to next level.
-        let ret = picker
-            .pick_compaction(&levels, &mut levels_handler)
-            .unwrap();
+        let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.input_levels[1].level_idx, 2);
 

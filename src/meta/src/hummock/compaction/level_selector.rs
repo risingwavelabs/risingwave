@@ -39,7 +39,7 @@ use crate::hummock::level_handler::LevelHandler;
 const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
-    fn need_compaction(&self, levels: &Levels, level_handlers: &mut [LevelHandler]) -> bool;
+    fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool;
 
     fn pick_compaction(
         &self,
@@ -183,7 +183,7 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn get_priority_levels(&self, levels: &Levels, handlers: &mut [LevelHandler]) -> SelectContext {
+    fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
         let idle_file_count = levels
@@ -306,7 +306,7 @@ impl DynamicLevelSelector {
 }
 
 impl LevelSelector for DynamicLevelSelector {
-    fn need_compaction(&self, levels: &Levels, level_handlers: &mut [LevelHandler]) -> bool {
+    fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool {
         let ctx = self.get_priority_levels(levels, level_handlers);
         ctx.score_levels
             .first()

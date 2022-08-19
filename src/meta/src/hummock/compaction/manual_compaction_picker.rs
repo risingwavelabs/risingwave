@@ -47,7 +47,7 @@ impl ManualCompactionPicker {
     fn pick_l0_to_sub_level(
         &self,
         l0: &OverlappingLevel,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         let mut input_levels = vec![];
         let mut sub_level_id = 0;
@@ -88,7 +88,7 @@ impl ManualCompactionPicker {
     fn pick_l0_to_base_level(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         let l0 = levels.l0.as_ref().unwrap();
         let mut input_levels = vec![];
@@ -173,7 +173,7 @@ impl CompactionPicker for ManualCompactionPicker {
     fn pick_compaction(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         if self.option.level == 0 {
             if !self.option.sst_ids.is_empty() {
@@ -351,9 +351,8 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
+            result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(2, result.input_levels[0].table_infos.len());
             assert_eq!(3, result.input_levels[1].table_infos.len());
@@ -371,9 +370,8 @@ pub mod tests {
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
+            result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(3, result.input_levels[0].table_infos.len());
             assert_eq!(3, result.input_levels[1].table_infos.len());
@@ -403,9 +401,8 @@ pub mod tests {
                 target_level,
             );
 
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
+            result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(1, result.input_levels[0].table_infos.len());
             assert_eq!(2, result.input_levels[1].table_infos.len());
@@ -442,9 +439,7 @@ pub mod tests {
                 target_level,
             );
 
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
 
             assert_eq!(1, result.input_levels[0].table_infos.len());
             assert_eq!(2, result.input_levels[1].table_infos.len());
