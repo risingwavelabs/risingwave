@@ -220,10 +220,10 @@ impl LocalVersionManager {
         });
 
         // Pin and get the latest version.
-        tokio::spawn(LocalVersionManager::start_pin_worker(
-            Arc::downgrade(&local_version_manager),
-            hummock_meta_client.clone(),
-        ));
+        // tokio::spawn(LocalVersionManager::start_pin_worker(
+        // Arc::downgrade(&local_version_manager),
+        // hummock_meta_client.clone(),
+        // ));
 
         // Unpin unused version.
         tokio::spawn(LocalVersionManager::start_unpin_worker(
@@ -718,6 +718,7 @@ impl LocalVersionManager {
         }
     }
 
+    #[allow(dead_code)]
     async fn start_pin_worker(
         local_version_manager_weak: Weak<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
