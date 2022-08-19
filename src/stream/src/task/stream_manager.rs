@@ -449,7 +449,7 @@ impl LocalStreamManagerCore {
             .try_collect()?;
 
         let pk_indices = node
-            .get_pk_indices()
+            .get_stream_key()
             .iter()
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
