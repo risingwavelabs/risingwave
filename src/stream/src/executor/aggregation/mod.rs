@@ -24,13 +24,12 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DataChunk, DecimalArray,
-    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DataChunk, DecimalArray, F32Array,
+    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
     NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
@@ -39,13 +38,13 @@ use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
-use super::PkIndices;
-use crate::common::StateTableColumnMapping;
+use super::{ActorContextRef, PkIndices};
+use crate::common::{InfallibleExpression, StateTableColumnMapping};
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Executor, PkDataTypes};
+use crate::executor::Executor;
 
 mod agg_call;
 mod agg_state;
@@ -292,37 +291,6 @@ pub fn create_streaming_agg_state(
     Ok(state)
 }
 
-/// Get clones of aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
-    agg_calls
-        .iter()
-        .map(|agg| {
-            agg.args
-                .val_indices()
-                .iter()
-                .map(|val_idx| columns[*val_idx].array())
-                .collect()
-        })
-        .collect()
-}
-
-/// Get references to aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_array_refs<'a>(
-    agg_calls: &[AggCall],
-    columns: &'a [Column],
-) -> Vec<Vec<&'a ArrayImpl>> {
-    agg_calls
-        .iter()
-        .map(|agg| {
-            agg.args
-                .val_indices()
-                .iter()
-                .map(|val_idx| columns[*val_idx].array_ref())
-                .collect()
-        })
-        .collect()
-}
-
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
 /// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
 /// be provided.
@@ -350,14 +318,11 @@ pub fn generate_agg_schema(
 
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
-#[allow(clippy::too_many_arguments)]
 pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
     pk_indices: PkIndices,
-    pk_data_types: PkDataTypes,
     epoch: u64,
-    key_hash_code: Option<HashCode>,
     state_tables: &[RowBasedStateTable<S>],
     state_table_col_mappings: &[Arc<StateTableColumnMapping>],
 ) -> StreamExecutorResult<AggState<S>> {
@@ -372,9 +337,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
             agg_call.clone(),
             row_count,
             pk_indices.clone(),
-            pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
-            key_hash_code.clone(),
             key,
             &state_tables[idx],
             state_table_col_mappings[idx].clone(),
@@ -415,6 +378,8 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
 }
 
 pub fn agg_call_filter_res(
+    ctx: &ActorContextRef,
+    identity: &str,
     agg_call: &AggCall,
     columns: &Vec<Column>,
     vis_map: Option<&Bitmap>,
@@ -427,7 +392,10 @@ pub fn agg_call_filter_res(
                 .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
         );
         let data_chunk = DataChunk::new(columns.to_owned(), vis);
-        if let Bool(filter_res) = filter.eval(&data_chunk)?.as_ref() {
+        if let Bool(filter_res) = filter
+            .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, identity))
+            .as_ref()
+        {
             Ok(Some(filter_res.to_bitmap()))
         } else {
             Err(StreamExecutorError::from(anyhow!(

@@ -259,14 +259,20 @@ impl FunctionalDependencySet {
         self.get_closure(determinant).is_superset(dependant)
     }
 
-    /// Return true if the combination of `columns` can fully determine other columns.
-    pub fn is_key(&self, columns: &FixedBitSet) -> bool {
+    fn is_key_inner(&self, columns: &FixedBitSet) -> bool {
         let all_columns = {
             let mut tmp = columns.clone();
             tmp.set_range(.., true);
             tmp
         };
         self.is_determined_by(columns, &all_columns)
+    }
+
+    /// Return true if the combination of `columns` can fully determine other columns.
+    pub fn is_key(&self, columns: &[usize]) -> bool {
+        let mut key_bitset = FixedBitSet::from_iter(columns.iter().copied());
+        key_bitset.grow(self.column_count);
+        self.is_key_inner(&key_bitset)
     }
 
     /// Remove redundant columns from the given set.
@@ -280,9 +286,9 @@ impl FunctionalDependencySet {
     ///
     /// This algorithm may not necessarily find the key with the least number of columns.
     /// But it will ensure that no redundant columns will be preserved.
-    pub fn minimize_key(&self, key_indices: &[usize], column_cnt: usize) -> Vec<usize> {
+    pub fn minimize_key(&self, key_indices: &[usize]) -> Vec<usize> {
         let mut key_bitset = FixedBitSet::from_iter(key_indices.iter().copied());
-        key_bitset.grow(column_cnt);
+        key_bitset.grow(self.column_count);
         let res = self.minimize_key_inner(key_bitset);
         res.ones().collect_vec()
     }
@@ -291,11 +297,15 @@ impl FunctionalDependencySet {
     /// whether the remaining columns can form a key or not. If the remaining columns can form a
     /// key, then this column can be removed.
     fn minimize_key_inner(&self, key: FixedBitSet) -> FixedBitSet {
-        assert!(self.is_key(&key));
+        assert!(
+            self.is_key_inner(&key),
+            "{:?} is not a key!",
+            key.ones().into_iter().collect_vec()
+        );
         let mut new_key = key.clone();
         for i in key.ones() {
             new_key.set(i, false);
-            if !self.is_key(&new_key) {
+            if !self.is_key_inner(&new_key) {
                 new_key.set(i, true);
             }
         }
@@ -324,7 +334,7 @@ mod tests {
         // 3, 4 --> 2
         fd_set.add_functional_dependency_by_column_indices(&[3, 4], &[2]);
         // therefore, column 0 and column 2 can be removed from key
-        let key = fd_set.minimize_key(&[0, 2, 3, 4], 5);
+        let key = fd_set.minimize_key(&[0, 2, 3, 4]);
         assert_eq!(key, &[3, 4]);
     }
 

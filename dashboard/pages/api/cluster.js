@@ -17,11 +17,11 @@
 import api from "./api";
 
 export async function getClusterInfoFrontend(){
-  const res = await api.get("/api/clusters/0");
+  const res = await api.get("/api/clusters/1");
   return res;
 }
 
 export async function getClusterInfoComputeNode(){
-  const res = await api.get("/api/clusters/1");
+  const res = await api.get("/api/clusters/2");
   return res;
 }

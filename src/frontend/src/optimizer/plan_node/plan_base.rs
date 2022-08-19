@@ -66,11 +66,11 @@ impl PlanBase {
         ctx: OptimizerContextRef,
         schema: Schema,
         logical_pk: Vec<usize>,
+        functional_dependency: FunctionalDependencySet,
         dist: Distribution,
         append_only: bool,
     ) -> Self {
         let id = ctx.next_plan_node_id();
-        let functional_dependency = FunctionalDependencySet::new(schema.len());
         Self {
             id,
             ctx,

@@ -78,7 +78,7 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
     }
 }
 
-async fn distribute_execute(
+pub async fn distribute_execute(
     context: OptimizerContext,
     stmt: BoundStatement,
 ) -> Result<(BoxedDataChunkStream, Vec<PgFieldDescriptor>)> {

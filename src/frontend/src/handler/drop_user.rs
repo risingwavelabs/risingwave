@@ -16,6 +16,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
+use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 
@@ -30,10 +31,11 @@ pub async fn handle_drop_user(
         return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
     }
 
+    let user_name = Binder::resolve_user_name(user_name)?;
     let user_info_reader = session.env().user_info_reader();
     let user = user_info_reader
         .read_guard()
-        .get_user_by_name(&user_name.to_string())
+        .get_user_by_name(&user_name)
         .cloned();
     match user {
         Some(user) => {
@@ -47,7 +49,7 @@ pub async fn handle_drop_user(
                     format!("NOTICE: user {} does not exist, skipping", user_name),
                 ))
             } else {
-                Err(CatalogError::NotFound("user", user_name.to_string()).into())
+                Err(CatalogError::NotFound("user", user_name).into())
             };
         }
     }

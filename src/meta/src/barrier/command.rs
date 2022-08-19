@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::try_join_all;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
@@ -48,6 +49,8 @@ pub struct Reschedule {
     pub added_actors: Vec<ActorId>,
     /// Removed actors in this fragment.
     pub removed_actors: Vec<ActorId>,
+    /// Vnode bitmap updates for some actors in this fragment.
+    pub vnode_bitmap_updates: HashMap<ActorId, Bitmap>,
 
     /// The upstream fragments of this fragment, and the dispatchers that should be updated.
     pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
@@ -291,6 +294,17 @@ where
                     }
                 }
 
+                let mut actor_vnode_bitmap_update = HashMap::new();
+                for (_fragment_id, reschedule) in reschedules.iter() {
+                    // Record updates for all actors in this fragment.
+                    for (&actor_id, bitmap) in &reschedule.vnode_bitmap_updates {
+                        let bitmap = bitmap.to_protobuf();
+                        actor_vnode_bitmap_update
+                            .try_insert(actor_id, bitmap)
+                            .unwrap();
+                    }
+                }
+
                 let dropped_actors = reschedules
                     .values()
                     .flat_map(|r| r.removed_actors.iter().copied())
@@ -299,6 +313,7 @@ where
                 Some(Mutation::Update(UpdateMutation {
                     actor_dispatcher_update,
                     actor_merge_update,
+                    actor_vnode_bitmap_update,
                     dropped_actors,
                 }))
             }
