@@ -123,7 +123,11 @@ impl Binder {
                     FunctionCall::new_unchecked(ExprType::ArrayAccess, indexs, *return_type).into();
                 Ok(expr)
             }
-            _ => panic!("Should be a List"),
+            data_type => Err(ErrorCode::BindError(format!(
+                "array index applied to type {}, which is not a composite type",
+                data_type
+            ))
+            .into())
         }
     }
 
