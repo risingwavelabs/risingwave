@@ -23,19 +23,16 @@ use crate::hummock::compaction::{CompactionInput, CompactionPicker};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
-    compact_task_id: u64,
     config: Arc<CompactionConfig>,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
 impl TierCompactionPicker {
     pub fn new(
-        compact_task_id: u64,
         config: Arc<CompactionConfig>,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> TierCompactionPicker {
         TierCompactionPicker {
-            compact_task_id,
             config,
             overlap_strategy,
         }
@@ -99,10 +96,6 @@ impl TierCompactionPicker {
                 < self.config.level0_tier_compact_file_number as usize
             {
                 continue;
-            }
-
-            for input_level in &mut select_level_inputs {
-                level_handler.add_pending_task(self.compact_task_id, 0, &input_level.table_infos);
             }
 
             return Some(CompactionInput {
@@ -185,10 +178,6 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            for input_level in &select_level_inputs {
-                level_handler.add_pending_task(self.compact_task_id, 0, &input_level.table_infos);
-            }
-
             return Some(CompactionInput {
                 input_levels: select_level_inputs,
                 target_level: 0,
@@ -213,11 +202,9 @@ impl TierCompactionPicker {
             }
 
             let min_overlap_picker = MinOverlappingPicker::new(
-                self.compact_task_id,
                 0,
                 0,
                 self.config.sub_level_max_compaction_bytes,
-                u64::MAX,
                 self.overlap_strategy.clone(),
             );
 
@@ -232,7 +219,6 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            level_handlers[0].add_pending_task(self.compact_task_id, 0, &select_tables);
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,

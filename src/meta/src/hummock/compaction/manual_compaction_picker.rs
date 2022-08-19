@@ -26,7 +26,6 @@ use crate::hummock::compaction::{CompactionInput, CompactionPicker, ManualCompac
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
-    compact_task_id: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
     option: ManualCompactionOption,
     target_level: usize,
@@ -34,13 +33,11 @@ pub struct ManualCompactionPicker {
 
 impl ManualCompactionPicker {
     pub fn new(
-        compact_task_id: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
         option: ManualCompactionOption,
         target_level: usize,
     ) -> Self {
         Self {
-            compact_task_id,
             overlap_strategy,
             option,
             target_level,
@@ -78,16 +75,6 @@ impl ManualCompactionPicker {
                 if sub_level_id == 0 {
                     sub_level_id = level.sub_level_id;
                 }
-            }
-        }
-
-        for level in &input_levels {
-            if !level.table_infos.is_empty() {
-                level_handlers[level.level_idx as usize].add_pending_task(
-                    self.compact_task_id,
-                    self.target_level,
-                    &level.table_infos,
-                );
             }
         }
 
@@ -173,15 +160,7 @@ impl ManualCompactionPicker {
             level_type: LevelType::Nonoverlapping as i32,
             table_infos: target_input_ssts,
         });
-        for level in &input_levels {
-            if !level.table_infos.is_empty() {
-                level_handlers[level.level_idx as usize].add_pending_task(
-                    self.compact_task_id,
-                    self.target_level,
-                    &level.table_infos,
-                );
-            }
-        }
+
         Some(CompactionInput {
             input_levels,
             target_level: self.target_level,
@@ -278,19 +257,6 @@ impl CompactionPicker for ManualCompactionPicker {
             return None;
         }
 
-        level_handlers[level].add_pending_task(
-            self.compact_task_id,
-            target_level,
-            &select_input_ssts,
-        );
-        if !target_input_ssts.is_empty() {
-            level_handlers[target_level].add_pending_task(
-                self.compact_task_id,
-                target_level,
-                &target_input_ssts,
-            );
-        }
-
         Some(CompactionInput {
             input_levels: vec![
                 InputLevel {
@@ -381,7 +347,6 @@ pub mod tests {
 
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -402,7 +367,6 @@ pub mod tests {
             let option = ManualCompactionOption::default();
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -434,7 +398,6 @@ pub mod tests {
 
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -474,7 +437,6 @@ pub mod tests {
 
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,

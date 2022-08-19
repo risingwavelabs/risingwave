@@ -24,9 +24,7 @@ use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct MinOverlappingPicker {
-    compact_task_id: u64,
     max_select_bytes: u64,
-    max_write_amplification: u64,
     level: usize,
     target_level: usize,
     overlap_strategy: Arc<dyn OverlapStrategy>,
@@ -34,17 +32,13 @@ pub struct MinOverlappingPicker {
 
 impl MinOverlappingPicker {
     pub fn new(
-        compact_task_id: u64,
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
-        max_write_amplification: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
-            compact_task_id,
             max_select_bytes,
-            max_write_amplification,
             level,
             target_level,
             overlap_strategy,
@@ -64,15 +58,15 @@ impl MinOverlappingPicker {
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
             let mut select_file_size = 0;
-            for right in left..select_tables.len() {
-                if level_handlers[self.level].is_pending_compact(&select_tables[right].id) {
+            for (right, table) in select_tables[left..].iter().enumerate() {
+                if level_handlers[self.level].is_pending_compact(&table.id) {
                     break;
                 }
                 if select_file_size > self.max_select_bytes {
                     break;
                 }
-                select_file_size += select_tables[right].file_size;
-                overlap_info.update(&select_tables[right]);
+                select_file_size += table.file_size;
+                overlap_info.update(table);
                 let overlap_files = overlap_info.check_multiple_overlap(target_tables);
                 let mut total_file_size = 0;
                 let mut pending_campct = false;
@@ -116,25 +110,6 @@ impl CompactionPicker for MinOverlappingPicker {
         if select_input_ssts.is_empty() {
             return None;
         }
-        if self.level > 0 {
-            let target_file_size = target_input_ssts.iter().map(|table|table.file_size).sum::<u64>();
-            let select_file_size = select_input_ssts.iter().map(|table|table.file_size).sum::<u64>();
-            if target_file_size / select_file_size >= self.max_write_amplification {
-                return None;
-            }
-        }
-        level_handlers[self.level].add_pending_task(
-            self.compact_task_id,
-            self.target_level,
-            &select_input_ssts,
-        );
-        if !target_input_ssts.is_empty() {
-            level_handlers[self.target_level].add_pending_task(
-                self.compact_task_id,
-                self.target_level,
-                &target_input_ssts,
-            );
-        }
         Some(CompactionInput {
             input_levels: vec![
                 InputLevel {
@@ -167,7 +142,7 @@ pub mod tests {
     #[test]
     fn test_compact_l1() {
         let picker =
-            MinOverlappingPicker::new(0, 1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -198,7 +173,7 @@ pub mod tests {
             levels,
             l0: Some(generate_l0_with_overlap(vec![])),
         };
-        let mut levels_handler = vec![
+        let mut level_handlers = vec![
             LevelHandler::new(0),
             LevelHandler::new(1),
             LevelHandler::new(2),
@@ -206,16 +181,17 @@ pub mod tests {
 
         // pick a non-overlapping files. It means that this file could be trival move to next level.
         let ret = picker
-            .pick_compaction(&levels, &mut levels_handler)
+            .pick_compaction(&levels, &mut level_handlers)
             .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
         assert_eq!(ret.input_levels[0].table_infos[0].id, 2);
         assert_eq!(ret.input_levels[1].table_infos.len(), 0);
+        ret.add_pending_task(0, &mut level_handlers);
 
         let ret = picker
-            .pick_compaction(&levels, &mut levels_handler)
+            .pick_compaction(&levels, &mut level_handlers)
             .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
@@ -223,9 +199,10 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].table_infos.len(), 1);
         assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
         assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
+        ret.add_pending_task(1, &mut level_handlers);
 
         let ret = picker
-            .pick_compaction(&levels, &mut levels_handler)
+            .pick_compaction(&levels, &mut level_handlers)
             .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
@@ -239,7 +216,7 @@ pub mod tests {
     #[test]
     fn test_expand_l1_files() {
         let picker =
-            MinOverlappingPicker::new(0, 1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,

@@ -30,7 +30,6 @@ fn cal_file_size(table_infos: &[SstableInfo]) -> u64 {
 }
 
 pub struct LevelCompactionPicker {
-    compact_task_id: u64,
     target_level: usize,
     overlap_strategy: Arc<dyn OverlapStrategy>,
     config: Arc<CompactionConfig>,
@@ -42,9 +41,7 @@ impl CompactionPicker for LevelCompactionPicker {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
-        let select_level = 0;
         let target_level = self.target_level as u32;
-        let next_task_id = self.compact_task_id;
 
         let l0 = levels.l0.as_ref().unwrap();
         if l0.sub_levels.is_empty()
@@ -58,11 +55,6 @@ impl CompactionPicker for LevelCompactionPicker {
 
         // move the whole level to target level.
         if !is_l0_pending_compact && levels.get_level(self.target_level).table_infos.is_empty() {
-            level_handlers[select_level].add_pending_task(
-                next_task_id,
-                self.target_level,
-                &l0.sub_levels[0].table_infos,
-            );
             return Some(CompactionInput {
                 input_levels: vec![
                     InputLevel {
@@ -139,14 +131,6 @@ impl CompactionPicker for LevelCompactionPicker {
             });
         }
 
-        for input_level in &input_levels {
-            level_handlers[input_level.level_idx as usize].add_pending_task(
-                self.compact_task_id,
-                self.target_level,
-                &input_level.table_infos,
-            );
-        }
-
         Some(CompactionInput {
             input_levels,
             target_level: self.target_level,
@@ -157,13 +141,11 @@ impl CompactionPicker for LevelCompactionPicker {
 
 impl LevelCompactionPicker {
     pub fn new(
-        compact_task_id: u64,
         target_level: usize,
         config: Arc<CompactionConfig>,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> LevelCompactionPicker {
         LevelCompactionPicker {
-            compact_task_id,
             target_level,
             overlap_strategy,
             config,
@@ -177,11 +159,9 @@ impl LevelCompactionPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Vec<InputLevel> {
         let min_overlap_picker = MinOverlappingPicker::new(
-            self.compact_task_id,
             0,
             self.target_level,
             self.config.sub_level_max_compaction_bytes,
-            u64::MAX,
             self.overlap_strategy.clone(),
         );
 
@@ -227,7 +207,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .build(),
         );
-        LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()))
+        LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()))
     }
 
     #[test]
@@ -295,7 +275,6 @@ pub mod tests {
         // pick table 7.
         let picker = LevelCompactionPicker::new(
             1,
-            1,
             Arc::new(CompactionConfigBuilder::new().build()),
             Arc::new(RangeOverlapStrategy::default()),
         );
@@ -307,11 +286,8 @@ pub mod tests {
         let config = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
             .build();
-        let picker = TierCompactionPicker::new(
-            2,
-            Arc::new(config),
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let picker =
+            TierCompactionPicker::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
         push_table_level0(&mut levels, generate_table(9, 1, 100, 400, 3));
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
@@ -353,7 +329,7 @@ pub mod tests {
                 .build(),
         );
         let picker =
-            LevelCompactionPicker::new(0, 1, config, Arc::new(RangeOverlapStrategy::default()));
+            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
 
         let levels = vec![Level {
             level_idx: 1,
@@ -447,7 +423,7 @@ pub mod tests {
 
         push_tables_level0(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
         let picker =
-            TierCompactionPicker::new(1, picker.config.clone(), picker.overlap_strategy.clone());
+            TierCompactionPicker::new(picker.config.clone(), picker.overlap_strategy.clone());
         assert!(picker
             .pick_compaction(&levels, &mut levels_handler)
             .is_none());

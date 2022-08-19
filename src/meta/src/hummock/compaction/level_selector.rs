@@ -97,30 +97,26 @@ impl DynamicLevelSelector {
         &self,
         select_level: usize,
         target_level: usize,
-        task_id: HummockCompactionTaskId,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
                 Box::new(TierCompactionPicker::new(
-                    task_id,
                     self.config.clone(),
                     self.overlap_strategy.clone(),
                 ))
             } else {
                 Box::new(LevelCompactionPicker::new(
-                    task_id,
                     target_level,
                     self.config.clone(),
                     self.overlap_strategy.clone(),
                 ))
             }
         } else {
+            assert_eq!(select_level + 1, target_level);
             Box::new(MinOverlappingPicker::new(
-                task_id,
                 select_level,
-                select_level + 1,
+                target_level,
                 self.config.max_bytes_for_level_base,
-                self.config.max_bytes_for_level_multiplier / 2,
                 self.overlap_strategy.clone(),
             ))
         }
@@ -246,11 +242,7 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn generate_task_by_compaction_config(
-        &self,
-        input: CompactionInput,
-        base_level: usize,
-    ) -> CompactionTask {
+    fn create_compaction_task(&self, input: CompactionInput, base_level: usize) -> CompactionTask {
         let target_file_size = if input.target_level == 0 {
             self.config.target_file_size_base
         } else {
@@ -333,9 +325,10 @@ impl LevelSelector for DynamicLevelSelector {
             if score <= SCORE_BASE {
                 return None;
             }
-            let picker = self.create_compaction_picker(select_level, target_level, task_id);
+            let picker = self.create_compaction_picker(select_level, target_level);
             if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
-                return Some(self.generate_task_by_compaction_config(ret, ctx.base_level));
+                ret.add_pending_task(task_id, level_handlers);
+                return Some(self.create_compaction_task(ret, ctx.base_level));
             }
         }
         None
@@ -360,15 +353,12 @@ impl LevelSelector for DynamicLevelSelector {
             return None;
         }
 
-        let picker = ManualCompactionPicker::new(
-            task_id,
-            self.overlap_strategy.clone(),
-            option,
-            target_level,
-        );
+        let picker =
+            ManualCompactionPicker::new(self.overlap_strategy.clone(), option, target_level);
 
         let ret = picker.pick_compaction(levels, level_handlers)?;
-        Some(self.generate_task_by_compaction_config(ret, ctx.base_level))
+        ret.add_pending_task(task_id, level_handlers);
+        Some(self.create_compaction_task(ret, ctx.base_level))
     }
 
     fn name(&self) -> &'static str {
