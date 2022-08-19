@@ -48,7 +48,7 @@
 #![feature(never_type)]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 mod common;
 pub mod executor;

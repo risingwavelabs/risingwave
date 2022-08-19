@@ -1624,19 +1624,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_logger"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
-dependencies = [
- "atty",
- "humantime",
- "log",
- "regex",
- "termcolor",
-]
-
-[[package]]
 name = "error-chain"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4216,7 +4203,6 @@ dependencies = [
  "futures-async-stream",
  "itertools",
  "lazy_static",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4263,12 +4249,10 @@ dependencies = [
  "bytes",
  "bytesize",
  "clap 3.2.17",
- "env_logger",
  "futures",
  "hdrhistogram",
  "itertools",
  "libc",
- "log",
  "madsim-tokio",
  "moka",
  "nix",
@@ -4284,6 +4268,8 @@ dependencies = [
  "serde",
  "tokio-stream",
  "toml",
+ "tracing",
+ "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -4350,7 +4336,6 @@ dependencies = [
  "itertools",
  "lazy_static",
  "libc",
- "log",
  "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
@@ -4388,7 +4373,6 @@ name = "risingwave_common_service"
 version = "0.1.11"
 dependencies = [
  "hyper",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "prometheus",
@@ -4445,7 +4429,6 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4514,7 +4497,6 @@ dependencies = [
  "humantime",
  "hyper",
  "itertools",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4590,7 +4572,6 @@ dependencies = [
  "either",
  "itertools",
  "lazy_static",
- "log",
  "lru 0.7.8",
  "madsim-tokio",
  "madsim-tonic",
@@ -4632,7 +4613,6 @@ dependencies = [
  "futures-async-stream",
  "itertools",
  "lazy_static",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4690,7 +4670,6 @@ dependencies = [
  "bytes",
  "hex",
  "itertools",
- "log",
  "madsim-tokio",
  "num-derive",
  "num-traits",
@@ -4746,7 +4725,6 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4831,12 +4809,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 3.2.17",
- "env_logger",
- "log",
  "madsim-tokio",
  "path-absolutize",
  "similar",
  "tempfile",
+ "tracing",
+ "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -4848,7 +4826,6 @@ dependencies = [
  "async-trait",
  "async_stack_trace",
  "futures",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
@@ -4919,7 +4896,6 @@ dependencies = [
  "futures",
  "itertools",
  "lazy_static",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -4959,10 +4935,10 @@ name = "risingwave_sqlparser"
 version = "0.1.11"
 dependencies = [
  "itertools",
- "log",
  "matches",
  "serde",
  "serde_json",
+ "tracing",
  "workspace-hack",
 ]
 
@@ -4987,12 +4963,10 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap 3.2.17",
- "env_logger",
  "futures",
  "itertools",
  "lazy_static",
  "libtest-mimic",
- "log",
  "madsim-tokio",
  "madsim-tokio-postgres",
  "paste",
@@ -5000,6 +4974,8 @@ dependencies = [
  "risingwave_expr",
  "risingwave_frontend",
  "risingwave_sqlparser",
+ "tracing",
+ "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -5031,7 +5007,6 @@ dependencies = [
  "itertools",
  "lazy_static",
  "libc",
- "log",
  "lz4",
  "madsim-tokio",
  "madsim-tonic",
@@ -5093,7 +5068,6 @@ dependencies = [
  "iter-chunks",
  "itertools",
  "lazy_static",
- "log",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",

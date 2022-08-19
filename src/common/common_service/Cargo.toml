@@ -6,7 +6,6 @@ edition = "2021"
 
 [dependencies]
 hyper = "0.14"
-log = "0.4"
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../" }
 risingwave_pb = { path = "../../prost" }

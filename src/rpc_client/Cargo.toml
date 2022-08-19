@@ -8,7 +8,6 @@ anyhow = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-log = "0.4"
 moka = { version = "0.9", features = ["future"] }
 paste = "1"
 risingwave_common = { path = "../common" }

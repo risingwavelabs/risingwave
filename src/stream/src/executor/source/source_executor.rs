@@ -290,7 +290,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             Mutation::SourceChangeSplit(mapping) => {
                                 if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
                                     if let Some(target_state) = self.get_diff(target_splits) {
-                                        log::info!(
+                                        tracing::info!(
                                             "actor {:?} apply source split change to {:?}",
                                             self.ctx.id,
                                             target_state
