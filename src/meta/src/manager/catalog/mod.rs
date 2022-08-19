@@ -173,7 +173,7 @@ where
             let schemas = Schema::list(self.env.meta_store())
                 .await?
                 .into_iter()
-                .filter(|s| s.database_id != database_id)
+                .filter(|s| s.database_id == database_id)
                 .collect_vec();
             if schemas.len() != 1 {
                 bail!("database is not empty!");
@@ -239,7 +239,7 @@ where
             let tables = Table::list(self.env.meta_store())
                 .await?
                 .into_iter()
-                .filter(|t| t.database_id != schema.database_id && t.schema_id != schema_id)
+                .filter(|t| t.database_id == schema.database_id && t.schema_id == schema_id)
                 .collect_vec();
             if !tables.is_empty() {
                 bail!("schema is not empty!");
