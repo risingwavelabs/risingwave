@@ -162,7 +162,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
     sstable_store: Arc<CompactorSstableStore>,
 ) {
     let global_table_id = AtomicU64::new(32);
-    let mut builder = CapacitySplitTableBuilder::new(
+    let mut builder = CapacitySplitTableBuilder::new_for_test(
         LocalTableBuilderFactory {
             global_table_id,
             options: SstableBuilderOptions {
@@ -259,7 +259,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     read_options.clone(),
                 )),
             ];
-            let iter = MultiSstIterator::new(sub_iters, stats.clone());
+            let iter = MultiSstIterator::for_compactor(sub_iters, stats.clone());
             let sstable_store = Arc::new(CompactorSstableStore::new(
                 sstable_store1,
                 MemoryLimiter::unlimit(),
@@ -278,7 +278,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), sstable_store.clone()),
                 ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), sstable_store.clone()),
             ];
-            let iter = UnorderedMergeIteratorInner::new(sub_iters, stats.clone());
+            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters, stats.clone());
             let sstable_store1 = sstable_store.clone();
             async move { compact(iter, sstable_store1).await }
         });

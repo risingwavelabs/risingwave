@@ -22,7 +22,9 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
-use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
+use super::create_table::{
+    bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
+};
 use super::privilege::check_privileges;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
@@ -87,6 +89,10 @@ pub async fn handle_create_source(
 ) -> Result<PgResponse> {
     let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
 
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
+    let (columns, pk_column_ids) =
+        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, stmt.constraints)?;
+
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
@@ -105,16 +111,16 @@ pub async fn handle_create_source(
             row_format: RowFormatType::Json as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
-            columns: bind_sql_columns(stmt.columns)?,
-            pk_column_ids: vec![0],
+            columns,
+            pk_column_ids,
         },
         SourceSchema::DebeziumJson => StreamSourceInfo {
             properties: with_properties.clone(),
             row_format: RowFormatType::DebeziumJson as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
-            columns: bind_sql_columns(stmt.columns)?,
-            pk_column_ids: vec![0],
+            columns,
+            pk_column_ids,
         },
     };
 

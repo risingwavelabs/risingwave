@@ -44,15 +44,17 @@ use smallvec::SmallVec;
 use crate::task::ActorId;
 
 mod actor;
-pub mod aggregation;
 mod barrier_align;
+pub mod exchange;
+pub mod monitor;
+
+pub mod aggregation;
 mod batch_query;
 mod chain;
 mod debug;
 mod dispatch;
 mod dynamic_filter;
 mod error;
-pub mod exchange;
 mod expand;
 mod filter;
 mod global_simple_agg;
@@ -65,7 +67,6 @@ mod lookup;
 mod lookup_union;
 mod managed_state;
 mod merge;
-pub mod monitor;
 mod mview;
 mod project;
 mod project_set;
@@ -84,7 +85,7 @@ mod integration_tests;
 #[cfg(test)]
 mod test_utils;
 
-pub use actor::{Actor, ActorContext, ActorContextRef, OperatorInfo, OperatorInfoStatus};
+pub use actor::{Actor, ActorContext, ActorContextRef};
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use debug::DebugExecutor;
@@ -175,6 +176,12 @@ pub trait Executor: Send + 'static {
     }
 }
 
+impl std::fmt::Debug for BoxedExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.identity())
+    }
+}
+
 pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
@@ -238,6 +245,7 @@ impl Default for Epoch {
 pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
+    pub checkpoint: bool,
 }
 
 impl Barrier {
@@ -245,6 +253,7 @@ impl Barrier {
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
             epoch: Epoch::new_test_epoch(epoch),
+            checkpoint: true,
             ..Default::default()
         }
     }
@@ -463,7 +472,10 @@ impl Mutation {
 impl Barrier {
     pub fn to_protobuf(&self) -> ProstBarrier {
         let Barrier {
-            epoch, mutation, ..
+            epoch,
+            mutation,
+            checkpoint,
+            ..
         }: Barrier = self.clone();
         ProstBarrier {
             epoch: Some(ProstEpoch {
@@ -472,6 +484,7 @@ impl Barrier {
             }),
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             span: vec![],
+            checkpoint,
         }
     }
 
@@ -484,6 +497,7 @@ impl Barrier {
             .map(Arc::new);
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
+            checkpoint: prost.checkpoint,
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
         })

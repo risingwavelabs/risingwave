@@ -1,0 +1,5 @@
+disallowed-methods = [
+    { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." },
+    { path = "risingwave_expr::expr::Expression::eval", reason = "Please use InfallibleExpression::eval_infallible instead." },
+    { path = "risingwave_expr::expr::Expression::eval_row", reason = "Please use InfallibleExpression::eval_row_infallible instead." }
+]

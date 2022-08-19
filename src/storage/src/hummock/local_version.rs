@@ -39,7 +39,7 @@ pub struct LocalVersion {
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
-    pub sync_uncommitted_data: Vec<(HummockEpoch, SyncUncommittedData)>,
+    pub sync_uncommitted_data: Vec<(Vec<HummockEpoch>, SyncUncommittedData)>,
     max_sync_epoch: u64,
 }
 
@@ -47,7 +47,7 @@ pub struct LocalVersion {
 pub enum SyncUncommittedData {
     /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
     /// as `Syncing`.
-    Syncing(KeyIndexedUncommittedData),
+    Syncing(Vec<KeyIndexedUncommittedData>),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
     Synced(Vec<UncommittedData>),
 }
@@ -62,6 +62,7 @@ impl SyncUncommittedData {
             SyncUncommittedData::Syncing(task) => {
                 let local_data_iter = task
                     .iter()
+                    .flatten()
                     .filter(|(_, data)| match data {
                         UncommittedData::Batch(batch) => {
                             range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
@@ -113,16 +114,14 @@ impl LocalVersion {
         &self.pinned_version
     }
 
-    pub fn get_min_unsynced_epoch(&self) -> Option<HummockEpoch> {
-        self.shared_buffer
-            .iter()
-            .find(|(key, _)| key > &&self.max_sync_epoch)
-            .map(|(key, _)| key)
-            .cloned()
-    }
-
-    pub fn set_max_sync_epoch(&mut self, epoch: HummockEpoch) {
-        self.max_sync_epoch = epoch;
+    pub fn swap_max_sync_epoch(&mut self, epoch: HummockEpoch) -> Option<HummockEpoch> {
+        if self.max_sync_epoch > epoch {
+            None
+        } else {
+            let last_epoch = self.max_sync_epoch;
+            self.max_sync_epoch = epoch;
+            Some(last_epoch)
+        }
     }
 
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
@@ -133,9 +132,31 @@ impl LocalVersion {
         self.shared_buffer.get(&epoch)
     }
 
+    /// Returns all shared buffer less than or equal to epoch
+    pub fn scan_mut_shared_buffer<R>(
+        &mut self,
+        epoch_range: R,
+    ) -> impl Iterator<Item = (&HummockEpoch, &mut SharedBuffer)>
+    where
+        R: RangeBounds<u64>,
+    {
+        self.shared_buffer.range_mut(epoch_range)
+    }
+
+    /// Returns all shared buffer less than or equal to epoch
+    pub fn scan_shared_buffer<R>(
+        &self,
+        epoch_range: R,
+    ) -> impl Iterator<Item = (&HummockEpoch, &SharedBuffer)>
+    where
+        R: RangeBounds<u64>,
+    {
+        self.shared_buffer.range(epoch_range)
+    }
+
     pub fn add_sync_state(
         &mut self,
-        sync_epoch: HummockEpoch,
+        sync_epoch: Vec<HummockEpoch>,
         sync_uncommitted_data: SyncUncommittedData,
     ) {
         let node = self
@@ -146,7 +167,12 @@ impl LocalVersion {
             None => {
                 assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
                 if let Some(last) = self.sync_uncommitted_data.last() {
-                    assert!(last.0 < sync_epoch)
+                    assert!(
+                        last.0.first().lt(&sync_epoch.first()),
+                        "last epoch:{:?} >= sync epoch:{:?}",
+                        last,
+                        sync_epoch
+                    );
                 }
                 self.sync_uncommitted_data
                     .push((sync_epoch, sync_uncommitted_data));
@@ -197,8 +223,11 @@ impl LocalVersion {
             );
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
-            self.sync_uncommitted_data
-                .retain(|(epoch, _)| epoch > &new_pinned_version.max_committed_epoch);
+            self.sync_uncommitted_data.retain(|(epoch, _)| {
+                epoch
+                    .first()
+                    .gt(&Some(&new_pinned_version.max_committed_epoch))
+            });
         }
 
         self.version_ids_in_use.insert(new_pinned_version.id);
@@ -238,7 +267,8 @@ impl LocalVersion {
                         .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
-                            node.0 <= read_epoch && node.0 >= smallest_uncommitted_epoch
+                            node.0.first().le(&Some(&read_epoch))
+                                && node.0.first().ge(&Some(&smallest_uncommitted_epoch))
                         })
                         .map(|(_, value)| value.get_overlap_data(key_range))
                         .collect();

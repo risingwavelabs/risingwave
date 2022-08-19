@@ -59,6 +59,7 @@ script = '''
 rm -rf "${PREFIX_DATA}"
 rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
+rm -rf "${PREFIX_PROFILING}"
 '''
 
 
@@ -608,13 +609,26 @@ description = "Kill cluster, dump logs and check logs"
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
 dependencies = ["warn-on-missing-tools"]
-script = """
-#!/bin/bash
-set -e
-
-sqllogictest "$@"
-"""
+command = "sqllogictest"
+args = ["${@}"]
 description = "Run SQLLogicTest"
+
+[tasks.slt-streaming]
+category = "RiseDev - SQLLogicTest"
+extend = "slt"
+args = ["${@}", "./e2e_test/streaming/**/*.slt"]
+description = "Run all streaming e2e tests"
+
+[tasks.slt-batch]
+category = "RiseDev - SQLLogicTest"
+extend = "slt"
+args = ["${@}", "./e2e_test/batch/**/*.slt"]
+description = "Run all batch e2e tests"
+
+[tasks.slt-all]
+category = "RiseDev - SQLLogicTest"
+run_task = { name = ["slt-streaming", "slt-batch"] }
+description = "Run all batch and streaming e2e tests"
 
 [tasks.compose]
 category = "RiseDev - Compose"
