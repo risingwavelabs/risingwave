@@ -677,7 +677,7 @@ impl StreamGraphBuilder {
                             assert!(!input.get_fields().is_empty());
                             new_stream_node.input[idx] = StreamNode {
                                 input: vec![],
-                                pk_indices: input.pk_indices.clone(),
+                                stream_key: input.stream_key.clone(),
                                 node_body: Some(NodeBody::Merge(MergeNode {
                                     upstream_actor_id: upstream_actor_id
                                         .remove(&input.get_operator_id())
@@ -727,7 +727,7 @@ impl StreamGraphBuilder {
         let chain_input = vec![
             StreamNode {
                 input: vec![],
-                pk_indices: stream_node.pk_indices.clone(),
+                stream_key: stream_node.stream_key.clone(),
                 node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: vec![],
                     upstream_fragment_id: 0,
@@ -743,7 +743,7 @@ impl StreamGraphBuilder {
 
         Ok(StreamNode {
             input: chain_input,
-            pk_indices: stream_node.pk_indices.clone(),
+            stream_key: stream_node.stream_key.clone(),
             node_body: Some(NodeBody::Chain(chain_node.clone())),
             operator_id: stream_node.operator_id,
             identity: "ChainExecutor".to_string(),

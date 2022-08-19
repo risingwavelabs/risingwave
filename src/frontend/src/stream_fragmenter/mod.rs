@@ -126,7 +126,7 @@ impl StreamFragmenter {
                     };
                     let append_only = child_node.append_only;
                     StreamNode {
-                        pk_indices: child_node.pk_indices.clone(),
+                        stream_key: child_node.stream_key.clone(),
                         fields: child_node.fields.clone(),
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
                             strategy: Some(strategy.clone()),

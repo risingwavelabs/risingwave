@@ -135,7 +135,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
         })),
-        pk_indices: vec![2],
+        stream_key: vec![2],
         ..Default::default()
     };
     fragments.push(StreamFragment {
@@ -161,7 +161,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             make_field(TypeName::Int64),
         ],
         input: vec![],
-        pk_indices: vec![2],
+        stream_key: vec![2],
         operator_id: 1,
         identity: "ExchangeExecutor".to_string(),
         ..Default::default()
@@ -184,7 +184,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node],
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 2,
         identity: "FilterExecutor".to_string(),
         ..Default::default()
@@ -205,7 +205,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 3,
         identity: "GlobalSimpleAggExecutor".to_string(),
         ..Default::default()
@@ -230,7 +230,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         input: vec![],
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 4,
         identity: "ExchangeExecutor".to_string(),
         ..Default::default()
@@ -251,7 +251,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
-        pk_indices: vec![0, 1],
+        stream_key: vec![0, 1],
         operator_id: 5,
         identity: "GlobalSimpleAggExecutor".to_string(),
         ..Default::default()
@@ -278,7 +278,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
-        pk_indices: vec![1, 2],
+        stream_key: vec![1, 2],
         operator_id: 6,
         identity: "ProjectExecutor".to_string(),
         ..Default::default()
@@ -287,7 +287,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // mview node
     let mview_node = StreamNode {
         input: vec![project_node],
-        pk_indices: vec![],
+        stream_key: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_id: 1,
             table: Some(make_internal_table(4, true)),
