@@ -18,4 +18,4 @@ risingwave_meta = { path = "../../meta" }
 sqllogictest = "0.6.1"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = { version = "0.2", package = "madsim-tokio-postgres" }
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+tracing = "0.1"
