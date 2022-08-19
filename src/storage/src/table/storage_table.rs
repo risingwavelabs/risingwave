@@ -36,7 +36,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
-use risingwave_hummock_sdk::HummockVersionEpoch;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::RowOp;
@@ -580,7 +580,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         &self,
         prefix_hint: Option<Vec<u8>>,
         encoded_key_range: R,
-        wait_epoch: HummockVersionEpoch,
+        wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S, RS>>
@@ -647,7 +647,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     // TODO: support multiple datums or `Row` for `next_col_bounds`.
     async fn iter_with_pk_bounds(
         &self,
-        epoch: HummockVersionEpoch,
+        epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
         ordered: bool,
@@ -763,7 +763,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     // TODO: introduce ordered batch iterator.
     pub async fn batch_iter_with_pk_bounds(
         &self,
-        epoch: HummockVersionEpoch,
+        epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S, RS>> {
@@ -779,7 +779,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S, RS>> {
         self.iter_with_pk_bounds(
-            HummockVersionEpoch::NoWait(epoch),
+            HummockReadEpoch::NoWait(epoch),
             pk_prefix,
             next_col_bounds,
             true,
@@ -789,7 +789,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
     pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S, RS>> {
-        self.batch_iter_with_pk_bounds(HummockVersionEpoch::Checkpoint(epoch), Row::empty(), ..)
+        self.batch_iter_with_pk_bounds(HummockReadEpoch::Committed(epoch), Row::empty(), ..)
             .await
     }
 
@@ -797,7 +797,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         &self,
         epoch: u64,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        self.batch_iter_with_pk_bounds(HummockVersionEpoch::Reading(epoch), Row::empty(), ..)
+        self.batch_iter_with_pk_bounds(HummockReadEpoch::Current(epoch), Row::empty(), ..)
             .await
     }
 
@@ -829,20 +829,21 @@ struct StorageTableIterInner<S: StateStore, RS: RowSerde> {
 }
 
 impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
-    /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
+    /// If `HummockReadEpoch` isn't `NoWait`, it will wait for the given epoch to be updated up
+    /// before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         read_options: ReadOptions,
-        epoch: HummockVersionEpoch,
+        epoch: HummockReadEpoch,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        if !matches!(epoch, HummockVersionEpoch::NoWait(_)) {
+        if !matches!(epoch, HummockReadEpoch::NoWait(_)) {
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 

@@ -83,7 +83,7 @@ message Barrier {
   }
   // Used for tracing.
   bytes span = 2;
-  //Whether this barrier do checkpoint
+  // Whether this barrier do checkpoint
   bool checkpoint = 9;
 }
 

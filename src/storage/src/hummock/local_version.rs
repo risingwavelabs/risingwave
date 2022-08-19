@@ -225,7 +225,7 @@ impl LocalVersion {
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
             self.sync_uncommitted_data.retain(|(epoch, _)| {
                 epoch
-                    .first()
+                    .last()
                     .gt(&Some(&new_pinned_version.max_committed_epoch))
             });
         }

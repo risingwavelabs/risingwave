@@ -917,7 +917,7 @@ async fn test_trigger_manual_compaction() {
             .await;
 
         assert_eq!(
-            "internal error: trigger_manual_compaction No compactor is available. compaction_group 2",
+            "trigger_manual_compaction No compactor is available. compaction_group 2",
             result.err().unwrap().to_string()
         );
     }
@@ -930,7 +930,10 @@ async fn test_trigger_manual_compaction() {
         let result = hummock_manager
             .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
-        assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
+        assert_eq!(
+            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
+            result.err().unwrap().to_string()
+        );
     }
 
     let _ = add_test_tables(&hummock_manager, context_id).await;

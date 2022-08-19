@@ -40,7 +40,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::RwLockWriteGuard;
+use tokio::sync::{RwLockReadGuard, RwLockWriteGuard};
 
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
@@ -854,6 +854,20 @@ where
                 )?;
             }
             versioning.current_version = new_version;
+
+            self.env
+                .notification_manager()
+                .notify_compute_asynchronously(
+                    Operation::Add,
+                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                        version_deltas: vec![versioning
+                            .hummock_version_deltas
+                            .last_key_value()
+                            .unwrap()
+                            .1
+                            .clone()],
+                    }),
+                );
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -962,10 +976,12 @@ where
         new_hummock_version.id = new_version_id;
         new_version_delta.id = new_version_id;
         if epoch <= new_hummock_version.max_committed_epoch {
-            return Err(Error::InternalError(format!(
+            return Err(anyhow::anyhow!(
                 "Epoch {} <= max_committed_epoch {}",
-                epoch, new_hummock_version.max_committed_epoch
-            )));
+                epoch,
+                new_hummock_version.max_committed_epoch
+            )
+            .into());
         }
 
         let mut modified_compaction_groups = vec![];
@@ -1008,14 +1024,16 @@ where
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
+        let max_current_epoch = new_version_delta.max_current_epoch.max(epoch);
         new_version_delta.max_committed_epoch = epoch;
-        new_version_delta.max_current_epoch = epoch;
+        new_version_delta.max_current_epoch = max_current_epoch;
         new_hummock_version.max_committed_epoch = epoch;
-        new_hummock_version.max_current_epoch = epoch;
+        new_hummock_version.max_current_epoch = max_current_epoch;
         commit_multi_var!(self, None, new_version_delta)?;
         versioning.current_version = new_hummock_version;
         self.max_committed_epoch.store(epoch, Ordering::Release);
-        self.max_current_epoch.store(epoch, Ordering::Release);
+        self.max_current_epoch
+            .store(max_current_epoch, Ordering::Release);
         // Update metrics
         trigger_commit_stat(&self.metrics, &versioning.current_version);
         for compaction_group_id in &modified_compaction_groups {
@@ -1036,8 +1054,21 @@ where
                 Info::HummockSnapshot(HummockSnapshot {
                     epoch: Some(HummockAllEpoch {
                         committed_epoch: epoch,
-                        current_epoch: epoch,
+                        current_epoch: max_current_epoch,
                     }),
+                }),
+            );
+        self.env
+            .notification_manager()
+            .notify_compute_asynchronously(
+                Operation::Add,
+                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                    version_deltas: vec![versioning
+                        .hummock_version_deltas
+                        .last_key_value()
+                        .unwrap()
+                        .1
+                        .clone()],
                 }),
             );
 
@@ -1056,8 +1087,9 @@ where
         Ok(())
     }
 
+    /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
     #[named]
-    pub async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+    pub async fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
 
@@ -1072,29 +1104,32 @@ where
                 prev_id: old_version.id,
                 safe_epoch: old_version.safe_epoch,
                 trivial_move: false,
+                max_committed_epoch: old_version.max_committed_epoch,
                 ..Default::default()
             },
         );
         let mut new_hummock_version = old_version;
         new_hummock_version.id = new_version_id;
         new_version_delta.id = new_version_id;
-        //?
-        if epoch <= new_hummock_version.max_committed_epoch {
-            return Err(Error::InternalError(format!(
-                "Epoch {} <= max_committed_epoch {}",
-                epoch, new_hummock_version.max_committed_epoch
-            )));
+        if max_current_epoch <= new_hummock_version.max_current_epoch{
+            return Err(anyhow::anyhow!(
+                "Epoch {} <= max_current_epoch {}",
+                max_current_epoch,
+                new_hummock_version.max_current_epoch
+            )
+            .into());
         }
 
-        // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        new_version_delta.max_current_epoch = epoch;
-        new_hummock_version.max_current_epoch = epoch;
+        // Create a new_version, update the max_current_epoch.
+        new_version_delta.max_current_epoch = max_current_epoch;
+        new_hummock_version.max_current_epoch = max_current_epoch;
+        let max_committed_epoch = new_hummock_version.max_committed_epoch;
         commit_multi_var!(self, None, new_version_delta)?;
         versioning.current_version = new_hummock_version;
-        self.max_committed_epoch.store(epoch, Ordering::Release);
-        self.max_current_epoch.store(epoch, Ordering::Release);
+        self.max_current_epoch
+            .store(max_current_epoch, Ordering::Release);
 
-        tracing::trace!("new committed epoch {}", epoch);
+        tracing::trace!("new current epoch {}", max_current_epoch);
 
         self.env
             .notification_manager()
@@ -1102,9 +1137,22 @@ where
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot {
                     epoch: Some(HummockAllEpoch {
-                        committed_epoch: epoch,
-                        current_epoch: epoch,
+                        committed_epoch: max_committed_epoch,
+                        current_epoch: max_current_epoch,
                     }),
+                }),
+            );
+        self.env
+            .notification_manager()
+            .notify_compute_asynchronously(
+                Operation::Add,
+                Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                    version_deltas: vec![versioning
+                        .hummock_version_deltas
+                        .last_key_value()
+                        .unwrap()
+                        .1
+                        .clone()],
                 }),
             );
 
@@ -1218,6 +1266,11 @@ where
         read_lock!(self, versioning).await.current_version.clone()
     }
 
+    #[named]
+    pub(crate) async fn get_read_guard(&self) -> RwLockReadGuard<Versioning> {
+        read_lock!(self, versioning).await
+    }
+
     pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
         *self.compaction_scheduler.write() = Some(sender);
     }
@@ -1276,10 +1329,11 @@ where
         let compactor = match compactor {
             None => {
                 tracing::warn!("trigger_manual_compaction No compactor is available.");
-                return Err(Error::InternalError(format!(
+                return Err(anyhow::anyhow!(
                     "trigger_manual_compaction No compactor is available. compaction_group {}",
                     compaction_group
-                )));
+                )
+                .into());
             }
 
             Some(compactor) => compactor,
@@ -1293,17 +1347,19 @@ where
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
-                return Err(Error::InternalError(format!(
+                return Err(anyhow::anyhow!(
                     "trigger_manual_compaction No compaction_task is available. compaction_group {}",
                     compaction_group
-                )));
+                ).into());
             }
             Err(err) => {
                 tracing::warn!("Failed to get compaction task: {:#?}.", err);
-                return Err(Error::InternalError(format!(
+                return Err(anyhow::anyhow!(
                     "Failed to get compaction task: {:#?} compaction_group {}",
-                    err, compaction_group
-                )));
+                    err,
+                    compaction_group
+                )
+                .into());
             }
         };
 
@@ -1349,9 +1405,9 @@ where
         }
 
         if is_failed {
-            return Err(Error::InternalError(
-                "Failed to trigger_manual_compaction".to_string(),
-            ));
+            return Err(Error::InternalError(anyhow::anyhow!(
+                "Failed to trigger_manual_compaction"
+            )));
         }
 
         tracing::info!(
@@ -1379,5 +1435,9 @@ where
 
     pub fn compaction_group_manager_ref_for_test(&self) -> CompactionGroupManagerRef<S> {
         self.compaction_group_manager.clone()
+    }
+
+    pub fn cluster_manager(&self) -> &ClusterManagerRef<S> {
+        &self.cluster_manager
     }
 }

@@ -92,8 +92,8 @@ message BarrierCompleteResponse {
   }
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
-  //Whether the collected barriers do checkpoint. It is usually the same as barrier's checkpoint
-  //unless it fails to compete with another barrier (checkpoint = true) for sync.
+  // Whether the collected barriers do checkpoint. It is usually the same as barrier's checkpoint
+  // unless it fails to compete with another barrier (checkpoint = true) for sync.
   bool checkpoint = 6;
 }
 

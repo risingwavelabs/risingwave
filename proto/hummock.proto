@@ -65,7 +65,6 @@ message HummockVersion {
   uint64 max_current_epoch = 6;
 }
 
-
 message HummockVersionDelta {
   message LevelDeltas {
     repeated LevelDelta level_deltas = 1;
@@ -89,8 +88,11 @@ message HummockVersionDeltas {
 message HummockSnapshot {
   HummockAllEpoch epoch = 1;
 }
-message HummockAllEpoch{
+// We will have two epoch after decouple
+message HummockAllEpoch {
+  // Epoch with checkpoint, we will read durable data with it.
   uint64 committed_epoch = 1;
+  // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
   uint64 current_epoch = 2;
 }
 

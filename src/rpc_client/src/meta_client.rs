@@ -494,8 +494,6 @@ impl HummockMetaClient for MetaClient {
         let req = UnpinSnapshotBeforeRequest {
             context_id: self.worker_id(),
             // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
-            // We only need committed_epoch, because current_epoch is always greater than
-            // committed_epoch.
             min_snapshot: Some(HummockSnapshot {
                 epoch: Some(HummockAllEpoch {
                     committed_epoch: pinned_epochs,
@@ -579,6 +577,15 @@ impl HummockMetaClient for MetaClient {
         };
 
         self.inner.trigger_manual_compaction(req).await?;
+        Ok(())
+    }
+
+    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+        self.inner
+            .trigger_full_gc(TriggerFullGcRequest {
+                sst_retention_time_sec,
+            })
+            .await?;
         Ok(())
     }
 }
@@ -686,6 +693,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
+            ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
