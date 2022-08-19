@@ -26,7 +26,7 @@ use tokio::sync::oneshot::Receiver;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
-use crate::manager::META_NODE_ID;
+use crate::manager::{MetaSrvEnv, META_NODE_ID};
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
@@ -80,14 +80,14 @@ where
     S: MetaStore,
 {
     pub fn new(
+        env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
-        compactor_selection_retry_interval_sec: u64,
     ) -> Self {
         Self {
             hummock_manager,
             compactor_manager,
-            compactor_selection_retry_interval_sec,
+            compactor_selection_retry_interval_sec: env.opts.compactor_selection_retry_interval_sec,
         }
     }
 
