@@ -30,7 +30,7 @@ use tokio::sync::oneshot::{Receiver, Sender};
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
-use crate::executor::{BoxedExecutor, ExecutorBuilder};
+use crate::executor::{BatchTaskMetrics, BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
@@ -184,6 +184,10 @@ pub struct BatchTaskExecution<C> {
     /// This is a hack, cuz there is no easy way to get out the receiver.
     state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponseResult>>>,
 
+    /// Task Level Metrics created by BatchTaskMetricsManager.
+    /// None indicates that metrics are not to collect.
+    task_metrics: Option<Arc<BatchTaskMetrics>>,
+
     epoch: u64,
 }
 
@@ -194,16 +198,19 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         context: C,
         epoch: u64,
     ) -> Result<Self> {
+        let task_id = TaskId::from(prost_tid);
+        let query_id = task_id.query_id.clone();
         Ok(Self {
-            task_id: TaskId::from(prost_tid),
+            task_id,
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
-            context,
             failure: Arc::new(Mutex::new(None)),
             epoch,
             shutdown_tx: Mutex::new(None),
             state_rx: Mutex::new(None),
+            task_metrics: context.create_task_metrics(query_id).map(Arc::new),
+            context,
         })
     }
 
@@ -229,6 +236,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             &self.task_id,
             self.context.clone(),
             self.epoch,
+            self.task_metrics.clone(),
         )
         .build()
         .await?;
@@ -282,6 +290,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     {
                         // It's possible to send fail. Same reason in `.try_execute`.
                     }
+                }
+
+                if let Some(task_metrics) = self.task_metrics.as_ref() {
+                    task_metrics.clear_record().await;
                 }
             });
 

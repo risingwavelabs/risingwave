@@ -21,7 +21,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_source::SourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::executor::BatchMetrics;
+use crate::executor::{BatchMetrics, BatchTaskMetrics};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
 /// Context for batch task execution.
@@ -61,7 +61,12 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
             .ok_or_else(|| InternalError("State store not found".to_string()))?)
     }
 
+    /// None indicates that not collect batch metrics.
     fn stats(&self) -> Option<Arc<BatchMetrics>>;
+
+    /// Create task level metrics.
+    /// None indicates that not collect task metrics.
+    fn create_task_metrics(&self, query_id: String) -> Option<BatchTaskMetrics>;
 }
 
 /// Batch task context on compute node.
@@ -95,6 +100,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn stats(&self) -> Option<Arc<BatchMetrics>> {
         Some(self.env.stats())
+    }
+
+    fn create_task_metrics(&self, query_id: String) -> Option<BatchTaskMetrics> {
+        Some(self.env.create_task_metrics(query_id))
     }
 }
 

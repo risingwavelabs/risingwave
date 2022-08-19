@@ -20,6 +20,7 @@ use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::monitor::BatchMetrics;
+use crate::executor::{BatchTaskMetrics, BatchTaskMetricsManager};
 use crate::task::BatchManager;
 
 pub(crate) type WorkerNodeId = u32;
@@ -46,11 +47,15 @@ pub struct BatchEnvironment {
     /// State store for table scanning.
     state_store: StateStoreImpl,
 
+    /// task stats manager.
+    task_metrics_manager: Arc<BatchTaskMetricsManager>,
+
     /// Statistics.
     stats: Arc<BatchMetrics>,
 }
 
 impl BatchEnvironment {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_manager: SourceManagerRef,
         task_manager: Arc<BatchManager>,
@@ -58,6 +63,7 @@ impl BatchEnvironment {
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        task_metrics_manager: Arc<BatchTaskMetricsManager>,
         stats: Arc<BatchMetrics>,
     ) -> Self {
         BatchEnvironment {
@@ -67,6 +73,7 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
+            task_metrics_manager,
             stats,
         }
     }
@@ -86,6 +93,7 @@ impl BatchEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            task_metrics_manager: Arc::new(BatchTaskMetricsManager::unused()),
             stats: Arc::new(BatchMetrics::unused()),
         }
     }
@@ -121,5 +129,9 @@ impl BatchEnvironment {
 
     pub fn stats(&self) -> Arc<BatchMetrics> {
         self.stats.clone()
+    }
+
+    pub fn create_task_metrics(&self, query_id: String) -> BatchTaskMetrics {
+        self.task_metrics_manager.create_task_metrics(query_id)
     }
 }
