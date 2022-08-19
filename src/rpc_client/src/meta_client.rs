@@ -363,14 +363,14 @@ impl MetaClient {
                         return;
                     }
                 }
-                let extra_info = Vec::with_capacity(extra_info_sources.len());
-                // for extra_info_source in &extra_info_sources {
-                //     if let Some(info) = extra_info_source.get_extra_info().await {
-                //         // None means the info is not available at the moment, and won't be sent
-                // to         // meta.
-                //         extra_info.push(info);
-                //     }
-                // }
+                let mut extra_info = Vec::with_capacity(extra_info_sources.len());
+                for extra_info_source in &extra_info_sources {
+                    if let Some(info) = extra_info_source.get_extra_info().await {
+                        // None means the info is not available at the moment, and won't be sent to
+                        // meta.
+                        extra_info.push(info);
+                    }
+                }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 match meta_client
                     .send_heartbeat(meta_client.worker_id(), extra_info)
