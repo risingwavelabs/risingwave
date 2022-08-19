@@ -26,13 +26,15 @@ impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
         let name = update.table_source.name.clone();
         let source_id = update.table_source.source_id;
+        let table_id = update.table_source.associated_mview_id;
         let scan = self.plan_relation(update.table)?;
         let input = if let Some(expr) = update.selection {
             LogicalFilter::create_with_expr(scan, expr)
         } else {
             scan
         };
-        let plan: PlanRef = LogicalUpdate::create(input, name, source_id, update.exprs)?.into();
+        let plan: PlanRef =
+            LogicalUpdate::create(input, name, source_id, table_id, update.exprs)?.into();
 
         // For update, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
