@@ -23,13 +23,13 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use super::*;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::PkIndices;
+use crate::executor::{ActorContextRef, PkIndices};
 
 pub struct HashJoinExecutorBuilder;
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
@@ -38,8 +38,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
-        let source_l = params.input.remove(0);
-        let source_r = params.input.remove(0);
+        let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         let table_l = node.get_left_table()?;
         let table_r = node.get_right_table()?;
@@ -120,6 +119,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let state_table_r = RowBasedStateTable::from_table_catalog(table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
+            ctx: params.actor_context,
             source_l,
             source_r,
             params_l,
@@ -132,7 +132,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             state_table_l,
             state_table_r,
             is_append_only,
-            actor_id: params.actor_id as u64,
             metrics: params.executor_stats,
         };
 
@@ -145,6 +144,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 struct HashJoinExecutorDispatcher<S: StateStore, const T: JoinTypePrimitive>(PhantomData<S>);
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
+    ctx: ActorContextRef,
     source_l: Box<dyn Executor>,
     source_r: Box<dyn Executor>,
     params_l: JoinParams,
@@ -157,7 +157,6 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     state_table_l: RowBasedStateTable<S>,
     state_table_r: RowBasedStateTable<S>,
     is_append_only: bool,
-    actor_id: u64,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -169,13 +168,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
 
     fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Ok(Box::new(HashJoinExecutor::<K, S, T>::new(
+            args.ctx,
             args.source_l,
             args.source_r,
             args.params_l,
             args.params_r,
             args.pk_indices,
             args.output_indices,
-            args.actor_id,
             args.executor_id,
             args.cond,
             args.op_info,

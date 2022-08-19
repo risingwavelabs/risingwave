@@ -50,8 +50,10 @@ message UpdateMutation {
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
   // Merge updates for each downstream actor.
   map<uint32, MergeUpdate> actor_merge_update = 2;
-
-  repeated uint32 dropped_actors = 3;
+  // Vnode bitmap updates for each actor.
+  map<uint32, common.Buffer> actor_vnode_bitmap_update = 3;
+  // All actors to be dropped in this update.
+  repeated uint32 dropped_actors = 4;
 }
 
 message SourceChangeSplitMutation {
@@ -81,6 +83,8 @@ message Barrier {
   }
   // Used for tracing.
   bytes span = 2;
+  //Whether this barrier do checkpoint
+  bool checkpoint = 9;
 }
 
 message StreamMessage {
@@ -369,7 +373,7 @@ message StreamNode {
   uint64 operator_id = 1;
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
-  repeated uint32 pk_indices = 2;
+  repeated uint32 stream_key = 2;
   bool append_only = 24;
   string identity = 18;
   // The schema of the plan node

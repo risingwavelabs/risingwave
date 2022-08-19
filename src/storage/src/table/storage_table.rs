@@ -324,6 +324,17 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         self.disable_sanity_check = true;
     }
 
+    /// Update the vnode bitmap of this storage table, used for fragment scaling or migration.
+    pub(super) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        if self.dist_key_indices.is_empty() {
+            assert_eq!(
+                new_vnodes, self.vnodes,
+                "should not update vnode bitmap for singleton table"
+            );
+        }
+        self.vnodes = new_vnodes;
+    }
+
     pub fn schema(&self) -> &Schema {
         &self.schema
     }

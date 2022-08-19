@@ -29,6 +29,7 @@ use super::error::StreamExecutorError;
 use super::*;
 
 pub struct LocalSimpleAggExecutor {
+    ctx: ActorContextRef,
     pub(super) input: Box<dyn Executor>,
     pub(super) info: ExecutorInfo,
     pub(super) agg_calls: Vec<AggCall>,
@@ -54,6 +55,8 @@ impl Executor for LocalSimpleAggExecutor {
 
 impl LocalSimpleAggExecutor {
     fn apply_chunk(
+        ctx: &ActorContextRef,
+        identity: &str,
         agg_calls: &[AggCall],
         states: &mut [Box<dyn StreamingAggStateImpl>],
         chunk: StreamChunk,
@@ -64,8 +67,14 @@ impl LocalSimpleAggExecutor {
             .iter()
             .zip_eq(states.iter_mut())
             .try_for_each(|(agg_call, state)| {
-                let vis_map =
-                    agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
+                let vis_map = agg_call_filter_res(
+                    ctx,
+                    identity,
+                    agg_call,
+                    &columns,
+                    visibility.as_ref(),
+                    capacity,
+                )?;
                 let cols = agg_call
                     .args
                     .val_indices()
@@ -80,6 +89,7 @@ impl LocalSimpleAggExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
         let LocalSimpleAggExecutor {
+            ctx,
             input,
             info,
             agg_calls,
@@ -103,7 +113,7 @@ impl LocalSimpleAggExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&agg_calls, &mut states, chunk)?;
+                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut states, chunk)?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -142,6 +152,7 @@ impl LocalSimpleAggExecutor {
 
 impl LocalSimpleAggExecutor {
     pub fn new(
+        ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
@@ -155,6 +166,7 @@ impl LocalSimpleAggExecutor {
         };
 
         Ok(LocalSimpleAggExecutor {
+            ctx,
             input,
             info,
             agg_calls,
@@ -196,6 +208,7 @@ mod tests {
         }];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
+            ActorContext::create(123),
             Box::new(source),
             agg_calls,
             vec![],
@@ -269,6 +282,7 @@ mod tests {
         ];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
+            ActorContext::create(123),
             Box::new(source),
             agg_calls,
             vec![],
