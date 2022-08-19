@@ -142,7 +142,6 @@ impl RearrangedChainExecutor {
             // If we need to consume the snapshot ...
             // We will spawn a background task to poll the upstream actively, in order to get the
             // barrier as soon as possible and then to rearrange(steal) it.
-
             // The upstream after transforming the barriers to phantom barriers.
             let (upstream_tx, upstream_rx) = mpsc::unbounded();
             // When we catch-up the progress, notify the task to stop.
@@ -233,8 +232,6 @@ impl RearrangedChainExecutor {
                 yield msg;
             }
 
-            // Now we take back the remaining upstream. There should be no contention since
-            // `rearranged` stream is already dropped.
             let mut remaining_upstream = upstream;
 
             // Consume remaining upstream.
@@ -269,8 +266,6 @@ impl RearrangedChainExecutor {
     ) where
         U: MessageStream + std::marker::Unpin,
     {
-        // There should be no contention since `upstream` is used only after this stream finishes.
-
         loop {
             use futures::future::{select, Either};
 
