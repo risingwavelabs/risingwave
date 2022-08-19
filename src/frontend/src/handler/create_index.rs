@@ -313,7 +313,7 @@ pub async fn handle_create_index(
         (graph, index_table, index)
     };
 
-    log::trace!(
+    tracing::trace!(
         "name={}, graph=\n{}",
         name,
         serde_json::to_string_pretty(&graph).unwrap()

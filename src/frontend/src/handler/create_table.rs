@@ -263,7 +263,7 @@ pub async fn handle_create_table(
         (graph, source, table)
     };
 
-    log::trace!(
+    tracing::trace!(
         "name={}, graph=\n{}",
         table_name,
         serde_json::to_string_pretty(&graph).unwrap()

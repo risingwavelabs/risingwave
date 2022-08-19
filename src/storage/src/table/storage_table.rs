@@ -24,7 +24,6 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
@@ -37,6 +36,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_pb::catalog::Table;
+use tracing::trace;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
