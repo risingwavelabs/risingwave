@@ -41,7 +41,7 @@ use crate::hummock::shared_buffer::{
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -103,7 +103,7 @@ impl HummockStorage {
             sync_uncommitted_datas,
         } = self.read_filter(&read_options, &key_range)?;
 
-        let mut stats = StoreLocalStatistic::default();
+        let mut local_stats = StoreLocalStatistic::default();
 
         for (replicated_batches, uncommitted_data) in shared_buffer_datas {
             for batch in replicated_batches {
@@ -114,7 +114,7 @@ impl HummockStorage {
                     &uncommitted_data,
                     self.sstable_store.clone(),
                     self.stats.clone(),
-                    &mut stats,
+                    &mut local_stats,
                     iter_read_options.clone(),
                 )
                 .await?,
@@ -126,7 +126,7 @@ impl HummockStorage {
                     &sync_uncommitted_data,
                     self.sstable_store.clone(),
                     self.stats.clone(),
-                    &mut stats,
+                    &mut local_stats,
                     iter_read_options.clone(),
                 )
                 .await?,
@@ -178,10 +178,14 @@ impl HummockStorage {
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
                         let sstable = self
                             .sstable_store
-                            .sstable(sstable_info.id, &mut stats)
+                            .sstable(sstable_info.id, &mut local_stats)
                             .await?;
 
-                        if !sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                        if Self::hit_sstable_bloom_filter(
+                            sstable.value(),
+                            bloom_filter_key,
+                            &mut local_stats,
+                        ) {
                             sstables.push((*sstable_info).clone());
                         }
                     } else {
@@ -200,10 +204,14 @@ impl HummockStorage {
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
-                        .sstable(table_info.id, &mut stats)
+                        .sstable(table_info.id, &mut local_stats)
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
-                        if sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                        if !Self::hit_sstable_bloom_filter(
+                            sstable.value(),
+                            bloom_filter_key,
+                            &mut local_stats,
+                        ) {
                             continue;
                         }
                     }
@@ -241,8 +249,11 @@ impl HummockStorage {
         );
 
         user_iterator.rewind().await?;
-        stats.report(self.stats.as_ref());
-        Ok(HummockStateStoreIter::new(user_iterator))
+        local_stats.report(self.stats.as_ref());
+        Ok(HummockStateStoreIter::new(
+            user_iterator,
+            self.stats.clone(),
+        ))
     }
 
     /// Gets the value of a specified `key`.
@@ -263,7 +274,7 @@ impl HummockStorage {
             None => None,
             Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
         };
-        let mut stats = StoreLocalStatistic::default();
+        let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_datas,
             pinned_version,
@@ -285,7 +296,7 @@ impl HummockStorage {
                 .get_from_order_sorted_uncommitted_data(
                     uncommitted_data,
                     &internal_key,
-                    &mut stats,
+                    &mut local_stats,
                     key,
                     check_bloom_filter,
                 )
@@ -300,7 +311,7 @@ impl HummockStorage {
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,
                     &internal_key,
-                    &mut stats,
+                    &mut local_stats,
                     key,
                     check_bloom_filter,
                 )
@@ -323,7 +334,7 @@ impl HummockStorage {
                     for table_info in table_infos {
                         let table = self
                             .sstable_store
-                            .sstable(table_info.id, &mut stats)
+                            .sstable(table_info.id, &mut local_stats)
                             .await?;
                         table_counts += 1;
                         if let Some(v) = self
@@ -332,7 +343,7 @@ impl HummockStorage {
                                 &internal_key,
                                 key,
                                 check_bloom_filter,
-                                &mut stats,
+                                &mut local_stats,
                             )
                             .await?
                         {
@@ -365,11 +376,17 @@ impl HummockStorage {
 
                     let table = self
                         .sstable_store
-                        .sstable(level.table_infos[table_info_idx].id, &mut stats)
+                        .sstable(level.table_infos[table_info_idx].id, &mut local_stats)
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
-                        .get_from_table(table, &internal_key, key, check_bloom_filter, &mut stats)
+                        .get_from_table(
+                            table,
+                            &internal_key,
+                            key,
+                            check_bloom_filter,
+                            &mut local_stats,
+                        )
                         .await?
                     {
                         return Ok(v);
@@ -378,7 +395,7 @@ impl HummockStorage {
             }
         }
 
-        stats.report(self.stats.as_ref());
+        local_stats.report(self.stats.as_ref());
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["sub-iter"])
@@ -664,11 +681,12 @@ impl StateStore for HummockStorage {
 
 pub struct HummockStateStoreIter {
     inner: DirectedUserIterator,
+    metrics: Arc<StateStoreMetrics>,
 }
 
 impl HummockStateStoreIter {
-    fn new(inner: DirectedUserIterator) -> Self {
-        Self { inner }
+    fn new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
+        Self { inner, metrics }
     }
 
     async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
@@ -682,6 +700,10 @@ impl HummockStateStoreIter {
         }
 
         Ok(kvs)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats);
     }
 }
 
@@ -707,5 +729,13 @@ impl StateStoreIter for HummockStateStoreIter {
                 Ok(None)
             }
         }
+    }
+}
+
+impl Drop for HummockStateStoreIter {
+    fn drop(&mut self) {
+        let mut stats = StoreLocalStatistic::default();
+        self.collect_local_statistic(&mut stats);
+        stats.report(&self.metrics);
     }
 }

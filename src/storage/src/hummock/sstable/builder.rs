@@ -96,6 +96,7 @@ pub struct SstableBuilder {
     raw_value: BytesMut,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     last_bloom_filter_key_length: usize,
+    add_bloom_filter_key_counts: usize,
 }
 
 impl SstableBuilder {
@@ -120,6 +121,7 @@ impl SstableBuilder {
                 FullKeyFilterKeyExtractor::default(),
             )),
             last_bloom_filter_key_length: 0,
+            add_bloom_filter_key_counts: 0,
         }
     }
 
@@ -146,6 +148,7 @@ impl SstableBuilder {
             sstable_id,
             filter_key_extractor,
             last_bloom_filter_key_length: 0,
+            add_bloom_filter_key_counts: 0,
         }
     }
 
@@ -233,6 +236,14 @@ impl SstableBuilder {
             largest_key,
             version: VERSION,
         };
+
+        tracing::trace!(
+            "meta_size {} bloom_filter_size {}  add_key_counts {} add_bloom_filter_counts {}",
+            meta.encoded_size(),
+            meta.bloom_filter.len(),
+            self.key_count,
+            self.add_bloom_filter_key_counts
+        );
 
         (
             self.sstable_id,

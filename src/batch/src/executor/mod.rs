@@ -92,6 +92,12 @@ pub trait Executor: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedDataChunkStream;
 }
 
+impl std::fmt::Debug for BoxedExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.identity())
+    }
+}
+
 /// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor`
 /// from proto and global environment.
 #[async_trait::async_trait]

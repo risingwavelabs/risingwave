@@ -135,7 +135,13 @@ impl AggCall {
             (AggKind::Count | AggKind::ApproxCountDistinct, _) => DataType::Int64,
 
             // StringAgg
-            (AggKind::StringAgg, _) => DataType::Varchar,
+            (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
+            (AggKind::StringAgg, _) => return invalid(),
+
+            (AggKind::ArrayAgg, [input]) => DataType::List {
+                datatype: Box::new(input.clone()),
+            },
+            (AggKind::ArrayAgg, _) => return invalid(),
 
             // SingleValue
             (AggKind::SingleValue, [input]) => input.clone(),

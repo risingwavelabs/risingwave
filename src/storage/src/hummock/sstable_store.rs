@@ -29,7 +29,7 @@ use super::{
     Block, BlockCache, Sstable, SstableMeta, TieredCache, TieredCacheKey, TieredCacheValue,
 };
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
@@ -179,32 +179,10 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 2),
+            block_cache: BlockCache::new(block_cache_capacity, 0),
             meta_cache,
             tiered_cache,
         }
-    }
-
-    pub async fn put_sst(
-        &self,
-        sst_id: HummockSstableId,
-        meta: SstableMeta,
-        data: Bytes,
-        policy: CachePolicy,
-    ) -> HummockResult<()> {
-        self.put_sst_data(sst_id, data.clone()).await?;
-        fail_point!("metadata_upload_err");
-        if let Err(e) = self.put_meta(sst_id, &meta).await {
-            self.delete_sst_data(sst_id).await?;
-            return Err(e);
-        }
-        if let CachePolicy::Fill = policy {
-            let sst = Sstable::new_with_data(sst_id, meta, data).unwrap();
-            let charge = sst.estimate_size();
-            self.meta_cache
-                .insert(sst_id, sst_id, charge, Box::new(sst));
-        }
-        Ok(())
     }
 
     pub async fn put_sst_stream(
@@ -432,67 +410,39 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
-    pub async fn load_table(
-        &self,
-        sst_id: HummockSstableId,
-        load_data: bool,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        let mut meta_data = None;
-        loop {
-            stats.cache_meta_block_total += 1;
-            let entry = self
-                .meta_cache
-                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
-                    let store = self.store.clone();
-                    let meta_path = self.get_sst_meta_path(sst_id);
-                    let data_path = self.get_sst_data_path(sst_id);
-                    stats.cache_meta_block_miss += 1;
-                    let stats_ptr = stats.remote_io_time.clone();
-                    async move {
-                        let now = Instant::now();
-                        let meta = match meta_data {
-                            Some(data) => data,
-                            None => {
-                                let buf = store.read(&meta_path, None).await?;
-                                SstableMeta::decode(&mut &buf[..])?
-                            }
-                        };
-                        let sst = if load_data {
-                            let block_data = store.read(&data_path, None).await?;
-                            Sstable::new_with_data(sst_id, meta, block_data)?
-                        } else {
-                            Sstable::new(sst_id, meta)
-                        };
-                        let charge = sst.estimate_size();
-                        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
-                        stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                        Ok((Box::new(sst), charge))
-                    }
-                })
-                .await
-                .map_err(|e| {
-                    HummockError::other(format!(
-                        "meta cache lookup request dedup get cancel: {:?}",
-                        e,
-                    ))
-                })??;
-            if !load_data || !entry.value().blocks.is_empty() {
-                return Ok(entry);
-            }
-            // remove sst from cache to avoid multiple thread acquire the same sstable.
-            meta_data = Some(entry.value().meta.clone());
-            drop(entry);
-            self.meta_cache.erase(sst_id, &sst_id);
-        }
-    }
-
     pub async fn sstable(
         &self,
         sst_id: HummockSstableId,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
-        self.load_table(sst_id, false, stats).await
+        stats.cache_meta_block_total += 1;
+        self.meta_cache
+            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
+                let store = self.store.clone();
+                let meta_path = self.get_sst_meta_path(sst_id);
+                stats.cache_meta_block_miss += 1;
+                let stats_ptr = stats.remote_io_time.clone();
+                async move {
+                    let now = Instant::now();
+                    let buf = store
+                        .read(&meta_path, None)
+                        .await
+                        .map_err(HummockError::object_io_error)?;
+                    let meta = SstableMeta::decode(&mut &buf[..])?;
+                    let sst = Sstable::new(sst_id, meta);
+                    let charge = sst.meta.encoded_size();
+                    let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                    stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
+                    Ok((Box::new(sst), charge))
+                }
+            })
+            .await
+            .map_err(|e| {
+                HummockError::other(format!(
+                    "meta cache lookup request dedup get cancel: {:?}",
+                    e,
+                ))
+            })?
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
@@ -504,6 +454,63 @@ impl SstableStore {
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
+
+impl MemoryCollector for SstableStore {
+    fn get_meta_memory_usage(&self) -> u64 {
+        self.meta_cache.get_memory_usage() as u64
+    }
+
+    fn get_data_memory_usage(&self) -> u64 {
+        self.block_cache.size() as u64
+    }
+
+    // TODO: limit shared-buffer uploading memory
+    fn get_total_memory_usage(&self) -> u64 {
+        0
+    }
+}
+
+#[async_trait::async_trait]
+pub trait SstableStoreWrite: Send + Sync {
+    async fn put_sst(
+        &self,
+        sst_id: HummockSstableId,
+        meta: SstableMeta,
+        data: Bytes,
+        policy: CachePolicy,
+    ) -> HummockResult<()>;
+}
+
+#[async_trait::async_trait]
+impl SstableStoreWrite for SstableStore {
+    async fn put_sst(
+        &self,
+        sst_id: HummockSstableId,
+        meta: SstableMeta,
+        data: Bytes,
+        policy: CachePolicy,
+    ) -> HummockResult<()> {
+        self.put_sst_data(sst_id, data.clone()).await?;
+        fail_point!("metadata_upload_err");
+        if let Err(e) = self.put_meta(sst_id, &meta).await {
+            self.delete_sst_data(sst_id).await?;
+            return Err(e);
+        }
+        if let CachePolicy::Fill = policy {
+            for (block_idx, block_meta) in meta.block_metas.iter().enumerate() {
+                let end_offset = (block_meta.offset + block_meta.len) as usize;
+                let block = Block::decode(&data[block_meta.offset as usize..end_offset])?;
+                self.block_cache
+                    .insert(sst_id, block_idx as u64, Box::new(block));
+            }
+        }
+        let sst = Sstable::new(sst_id, meta);
+        let charge = sst.estimate_size();
+        self.meta_cache
+            .insert(sst_id, sst_id, charge, Box::new(sst));
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -520,7 +527,7 @@ mod tests {
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta};
+    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStoreWrite};
     use crate::monitor::StoreLocalStatistic;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
@@ -536,17 +543,8 @@ mod tests {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(id, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
-        assert!(holder.value().blocks.is_empty());
-        let holder = sstable_store
-            .load_table(id, true, &mut stats)
-            .await
-            .unwrap();
+        let holder = sstable_store.sstable(id, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
-        assert_eq!(
-            holder.value().meta.block_metas.len(),
-            holder.value().blocks.len()
-        );
-        assert!(!holder.value().blocks.is_empty());
         let mut iter = SstableIterator::new(
             holder,
             sstable_store,

@@ -34,7 +34,7 @@ pub struct TableFunction {
     pub function_type: TableFunctionType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum TableFunctionType {
     Generate,
     Unnest,
@@ -42,7 +42,7 @@ pub enum TableFunctionType {
 }
 
 impl TableFunctionType {
-    fn to_protobuf(&self) -> Type {
+    fn to_protobuf(self) -> Type {
         match self {
             TableFunctionType::Generate => Type::Generate,
             TableFunctionType::Unnest => Type::Unnest,

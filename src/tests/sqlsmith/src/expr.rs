@@ -274,37 +274,36 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let can_agg = true;
         // show then the expression inside this function is in aggregate function
         let inside_agg = true;
-        let expr: Vec<Expr> = func
+        let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
             .map(|t| self.gen_expr(*t, can_agg, inside_agg))
             .collect();
-        assert!(expr.len() == 1);
 
         let distinct = self.flip_coin() && self.is_distinct_allowed;
-        self.make_agg_expr(func.func, expr[0].clone(), distinct)
+        self.make_agg_expr(func.func, &exprs, distinct)
     }
 
-    fn make_agg_expr(&mut self, func: AggKind, expr: Expr, distinct: bool) -> Expr {
+    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Expr {
         use AggKind as A;
 
         match func {
-            A::Sum => Expr::Function(make_agg_func("sum", &[expr], distinct)),
-            A::Min => Expr::Function(make_agg_func("min", &[expr], distinct)),
-            A::Max => Expr::Function(make_agg_func("max", &[expr], distinct)),
-            A::Count => Expr::Function(make_agg_func("count", &[expr], distinct)),
-            A::Avg => Expr::Function(make_agg_func("avg", &[expr], distinct)),
-            // TODO: Tracked by: <https://github.com/singularity-data/risingwave/issues/3115>
-            // A::StringAgg => Expr::Function(make_agg_func("string_agg", &[expr], distinct)),
-            A::StringAgg => self.gen_simple_scalar(DataTypeName::Varchar),
-            A::SingleValue => Expr::Function(make_agg_func("single_value", &[expr], false)),
+            A::Sum => Expr::Function(make_agg_func("sum", exprs, distinct)),
+            A::Min => Expr::Function(make_agg_func("min", exprs, distinct)),
+            A::Max => Expr::Function(make_agg_func("max", exprs, distinct)),
+            A::Count => Expr::Function(make_agg_func("count", exprs, distinct)),
+            A::Avg => Expr::Function(make_agg_func("avg", exprs, distinct)),
+            A::StringAgg => Expr::Function(make_agg_func("string_agg", exprs, distinct)),
+            A::SingleValue => Expr::Function(make_agg_func("single_value", exprs, false)),
             A::ApproxCountDistinct => {
                 if distinct {
                     self.gen_simple_scalar(DataTypeName::Int64)
                 } else {
-                    Expr::Function(make_agg_func("approx_count_distinct", &[expr], false))
+                    Expr::Function(make_agg_func("approx_count_distinct", exprs, false))
                 }
             }
+            // TODO(yuchao): `array_agg` support is still WIP, see #4657.
+            A::ArrayAgg => self.gen_simple_scalar(DataTypeName::List),
         }
     }
 }

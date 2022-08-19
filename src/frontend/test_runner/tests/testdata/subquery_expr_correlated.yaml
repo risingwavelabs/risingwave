@@ -483,16 +483,16 @@
 - sql: |
     create table a(x int, y varchar, z int);
     create table b(x varchar, y int, z int);
-    select count(*) from a where a.y = (select string_agg(x order by x) from b where b.z = a.z);
+    select count(*) from a where a.y = (select string_agg(x, ',' order by x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y = string_agg(b.x order_by(b.x ASC NULLS LAST))), output: [] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y = string_agg(b.x, ',':Varchar order_by(b.x ASC NULLS LAST))), output: [] }
         LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [a.z], aggs: [string_agg(b.x order_by(b.x ASC NULLS LAST))] }
-          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+        LogicalAgg { group_key: [a.z], aggs: [string_agg(b.x, ',':Varchar order_by(b.x ASC NULLS LAST))] }
+          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x, ',':Varchar] }
             LogicalAgg { group_key: [a.z], aggs: [] }
               LogicalScan { table: a, columns: [a.z] }
-            LogicalProject { exprs: [b.z, b.x] }
+            LogicalProject { exprs: [b.z, b.x, ',':Varchar] }
               LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
