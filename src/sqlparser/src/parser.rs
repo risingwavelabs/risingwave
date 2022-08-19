@@ -3419,4 +3419,15 @@ mod tests {
             parser.prev_token();
         });
     }
+
+    #[test]
+    fn test_parse_integer_min() {
+        let min_bigint = "-9223372036854775808";
+        run_parser_method(min_bigint, |parser| {
+            assert_eq!(
+                parser.parse_expr().unwrap(),
+                Expr::Value(Value::Number("-9223372036854775808".to_string(), false))
+            )
+        });
+    }
 }
