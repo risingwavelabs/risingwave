@@ -93,7 +93,7 @@ impl AggCall {
     /// Returns error if not supported or the arguments are invalid.
     pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Result<DataType> {
         let invalid = || {
-            let args = inputs.iter().map(|t| format!("{:?}", t)).join(", ");
+            let args = inputs.iter().map(|t| format!("{}", t)).join(", ");
             Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
                 "Invalid aggregation: {}({})",
                 agg_kind, args

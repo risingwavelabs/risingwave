@@ -30,12 +30,20 @@ pub struct StreamExpand {
 
 impl StreamExpand {
     pub fn new(logical: LogicalExpand) -> Self {
+        let dist = match logical.input().distribution() {
+            Distribution::Single => Distribution::Single,
+            Distribution::SomeShard
+            | Distribution::HashShard(_)
+            | Distribution::UpstreamHashShard(_) => Distribution::SomeShard,
+            Distribution::Broadcast => unreachable!(),
+        };
+
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
             logical.schema().clone(),
             logical.base.logical_pk.to_vec(),
             logical.functional_dependency().clone(),
-            Distribution::SomeShard,
+            dist,
             logical.input().append_only(),
         );
         StreamExpand { base, logical }

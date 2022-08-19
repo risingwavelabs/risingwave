@@ -33,7 +33,7 @@ pub struct TableDesc {
     /// as distribution key.
     pub distribution_key: Vec<usize>,
     /// Column indices for primary keys.
-    pub pk: Vec<usize>,
+    pub stream_key: Vec<usize>,
 
     /// Whether the table source is append-only
     pub appendonly: bool,

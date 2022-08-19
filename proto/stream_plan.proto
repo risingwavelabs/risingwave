@@ -83,6 +83,8 @@ message Barrier {
   }
   // Used for tracing.
   bytes span = 2;
+  //Whether this barrier do checkpoint
+  bool checkpoint = 9;
 }
 
 message StreamMessage {

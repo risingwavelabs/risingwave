@@ -417,7 +417,7 @@ mod tests {
                 index: 0,
                 order_type: 2,
             }],
-            pk: vec![2],
+            stream_key: vec![2],
             ..Default::default()
         }
     }

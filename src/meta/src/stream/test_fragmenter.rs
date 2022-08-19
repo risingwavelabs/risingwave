@@ -116,7 +116,7 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
             index: 0,
             order_type: 2,
         }],
-        pk: vec![2],
+        stream_key: vec![2],
         ..Default::default()
     }
 }

@@ -22,7 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
-use log::debug;
+use tracing::debug;
 
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -436,8 +436,6 @@ impl Parser {
                     UnaryOperator::Minus
                 };
                 let mut sub_expr = self.parse_subexpr(Self::PLUS_MINUS_PREC)?;
-                // TODO: Deal with nested unary exp: -(-(-(1))) => -1
-                // Tracked by: <https://github.com/singularity-data/risingwave/issues/4344>
                 if let Expr::Value(Value::Number(ref mut s, _)) = sub_expr {
                     if tok == Token::Minus {
                         *s = format!("-{}", s);
@@ -3419,6 +3417,17 @@ mod tests {
             assert_eq!(parser.next_token(), Token::EOF);
             assert_eq!(parser.next_token(), Token::EOF);
             parser.prev_token();
+        });
+    }
+
+    #[test]
+    fn test_parse_integer_min() {
+        let min_bigint = "-9223372036854775808";
+        run_parser_method(min_bigint, |parser| {
+            assert_eq!(
+                parser.parse_expr().unwrap(),
+                Expr::Value(Value::Number("-9223372036854775808".to_string(), false))
+            )
         });
     }
 }

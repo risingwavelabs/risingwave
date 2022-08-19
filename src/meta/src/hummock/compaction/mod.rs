@@ -83,6 +83,18 @@ pub struct CompactionInput {
     pub target_sub_level_id: u64,
 }
 
+impl CompactionInput {
+    pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
+        for level in &self.input_levels {
+            level_handlers[level.level_idx as usize].add_pending_task(
+                task_id,
+                self.target_level,
+                &level.table_infos,
+            );
+        }
+    }
+}
+
 pub struct CompactionTask {
     pub input: CompactionInput,
     pub compression_algorithm: String,
@@ -305,6 +317,6 @@ pub trait CompactionPicker {
     fn pick_compaction(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput>;
 }

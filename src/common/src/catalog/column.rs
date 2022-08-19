@@ -150,13 +150,10 @@ impl ColumnDesc {
         type_name: &str,
         fields: Vec<ColumnDesc>,
     ) -> Self {
-        let data_type = DataType::Struct {
-            fields: fields
-                .iter()
-                .map(|f| f.data_type.clone())
-                .collect_vec()
-                .into(),
-        };
+        let data_type = DataType::new_struct(
+            fields.iter().map(|f| f.data_type.clone()).collect_vec(),
+            fields.iter().map(|f| f.name.clone()).collect_vec(),
+        );
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
