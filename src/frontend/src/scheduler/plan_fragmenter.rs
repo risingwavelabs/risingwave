@@ -597,7 +597,7 @@ mod tests {
             false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pk: vec![],
+                stream_key: vec![],
                 order_key: vec![],
                 columns: vec![
                     ColumnDesc {

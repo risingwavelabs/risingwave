@@ -124,7 +124,7 @@ pub type SharedBufferIteratorType<
 pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     uncommitted_data: &OrderSortedUncommittedData,
     sstable_store: Arc<SstableStore>,
-    stats: Arc<StateStoreMetrics>,
+    _stats: Arc<StateStoreMetrics>,
     local_stats: &mut StoreLocalStatistic,
     read_options: Arc<SstableIteratorReadOptions>,
 ) -> HummockResult<SharedBufferIteratorType<T::Direction, T::SstableIteratorType>> {
@@ -156,11 +156,11 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
             ordered_iters.push(HummockIteratorUnion::First(data_iters.pop().unwrap()));
         } else {
             ordered_iters.push(HummockIteratorUnion::Second(
-                UnorderedMergeIteratorInner::new(data_iters, stats.clone()),
+                UnorderedMergeIteratorInner::new(data_iters),
             ));
         }
     }
-    Ok(OrderedMergeIteratorInner::new(ordered_iters, stats.clone()))
+    Ok(OrderedMergeIteratorInner::new(ordered_iters))
 }
 
 #[derive(Debug, Clone)]

@@ -373,7 +373,7 @@ message StreamNode {
   uint64 operator_id = 1;
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
-  repeated uint32 pk_indices = 2;
+  repeated uint32 stream_key = 2;
   bool append_only = 24;
   string identity = 18;
   // The schema of the plan node

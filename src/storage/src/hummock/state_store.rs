@@ -41,7 +41,7 @@ use crate::hummock::shared_buffer::{
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -250,7 +250,10 @@ impl HummockStorage {
 
         user_iterator.rewind().await?;
         local_stats.report(self.stats.as_ref());
-        Ok(HummockStateStoreIter::new(user_iterator))
+        Ok(HummockStateStoreIter::new(
+            user_iterator,
+            self.stats.clone(),
+        ))
     }
 
     /// Gets the value of a specified `key`.
@@ -678,11 +681,12 @@ impl StateStore for HummockStorage {
 
 pub struct HummockStateStoreIter {
     inner: DirectedUserIterator,
+    metrics: Arc<StateStoreMetrics>,
 }
 
 impl HummockStateStoreIter {
-    fn new(inner: DirectedUserIterator) -> Self {
-        Self { inner }
+    fn new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
+        Self { inner, metrics }
     }
 
     async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
@@ -696,6 +700,10 @@ impl HummockStateStoreIter {
         }
 
         Ok(kvs)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats);
     }
 }
 
@@ -721,5 +729,13 @@ impl StateStoreIter for HummockStateStoreIter {
                 Ok(None)
             }
         }
+    }
+}
+
+impl Drop for HummockStateStoreIter {
+    fn drop(&mut self) {
+        let mut stats = StoreLocalStatistic::default();
+        self.collect_local_statistic(&mut stats);
+        stats.report(&self.metrics);
     }
 }

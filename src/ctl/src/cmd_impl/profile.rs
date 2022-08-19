@@ -62,5 +62,7 @@ pub async fn profile(sleep_s: u64) -> anyhow::Result<()> {
         }
     }
 
+    println!("Profiling results are saved at {}", dir_path.display());
+
     Ok(())
 }

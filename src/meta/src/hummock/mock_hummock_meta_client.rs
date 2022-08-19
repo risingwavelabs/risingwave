@@ -174,11 +174,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
-        self.hummock_manager
-            .extend_ssts_to_delete_from_scan(&sst_ids)
-            .await;
-        Ok(())
+    async fn report_full_scan_task(&self, _sst_ids: Vec<HummockSstableId>) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn trigger_full_gc(&self, _sst_retention_time_sec: u64) -> Result<()> {
+        unimplemented!()
     }
 }
 
