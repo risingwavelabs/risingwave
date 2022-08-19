@@ -178,34 +178,26 @@ pub mod tests {
             .clone();
         assert_eq!(source.name, "t");
 
-        // Only check stream source
-        let catalogs = source.columns;
-        let mut columns = vec![];
-
-        // Get all column descs
-        for catalog in catalogs {
-            columns.append(&mut catalog.column_desc.flatten());
-        }
-        let columns = columns
+        let columns = source
+            .columns
             .iter()
-            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let city_type = DataType::Struct {
-            fields: vec![DataType::Varchar, DataType::Varchar].into(),
-        };
+        let city_type = DataType::new_struct(
+            vec![DataType::Varchar, DataType::Varchar],
+            vec!["address".to_string(), "zipcode".to_string()],
+        );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "id" => DataType::Int32,
-            "country.zipcode" => DataType::Varchar,
             "zipcode" => DataType::Int64,
-            "country.city.address" => DataType::Varchar,
-            "country.address" => DataType::Varchar,
-            "country.city" => city_type.clone(),
-            "country.city.zipcode" => DataType::Varchar,
             "rate" => DataType::Float32,
-            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+            "country" => DataType::new_struct(
+                vec![DataType::Varchar,city_type,DataType::Varchar],
+                vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
+            ),
         };
         assert_eq!(columns, expected_columns);
     }
