@@ -121,9 +121,6 @@ impl TaskOutput {
                         self.output_id,
                         chunk.cardinality()
                     );
-                    println!(                        "Task output id: {:?}, data len: {:?}",
-                                                     self.output_id,
-                                                     chunk.cardinality());
                     let pb = chunk.to_protobuf().await?;
                     let resp = GetDataResponse {
                         status: Default::default(),

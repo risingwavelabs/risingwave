@@ -376,7 +376,6 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                 let probe_side_chunk = probe_side_stream.next().await;
                 probe_side_chunk_exists = probe_side_chunk.is_some();
 
-
                 let probe_side_chunk = if let Some(chunk) = probe_side_chunk {
                     println!("some for probe side chunk");
                     Some(chunk?.compact()?)

@@ -116,11 +116,6 @@ impl TaskService for BatchServiceImpl {
             plan,
             task_id
         );
-        println!(
-            "local execute request: plan:{:?} with task id:{:?}",
-            plan,
-            task_id
-        );
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch)?;
         let task = Arc::new(task);
 

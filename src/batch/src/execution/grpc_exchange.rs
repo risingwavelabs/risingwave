@@ -51,29 +51,9 @@ impl GrpcExchangeSource {
                     plan: plan.plan,
                     epoch: plan.epoch,
                 };
-                println!("local execute RPC for task_output_id: {:?}", task_output_id);
-                let a = client.execute(execute_request).await;
-                if let Err(e) = a.as_ref() {
-                    println!("error for {:?}", e);
-                } else {
-
-                }
-                println!("local execute RPC for task_output_id Done: {:?}", task_output_id);
-                a.unwrap()
+                client.execute(execute_request).await?
             }
-            None => {
-                let a = task_output_id.task_id.as_ref().unwrap();
-                println!(
-                    "---------get by exchange rpc done for task_id {:?}, stage_id {:?}, query_id {:?} start",
-                    a.task_id, a.stage_id, a.query_id
-                );
-                let b = client.get_data(task_output_id.clone()).await.unwrap();
-                println!(
-                    "---------get by exchange rpc done for task_id {:?}, stage_id {:?}, query_id {:?} done",
-                    a.task_id, a.stage_id, a.query_id
-                );
-                b
-            }
+            None => client.get_data(task_output_id.clone()).await?,
         };
         let source = Self {
             stream,
