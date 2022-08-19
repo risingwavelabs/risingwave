@@ -74,12 +74,27 @@ impl BuildFragmentGraphState {
     }
 }
 
-pub struct StreamFragmenterV2 {}
+pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+    let stream_node = plan_node.to_stream_prost();
+    let BuildFragmentGraphState {
+        fragment_graph,
+        next_local_fragment_id: _,
+        next_operator_id: _,
+        dependent_table_ids,
+        next_table_id,
+    } = {
+        let mut state = BuildFragmentGraphState::default();
+        StreamFragmenter::generate_fragment_graph(&mut state, stream_node).unwrap();
+        state
+    };
 
-impl StreamFragmenterV2 {
-    pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
-        StreamFragmenter::build_graph(plan_node.to_stream_prost())
-    }
+    let mut fragment_graph = fragment_graph.to_protobuf();
+    fragment_graph.dependent_table_ids = dependent_table_ids
+        .into_iter()
+        .map(|id| id.table_id)
+        .collect();
+    fragment_graph.table_ids_cnt = next_table_id;
+    fragment_graph
 }
 
 pub struct StreamFragmenter {}
@@ -277,28 +292,6 @@ impl StreamFragmenter {
         stream_node.input = inputs;
 
         Ok(stream_node)
-    }
-
-    pub fn build_graph(stream_node: StreamNode) -> StreamFragmentGraphProto {
-        let BuildFragmentGraphState {
-            fragment_graph,
-            next_local_fragment_id: _,
-            next_operator_id: _,
-            dependent_table_ids,
-            next_table_id,
-        } = {
-            let mut state = BuildFragmentGraphState::default();
-            Self::generate_fragment_graph(&mut state, stream_node).unwrap();
-            state
-        };
-
-        let mut fragment_graph = fragment_graph.to_protobuf();
-        fragment_graph.dependent_table_ids = dependent_table_ids
-            .into_iter()
-            .map(|id| id.table_id)
-            .collect();
-        fragment_graph.table_ids_cnt = next_table_id;
-        fragment_graph
     }
 
     /// This function assigns the `table_id` based on the type of `StreamNode`
