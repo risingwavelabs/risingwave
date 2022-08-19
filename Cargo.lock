@@ -4183,15 +4183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qcell"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b632aa7e99db96aa805f87e389f801c536f6785ded873a4e3fbc0441747cc40"
-dependencies = [
- "once_cell",
-]
-
-[[package]]
 name = "quanta"
 version = "0.10.1"
 source = "git+https://github.com/madsys-dev/quanta.git?rev=a819877#a819877978ef542a6e0c626e0220030fd7c3e717"
@@ -5395,7 +5386,6 @@ dependencies = [
  "pin-project",
  "prometheus",
  "prost 0.11.0",
- "qcell",
  "rand 0.8.5",
  "rdkafka",
  "risingwave_common",
@@ -5410,7 +5400,6 @@ dependencies = [
  "serde-value",
  "serde_json",
  "smallvec",
- "static-rc",
  "static_assertions",
  "stats_alloc",
  "thiserror",
@@ -5916,11 +5905,6 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
-
-[[package]]
-name = "static-rc"
-version = "0.5.0"
-source = "git+https://github.com/matthieu-m/static-rc#2596db6b2dcb574a1cdc2c59e588fd18ee855e11"
 
 [[package]]
 name = "static_assertions"
