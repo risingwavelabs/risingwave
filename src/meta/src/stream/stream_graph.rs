@@ -888,7 +888,7 @@ impl ActorGraphBuilder {
         fragment_graph: &StreamFragmentGraph,
     ) -> MetaResult<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
-        // poped out from the heap will be the top-most node in plan, or the sink in stream graph.)
+        // popped out from the heap will be the top-most node in plan, or the sink in stream graph.)
         let mut actionable_fragment_id = VecDeque::new();
         let mut downstream_cnts = HashMap::new();
 

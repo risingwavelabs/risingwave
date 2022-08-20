@@ -229,7 +229,7 @@ impl Parser {
 
         match self.next_token() {
             Token::Word(w) if self.peek_token() == Token::Period => {
-                // Since there's no parentesis, `w` must be a column or a table
+                // Since there's no parenthesis, `w` must be a column or a table
                 // So what follows must be dot-delimited identifiers, e.g. `a.b.c.*`
                 let wildcard_expr = self.parse_simple_wildcard_expr(index)?;
                 return self.word_concat_wildcard_expr(w.to_ident(), wildcard_expr);
@@ -242,7 +242,7 @@ impl Parser {
             Token::LParen => {
                 let mut expr = self.parse_expr()?;
                 if self.consume_token(&Token::RParen) {
-                    // Cast off nested expression to avoid interface by parentesis.
+                    // Cast off nested expression to avoid interface by parenthesis.
                     while let Expr::Nested(expr1) = expr {
                         expr = *expr1;
                     }
@@ -518,7 +518,7 @@ impl Parser {
     pub fn parse_struct_selection(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         if let Expr::Nested(compound_expr) = expr.clone() {
             let mut nested_expr = *compound_expr;
-            // Cast off nested expression to avoid interface by parentesis.
+            // Cast off nested expression to avoid interface by parenthesis.
             while let Expr::Nested(expr1) = nested_expr {
                 nested_expr = *expr1;
             }
@@ -934,7 +934,7 @@ impl Parser {
         // of the duration specified in the string literal.
         //
         // Note that PostgreSQL allows omitting the qualifier, so we provide
-        // this more general implemenation.
+        // this more general implementation.
         let leading_field = match self.peek_token() {
             Token::Word(kw)
                 if [
@@ -1103,15 +1103,15 @@ impl Parser {
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         let index = self.parse_expr()?;
         self.expect_token(&Token::RBracket)?;
-        let mut indexs: Vec<Expr> = vec![index];
+        let mut indices: Vec<Expr> = vec![index];
         while self.consume_token(&Token::LBracket) {
             let index = self.parse_expr()?;
             self.expect_token(&Token::RBracket)?;
-            indexs.push(index);
+            indices.push(index);
         }
         Ok(Expr::ArrayIndex {
             obj: Box::new(expr),
-            indexs,
+            indices,
         })
     }
 
@@ -2373,7 +2373,7 @@ impl Parser {
     }
 
     /// Parse a query expression, i.e. a `SELECT` statement optionally
-    /// preceeded with some `WITH` CTE declarations and optionally followed
+    /// preceded with some `WITH` CTE declarations and optionally followed
     /// by `ORDER BY`. Unlike some other parse_... methods, this one doesn't
     /// expect the initial keyword to be already consumed
     pub fn parse_query(&mut self) -> Result<Query, ParserError> {

@@ -44,7 +44,7 @@ impl CompactorService {
         }
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))

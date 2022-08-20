@@ -119,7 +119,7 @@ export function computeNodeAddrToSideColor(addr) {
  *   layoutActorBox         <- dagLayout         <- drawActorBox      <- drawFlow 
  *   [ The layout of the ]     [ The layout of ]    [ Draw an actor ]    [ Draw many actors   ]
  *   [ operators in an   ]     [ actors in a   ]    [ in specified  ]    [ and links between  ]
- *   [ actor.            ]     [ stram plan    ]    [ place         ]    [ them.              ]
+ *   [ actor.            ]     [ stream plan    ]    [ place         ]    [ them.              ]
  *
  */
 export class StreamChartHelper {
@@ -128,7 +128,7 @@ export class StreamChartHelper {
    * 
    * @param {Group} g The group element in canvas engine
    * @param {*} data The raw response from the meta node
-   * @param {(e, node) => void} onNodeClick The callback function trigged when a node is click
+   * @param {(e, node) => void} onNodeClick The callback function triggered when a node is click
    * @param {(e, actor) => void} onActorClick
    * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedWokerNode
    * @param {Array<number>} shownActorIdList
@@ -468,10 +468,10 @@ export class StreamChartHelper {
    * }} props
    * @param {Group} props.g The group element in canvas engine
    * @param {{id: any, nextNodes: []}} props.rootNode The root node of the tree in the actor
-   * @param {string} props.nodeColor [optinal] The filled color of nodes.
-   * @param {string} props.strokeColor [optinal] The color of the stroke.
-   * @param {number} props.baseX [optinal] The x coordination of the lef-top corner. default: 0
-   * @param {number} props.baseY [optinal] The y coordination of the lef-top corner. default: 0
+   * @param {string} props.nodeColor [optional] The filled color of nodes.
+   * @param {string} props.strokeColor [optional] The color of the stroke.
+   * @param {number} props.baseX [optional] The x coordination of the lef-top corner. default: 0
+   * @param {number} props.baseY [optional] The y coordination of the lef-top corner. default: 0
    * @returns {Group} The group element of this tree
    */
    drawActorBox(props) {
@@ -576,7 +576,7 @@ export class StreamChartHelper {
         // .attr("d", linkGen(link))
         .attr("fill", "none")
         .attr("class", "actor-" + actor.actorId)
-        .classed("interal-link", true)
+        .classed("internal-link", true)
         .attr("id", constructInternalLinkId(link.sourceNode, link.nextNode))
         .style("stroke-width", internalLinkStrokeWidth)
         .attr("stroke", linkColor);
@@ -614,7 +614,7 @@ export class StreamChartHelper {
    *   baseY?: number
    * }} props
    * @param {Group} props.g The target group contains this group.
-   * @param {Arrary} props.actorDagList A list of dag nodes constructed from actors
+   * @param {Array} props.actorDagList A list of dag nodes constructed from actors
    * { id: actor.actorId, nextNodes: [], actor: actor }
    * @param {number} props.baseX [optional] The x coordination of left-top corner. default: 0.
    * @param {number} props.baseY [optional] The y coordination of left-top corner. default: 0.
