@@ -250,7 +250,7 @@ impl LocalVersion {
         B: AsRef<[u8]>,
     {
         use parking_lot::RwLockReadGuard;
-        let (pinned_version, (shared_buffer_datas, sync_uncommitted_datas)) = {
+        let (pinned_version, (shared_buffer_data, sync_uncommitted_data)) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
             let pinned_version = guard.pinned_version.clone();
@@ -282,9 +282,9 @@ impl LocalVersion {
         };
 
         ReadVersion {
-            shared_buffer_datas,
+            shared_buffer_data,
             pinned_version,
-            sync_uncommitted_datas,
+            sync_uncommitted_data,
         }
     }
 
@@ -353,7 +353,7 @@ impl PinnedVersion {
 
 pub struct ReadVersion {
     /// The shared buffer is sorted by epoch descendingly
-    pub shared_buffer_datas: Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
+    pub shared_buffer_data: Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
     pub pinned_version: Arc<PinnedVersion>,
-    pub sync_uncommitted_datas: Vec<OrderSortedUncommittedData>,
+    pub sync_uncommitted_data: Vec<OrderSortedUncommittedData>,
 }
