@@ -66,7 +66,7 @@ pub struct LateralBindContext {
 pub struct BindContext {
     // Columns of all tables.
     pub columns: Vec<ColumnBinding>,
-    // Mapping column name to indexs in `columns`.
+    // Mapping column name to indices in `columns`.
     pub indices_of: HashMap<String, Vec<usize>>,
     // Mapping table name to [begin, end) of its columns.
     pub range_of: HashMap<String, (usize, usize)>,
