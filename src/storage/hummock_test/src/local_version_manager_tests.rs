@@ -32,6 +32,7 @@ use risingwave_storage::hummock::test_utils::{
 };
 use risingwave_storage::storage_value::StorageValue;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::unbounded_channel;
 
 #[tokio::test]
 async fn test_update_pinned_version() {
@@ -85,6 +86,74 @@ async fn test_update_pinned_version() {
         );
     }
 
+    local_version_manager
+        .write_shared_buffer(
+            epochs[2],
+            StaticCompactionGroupId::StateDefault.into(),
+            batches[2].clone(),
+            true,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let local_version = local_version_manager.get_local_version();
+    assert!(local_version.get_shared_buffer(epochs[2]).is_none(),);
+
+    let build_batch = |pairs, epoch| {
+        SharedBufferBatch::new(
+            LocalVersionManager::build_shared_buffer_item_batches(pairs, epoch),
+            epoch,
+            unbounded_channel().0,
+            StaticCompactionGroupId::StateDefault.into(),
+            0,
+        )
+    };
+
+    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[0], &(..));
+    assert!(read_version.replicated_batches.is_empty());
+    assert_eq!(
+        read_version.shared_buffer_datas,
+        vec![vec![vec![UncommittedData::Batch(build_batch(
+            batches[0].clone(),
+            epochs[0]
+        ))]]]
+    );
+
+    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[1], &(..));
+    assert!(read_version.replicated_batches.is_empty());
+    assert_eq!(
+        read_version.shared_buffer_datas,
+        vec![
+            vec![vec![UncommittedData::Batch(build_batch(
+                batches[1].clone(),
+                epochs[1]
+            ))]],
+            vec![vec![UncommittedData::Batch(build_batch(
+                batches[0].clone(),
+                epochs[0]
+            ))]]
+        ]
+    );
+
+    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
+    assert_eq!(
+        read_version.replicated_batches,
+        vec![vec![build_batch(batches[2].clone(), epochs[2])]]
+    );
+    assert_eq!(
+        read_version.shared_buffer_datas,
+        vec![
+            vec![vec![UncommittedData::Batch(build_batch(
+                batches[1].clone(),
+                epochs[1]
+            ))]],
+            vec![vec![UncommittedData::Batch(build_batch(
+                batches[0].clone(),
+                epochs[0]
+            ))]]
+        ]
+    );
+
     let result = local_version_manager
         .sync_shared_buffer(epochs[0])
         .await
@@ -106,6 +175,11 @@ async fn test_update_pinned_version() {
             &LocalVersionManager::build_shared_buffer_item_batches(batches[1].clone(), epochs[1])
         )
     );
+    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
+    assert_eq!(
+        read_version.replicated_batches,
+        vec![vec![build_batch(batches[2].clone(), epochs[2])]]
+    );
 
     let result = local_version_manager
         .sync_shared_buffer(epochs[1])
@@ -123,6 +197,23 @@ async fn test_update_pinned_version() {
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
+    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
+    assert_eq!(
+        read_version.replicated_batches,
+        vec![vec![build_batch(batches[2].clone(), epochs[2])]]
+    );
+
+    // Update version for epochs[2]
+    let version = HummockVersion {
+        id: initial_version_id + 3,
+        max_committed_epoch: epochs[2],
+        ..Default::default()
+    };
+    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    assert!(local_version.get_shared_buffer(epochs[0]).is_none());
+    assert!(local_version.get_shared_buffer(epochs[1]).is_none());
+    let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[2], &(..));
+    assert!(read_version.replicated_batches.is_empty());
 }
 
 #[tokio::test]
