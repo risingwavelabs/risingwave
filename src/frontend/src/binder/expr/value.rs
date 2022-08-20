@@ -120,7 +120,8 @@ impl Binder {
                 indices.insert(0, obj);
 
                 let expr: ExprImpl =
-                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indices, *return_type).into();
+                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indices, *return_type)
+                        .into();
                 Ok(expr)
             }
             data_type => Err(ErrorCode::BindError(format!(
