@@ -280,6 +280,7 @@ mod test {
     use itertools::Itertools;
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -322,6 +323,10 @@ mod test {
                         fragment_id: id,
                         nodes: Some(StreamNode {
                             node_body: Some(NodeBody::TopN(TopNNode {
+                                table: Some(Table {
+                                    id: 0,
+                                    ..Default::default()
+                                }),
                                 ..Default::default()
                             })),
                             ..Default::default()
