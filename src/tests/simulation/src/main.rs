@@ -154,9 +154,20 @@ async fn main() {
         .unwrap();
 }
 
+async fn kill_node() {
+    let i = rand::thread_rng().gen_range(0..3);
+    let name = format!("compute-{}", i);
+    tracing::info!("kill {name}");
+    madsim::runtime::Handle::current().kill(&name);
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    madsim::runtime::Handle::current().restart(&name);
+}
+
 async fn run_slt_task(glob: &str, host: &str) {
     let mut tester =
-        sqllogictest::Runner::new(Postgres::connect(host.to_string(), "dev".to_string()).await);
+        sqllogictest::Runner::new(Risingwave::connect(host.to_string(), "dev".to_string()).await);
+    tester.on_stmt_complete(kill_node);
+    tester.on_query_complete(kill_node);
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         let file = file.unwrap();
@@ -172,19 +183,19 @@ async fn run_parallel_slt_task(
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
     let i = rand::thread_rng().gen_range(0..hosts.len());
-    let db = Postgres::connect(hosts[i].clone(), "dev".to_string()).await;
+    let db = Risingwave::connect(hosts[i].clone(), "dev".to_string()).await;
     let mut tester = sqllogictest::Runner::new(db);
     tester
-        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, jobs)
+        .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
 }
 
-struct Postgres {
+struct Risingwave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl Postgres {
+impl Risingwave {
     async fn connect(host: String, dbname: String) -> Self {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
@@ -198,18 +209,18 @@ impl Postgres {
         let task = tokio::spawn(async move {
             connection.await.expect("Postgres connection error");
         });
-        Postgres { client, task }
+        Risingwave { client, task }
     }
 }
 
-impl Drop for Postgres {
+impl Drop for Risingwave {
     fn drop(&mut self) {
         self.task.abort();
     }
 }
 
 #[async_trait::async_trait]
-impl sqllogictest::AsyncDB for Postgres {
+impl sqllogictest::AsyncDB for Risingwave {
     type Error = tokio_postgres::error::Error;
 
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
