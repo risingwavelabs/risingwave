@@ -152,7 +152,7 @@ pub fn new_unary_expr(
             DataType::List {
                 datatype: source_elem_type,
             },
-        ) => Box::new(UnaryExpression::<ListArray, ListArray>::new(
+        ) => Box::new(UnaryExpression::<ListArray, ListArray, _>::new(
             child_expr,
             return_type,
             move |input| list_cast(input, &source_elem_type, &target_elem_type),
