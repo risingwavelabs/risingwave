@@ -172,7 +172,7 @@ impl StreamMaterialize {
             name: mv_name,
             columns,
             order_key: order_keys,
-            pk: pk_indices.clone(),
+            stream_key: pk_indices.clone(),
             is_index_on,
             distribution_key: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
@@ -205,7 +205,7 @@ impl fmt::Display for StreamMaterialize {
             .join(", ");
 
         let pk_column_names = table
-            .pk
+            .stream_key
             .iter()
             .map(|&pk| &table.columns[pk].column_desc.name)
             .join(", ");

@@ -246,6 +246,7 @@ impl Default for Epoch {
 pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
+    pub checkpoint: bool,
 }
 
 impl Barrier {
@@ -253,6 +254,7 @@ impl Barrier {
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
             epoch: Epoch::new_test_epoch(epoch),
+            checkpoint: true,
             ..Default::default()
         }
     }
@@ -471,7 +473,10 @@ impl Mutation {
 impl Barrier {
     pub fn to_protobuf(&self) -> ProstBarrier {
         let Barrier {
-            epoch, mutation, ..
+            epoch,
+            mutation,
+            checkpoint,
+            ..
         }: Barrier = self.clone();
         ProstBarrier {
             epoch: Some(ProstEpoch {
@@ -480,6 +485,7 @@ impl Barrier {
             }),
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             span: vec![],
+            checkpoint,
         }
     }
 
@@ -492,6 +498,7 @@ impl Barrier {
             .map(Arc::new);
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
+            checkpoint: prost.checkpoint,
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
         })

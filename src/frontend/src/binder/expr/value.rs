@@ -123,7 +123,11 @@ impl Binder {
                     FunctionCall::new_unchecked(ExprType::ArrayAccess, indexs, *return_type).into();
                 Ok(expr)
             }
-            _ => panic!("Should be a List"),
+            data_type => Err(ErrorCode::BindError(format!(
+                "array index applied to type {}, which is not a composite type",
+                data_type
+            ))
+            .into()),
         }
     }
 
@@ -133,9 +137,8 @@ impl Binder {
             .into_iter()
             .map(|e| self.bind_expr(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type = DataType::Struct {
-            fields: exprs.iter().map(|e| e.return_type()).collect_vec().into(),
-        };
+        let data_type =
+            DataType::new_struct(exprs.iter().map(|e| e.return_type()).collect_vec(), vec![]);
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }
