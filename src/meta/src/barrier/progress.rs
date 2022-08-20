@@ -101,11 +101,11 @@ impl CreateMviewProgressTracker {
         notifiers: impl IntoIterator<Item = Notifier>,
     ) {
         let actors = actors.into_iter().collect_vec();
-        // if actors.is_empty() {
-        //     // The command can be finished immediately.
-        //     notifiers.into_iter().for_each(Notifier::notify_finished);
-        //     return false;
-        // }
+        if actors.is_empty() {
+            // The command can be finished immediately.
+            notifiers.into_iter().for_each(Notifier::notify_finished);
+            return;
+        }
 
         for &actor in &actors {
             self.actor_map.insert(actor, ddl_epoch);

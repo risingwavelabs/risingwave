@@ -680,6 +680,9 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
+            if !matches!(command,Command::Plain(_)){
+                checkpoint_control.inject_checkpoint_in_next_barrier();
+            }
             let checkpoint = checkpoint_control.try_get_checkpoint();
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
@@ -915,6 +918,9 @@ where
                 } else {
                     tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers);
                 };
+                if !notifiers_collect.is_empty(){
+                    checkpoint_control.inject_checkpoint_in_next_barrier();
+                }
 
                 for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
                     if let Some(notifier) = tracker.update(&progress) {
