@@ -37,6 +37,10 @@ impl Notifier {
         }
     }
 
+    pub fn take_collected(&mut self) -> Option<oneshot::Sender<MetaResult<()>>> {
+        self.collected.take()
+    }
+
     /// Notify when we have collected a barrier from all actors.
     pub fn notify_collected(&mut self) {
         if let Some(tx) = self.collected.take() {

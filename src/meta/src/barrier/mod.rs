@@ -31,7 +31,6 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::Barrier;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -190,6 +189,9 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     /// The max barrier nums in flight
     in_flight_barrier_nums: usize,
 
+    /// There will be a checkpoint for every n barriers
+    checkpoint_frequency: usize,
+
     cluster_manager: ClusterManagerRef<S>,
 
     catalog_manager: CatalogManagerRef<S>,
@@ -203,11 +205,11 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 }
 /// Post-processing information for barriers.
-type CheckpointPost<S> = (
-    Arc<CommandContext<S>>,
-    SmallVec<[Notifier; 1]>,
-    Vec<CreateMviewProgress>,
-);
+struct CheckpointPost<S: MetaStore> {
+    command_contexts: Arc<CommandContext<S>>,
+    collect_notifier: Vec<Option<oneshot::Sender<MetaResult<()>>>>,
+    finish_notifiers: Vec<Notifier>,
+}
 
 /// Post-processing information for barriers and previously uncommitted ssts
 struct UncommittedMessages<S: MetaStore> {
@@ -253,13 +255,19 @@ struct CheckpointControl<S: MetaStore> {
 
     /// Messages that needs to be completed or processed with checkpoints
     uncommitted_messages: UncommittedMessages<S>,
+
+    /// We will inject a barrier(checkpoint=true) after `num_distance_checkpoint`
+    /// barrier(checkpoint = false)
+    num_distance_checkpoint: usize,
+
+    checkpoint_frequency: usize,
 }
 
 impl<S> CheckpointControl<S>
 where
     S: MetaStore,
 {
-    fn new(metrics: Arc<MetaMetrics>) -> Self {
+    fn new(metrics: Arc<MetaMetrics>, checkpoint_frequency: usize) -> Self {
         Self {
             command_ctx_queue: Default::default(),
             creating_tables: Default::default(),
@@ -268,7 +276,23 @@ where
             removing_actors: Default::default(),
             metrics,
             uncommitted_messages: Default::default(),
+            num_distance_checkpoint: checkpoint_frequency,
+            checkpoint_frequency,
         }
+    }
+
+    fn try_get_checkpoint(&mut self) -> bool {
+        if self.num_distance_checkpoint == 0 {
+            self.num_distance_checkpoint = self.checkpoint_frequency;
+            true
+        } else {
+            self.num_distance_checkpoint -= 1;
+            false
+        }
+    }
+
+    fn inject_checkpoint_in_next_barrier(&mut self) {
+        self.num_distance_checkpoint = 0;
     }
 
     fn add_uncommitted_messages(
@@ -292,7 +316,7 @@ where
             .push_front(checkpoint_post);
     }
 
-    fn get_uncommitted_states(&mut self) -> UncommittedMessages<S> {
+    fn get_uncommitted_messages(&mut self) -> UncommittedMessages<S> {
         take(&mut self.uncommitted_messages)
     }
 
@@ -522,11 +546,13 @@ where
         let enable_recovery = env.opts.enable_recovery;
         let interval = env.opts.checkpoint_interval;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
+        let checkpoint_frequency = env.opts.checkpoint_frequency;
         tracing::info!(
-            "Starting barrier manager with: interval={:?}, enable_recovery={} , in_flight_barrier_nums={}",
+            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}, checkpoint_frequency={}",
             interval,
             enable_recovery,
             in_flight_barrier_nums,
+            checkpoint_frequency,
         );
 
         Self {
@@ -540,6 +566,7 @@ where
             metrics,
             env,
             in_flight_barrier_nums,
+            checkpoint_frequency,
         }
     }
 
@@ -593,7 +620,8 @@ where
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
+        let mut checkpoint_control =
+            CheckpointControl::new(self.metrics.clone(), self.checkpoint_frequency);
         loop {
             tokio::select! {
                 biased;
@@ -652,7 +680,7 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
-
+            let checkpoint = checkpoint_control.try_get_checkpoint();
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_client_pool_ref(),
@@ -660,6 +688,7 @@ where
                 prev_epoch,
                 new_epoch,
                 command,
+                checkpoint,
             ));
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
@@ -717,7 +746,7 @@ where
                     mutation,
                     // TODO(chi): add distributed tracing
                     span: vec![],
-                    checkpoint: true,
+                    checkpoint: command_context.checkpoint,
                 };
                 async move {
                     let client = self.env.stream_client_pool().get(node).await?;
@@ -872,42 +901,68 @@ where
                 // the L0 layer files are generated.
                 // See https://github.com/singularity-data/risingwave/issues/1251
 
-                let notifiers = take(&mut node.notifiers);
+                let mut notifiers = take(&mut node.notifiers);
                 let command_ctx = node.command_ctx.clone();
-                let create_mv_progress = resps
-                    .iter()
-                    .flat_map(|r| r.create_mview_progress.clone())
+                let notifiers_collect = notifiers
+                    .iter_mut()
+                    .map(|notifier| notifier.take_collected())
                     .collect_vec();
-                checkpoint_control
-                    .add_uncommitted_messages(resps, (command_ctx, notifiers, create_mv_progress));
 
+                let actors_to_finish = command_ctx.actors_to_track();
+                let mut finish_notifier = vec![];
+                if actors_to_finish.is_empty() {
+                    finish_notifier.push(notifiers.into_iter().collect_vec());
+                } else {
+                    tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers);
+                };
+
+                for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
+                    if let Some(notifier) = tracker.update(&progress) {
+                        checkpoint_control.inject_checkpoint_in_next_barrier();
+                        finish_notifier.push(notifier);
+                    }
+                }
+                let finish_notifier = finish_notifier.into_iter().flatten().collect_vec();
+
+                checkpoint_control.add_uncommitted_messages(
+                    resps,
+                    CheckpointPost {
+                        command_contexts: command_ctx,
+                        collect_notifier: notifiers_collect,
+                        finish_notifiers: finish_notifier,
+                    },
+                );
                 // If no checkpoint, we can't notify collection completion
                 if *checkpoint {
-                    let mut uncommitted_states = checkpoint_control.get_uncommitted_states();
+                    let mut uncommitted_messages = checkpoint_control.get_uncommitted_messages();
                     if prev_epoch != INVALID_EPOCH {
                         self.hummock_manager
                             .commit_epoch(
                                 prev_epoch,
-                                uncommitted_states.uncommitted_ssts,
-                                uncommitted_states.uncommitted_work_ids,
+                                uncommitted_messages.uncommitted_ssts,
+                                uncommitted_messages.uncommitted_work_ids,
                             )
                             .await?;
                     }
-                    while let Some((command_ctx, mut notifiers, create_mv_progress)) =
-                        uncommitted_states.uncommitted_checkpoint_post.pop_back()
+                    while let Some(CheckpointPost {
+                        command_contexts,
+                        collect_notifier,
+                        finish_notifiers,
+                    }) = uncommitted_messages.uncommitted_checkpoint_post.pop_back()
                     {
-                        checkpoint_control.remove_changes(command_ctx.command.changes());
-                        command_ctx.post_collect().await?;
+                        checkpoint_control.remove_changes(command_contexts.command.changes());
+                        command_contexts.post_collect().await?;
 
                         // Notify about collected first.
-                        notifiers.iter_mut().for_each(Notifier::notify_collected);
-
+                        collect_notifier.into_iter().for_each(|send| {
+                            if let Some(tx) = send {
+                                tx.send(Ok(())).ok();
+                            }
+                        });
                         // Then try to finish the barrier for Create MVs.
-                        let actors_to_finish = command_ctx.actors_to_track();
-                        tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers);
-                        for progress in create_mv_progress {
-                            tracker.update(&progress);
-                        }
+                        finish_notifiers
+                            .into_iter()
+                            .for_each(Notifier::notify_finished);
                     }
                 }
                 node.timer.take().unwrap().observe_duration();

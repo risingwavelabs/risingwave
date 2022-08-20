@@ -205,37 +205,52 @@ impl LocalStreamManager {
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> CollectResult {
-        let (rx, timer) = {
+    pub async fn collect_barrier(&self, epoch: u64) -> (CollectResult, bool) {
+        let complete_receiver = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
             barrier_manager.remove_collect_rx(epoch)
         };
         // Wait for all actors finishing this barrier.
-        let result = rx.expect("no rx for local mode").await.unwrap();
-        timer.expect("no timer for test").observe_duration();
-        result
+        let result = complete_receiver
+            .complete_receiver
+            .expect("no rx for local mode")
+            .await
+            .unwrap();
+        complete_receiver
+            .barrier_inflight_timer
+            .expect("no timer for test")
+            .observe_duration();
+        (result, complete_receiver.checkpoint)
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> (Vec<LocalSstableInfo>, bool) {
-        let timer = self
-            .core
-            .lock()
-            .streaming_metrics
-            .barrier_sync_latency
-            .start_timer();
-        let (local_sst_info, sync_succeed) = dispatch_state_store!(self.state_store(), store, {
-            match store.sync(epoch).await {
-                Ok(sync_result) => (sync_result.uncommitted_ssts, sync_result.sync_succeed),
-                // TODO: Handle sync failure by propagating it back to global barrier manager
-                Err(e) => panic!(
-                    "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                    epoch, e
-                ),
-            }
-        });
-        timer.observe_duration();
-        (local_sst_info, sync_succeed)
+    pub async fn sync_epoch(&self, epoch: u64, checkpoint: bool) -> (Vec<LocalSstableInfo>, bool) {
+        if checkpoint {
+            let timer = self
+                .core
+                .lock()
+                .streaming_metrics
+                .barrier_sync_latency
+                .start_timer();
+            let (local_sst_info, sync_succeed) = dispatch_state_store!(
+                self.state_store(),
+                store,
+                {
+                    match store.sync(epoch).await {
+                    Ok(sync_result) => (sync_result.uncommitted_ssts, sync_result.sync_succeed),
+                    // TODO: Handle sync failure by propagating it back to global barrier manager
+                    Err(e) => panic!(
+                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
+                        epoch, e
+                    ),
+                }
+                }
+            );
+            timer.observe_duration();
+            (local_sst_info, sync_succeed)
+        } else {
+            (vec![], false)
+        }
     }
 
     pub async fn clear_storage_buffer(&self) {

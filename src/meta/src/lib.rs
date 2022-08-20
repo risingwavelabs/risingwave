@@ -181,6 +181,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
+        let checkpoint_frequency = compute_config.streaming.checkpoint_frequency as usize;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -200,6 +201,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 checkpoint_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,
+                checkpoint_frequency,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
                 sst_retention_time_sec: opts.sst_retention_time_sec,
                 compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,

@@ -62,7 +62,7 @@ where
 
     async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
         self.resolve_actor_info(
-            &mut CheckpointControl::new(self.metrics.clone()),
+            &mut CheckpointControl::new(self.metrics.clone(), self.checkpoint_frequency),
             &Command::checkpoint(),
         )
         .await
@@ -122,6 +122,7 @@ where
                 prev_epoch,
                 new_epoch,
                 Command::checkpoint(),
+                true,
             ));
 
             let command_ctx_clone = command_ctx.clone();

@@ -164,6 +164,8 @@ pub struct CommandContext<S: MetaStore> {
     pub curr_epoch: Epoch,
 
     pub command: Command,
+
+    pub checkpoint: bool,
 }
 
 impl<S: MetaStore> CommandContext<S> {
@@ -174,6 +176,7 @@ impl<S: MetaStore> CommandContext<S> {
         prev_epoch: Epoch,
         curr_epoch: Epoch,
         command: Command,
+        checkpoint: bool,
     ) -> Self {
         Self {
             fragment_manager,
@@ -182,6 +185,7 @@ impl<S: MetaStore> CommandContext<S> {
             prev_epoch,
             curr_epoch,
             command,
+            checkpoint,
         }
     }
 }

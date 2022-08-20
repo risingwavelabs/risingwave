@@ -71,6 +71,8 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     pub in_flight_barrier_nums: usize,
 
+    pub checkpoint_frequency: usize,
+
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
     /// Threshold used by worker node to filter out new SSTs when scanning object store.
@@ -88,6 +90,7 @@ impl Default for MetaOpts {
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            checkpoint_frequency: 20,
             vacuum_interval_sec: 30,
             sst_retention_time_sec: 3600 * 24 * 7,
             compactor_selection_retry_interval_sec: 5,
@@ -105,6 +108,7 @@ impl MetaOpts {
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            checkpoint_frequency: 20,
             ..Default::default()
         }
     }

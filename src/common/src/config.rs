@@ -97,6 +97,9 @@ pub struct StreamingConfig {
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
+    #[serde(default = "default::checkpoint_frequency")]
+    pub checkpoint_frequency: usize,
+
     #[serde(default = "default::worker_node_parallelism")]
     pub worker_node_parallelism: usize,
 }
@@ -312,6 +315,10 @@ mod default {
 
     pub fn in_flight_barrier_nums() -> usize {
         40
+    }
+
+    pub fn checkpoint_frequency() -> usize {
+        20
     }
 
     pub fn share_buffer_upload_concurrency() -> usize {
