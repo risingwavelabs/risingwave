@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -84,6 +85,12 @@ async fn test_update_pinned_version() {
         );
     }
 
+    let result = local_version_manager
+        .sync_shared_buffer(epochs[0])
+        .await
+        .unwrap();
+    assert!(result.sync_succeed);
+
     // Update version for epochs[0]
     let version = HummockVersion {
         id: initial_version_id + 1,
@@ -99,6 +106,12 @@ async fn test_update_pinned_version() {
             &LocalVersionManager::build_shared_buffer_item_batches(batches[1].clone(), epochs[1])
         )
     );
+
+    let result = local_version_manager
+        .sync_shared_buffer(epochs[1])
+        .await
+        .unwrap();
+    assert!(result.sync_succeed);
 
     // Update version for epochs[1]
     let version = HummockVersion {
@@ -169,9 +182,12 @@ async fn test_update_uncommitted_ssts() {
         let payload = {
             let mut local_version_guard = local_version_manager.local_version().write();
             let (payload, task_size) = local_version_guard
-                .get_mut_shared_buffer(epochs[0])
+                .drain_shared_buffer(epochs[0]..=epochs[0])
+                .collect_vec()
+                .pop()
                 .unwrap()
-                .take_uncommitted_data()
+                .1
+                .into_uncommitted_data()
                 .unwrap();
 
             local_version_guard.add_sync_state(
@@ -201,10 +217,7 @@ async fn test_update_uncommitted_ssts() {
 
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
-    assert_eq!(
-        local_version.get_shared_buffer(epochs[0]).unwrap().size(),
-        0
-    );
+    assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert_eq!(
         local_version.get_shared_buffer(epochs[1]).unwrap().size(),
         batches[1].size(),
@@ -212,7 +225,7 @@ async fn test_update_uncommitted_ssts() {
 
     // Check pinned version
     assert_eq!(local_version.pinned_version().version(), version);
-    assert_eq!(local_version.iter_shared_buffer().count(), 2);
+    assert_eq!(local_version.iter_shared_buffer().count(), 1);
 
     // Update uncommitted sst for epochs[1]
     let sst2 = gen_dummy_sst_info(2, vec![batches[1].clone()]);
@@ -220,9 +233,12 @@ async fn test_update_uncommitted_ssts() {
         let payload = {
             let mut local_version_guard = local_version_manager.local_version().write();
             let (payload, task_size) = local_version_guard
-                .get_mut_shared_buffer(epochs[1])
+                .drain_shared_buffer(epochs[1]..=epochs[1])
+                .collect_vec()
+                .pop()
                 .unwrap()
-                .take_uncommitted_data()
+                .1
+                .into_uncommitted_data()
                 .unwrap();
             local_version_guard.add_sync_state(
                 vec![epochs[1]],
@@ -251,7 +267,7 @@ async fn test_update_uncommitted_ssts() {
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     for epoch in &epochs {
-        assert_eq!(local_version.get_shared_buffer(*epoch).unwrap().size(), 0);
+        assert!(local_version.get_shared_buffer(*epoch).is_none());
     }
     // Check pinned version
     assert_eq!(local_version.pinned_version().version(), version);
@@ -267,10 +283,7 @@ async fn test_update_uncommitted_ssts() {
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
-    assert_eq!(
-        local_version.get_shared_buffer(epochs[1]).unwrap().size(),
-        0
-    );
+    assert!(local_version.get_shared_buffer(epochs[1]).is_none());
     // Check pinned version
     assert_eq!(local_version.pinned_version().version(), version);
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());

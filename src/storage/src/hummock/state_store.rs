@@ -98,6 +98,7 @@ impl HummockStorage {
         let mut overlapped_iters = vec![];
 
         let ReadVersion {
+            replicated_batches,
             shared_buffer_datas,
             pinned_version,
             sync_uncommitted_datas,
@@ -105,10 +106,12 @@ impl HummockStorage {
 
         let mut local_stats = StoreLocalStatistic::default();
 
-        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
-            for batch in replicated_batches {
+        for epoch_replicated_batches in replicated_batches {
+            for batch in epoch_replicated_batches {
                 overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
             }
+        }
+        for uncommitted_data in shared_buffer_datas {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
@@ -276,6 +279,7 @@ impl HummockStorage {
         };
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
+            replicated_batches,
             shared_buffer_datas,
             pinned_version,
             sync_uncommitted_datas,
@@ -284,13 +288,17 @@ impl HummockStorage {
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
 
-        // Query shared buffer. Return the value without iterating SSTs if found
-        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
-            for batch in replicated_batches {
+        // Query replicated batches. Return the value without iterating SSTs if found
+        for epoch_replicated_batches in replicated_batches {
+            for batch in epoch_replicated_batches {
                 if let Some(v) = self.get_from_batch(&batch, key) {
                     return Ok(v);
                 }
             }
+        }
+
+        // Query shared buffer. Return the value without iterating SSTs if found
+        for uncommitted_data in shared_buffer_datas {
             // iterate over uncommitted data in order index in descending order
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
