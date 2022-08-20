@@ -85,7 +85,7 @@ async fn create_tables(
     opt: &TestOptions,
     client: &tokio_postgres::Client,
 ) -> (Vec<Table>, Vec<Table>, String) {
-    log::info!("Preparing tables...");
+    tracing::info!("Preparing tables...");
 
     let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(opt);
@@ -121,7 +121,7 @@ async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
 }
 
 async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgres::Client) {
-    log::info!("Cleaning tables...");
+    tracing::info!("Cleaning tables...");
 
     for mview in mviews.iter().rev() {
         drop_mview_table(mview, client).await;
@@ -193,7 +193,7 @@ Reason:
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt::init();
 
     let opt = Opt::parse();
     let opt = match opt.command {
@@ -215,7 +215,7 @@ async fn main() {
         .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e));
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            log::error!("Postgres connection error: {:?}", e);
+            tracing::error!("Postgres connection error: {:?}", e);
         }
     });
 
@@ -226,7 +226,7 @@ async fn main() {
     // Test batch
     for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
-        log::info!("Executing: {}", sql);
+        tracing::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
         validate_response(&setup_sql, &format!("{};", sql), response);
     }
@@ -234,7 +234,7 @@ async fn main() {
     // Test stream
     for _ in 0..opt.count {
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
-        log::info!("Executing: {}", sql);
+        tracing::info!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;
         validate_response(&setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, &client).await;

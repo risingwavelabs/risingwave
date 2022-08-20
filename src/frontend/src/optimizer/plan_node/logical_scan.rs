@@ -82,7 +82,7 @@ impl LogicalScan {
             .collect();
 
         let pk_indices = table_desc
-            .pk
+            .stream_key
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>();
