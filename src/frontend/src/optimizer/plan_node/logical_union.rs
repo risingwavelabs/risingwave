@@ -22,9 +22,8 @@ use crate::optimizer::plan_node::{BatchHashAgg, BatchUnion, LogicalAgg, PlanTree
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalUnion`
-///  returns the union of the rows of its inputs
-///  if all is false means it need to eliminate duplicates.
+/// `LogicalUnion` returns the union of the rows of its inputs.
+/// If `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone)]
 pub struct LogicalUnion {
     pub base: PlanBase,
