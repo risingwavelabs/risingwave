@@ -94,6 +94,7 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
             bytes.fetch_add(new_size, Ordering::Relaxed);
             bytes.fetch_sub(layout.size(), Ordering::Relaxed);
         }
+        let new_size = new_size + 8;
         GLOBAL_ALLOC.realloc(ptr, layout, new_size)
     }
 }
