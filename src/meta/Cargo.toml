@@ -16,7 +16,7 @@ clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 derivative = "2"
 either = "1"
-etcd-client = "0.9"
+etcd-client = "0.10"
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -24,7 +24,6 @@ hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"

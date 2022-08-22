@@ -36,6 +36,7 @@ pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
+use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
@@ -159,48 +160,51 @@ impl Compactor {
 
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
-        let compaction_read_bytes = compact_task
+        let select_table_infos = compact_task
             .input_ssts
             .iter()
             .filter(|level| level.level_idx != compact_task.target_level)
             .flat_map(|level| level.table_infos.iter())
-            .map(|t| t.file_size)
-            .sum::<u64>();
+            .collect_vec();
+        let target_table_infos = compact_task
+            .input_ssts
+            .iter()
+            .filter(|level| level.level_idx == compact_task.target_level)
+            .flat_map(|level| level.table_infos.iter())
+            .collect_vec();
         context
             .stats
             .compact_read_current_level
             .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
-            .inc_by(compaction_read_bytes);
+            .inc_by(
+                select_table_infos
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum::<u64>(),
+            );
         context
             .stats
             .compact_read_sstn_current_level
             .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
-            .inc_by(compact_task.input_ssts[0].table_infos.len() as u64);
+            .inc_by(select_table_infos.len() as u64);
         context
             .stats
             .compact_frequency
             .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
             .inc();
 
-        if compact_task.input_ssts.len() > 1 {
-            let target_input_level = compact_task.input_ssts.last().unwrap();
-            let sec_level_read_bytes: u64 = target_input_level
-                .table_infos
-                .iter()
-                .map(|t| t.file_size)
-                .sum();
-            let next_level_label = target_input_level.level_idx.to_string();
-            context
-                .stats
-                .compact_read_next_level
-                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
-                .inc_by(sec_level_read_bytes);
-            context
-                .stats
-                .compact_read_sstn_next_level
-                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
-                .inc_by(compact_task.input_ssts[1].table_infos.len() as u64);
-        }
+        let sec_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
+        let next_level_label = compact_task.target_level.to_string();
+        context
+            .stats
+            .compact_read_next_level
+            .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+            .inc_by(sec_level_read_bytes);
+        context
+            .stats
+            .compact_read_sstn_next_level
+            .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+            .inc_by(target_table_infos.len() as u64);
 
         let timer = context
             .stats

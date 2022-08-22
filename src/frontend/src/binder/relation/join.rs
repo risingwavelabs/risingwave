@@ -117,10 +117,10 @@ impl Binder {
                     JoinConstraint::Using(cols) => {
                         // sanity check
                         for col in &cols {
-                            if old_context.indexs_of.get(&col.value).is_none() {
+                            if old_context.indices_of.get(&col.value).is_none() {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.value)).into());
                             }
-                            if self.context.indexs_of.get(&col.value).is_none() {
+                            if self.context.indices_of.get(&col.value).is_none() {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.value)).into());
                             }
                         }
@@ -131,7 +131,7 @@ impl Binder {
 
                 let mut columns = self
                     .context
-                    .indexs_of
+                    .indices_of
                     .iter()
                     .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
                     .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))

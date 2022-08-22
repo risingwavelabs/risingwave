@@ -160,7 +160,7 @@ impl StreamService for StreamServiceImpl {
             .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let synced_sstables = self
+        let (synced_sstables, sync_succeed) = self
             .mgr
             .sync_epoch(req.prev_epoch)
             .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
@@ -177,6 +177,7 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
+            checkpoint: sync_succeed,
             worker_id: self.env.worker_id(),
         }))
     }

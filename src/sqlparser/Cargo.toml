@@ -19,12 +19,12 @@ json_example = ["serde_json", "serde"]
 
 [dependencies]
 itertools = "0.10"
-log = "0.4"
 serde = { version = "1.0", features = ["derive"], optional = true }
 # serde_json is only used in examples/cli, but we have to put it outside
 # of dev-dependencies because of
 # https://github.com/rust-lang/cargo/issues/1596
 serde_json = { version = "1.0", optional = true }
+tracing = "0.1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

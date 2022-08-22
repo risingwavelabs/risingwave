@@ -54,7 +54,7 @@ pub mod vacuum;
 pub mod value;
 
 pub use error::*;
-pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
+pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;

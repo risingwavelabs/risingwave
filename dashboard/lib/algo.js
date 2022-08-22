@@ -19,7 +19,7 @@ import { newMatrix } from "./util";
 /**
  * Traverse a tree from its root node, and do operation
  * by calling the step function.
- * Every node will be visted only once.
+ * Every node will be visited only once.
  * @param {{nextNodes: []}} root The root node of the tree
  * @param {(node: any) => boolean} step callback when a node is visited.
  * return true if you want to stop to traverse its next nodes.
@@ -41,7 +41,7 @@ export function treeBfs(root, step) {
 /**
  * Traverse a graph from a random node, and do
  * operation by calling the step function.
- * Every node will be visted only once.
+ * Every node will be visited only once.
  * @param {{nextNodes: []}} root A random node in the graph
  * @param {(node: any) => boolean} step callback when a node is visited.
  * @param {string} [neighborListKey="nextNodes"] 

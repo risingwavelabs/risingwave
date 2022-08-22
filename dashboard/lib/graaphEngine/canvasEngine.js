@@ -430,7 +430,7 @@ export class CanvasEngine {
   }
 
   /**
-   * Invoke the click hander of an object.
+   * Invoke the click handler of an object.
    * @param {fabric.Object} target 
    */
   async _handleClickEvent(target) {
@@ -562,7 +562,7 @@ export class CanvasEngine {
    * is changed, such that the canvas can fix the current 
    * size of the browser. 
    * 
-   * Note that the outter div box of the canvas will be set
+   * Note that the outer div box of the canvas will be set
    * according to the parameters. However, the width and 
    * height of the canvas is double times of the parameters.
    * This is the feature of fabric.js to keep the canvas

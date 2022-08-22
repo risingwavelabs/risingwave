@@ -216,7 +216,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// to a particular shuffling strategy. For example, in hash shuffling, the result will be
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
-    /// such, parallel consumers are able to consume the result idependently.
+    /// such, parallel consumers are able to consume the result independently.
     pub async fn async_execute(self: Arc<Self>) -> Result<()> {
         trace!(
             "Prepare executing plan [{:?}]: {}",
