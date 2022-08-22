@@ -261,8 +261,7 @@ impl HummockSnapshotManagerCore {
         };
         for (id, cb) in batches.drain(..) {
             queries.insert(id);
-            let _ = cb.send(Ok(all_epoch.clone()
-            ));
+            let _ = cb.send(Ok(all_epoch.clone()));
         }
     }
 
