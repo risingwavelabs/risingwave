@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use minitrace::future::FutureExt;
+use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
 use risingwave_pb::hummock::LevelType;
 
@@ -91,7 +93,11 @@ impl HummockStorage {
         let epoch = read_options.epoch;
         let compaction_group_id = match read_options.table_id.as_ref() {
             None => None,
-            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+            Some(table_id) => Some(
+                self.get_compaction_group_id(*table_id)
+                    .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
+                    .await?,
+            ),
         };
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
@@ -120,6 +126,9 @@ impl HummockStorage {
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
+                .in_span(Span::enter_with_local_parent(
+                    "build_ordered_merge_iter_shared_buffer",
+                ))
                 .await?,
             ));
         }
@@ -132,6 +141,9 @@ impl HummockStorage {
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
+                .in_span(Span::enter_with_local_parent(
+                    "build_ordered_merge_iter_uncommitted",
+                ))
                 .await?,
             ))
         }
@@ -182,6 +194,7 @@ impl HummockStorage {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info.id, &mut local_stats)
+                            .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
                         if Self::hit_sstable_bloom_filter(
@@ -208,6 +221,7 @@ impl HummockStorage {
                     let sstable = self
                         .sstable_store
                         .sstable(table_info.id, &mut local_stats)
+                        .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
                         if !Self::hit_sstable_bloom_filter(
@@ -251,7 +265,10 @@ impl HummockStorage {
             Some(pinned_version),
         );
 
-        user_iterator.rewind().await?;
+        user_iterator
+            .rewind()
+            .in_span(Span::enter_with_local_parent("rewind"))
+            .await?;
         local_stats.report(self.stats.as_ref());
         Ok(HummockStateStoreIter::new(
             user_iterator,
@@ -644,7 +661,10 @@ impl StateStore for HummockStorage {
             // not check
         }
 
+        let span = self.tracing.new_tracer("hummock_iter");
+
         self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options)
+            .in_span(span)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key

@@ -4326,6 +4326,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4818,6 +4819,7 @@ dependencies = [
  "risingwave_meta",
  "sqllogictest",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4955,6 +4957,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "minitrace",
  "minstant",
  "moka",
  "nix",
@@ -4972,6 +4975,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
+ "risingwave_tracing",
  "scopeguard",
  "serde",
  "smallvec",
@@ -5056,6 +5060,18 @@ name = "risingwave_test_runner"
 version = "0.1.11"
 dependencies = [
  "fail",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_tracing"
+version = "0.1.11"
+dependencies = [
+ "anyhow",
+ "futures",
+ "madsim-tokio",
+ "minitrace",
+ "tracing",
  "workspace-hack",
 ]
 
@@ -6533,8 +6549,10 @@ dependencies = [
  "chrono",
  "clap 3.2.17",
  "criterion",
+ "crossbeam-channel",
  "crossbeam-deque",
  "crossbeam-epoch",
+ "crossbeam-utils",
  "either",
  "fail",
  "fixedbitset",
