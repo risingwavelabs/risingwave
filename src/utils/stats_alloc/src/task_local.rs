@@ -58,7 +58,8 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
         let layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
-        let bytes = ptr.sub(usize::BITS as usize) as *const AtomicUsize;
+        let ptr = ptr.sub(usize::BITS as usize);
+        let bytes = ptr as *const AtomicUsize;
         if let Some(bytes) = bytes.as_ref() {
             bytes.fetch_sub(layout.size(), Ordering::Relaxed);
         }
@@ -87,7 +88,8 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
     unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
         let layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
-        let bytes = ptr.sub(usize::BITS as usize) as *const AtomicUsize;
+        let ptr = ptr.sub(usize::BITS as usize);
+        let bytes = ptr as *const AtomicUsize;
         if let Some(bytes) = bytes.as_ref() {
             bytes.fetch_add(new_size, Ordering::Relaxed);
             bytes.fetch_sub(layout.size(), Ordering::Relaxed);
