@@ -4557,6 +4557,7 @@ dependencies = [
  "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
+ "serde",
  "serde_json",
  "sha2",
  "smallvec",
