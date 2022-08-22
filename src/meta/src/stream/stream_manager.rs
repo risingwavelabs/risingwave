@@ -68,7 +68,7 @@ pub struct CreateMaterializedViewContext {
     /// These fragments need to be colocated with their upstream tables.
     ///
     /// They are scheduled in `resolve_chain_node`.
-    pub fragment_upstream_table_map: HashMap<FragmentId, TableId>,
+    pub chain_fragment_upstream_table_map: HashMap<FragmentId, TableId>,
     /// SchemaId of mview
     pub schema_id: SchemaId,
     /// DatabaseId of mview
@@ -151,7 +151,7 @@ where
         dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
         upstream_worker_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &mut ScheduledLocations,
-        fragment_upstream_table_map: &HashMap<FragmentId, TableId>,
+        chain_fragment_upstream_table_map: &HashMap<FragmentId, TableId>,
     ) -> MetaResult<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
@@ -301,7 +301,7 @@ where
         };
 
         for fragment in table_fragments.fragments.values_mut() {
-            if !fragment_upstream_table_map.contains_key(&fragment.fragment_id) {
+            if !chain_fragment_upstream_table_map.contains_key(&fragment.fragment_id) {
                 continue;
             }
 
@@ -321,7 +321,7 @@ where
                 actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
             }
             // setup fragment vnode mapping.
-            let upstream_table_id = fragment_upstream_table_map
+            let upstream_table_id = chain_fragment_upstream_table_map
                 .get(&fragment.fragment_id)
                 .unwrap();
             fragment.vnode_mapping = env
@@ -355,7 +355,7 @@ where
             dependent_table_ids,
             table_properties,
             internal_table_id_map,
-            fragment_upstream_table_map,
+            chain_fragment_upstream_table_map,
             affiliated_source,
             ..
         }: &mut CreateMaterializedViewContext,
@@ -396,7 +396,7 @@ where
             let topological_order = table_fragments.generate_topological_order();
             for fragment_id in topological_order {
                 let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
-                if !fragment_upstream_table_map.contains_key(&fragment_id) {
+                if !chain_fragment_upstream_table_map.contains_key(&fragment_id) {
                     self.scheduler.schedule(fragment, &mut locations).await?;
                 }
             }
@@ -413,7 +413,7 @@ where
             dispatchers,
             upstream_worker_actors,
             &mut locations,
-            fragment_upstream_table_map,
+            chain_fragment_upstream_table_map,
         )
         .await?;
 

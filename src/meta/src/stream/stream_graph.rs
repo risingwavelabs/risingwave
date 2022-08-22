@@ -940,7 +940,7 @@ impl ActorGraphBuilder {
             .unwrap()
             .map(TableId::from);
         if let Some(upstream_table_id) = upstream_table_id {
-            ctx.fragment_upstream_table_map
+            ctx.chain_fragment_upstream_table_map
                 .insert(fragment_id.as_global_id(), upstream_table_id);
         }
 
