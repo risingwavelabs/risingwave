@@ -96,7 +96,7 @@ impl StateStoreImpl {
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-        tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
+        #[allow(unused)] tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
     ) -> StorageResult<Self> {
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
