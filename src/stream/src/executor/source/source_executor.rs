@@ -156,6 +156,8 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
         let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+        let pk_column_ids = &self.source_desc.pk_column_ids;
+        let specified_pk = !(pk_column_ids == &vec![0]);
 
         if let Some(idx) = self
             .column_ids
@@ -164,7 +166,11 @@ impl<S: StateStore> SourceExecutor<S> {
         {
             let (ops, mut columns, bitmap) = chunk.into_inner();
             if append_only {
-                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
+                if specified_pk {
+                    // if pk is set by user, we should prune #0 column
+                    // columns.remove(0);
+                } else {
+                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;}
             } else {
                 columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
             }
@@ -236,6 +242,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
+        tracing::info!("source schema: {:?}", self.schema);
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver
             .recv()
