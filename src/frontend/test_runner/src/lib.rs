@@ -539,12 +539,17 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
 
     for (i, c) in cases.into_iter().enumerate() {
         println!(
-            "Running test#{i}:{}, SQL:\n{}",
+            "Running test #{i} (id: {}), SQL:\n{}",
             c.id.clone().unwrap_or_else(|| "<none>".to_string()),
             c.sql
         );
         if let Err(e) = c.run(true).await {
-            println!("\nTest case failed, the input SQL:\n{}\n{}", c.sql, e);
+            eprintln!(
+                "Test #{i} (id: {}) failed, SQL:\n{}Error: {}",
+                c.id.clone().unwrap_or_else(|| "<none>".to_string()),
+                c.sql,
+                e
+            );
             failed_num += 1;
         }
     }
