@@ -38,7 +38,6 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
-use crate::stream::record_internal_state_tables;
 use crate::MetaResult;
 
 /// Id of an Actor, maybe local or global
@@ -800,7 +799,7 @@ impl ActorGraphBuilder {
             // identical state table id.
             let actor = fragment.actors.first().unwrap();
             let stream_node = actor.get_nodes()?.clone();
-            record_internal_state_tables(&stream_node, fragment)?;
+            Self::record_internal_state_tables(&stream_node, fragment)?;
         }
         Ok(graph)
     }
@@ -934,33 +933,24 @@ impl ActorGraphBuilder {
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
-        if !current_fragment.upstream_table_ids.is_empty() {
-            assert_eq!(current_fragment.upstream_table_ids.len(), 1);
-            ctx.fragment_upstream_table_map.insert(
-                fragment_id.as_global_id(),
-                TableId::new(
-                    *current_fragment
-                        .upstream_table_ids
-                        .iter()
-                        .exactly_one()
-                        .unwrap(),
-                ),
-            );
+        let upstream_table_id = current_fragment
+            .upstream_table_ids
+            .iter()
+            .at_most_one()
+            .unwrap()
+            .map(TableId::from);
+        if let Some(upstream_table_id) = upstream_table_id {
+            ctx.fragment_upstream_table_map
+                .insert(fragment_id.as_global_id(), upstream_table_id);
         }
 
         let parallel_degree = if current_fragment.is_singleton {
             1
-        } else if !current_fragment.upstream_table_ids.is_empty() {
+        } else if let Some(upstream_table_id) = upstream_table_id {
             // set fragment parallelism to the parallelism of its dependent table.
             let upstream_actors = ctx
                 .table_sink_map
-                .get(&TableId::from(
-                    *current_fragment
-                        .upstream_table_ids
-                        .iter()
-                        .exactly_one()
-                        .unwrap(),
-                ))
+                .get(&upstream_table_id)
                 .expect("upstream actor should exist");
             upstream_actors.len() as u32
         } else {
@@ -1014,6 +1004,69 @@ impl ActorGraphBuilder {
             fragment_id
         );
 
+        Ok(())
+    }
+
+    /// Record internal table ids for stateful operators in meta.
+    fn record_internal_state_tables(
+        stream_node: &StreamNode,
+        fragment: &mut Fragment,
+    ) -> MetaResult<()> {
+        match stream_node.get_node_body()? {
+            NodeBody::Materialize(node) => {
+                let table_id = node.get_table_id();
+                fragment.state_table_ids.push(table_id);
+            }
+            NodeBody::Arrange(node) => {
+                let table_id = node.table.as_ref().unwrap().id;
+                fragment.state_table_ids.push(table_id);
+            }
+            NodeBody::HashAgg(node) => {
+                for table in &node.internal_tables {
+                    fragment.state_table_ids.push(table.id);
+                }
+            }
+            NodeBody::GlobalSimpleAgg(node) => {
+                for table in &node.internal_tables {
+                    fragment.state_table_ids.push(table.id);
+                }
+            }
+            NodeBody::HashJoin(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.left_table.as_ref().unwrap().id);
+                fragment
+                    .state_table_ids
+                    .push(node.right_table.as_ref().unwrap().id);
+            }
+            NodeBody::DynamicFilter(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.left_table.as_ref().unwrap().id);
+                fragment
+                    .state_table_ids
+                    .push(node.right_table.as_ref().unwrap().id);
+            }
+            NodeBody::AppendOnlyTopN(node) => {
+                fragment.state_table_ids.push(node.table_id_l);
+                fragment.state_table_ids.push(node.table_id_h);
+            }
+            NodeBody::GroupTopN(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.table.as_ref().unwrap().id);
+            }
+            NodeBody::TopN(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.table.as_ref().unwrap().id);
+            }
+            _ => {}
+        }
+        let input_nodes = stream_node.get_input();
+        for input_node in input_nodes {
+            Self::record_internal_state_tables(input_node, fragment)?;
+        }
         Ok(())
     }
 }

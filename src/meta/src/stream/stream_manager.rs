@@ -64,8 +64,8 @@ pub struct CreateMaterializedViewContext {
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
     pub internal_table_id_map: HashMap<u32, Option<Table>>,
-    /// The set of fragments with their upstream table ids, these fragments need to be colocated
-    /// with their upstream tables. Specifically, they are fragments containing chain nodes.
+    /// The upstream tables of all fragments containing chain nodes.
+    /// These fragments need to be colocated with their upstream tables.
     ///
     /// They are scheduled in `resolve_chain_node`.
     pub fragment_upstream_table_map: HashMap<FragmentId, TableId>,
@@ -259,7 +259,6 @@ where
                 // Note: currently we ensure that the downstream chain operator has the same
                 // parallel unit and distribution as the upstream mview, so we can simply use
                 // `NoShuffle` dispatcher here.
-                // TODO: support different parallel unit and distribution for new MV.
                 self.dispatchers
                     .entry(*upstream_actor_id)
                     .or_default()
