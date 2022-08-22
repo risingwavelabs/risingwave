@@ -974,7 +974,17 @@ impl ActorGraphBuilder {
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
         if !current_fragment.upstream_table_ids.is_empty() {
-            ctx.colocate_fragment_set.insert(fragment_id.as_global_id());
+            assert_eq!(current_fragment.upstream_table_ids.len(), 1);
+            ctx.fragment_upstream_table_map.insert(
+                fragment_id.as_global_id(),
+                TableId::new(
+                    *current_fragment
+                        .upstream_table_ids
+                        .iter()
+                        .exactly_one()
+                        .unwrap(),
+                ),
+            );
         }
 
         let parallel_degree = if current_fragment.is_singleton {

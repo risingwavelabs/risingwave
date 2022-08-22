@@ -64,8 +64,11 @@ pub struct CreateMaterializedViewContext {
     pub table_id_offset: u32,
     /// Internal TableID to Table mapping
     pub internal_table_id_map: HashMap<u32, Option<Table>>,
-    /// Chain fragment set, used to determine when to schedule a chain fragment.
-    pub colocate_fragment_set: HashSet<FragmentId>,
+    /// The set of fragments with their upstream table ids, these fragments need to be colocated
+    /// with their upstream tables. Specifically, they are fragments containing chain nodes.
+    ///
+    /// They are scheduled in `resolve_chain_node`.
+    pub fragment_upstream_table_map: HashMap<FragmentId, TableId>,
     /// SchemaId of mview
     pub schema_id: SchemaId,
     /// DatabaseId of mview
@@ -148,7 +151,7 @@ where
         dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
         upstream_worker_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &mut ScheduledLocations,
-        colocate_fragment_set: &HashSet<FragmentId>,
+        fragment_upstream_table_map: &HashMap<FragmentId, TableId>,
     ) -> MetaResult<()> {
         // The closure environment. Used to simulate recursive closure.
         struct Env<'a> {
@@ -165,8 +168,6 @@ where
             dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
             /// New vnode bitmaps for chain actors.
             actor_vnode_bitmaps: &'a mut HashMap<ActorId, Option<Buffer>>,
-            /// Record fragment upstream table id of each fragment.
-            fragment_upstream_table_mapping: &'a mut HashMap<FragmentId, TableId>,
             /// Upstream Materialize actor ids grouped by worker id.
             upstream_worker_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
@@ -176,7 +177,6 @@ where
                 &mut self,
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
-                fragment_id: FragmentId,
                 upstream_actor_idx: usize,
                 _same_worker_node_as_upstream: bool,
                 is_singleton: bool,
@@ -184,15 +184,13 @@ where
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id, fragment_id, upstream_actor_idx, _same_worker_node_as_upstream, is_singleton)?;
+                        self.resolve_chain_node_inner(input, actor_id, upstream_actor_idx, _same_worker_node_as_upstream, is_singleton)?;
                     }
                     return Ok(());
                 };
 
                 // get upstream table id
                 let table_id = TableId::new(chain.table_id);
-                self.fragment_upstream_table_mapping
-                    .insert(fragment_id, table_id);
                 // 1. use table id to get upstream vnode mapping info: [(actor_id,
                 // option(vnode_bitmap))]
                 let upstream_vnode_mapping_info = &self.upstream_vnode_bitmap_info[&table_id];
@@ -300,12 +298,11 @@ where
             locations,
             dispatchers,
             actor_vnode_bitmaps: &mut Default::default(),
-            fragment_upstream_table_mapping: &mut Default::default(),
             upstream_worker_actors,
         };
 
         for fragment in table_fragments.fragments.values_mut() {
-            if !colocate_fragment_set.contains(&fragment.fragment_id) {
+            if !fragment_upstream_table_map.contains_key(&fragment.fragment_id) {
                 continue;
             }
 
@@ -317,7 +314,6 @@ where
                 env.resolve_chain_node_inner(
                     stream_node,
                     actor.actor_id,
-                    fragment.fragment_id,
                     idx,
                     actor.same_worker_node_as_upstream,
                     is_singleton,
@@ -326,8 +322,7 @@ where
                 actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
             }
             // setup fragment vnode mapping.
-            let upstream_table_id = env
-                .fragment_upstream_table_mapping
+            let upstream_table_id = fragment_upstream_table_map
                 .get(&fragment.fragment_id)
                 .unwrap();
             fragment.vnode_mapping = env
@@ -361,7 +356,7 @@ where
             dependent_table_ids,
             table_properties,
             internal_table_id_map,
-            colocate_fragment_set,
+            fragment_upstream_table_map,
             affiliated_source,
             ..
         }: &mut CreateMaterializedViewContext,
@@ -402,7 +397,7 @@ where
             let topological_order = table_fragments.generate_topological_order();
             for fragment_id in topological_order {
                 let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
-                if !colocate_fragment_set.contains(&fragment_id) {
+                if !fragment_upstream_table_map.contains_key(&fragment_id) {
                     self.scheduler.schedule(fragment, &mut locations).await?;
                 }
             }
@@ -419,7 +414,7 @@ where
             dispatchers,
             upstream_worker_actors,
             &mut locations,
-            colocate_fragment_set,
+            fragment_upstream_table_map,
         )
         .await?;
 
