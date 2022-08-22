@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::ops::Bound::{self, Excluded, Included, Unbounded};
+use std::ops::Bound::{self, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -30,11 +30,11 @@ use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
-use risingwave_common::types::{Datum, VirtualNode};
+use risingwave_common::types::VirtualNode;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::{end_bound_of_prefix, prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
@@ -428,7 +428,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let storage_iter = self.iter_with_pk_bounds(epoch, pk_prefix, ..).await?;
+        let storage_iter = self.iter_with_pk_bounds(epoch, pk_prefix).await?;
 
         let mem_table_iter = {
             let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
@@ -450,69 +450,25 @@ impl<S: StateStore> StateTable<S> {
         &self,
         epoch: u64,
         pk_prefix: &Row,
-        next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
             pk_prefix: &Row,
-            next_col_bound: Bound<&Datum>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
-            match next_col_bound {
-                Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                    let mut key = pk_prefix.clone();
-                    key.0.push(k.clone());
-                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                    if is_start_bound {
-                        Included(serialized_key)
-                    } else {
-                        // Should use excluded next key for end bound.
-                        // Otherwise keys starting with the bound is not included.
-                        end_bound_of_prefix(&serialized_key)
-                    }
-                }
-                Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                    let mut key = pk_prefix.clone();
-                    key.0.push(k.clone());
-                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                    if is_start_bound {
-                        // storage doesn't support excluded begin key yet, so transform it to
-                        // included
-                        // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
-                        // reject this?
-                        Included(next_key(&serialized_key))
-                    } else {
-                        Excluded(serialized_key)
-                    }
-                }
-                Unbounded => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-                    let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-                    if pk_prefix.size() == 0 {
-                        Unbounded
-                    } else if is_start_bound {
-                        Included(serialized_pk_prefix)
-                    } else {
-                        end_bound_of_prefix(&serialized_pk_prefix)
-                    }
-                }
+            let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+            if pk_prefix.size() == 0 {
+                Unbounded
+            } else if is_start_bound {
+                Included(serialized_pk_prefix)
+            } else {
+                end_bound_of_prefix(&serialized_pk_prefix)
             }
         }
 
-        let start_key = serialize_pk_bound(
-            &self.pk_serializer,
-            pk_prefix,
-            next_col_bounds.start_bound(),
-            true,
-        );
-        let end_key = serialize_pk_bound(
-            &self.pk_serializer,
-            pk_prefix,
-            next_col_bounds.end_bound(),
-            false,
-        );
+        let start_key = serialize_pk_bound(&self.pk_serializer, pk_prefix, true);
+        let end_key = serialize_pk_bound(&self.pk_serializer, pk_prefix, false);
 
         assert!(pk_prefix.size() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.size())
@@ -578,20 +534,6 @@ impl<S: StateStore> StateTable<S> {
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        // // Vnodes that are set and should be accessed.
-        // #[auto_enum(Iterator)]
-        // let vnodes = match vnode_hint {
-        //     // If `vnode_hint` is set, we can only access this single vnode.
-        //     Some(vnode) => std::iter::once(vnode),
-        //     // Otherwise, we need to access all vnodes of this table.
-        //     None => self
-        //         .vnodes
-        //         .iter()
-        //         .enumerate()
-        //         .filter(|&(_, set)| set)
-        //         .map(|(i, _)| i as VirtualNode),
-        // };
-
         let vnode = vnode_hint.unwrap_or(0_u8);
 
         let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
@@ -773,7 +715,6 @@ impl<S: StateStore> StorageIterInner<S> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            // let (_, pk_bytes) = parse_raw_key_to_vnode_and_key(key.as_ref());
             let row = deserialize(self.mapping.clone(), &value).map_err(err)?;
             yield (key.to_vec(), row)
         }
