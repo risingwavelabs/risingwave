@@ -189,7 +189,7 @@ impl BlockIterator {
                     Ordering::Greater => false,
                 }
             })
-            .saturating_sub(1) // Prevent from underflowing when given is smaller than ther first.
+            .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
     }
 
     /// Seeks to the restart point that the given `key` belongs to.

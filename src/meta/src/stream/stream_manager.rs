@@ -763,7 +763,7 @@ where
             .await
         {
             tracing::warn!(
-                "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                "Failed to unregister table {}. It will be unregistered eventually.\n{:#?}",
                 table_id,
                 e
             );
@@ -961,7 +961,10 @@ mod tests {
             &self,
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
-            Ok(Response::new(BarrierCompleteResponse::default()))
+            Ok(Response::new(BarrierCompleteResponse {
+                checkpoint: true,
+                ..Default::default()
+            }))
         }
     }
 
