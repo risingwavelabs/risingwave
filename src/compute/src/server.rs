@@ -37,7 +37,9 @@ use risingwave_storage::hummock::compactor::{
     CompactionExecutor, Compactor, CompactorContext, Context,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{CompactorSstableStore, MemoryLimiter};
+use risingwave_storage::hummock::{
+    CompactorSstableStore, MemoryLimiter, TieredCacheMetricsBuilder,
+};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -137,6 +139,7 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         filter_key_extractor_manager.clone(),
+        TieredCacheMetricsBuilder::new(registry.clone()),
     )
     .await
     .unwrap();
@@ -169,13 +172,13 @@ pub async fn compute_node_serve(
                 sstable_id_manager: storage.sstable_id_manager(),
             });
             // TODO: use normal sstable store for single-process mode.
-            let compact_sstable_store = CompactorSstableStore::new(
+            let compactor_sstable_store = CompactorSstableStore::new(
                 storage.sstable_store(),
                 Arc::new(MemoryLimiter::new(write_memory_limit)),
             );
             let compactor_context = Arc::new(CompactorContext {
                 context,
-                sstable_store: Arc::new(compact_sstable_store),
+                sstable_store: Arc::new(compactor_sstable_store),
             });
 
             let (handle, shutdown_sender) =
