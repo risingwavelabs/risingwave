@@ -128,6 +128,10 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
+    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
+        unimplemented!();
+    }
+
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         Ok(self
             .objects

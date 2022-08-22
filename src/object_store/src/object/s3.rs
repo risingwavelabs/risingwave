@@ -392,6 +392,10 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
+    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
+        unimplemented!();
+    }
+
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         let mut ret: Vec<ObjectMetadata> = vec![];
         let mut next_continuation_token = None;

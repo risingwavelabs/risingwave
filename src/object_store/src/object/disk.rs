@@ -282,6 +282,10 @@ impl ObjectStore for DiskObjectStore {
         Ok(())
     }
 
+    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
+        unimplemented!();
+    }
+
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         let mut list_result = vec![];
         let mut path_to_walk = vec![];

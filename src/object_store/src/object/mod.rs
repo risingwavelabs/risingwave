@@ -132,6 +132,9 @@ pub trait ObjectStore: Send + Sync {
     /// Deletes blob permanently.
     async fn delete(&self, path: &str) -> ObjectResult<()>;
 
+    /// Deletes multiple blobs permanently.
+    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()>;
+
     fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
     where
         Self: Sized,
