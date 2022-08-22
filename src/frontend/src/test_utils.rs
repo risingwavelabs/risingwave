@@ -586,7 +586,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(0)
     }
 
-    async fn flush(&self) -> RpcResult<u64> {
+    async fn flush(&self, _checkpoint: bool) -> RpcResult<u64> {
         Ok(0)
     }
 

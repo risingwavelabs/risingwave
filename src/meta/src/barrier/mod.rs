@@ -161,7 +161,8 @@ impl ScheduledBarriers {
         let mut buffer = self.buffer.write().await;
         while let Some((_, notifiers)) = buffer.pop_front() {
             notifiers.into_iter().for_each(|notify| {
-                notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
+                notify
+                    .notify_collection_checkpoint_failed(anyhow!("Scheduled barrier abort.").into())
             })
         }
     }
@@ -571,11 +572,11 @@ where
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self) -> MetaResult<u64> {
+    pub async fn flush(&self, checkpoint: bool) -> MetaResult<u64> {
         let start = Instant::now();
 
         debug!("start barrier flush");
-        self.wait_for_next_barrier_to_collect().await?;
+        self.wait_for_next_barrier_to_collect(checkpoint).await?;
 
         let elapsed = Instant::now().duration_since(start);
         debug!("barrier flushed in {:?}", elapsed);
@@ -664,7 +665,9 @@ where
             if info.nothing_to_do() {
                 let mut notifiers = notifiers;
                 notifiers.iter_mut().for_each(Notifier::notify_to_send);
-                notifiers.iter_mut().for_each(Notifier::notify_collected);
+                notifiers
+                    .iter_mut()
+                    .for_each(Notifier::notify_collected_checkpoint);
                 continue;
             }
             let prev_epoch = state.in_flight_prev_epoch;
@@ -680,7 +683,7 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
-            if !matches!(command,Command::Plain(_)){
+            if !matches!(command, Command::Plain(_)) {
                 checkpoint_control.inject_checkpoint_in_next_barrier();
             }
             let checkpoint = checkpoint_control.try_get_checkpoint();
@@ -867,7 +870,7 @@ where
             }
             node.notifiers
                 .into_iter()
-                .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
+                .for_each(|notifier| notifier.notify_collection_checkpoint_failed(err.clone()));
             new_epoch = node.command_ctx.prev_epoch;
         }
         if self.enable_recovery {
@@ -908,7 +911,10 @@ where
                 let command_ctx = node.command_ctx.clone();
                 let notifiers_collect = notifiers
                     .iter_mut()
-                    .map(|notifier| notifier.take_collected())
+                    .map(|notifier| {
+                        notifier.notify_collected_no_checkpoint();
+                        notifier.take_collected()
+                    })
                     .collect_vec();
 
                 let actors_to_finish = command_ctx.actors_to_track();
@@ -918,17 +924,16 @@ where
                 } else {
                     tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers);
                 };
-                if !notifiers_collect.is_empty(){
-                    checkpoint_control.inject_checkpoint_in_next_barrier();
-                }
 
                 for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
                     if let Some(notifier) = tracker.update(&progress) {
-                        checkpoint_control.inject_checkpoint_in_next_barrier();
                         finish_notifier.push(notifier);
                     }
                 }
                 let finish_notifier = finish_notifier.into_iter().flatten().collect_vec();
+                if !finish_notifier.is_empty() || !notifiers_collect.is_empty() {
+                    checkpoint_control.inject_checkpoint_in_next_barrier();
+                }
 
                 checkpoint_control.add_uncommitted_messages(
                     resps,
@@ -1031,7 +1036,7 @@ where
             scheduleds.push((
                 command,
                 once(Notifier {
-                    collected: Some(collect_tx),
+                    collected_checkpoint: Some(collect_tx),
                     finished: Some(finish_tx),
                     ..Default::default()
                 })
@@ -1071,11 +1076,18 @@ where
 
     /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
     /// ignored, if exists.
-    pub async fn wait_for_next_barrier_to_collect(&self) -> MetaResult<()> {
+    pub async fn wait_for_next_barrier_to_collect(&self, checkpoint: bool) -> MetaResult<()> {
         let (tx, rx) = oneshot::channel();
-        let notifier = Notifier {
-            collected: Some(tx),
-            ..Default::default()
+        let notifier = if checkpoint {
+            Notifier {
+                collected_checkpoint: Some(tx),
+                ..Default::default()
+            }
+        } else {
+            Notifier {
+                collected_no_checkpoint: Some(tx),
+                ..Default::default()
+            }
         };
         self.scheduled_barriers
             .attach_notifiers(once(notifier))

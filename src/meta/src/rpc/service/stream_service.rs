@@ -64,9 +64,9 @@ where
     #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
-        let max_committed_epoch = self.barrier_manager.flush().await?;
+        let max_committed_epoch = self.barrier_manager.flush(req.checkpoint).await?;
         Ok(Response::new(FlushResponse {
             status: None,
             snapshot: Some(HummockSnapshot {

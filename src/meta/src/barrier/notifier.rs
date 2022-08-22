@@ -22,11 +22,14 @@ pub(super) struct Notifier {
     /// Get notified when scheduled barrier is about to send.
     pub to_send: Option<oneshot::Sender<()>>,
 
-    /// Get notified when scheduled barrier is collected or failed.
-    pub collected: Option<oneshot::Sender<MetaResult<()>>>,
+    /// Get notified when scheduled barrier(checkpoint = true) is collected or failed,
+    pub collected_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
 
     /// Get notified when scheduled barrier is finished.
     pub finished: Option<oneshot::Sender<()>>,
+
+    /// Get notified when scheduled barrier(checkpoint = false) is collected or failed.
+    pub collected_no_checkpoint: Option<oneshot::Sender<MetaResult<()>>>,
 }
 
 impl Notifier {
@@ -38,19 +41,37 @@ impl Notifier {
     }
 
     pub fn take_collected(&mut self) -> Option<oneshot::Sender<MetaResult<()>>> {
-        self.collected.take()
+        self.collected_checkpoint.take()
     }
 
-    /// Notify when we have collected a barrier from all actors.
-    pub fn notify_collected(&mut self) {
-        if let Some(tx) = self.collected.take() {
+    /// Notify when we have collected a barrier(checkpoint = true) from all actors.
+    pub fn notify_collected_checkpoint(&mut self) {
+        self.notify_collected_no_checkpoint();
+        if let Some(tx) = self.collected_checkpoint.take() {
             tx.send(Ok(())).ok();
         }
     }
 
-    /// Notify when we failed to collect a barrier. This function consumes `self`.
-    pub fn notify_collection_failed(self, err: MetaError) {
-        if let Some(tx) = self.collected {
+    /// Notify when we have collected a barrier(checkpoint = false) from all actors.
+    pub fn notify_collected_no_checkpoint(&mut self) {
+        if let Some(tx) = self.collected_no_checkpoint.take() {
+            tx.send(Ok(())).ok();
+        }
+    }
+
+    /// Notify when we failed to collect(checkpoint = true) a barrier. This function consumes
+    /// `self`.
+    pub fn notify_collection_checkpoint_failed(mut self, err: MetaError) {
+        self.notify_collection_no_checkpoint_failed(err.clone());
+        if let Some(tx) = self.collected_checkpoint {
+            tx.send(Err(err)).ok();
+        }
+    }
+
+    /// Notify when we failed to collect a barrier(checkpoint = false). This function consumes
+    /// `self`.
+    pub fn notify_collection_no_checkpoint_failed(&mut self, err: MetaError) {
+        if let Some(tx) = self.collected_no_checkpoint.take() {
             tx.send(Err(err)).ok();
         }
     }
