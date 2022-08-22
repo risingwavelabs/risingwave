@@ -657,20 +657,23 @@ where
                 };
 
                 processing_table_guard.insert(*table_id, table_catalog.clone());
-                self.notify_state_ful_node(Operation::Add, Info::Table(table_catalog.clone()))
-                    .await;
+                self.notify_compute_and_compactor(
+                    Operation::Add,
+                    Info::Table(table_catalog.clone()),
+                )
+                .await;
             }
 
             match relation {
                 Relation::Table(mview) => {
                     processing_table_guard.insert(mview.id, mview.clone());
-                    self.notify_state_ful_node(Operation::Add, Info::Table(mview.clone()))
+                    self.notify_compute_and_compactor(Operation::Add, Info::Table(mview.clone()))
                         .await;
                 }
 
                 Relation::Index(_, mview) => {
                     processing_table_guard.insert(mview.id, mview.clone());
-                    self.notify_state_ful_node(Operation::Add, Info::Table(mview.clone()))
+                    self.notify_compute_and_compactor(Operation::Add, Info::Table(mview.clone()))
                         .await;
                 }
 
@@ -685,7 +688,7 @@ where
                         ..Default::default()
                     },
                 );
-                self.notify_state_ful_node(Operation::Add, Info::Source(source.clone()))
+                self.notify_compute_and_compactor(Operation::Add, Info::Source(source.clone()))
                     .await;
             }
         }
@@ -817,7 +820,7 @@ where
             processing_table_guard.remove(&table_id);
 
             if notify {
-                self.notify_state_ful_node(
+                self.notify_compute_and_compactor(
                     Operation::Delete,
                     Info::Table(Table {
                         id: table_id,
@@ -833,7 +836,7 @@ where
         self.processing_table.lock().await
     }
 
-    async fn notify_state_ful_node(&self, operation: Operation, info: Info) {
+    async fn notify_compute_and_compactor(&self, operation: Operation, info: Info) {
         self.notification_manager
             .notify_compute(operation, info.clone())
             .await;
