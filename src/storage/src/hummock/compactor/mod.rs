@@ -327,19 +327,12 @@ impl Compactor {
             .compact_write_sstn
             .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
-        if task_ok {
-            context
-                .stats
-                .compact_frequency
-                .with_label_values(&[group_label.as_str(), "success"])
-                .inc();
-        } else {
-            context
-                .stats
-                .compact_frequency
-                .with_label_values(&[group_label.as_str(), "failed"])
-                .inc();
-        }
+        let ret_label = if task_ok { "success" } else { "failed" };
+        context
+            .stats
+            .compact_frequency
+            .with_label_values(&[group_label.as_str(), ret_label])
+            .inc();
 
         if let Err(e) = context
             .hummock_meta_client
