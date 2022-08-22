@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{SchemaId as SchemaIdCommon, DatabaseId as DatabaseIdCommon};
 use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
@@ -136,6 +137,13 @@ impl TableCatalog {
 
     pub fn distribution_key(&self) -> &[usize] {
         self.distribution_key.as_ref()
+    }
+
+    pub fn to_internal_table_prost(&self) -> ProstTable {
+        self.to_prost(
+            SchemaIdCommon::placeholder() as u32,
+            DatabaseIdCommon::placeholder() as u32,
+        )
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, Field, Schema, SchemaId};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -201,6 +201,9 @@ impl ToStreamProst for StreamHashJoin {
             .iter()
             .map(|idx| *idx as i32)
             .collect_vec();
+
+        let (left_table, left_degree_table) = infer_internal_and_degree_table_catalog(self.left(), left_key_indices);
+        let (right_table, right_degree_table) = infer_internal_and_degree_table_catalog(self.right(), right_key_indices);
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: left_key_indices_prost,
@@ -211,17 +214,13 @@ impl ToStreamProst for StreamHashJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             left_table: Some(
-                infer_internal_table_catalog(self.left(), left_key_indices).to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                ),
+                left_table.to_internal_table_prost()
             ),
             right_table: Some(
-                infer_internal_table_catalog(self.right(), right_key_indices).to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                ),
+                right_table.to_internal_table_prost()
             ),
+            left_degree_table: Some(left_degree_table.to_internal_table_prost()),
+            right_degree_table: Some(right_degree_table.to_internal_table_prost()),
             output_indices: self
                 .logical
                 .output_indices()
@@ -233,33 +232,43 @@ impl ToStreamProst for StreamHashJoin {
     }
 }
 
-fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) -> TableCatalog {
+/// Return hash join internal table catalog and degree table catalog.
+fn infer_internal_and_degree_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) -> (TableCatalog, TableCatalog) {
     let base = input.plan_base();
     let schema = &base.schema;
 
     let append_only = input.append_only();
     let dist_keys = base.dist.dist_column_indices().to_vec();
 
-    // The pk of hash join internal table should be join_key + input_pk.
+    // The pk of hash join internal and degree table should be join_key + input_pk.
     let mut pk_indices = join_key_indices;
     // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(&base.logical_pk);
 
-    let mut columns_fields = schema.fields().to_vec();
-
-    // The join degree at the end of internal table.
-    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
-    columns_fields.push(degree_column_field);
-
+    
+    // Build internal table
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-
-    columns_fields.iter().for_each(|field| {
+    let internal_columns_fields = schema.fields().to_vec();
+    
+    internal_columns_fields.iter().for_each(|field| {
         internal_table_catalog_builder.add_column(field);
     });
-
+    
     pk_indices.iter().for_each(|idx| {
         internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
+    
+    // Build degree table.
+    let mut degree_table_catalog_builder = TableCatalogBuilder::new();
+
+    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
+    
+    pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+        degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+        degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+    });
+    degree_table_catalog_builder.add_column(&degree_column_field);
+    
 
     if !base.ctx.inner().with_properties.is_empty() {
         let properties: HashMap<_, _> = base
@@ -272,9 +281,11 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
             .collect();
 
         if !properties.is_empty() {
-            internal_table_catalog_builder.add_properties(properties);
+            internal_table_catalog_builder.add_properties(properties.clone());
+            degree_table_catalog_builder.add_properties(properties.clone());
         }
     }
 
-    internal_table_catalog_builder.build(dist_keys, append_only)
+    (internal_table_catalog_builder.build(dist_keys.clone(), append_only),
+    degree_table_catalog_builder.build(dist_keys, append_only))
 }
