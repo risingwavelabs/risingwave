@@ -28,12 +28,12 @@ pub trait Memtable: Send + Sync + 'static + Clone {
 
     /// Point gets a value from memtable.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get(&self, key: &u8, epoch: u64) -> Option<Bytes>;
+    fn get(&self, key: &[u8], epoch: u64) -> Option<Bytes>;
 
     /// Opens and returns an iterator for a given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to
     /// the given `epoch`.
-    fn iter<'a, R, B>(&self, key_range: R) -> Self::Iter
+    fn iter<R, B>(&self, key_range: R) -> Self::Iter
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;

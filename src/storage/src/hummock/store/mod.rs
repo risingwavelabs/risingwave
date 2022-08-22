@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod memtable;
-pub mod store;
+pub mod state_store;
 pub mod version;
 pub mod write_queue;
 

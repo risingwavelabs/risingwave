@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use tokio::sync::mpsc;
 
 use super::memtable::Memtable;
@@ -30,7 +31,7 @@ where
     /// Idx to identify immutable memtable in state store.
     idx: OrderIdx,
     /// table_id to identify table configuration for writes.
-    table_id: u64,
+    table_id: StateTableId,
     // TODO: may add more
 }
 
