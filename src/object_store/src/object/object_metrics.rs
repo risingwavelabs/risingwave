@@ -26,8 +26,6 @@ macro_rules! for_all_metrics {
             read_bytes: GenericCounter<AtomicU64>,
             operation_latency: HistogramVec,
             operation_size: HistogramVec,
-            s3_num_writes: GenericCounter<AtomicU64>,
-            s3_num_reads: GenericCounter<AtomicU64>,
         }
     };
 }
@@ -67,27 +65,14 @@ impl ObjectStoreMetrics {
         )
         .unwrap();
 
-        let s3_num_writes = register_int_counter_with_registry!(
-            "object_store_s3_num_writes",
-            "Total number of write requests to object store",
-            registry
-        )
-        .unwrap();
-
-        let s3_num_reads = register_int_counter_with_registry!(
-            "object_store_s3_num_reads",
-            "Total number of read requests to object store",
-            registry
-        )
-        .unwrap();
-
         let latency_opts = histogram_opts!(
             "object_store_operation_latency",
             "Total latency of operation on object store",
             exponential_buckets(0.0001, 2.0, 21).unwrap(), // max 104s
         );
         let operation_latency =
-            register_histogram_vec_with_registry!(latency_opts, &["type"], registry).unwrap();
+            register_histogram_vec_with_registry!(latency_opts, &["media_type", "type"], registry)
+                .unwrap();
         let mut buckets = vec![];
         for i in 0..4 {
             buckets.push((4096 << (i * 2)) as f64);
@@ -116,8 +101,6 @@ impl ObjectStoreMetrics {
             read_bytes,
             operation_latency,
             operation_size,
-            s3_num_writes,
-            s3_num_reads,
         }
     }
 

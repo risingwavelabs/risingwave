@@ -151,6 +151,17 @@ pub enum StoreMediaType {
     S3,
 }
 
+impl StoreMediaType {
+    fn as_str(&self) -> &'static str {
+        match self {
+            StoreMediaType::None => "none",
+            StoreMediaType::Mem => "mem",
+            StoreMediaType::Disk => "disk",
+            StoreMediaType::S3 => "s3",
+        }
+    }
+}
+
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Disk(MonitoredObjectStore<DiskObjectStore>),
@@ -315,16 +326,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         }
     }
 
-    fn report_write(&self, num_writes: u64) {
-        if let StoreMediaType::S3 = self.inner.store_media_type() {
-            self.object_store_metrics.s3_num_writes.inc_by(num_writes);
-        }
-    }
-
-    fn report_read(&self, num_reads: u64) {
-        if let StoreMediaType::S3 = self.inner.store_media_type() {
-            self.object_store_metrics.s3_num_reads.inc_by(num_reads);
-        }
+    fn media_type(&self) -> &str {
+        self.inner.store_media_type().as_str()
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -334,13 +337,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["upload"])
+            .with_label_values(&[self.media_type(), "upload"])
             .start_timer();
         self.object_store_metrics
             .operation_size
             .with_label_values(&["upload"])
             .observe(obj.len() as f64);
-        self.report_write(1);
 
         self.inner
             .upload(path, obj)
@@ -361,9 +363,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["read"])
+            .with_label_values(&[self.media_type(), "read"])
             .start_timer();
-        self.report_read(1);
         let ret = self
             .inner
             .read(path, block_loc)
@@ -393,9 +394,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["readv"])
+            .with_label_values(&[self.media_type(), "readv"])
             .start_timer();
-        self.report_read(block_locs.len() as u64);
         let ret = self
             .inner
             .readv(path, block_locs)
@@ -411,9 +411,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["metadata"])
+            .with_label_values(&[self.media_type(), "metadata"])
             .start_timer();
-        self.report_read(1);
         self.inner
             .metadata(path)
             .stack_trace("object_store_metadata")
@@ -424,9 +423,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["delete"])
+            .with_label_values(&[self.media_type(), "delete"])
             .start_timer();
-        self.report_write(1);
         self.inner
             .delete(path)
             .stack_trace("object_store_delete")
@@ -437,9 +435,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["list"])
+            .with_label_values(&[self.media_type(), "list"])
             .start_timer();
-        self.report_read(1);
         self.inner
             .list(prefix)
             .stack_trace("object_store_list")
