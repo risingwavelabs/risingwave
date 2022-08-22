@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp;
-use std::fmt::format;
 use std::sync::Arc;
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
