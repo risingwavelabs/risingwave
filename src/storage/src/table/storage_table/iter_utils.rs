@@ -57,7 +57,7 @@ impl<S: PkAndRowStream> Ord for Node<S> {
 /// Merge multiple streams of primary key and rows into a single stream, sorted by primary key.
 /// We should ensure that the primary key from different streams are unique.
 #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
-pub async fn merge_sort<S>(streams: Vec<S>)
+pub(super) async fn merge_sort<S>(streams: Vec<S>)
 where
     S: PkAndRowStream + Unpin,
 {
