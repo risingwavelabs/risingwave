@@ -37,18 +37,18 @@ struct TaskLocalAlloc;
 
 unsafe impl GlobalAlloc for TaskLocalAlloc {
     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
-        let layout =
+        let new_layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
         BYTES_ALLOCATED
             .try_with(|bytes| {
                 bytes.0.as_ref().fetch_add(layout.size(), Ordering::Relaxed);
-                let ptr = GLOBAL_ALLOC.alloc(layout);
+                let ptr = GLOBAL_ALLOC.alloc(new_layout);
                 *(ptr as *mut usize) = bytes.0.as_ptr() as usize;
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
             })
             .unwrap_or_else(|_| {
-                let ptr = GLOBAL_ALLOC.alloc(layout);
+                let ptr = GLOBAL_ALLOC.alloc(new_layout);
                 *(ptr as *mut usize) = 0;
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
@@ -56,29 +56,29 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
-        let layout =
+        let new_layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
         let ptr = ptr.sub(usize::BITS as usize);
         let bytes = ptr as *const AtomicUsize;
         if let Some(bytes) = bytes.as_ref() {
             bytes.fetch_sub(layout.size(), Ordering::Relaxed);
         }
-        GLOBAL_ALLOC.dealloc(ptr, layout)
+        GLOBAL_ALLOC.dealloc(ptr, new_layout)
     }
 
     unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
-        let layout =
+        let new_layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
         BYTES_ALLOCATED
             .try_with(|bytes| {
                 bytes.0.as_ref().fetch_add(layout.size(), Ordering::Relaxed);
-                let ptr = GLOBAL_ALLOC.alloc_zeroed(layout);
+                let ptr = GLOBAL_ALLOC.alloc_zeroed(new_layout);
                 *(ptr as *mut usize) = bytes.0.as_ptr() as usize;
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
             })
             .unwrap_or_else(|_| {
-                let ptr = GLOBAL_ALLOC.alloc_zeroed(layout);
+                let ptr = GLOBAL_ALLOC.alloc_zeroed(new_layout);
                 *(ptr as *mut usize) = 0;
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
@@ -86,7 +86,7 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
-        let layout =
+        let new_layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
         let ptr = ptr.sub(usize::BITS as usize);
         let bytes = ptr as *const AtomicUsize;
@@ -95,7 +95,7 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
             bytes.fetch_sub(layout.size(), Ordering::Relaxed);
         }
         let new_size = new_size + 8;
-        GLOBAL_ALLOC.realloc(ptr, layout, new_size)
+        GLOBAL_ALLOC.realloc(ptr, new_layout, new_size)
     }
 }
 
