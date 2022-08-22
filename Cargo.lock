@@ -2013,7 +2013,7 @@ dependencies = [
 [[package]]
 name = "getrandom"
 version = "0.2.7"
-source = "git+https://github.com/madsys-dev/getrandom.git?rev=cc95ee3#cc95ee36a2ae473edb01fcdcf34da3f2dcfc4b2f"
+source = "git+https://github.com/madsim-rs/getrandom.git?rev=cc95ee3#cc95ee36a2ae473edb01fcdcf34da3f2dcfc4b2f"
 dependencies = [
  "cfg-if",
  "libc",
@@ -2665,8 +2665,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c22974df2eec970953226b378cc167992831227cfe783204b72a0f3f32fd6891"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=874a606#874a606e6e39118e84c31bbfd177af2fa9ac89e3"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2692,8 +2691,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a95505369fabd293bcb3eaab7cefd668f174a7e533dcf247eed97a91ea5d2a"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=874a606#874a606e6e39118e84c31bbfd177af2fa9ac89e3"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -3835,7 +3833,7 @@ dependencies = [
 [[package]]
 name = "quanta"
 version = "0.10.1"
-source = "git+https://github.com/madsys-dev/quanta.git?rev=a819877#a819877978ef542a6e0c626e0220030fd7c3e717"
+source = "git+https://github.com/madsim-rs/quanta.git?rev=a819877#a819877978ef542a6e0c626e0220030fd7c3e717"
 dependencies = [
  "crossbeam-utils",
  "libc",
@@ -5949,12 +5947,11 @@ dependencies = [
 [[package]]
 name = "tokio-retry"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f57eb36ecbe0fc510036adff84824dd3c24bb781e21bfa67b69d556aa85214f"
+source = "git+https://github.com/madsim-rs/rust-tokio-retry.git?rev=95e2fd3#95e2fd3c31047093869346f5253335c3876a483f"
 dependencies = [
+ "madsim-tokio",
  "pin-project",
  "rand 0.8.5",
- "tokio",
 ]
 
 [[package]]

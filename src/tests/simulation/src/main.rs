@@ -128,6 +128,7 @@ async fn main() {
                 ]);
                 risingwave_compute::start(opts).await
             })
+            .restart_on_panic()
             .build();
     }
     // wait for the service to be ready
@@ -155,12 +156,13 @@ async fn main() {
 }
 
 async fn kill_node() {
-    let i = rand::thread_rng().gen_range(0..3);
+    let i = rand::thread_rng().gen_range(1..=3);
     let name = format!("compute-{}", i);
     tracing::info!("kill {name}");
     madsim::runtime::Handle::current().kill(&name);
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     madsim::runtime::Handle::current().restart(&name);
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 }
 
 async fn run_slt_task(glob: &str, host: &str) {
