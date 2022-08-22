@@ -17,12 +17,13 @@ use std::future::Future;
 use tokio::task::JoinHandle;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
+#[cfg(not(madsim))]
 pub struct CompactionExecutor {
     runtime: Option<tokio::runtime::Runtime>,
 }
 
+#[cfg(not(madsim))]
 impl CompactionExecutor {
-    #[cfg(not(madsim))]
     pub fn new(worker_threads_num: Option<usize>) -> Self {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         if let Some(worker_threads_num) = worker_threads_num {
@@ -31,15 +32,6 @@ impl CompactionExecutor {
         let runtime = builder.enable_all().build().unwrap();
         Self {
             runtime: Some(runtime),
-        }
-    }
-
-    // FIXME: simulation doesn't support new thread or tokio runtime.
-    //        this is a workaround to make it compile.
-    #[cfg(madsim)]
-    pub fn new(_worker_threads_num: Option<usize>) -> Self {
-        Self {
-            runtime: Option::<tokio::runtime::Runtime>::None,
         }
     }
 
@@ -57,11 +49,28 @@ impl CompactionExecutor {
 
 impl Drop for CompactionExecutor {
     fn drop(&mut self) {
-        match self.runtime.take() {
-            Some(runtime) => {
-                runtime.shutdown_background();
-            }
-            None => (),
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
         }
+    }
+}
+
+#[cfg(madsim)]
+pub struct CompactionExecutor {}
+
+#[cfg(madsim)]
+impl CompactionExecutor {
+    // FIXME: simulation doesn't support new thread or tokio runtime.
+    // this is a workaround to make it compile.
+    pub fn new(_worker_threads_num: Option<usize>) -> Self {
+        Self {}
+    }
+
+    pub fn execute<F, T>(&self, t: F) -> JoinHandle<T>
+    where
+        F: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        tokio::spawn(t)
     }
 }
