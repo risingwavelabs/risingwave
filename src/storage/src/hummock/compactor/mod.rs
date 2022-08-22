@@ -21,7 +21,6 @@ mod shared_buffer_compact;
 mod sstable_store;
 
 use std::collections::HashSet;
-use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -115,14 +114,6 @@ pub struct Compactor {
 pub type CompactOutput = (usize, Vec<SstableInfo>);
 
 impl Compactor {
-    /// Tries to schedule on current runtime if `compaction_executor` is None.
-    fn request_execution<T: Send + 'static>(
-        compaction_executor: Arc<CompactionExecutor>,
-        split_task: impl Future<Output = T> + Send + 'static,
-    ) -> JoinHandle<T> {
-        compaction_executor.send_request(split_task)
-    }
-
     /// Handles a compaction task and reports its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(
@@ -361,6 +352,7 @@ impl Compactor {
                         continue 'start_stream;
                     }
                 };
+                let executor = compactor_context.context.compaction_executor.clone();
 
                 // This inner loop is to consume stream.
                 'consume_stream: loop {
@@ -384,32 +376,29 @@ impl Compactor {
 
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
-                            Compactor::request_execution(
-                                compactor_context.context.compaction_executor.clone(),
-                                async move {
-                                    match task {
-                                        Task::CompactTask(compact_task) => {
-                                            Compactor::compact(context, compact_task).await;
-                                        }
-                                        Task::VacuumTask(vacuum_task) => {
-                                            Vacuum::vacuum(
-                                                vacuum_task,
-                                                context.context.sstable_store.clone(),
-                                                meta_client,
-                                            )
-                                            .await;
-                                        }
-                                        Task::FullScanTask(full_scan_task) => {
-                                            Vacuum::full_scan(
-                                                full_scan_task,
-                                                context.context.sstable_store.clone(),
-                                                meta_client,
-                                            )
-                                            .await;
-                                        }
+                            executor.execute(async move {
+                                match task {
+                                    Task::CompactTask(compact_task) => {
+                                        Compactor::compact(context, compact_task).await;
                                     }
-                                },
-                            );
+                                    Task::VacuumTask(vacuum_task) => {
+                                        Vacuum::vacuum(
+                                            vacuum_task,
+                                            context.context.sstable_store.clone(),
+                                            meta_client,
+                                        )
+                                        .await;
+                                    }
+                                    Task::FullScanTask(full_scan_task) => {
+                                        Vacuum::full_scan(
+                                            full_scan_task,
+                                            context.context.sstable_store.clone(),
+                                            meta_client,
+                                        )
+                                        .await;
+                                    }
+                                }
+                            });
                         }
                         Err(e) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());

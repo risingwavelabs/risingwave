@@ -41,7 +41,7 @@ impl CompactionExecutor {
         Self { runtime: None }
     }
 
-    pub fn send_request<F, T>(&self, t: F) -> JoinHandle<T>
+    pub fn execute<F, T>(&self, t: F) -> JoinHandle<T>
     where
         F: Future<Output = T> + Send + 'static,
         T: Send + 'static,
