@@ -56,6 +56,7 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
         batch_index: None,
         ack_set: vec![],
         batch_size: None,
+        first_chunk_message_id: None,
     };
 
     if splits.len() > 2 {
