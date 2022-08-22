@@ -15,7 +15,7 @@
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
 
-use risingwave_common::cache::CachableEntry;
+use risingwave_common::cache::CacheableEntry;
 
 pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
 
@@ -43,7 +43,7 @@ where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
-    Cache(CachableEntry<K, V>),
+    Cache(CacheableEntry<K, V>),
     Owned(Box<V>),
 }
 
@@ -61,7 +61,7 @@ where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
-    pub fn from_cached_value(entry: CachableEntry<K, V>) -> Self {
+    pub fn from_cached_value(entry: CacheableEntry<K, V>) -> Self {
         let ptr = entry.value() as *const _;
         Self {
             handle: TieredCacheEntry::Cache(entry),

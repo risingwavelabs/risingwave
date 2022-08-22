@@ -18,25 +18,28 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 
 use super::*;
-use crate::executor::TopNExecutor;
+use crate::executor::GroupTopNExecutor;
 
-pub struct TopNExecutorNewBuilder;
+pub struct GroupTopNExecutorBuilder;
 
-impl ExecutorBuilder for TopNExecutorNewBuilder {
+impl ExecutorBuilder for GroupTopNExecutorBuilder {
     fn new_boxed_executor(
-        params: ExecutorParams,
+        mut params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
-        let [input]: [_; 1] = params.input.try_into().unwrap();
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GroupTopN)?;
         let limit = if node.limit == 0 {
             None
         } else {
             Some(node.limit as usize)
         };
-
+        let group_by = node
+            .get_group_key()
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect();
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = RowBasedStateTable::from_table_catalog(table, store, vnodes);
@@ -50,14 +53,16 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             .iter()
             .map(|idx| *idx as usize)
             .collect();
-        Ok(TopNExecutor::new(
-            input,
+
+        Ok(GroupTopNExecutor::new(
+            params.input.remove(0),
             order_pairs,
             (node.offset as usize, limit),
             params.pk_indices,
             0,
             params.executor_id,
             key_indices,
+            group_by,
             state_table,
         )?
         .boxed())

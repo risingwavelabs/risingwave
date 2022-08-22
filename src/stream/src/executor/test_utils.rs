@@ -277,3 +277,31 @@ pub mod agg_executor {
         )
     }
 }
+
+pub mod top_n_executor {
+    use itertools::Itertools;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
+
+    pub fn create_in_memory_state_table(
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+    ) -> RowBasedStateTable<MemoryStateStore> {
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+        RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            TableId::new(0),
+            column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+        )
+    }
+}

@@ -179,7 +179,8 @@ pub mod tests {
             LevelHandler::new(2),
         ];
 
-        // pick a non-overlapping files. It means that this file could be trival move to next level.
+        // pick a non-overlapping files. It means that this file could be trivial move to next
+        // level.
         let ret = picker.pick_compaction(&levels, &level_handlers).unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
@@ -244,7 +245,8 @@ pub mod tests {
             LevelHandler::new(2),
         ];
 
-        // pick a non-overlapping files. It means that this file could be trival move to next level.
+        // pick a non-overlapping files. It means that this file could be trivial move to next
+        // level.
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.input_levels[1].level_idx, 2);

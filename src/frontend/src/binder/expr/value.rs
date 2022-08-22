@@ -107,20 +107,21 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_index(&mut self, obj: Expr, indexs: Vec<Expr>) -> Result<ExprImpl> {
+    pub(super) fn bind_array_index(&mut self, obj: Expr, indices: Vec<Expr>) -> Result<ExprImpl> {
         let obj = self.bind_expr(obj)?;
         match obj.return_type() {
             DataType::List {
                 datatype: return_type,
             } => {
-                let mut indexs = indexs
+                let mut indices = indices
                     .into_iter()
                     .map(|e| self.bind_expr(e))
                     .collect::<Result<Vec<ExprImpl>>>()?;
-                indexs.insert(0, obj);
+                indices.insert(0, obj);
 
                 let expr: ExprImpl =
-                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indexs, *return_type).into();
+                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indices, *return_type)
+                        .into();
                 Ok(expr)
             }
             data_type => Err(ErrorCode::BindError(format!(

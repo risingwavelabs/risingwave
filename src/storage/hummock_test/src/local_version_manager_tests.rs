@@ -112,7 +112,7 @@ async fn test_update_pinned_version() {
     let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[0], &(..));
     assert!(read_version.replicated_batches.is_empty());
     assert_eq!(
-        read_version.shared_buffer_datas,
+        read_version.shared_buffer_data,
         vec![vec![vec![UncommittedData::Batch(build_batch(
             batches[0].clone(),
             epochs[0]
@@ -122,7 +122,7 @@ async fn test_update_pinned_version() {
     let read_version = local_version_manager.read_filter::<_, &[u8]>(epochs[1], &(..));
     assert!(read_version.replicated_batches.is_empty());
     assert_eq!(
-        read_version.shared_buffer_datas,
+        read_version.shared_buffer_data,
         vec![
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[1].clone(),
@@ -141,7 +141,7 @@ async fn test_update_pinned_version() {
         vec![vec![build_batch(batches[2].clone(), epochs[2])]]
     );
     assert_eq!(
-        read_version.shared_buffer_datas,
+        read_version.shared_buffer_data,
         vec![
             vec![vec![UncommittedData::Batch(build_batch(
                 batches[1].clone(),

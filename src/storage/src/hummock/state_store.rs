@@ -99,9 +99,9 @@ impl HummockStorage {
 
         let ReadVersion {
             replicated_batches,
-            shared_buffer_datas,
+            shared_buffer_data,
             pinned_version,
-            sync_uncommitted_datas,
+            sync_uncommitted_data,
         } = self.read_filter(&read_options, &key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
@@ -111,7 +111,7 @@ impl HummockStorage {
                 overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
             }
         }
-        for uncommitted_data in shared_buffer_datas {
+        for uncommitted_data in shared_buffer_data {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
@@ -123,7 +123,7 @@ impl HummockStorage {
                 .await?,
             ));
         }
-        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
@@ -280,9 +280,9 @@ impl HummockStorage {
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             replicated_batches,
-            shared_buffer_datas,
+            shared_buffer_data,
             pinned_version,
-            sync_uncommitted_datas,
+            sync_uncommitted_data,
         } = self.read_filter(&read_options, &(key..=key))?;
 
         let mut table_counts = 0;
@@ -298,7 +298,7 @@ impl HummockStorage {
         }
 
         // Query shared buffer. Return the value without iterating SSTs if found
-        for uncommitted_data in shared_buffer_datas {
+        for uncommitted_data in shared_buffer_data {
             // iterate over uncommitted data in order index in descending order
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
@@ -314,7 +314,7 @@ impl HummockStorage {
             }
             table_counts += table_count;
         }
-        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,

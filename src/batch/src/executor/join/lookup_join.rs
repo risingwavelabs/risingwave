@@ -149,7 +149,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `ProstExchangeSource` using the given `id`.
     fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
         let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
-            internal_error("No worker node found for hte given parallel unit id.")
+            internal_error("No worker node found for the given parallel unit id.")
         })?;
 
         let local_execute_plan = LocalExecutePlan {
