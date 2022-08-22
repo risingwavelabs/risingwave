@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::sort_util::OrderType;
 
+use super::utils::TableCatalogBuilder;
 use super::{
     gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
     ToBatch, ToStream,
@@ -27,6 +30,7 @@ use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
+use crate::TableCatalog;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -95,6 +99,34 @@ impl LogicalTopN {
             .field("limit", &format_args!("{}", self.limit()))
             .field("offset", &format_args!("{}", self.offset()))
             .finish()
+    }
+
+    pub fn infer_internal_table_catalog(&self) -> TableCatalog {
+        let schema = &self.base.schema;
+        let dist_keys = self.base.dist.dist_column_indices().to_vec();
+        let pk_indices = &self.base.logical_pk;
+        let columns_fields = schema.fields().to_vec();
+        let field_order = &self.order.field_order;
+        let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+
+        columns_fields.iter().for_each(|field| {
+            internal_table_catalog_builder.add_column(field);
+        });
+        let mut order_cols = HashSet::new();
+
+        field_order.iter().for_each(|field_order| {
+            internal_table_catalog_builder
+                .add_order_column(field_order.index, OrderType::from(field_order.direct));
+            order_cols.insert(field_order.index);
+        });
+
+        pk_indices.iter().for_each(|idx| {
+            if !order_cols.contains(idx) {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+                order_cols.insert(*idx);
+            }
+        });
+        internal_table_catalog_builder.build(dist_keys, self.base.append_only)
     }
 }
 

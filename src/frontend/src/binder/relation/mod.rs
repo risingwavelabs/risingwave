@@ -209,7 +209,7 @@ impl Binder {
                 field,
             ));
             self.context
-                .indexs_of
+                .indices_of
                 .entry(name)
                 .or_default()
                 .push(self.context.columns.len() - 1);

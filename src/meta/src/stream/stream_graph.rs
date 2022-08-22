@@ -524,6 +524,19 @@ impl StreamGraphBuilder {
             ctx.internal_table_id_map.entry(table_id).or_insert(table);
         };
 
+        let mut update_table = |table: &mut Table, table_type_name: &str| {
+            table.id += table_id_offset;
+            table.schema_id = ctx.schema_id;
+            table.database_id = ctx.database_id;
+            table.name = generate_internal_table_name_with_type(
+                &ctx.mview_name,
+                fragment_id.as_global_id(),
+                table.id,
+                table_type_name,
+            );
+            check_and_fill_internal_table(table.id, Some(table.clone()));
+        };
+
         match stream_node.get_node_body()? {
             NodeBody::Exchange(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
@@ -536,28 +549,10 @@ impl StreamGraphBuilder {
                 match new_stream_node.node_body.as_mut().unwrap() {
                     NodeBody::HashJoin(node) => {
                         if let Some(table) = &mut node.left_table {
-                            table.id += table_id_offset;
-                            table.schema_id = ctx.schema_id;
-                            table.database_id = ctx.database_id;
-                            table.name = generate_internal_table_name_with_type(
-                                &ctx.mview_name,
-                                fragment_id.as_global_id(),
-                                table.id,
-                                "HashJoinLeft",
-                            );
-                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                            update_table(table, "HashJoinLeft");
                         }
                         if let Some(table) = &mut node.right_table {
-                            table.id += table_id_offset;
-                            table.schema_id = ctx.schema_id;
-                            table.database_id = ctx.database_id;
-                            table.name = generate_internal_table_name_with_type(
-                                &ctx.mview_name,
-                                fragment_id.as_global_id(),
-                                table.id,
-                                "HashJoinRight",
-                            );
-                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                            update_table(table, "HashJoinRight");
                         }
                     }
 
@@ -574,16 +569,7 @@ impl StreamGraphBuilder {
 
                     NodeBody::Arrange(node) => {
                         if let Some(table) = &mut node.table {
-                            table.id += table_id_offset;
-                            table.schema_id = ctx.schema_id;
-                            table.database_id = ctx.database_id;
-                            table.name = generate_internal_table_name_with_type(
-                                &ctx.mview_name,
-                                fragment_id.as_global_id(),
-                                table.id,
-                                "ArrangeNode",
-                            );
-                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                            update_table(table, "ArrangeNode");
                         }
                     }
 
@@ -591,69 +577,44 @@ impl StreamGraphBuilder {
                         assert_eq!(node.internal_tables.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
                         for table in &mut node.internal_tables {
-                            table.id += table_id_offset;
-                            table.schema_id = ctx.schema_id;
-                            table.database_id = ctx.database_id;
-                            table.name = generate_internal_table_name_with_type(
-                                &ctx.mview_name,
-                                fragment_id.as_global_id(),
-                                table.id,
-                                "HashAgg",
-                            );
-                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                            update_table(table, "HashAgg");
                         }
                     }
 
-                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
+                    NodeBody::AppendOnlyTopN(node) => {
                         node.table_id_l += table_id_offset;
                         node.table_id_h += table_id_offset;
 
-                        // TODO add catalog::Table to TopNNode
+                        // TODO add catalog::Table to AppendOnlyTopN
                         check_and_fill_internal_table(node.table_id_l, None);
                         check_and_fill_internal_table(node.table_id_h, None);
+                    }
+                    NodeBody::TopN(node) => {
+                        if let Some(table) = &mut node.table {
+                            update_table(table, "TopNNode");
+                        }
+                    }
+
+                    NodeBody::GroupTopN(node) => {
+                        if let Some(table) = &mut node.table {
+                            update_table(table, "GroupTopNNode");
+                        }
                     }
 
                     NodeBody::GlobalSimpleAgg(node) => {
                         assert_eq!(node.internal_tables.len(), node.agg_calls.len());
                         // In-place update the table id. Convert from local to global.
                         for table in &mut node.internal_tables {
-                            table.id += table_id_offset;
-                            table.schema_id = ctx.schema_id;
-                            table.database_id = ctx.database_id;
-                            table.name = generate_internal_table_name_with_type(
-                                &ctx.mview_name,
-                                fragment_id.as_global_id(),
-                                table.id,
-                                "GlobalSimpleAgg",
-                            );
-                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                            update_table(table, "GlobalSimpleAgg");
                         }
                     }
 
                     NodeBody::DynamicFilter(node) => {
                         if let Some(table) = &mut node.left_table {
-                            table.id += table_id_offset;
-                            table.schema_id = ctx.schema_id;
-                            table.database_id = ctx.database_id;
-                            table.name = generate_internal_table_name_with_type(
-                                &ctx.mview_name,
-                                fragment_id.as_global_id(),
-                                table.id,
-                                "DynamicFilterLeft",
-                            );
-                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                            update_table(table, "DynamicFilterLeft");
                         }
                         if let Some(table) = &mut node.right_table {
-                            table.id += table_id_offset;
-                            table.schema_id = ctx.schema_id;
-                            table.database_id = ctx.database_id;
-                            table.name = generate_internal_table_name_with_type(
-                                &ctx.mview_name,
-                                fragment_id.as_global_id(),
-                                table.id,
-                                "DynamicFilterRight",
-                            );
-                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                            update_table(table, "DynamicFilterRight");
                         }
                     }
                     _ => {}
@@ -665,7 +626,7 @@ impl StreamGraphBuilder {
                             assert!(!input.get_fields().is_empty());
                             new_stream_node.input[idx] = StreamNode {
                                 input: vec![],
-                                pk_indices: input.pk_indices.clone(),
+                                stream_key: input.stream_key.clone(),
                                 node_body: Some(NodeBody::Merge(MergeNode {
                                     upstream_actor_id: upstream_actor_id
                                         .remove(&input.get_operator_id())
@@ -715,7 +676,7 @@ impl StreamGraphBuilder {
         let chain_input = vec![
             StreamNode {
                 input: vec![],
-                pk_indices: stream_node.pk_indices.clone(),
+                stream_key: stream_node.stream_key.clone(),
                 node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: vec![],
                     upstream_fragment_id: 0,
@@ -731,7 +692,7 @@ impl StreamGraphBuilder {
 
         Ok(StreamNode {
             input: chain_input,
-            pk_indices: stream_node.pk_indices.clone(),
+            stream_key: stream_node.stream_key.clone(),
             node_body: Some(NodeBody::Chain(chain_node.clone())),
             operator_id: stream_node.operator_id,
             identity: "ChainExecutor".to_string(),
