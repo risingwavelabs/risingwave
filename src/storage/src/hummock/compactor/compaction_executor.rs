@@ -38,7 +38,9 @@ impl CompactionExecutor {
     //        this is a workaround to make it compile.
     #[cfg(madsim)]
     pub fn new(_worker_threads_num: Option<usize>) -> Self {
-        Self { runtime: None }
+        Self {
+            runtime: Option::<tokio::runtime::Runtime>::None,
+        }
     }
 
     pub fn execute<F, T>(&self, t: F) -> JoinHandle<T>
@@ -49,6 +51,17 @@ impl CompactionExecutor {
         match self.runtime.as_ref() {
             Some(runtime) => runtime.spawn(t),
             None => tokio::spawn(t),
+        }
+    }
+}
+
+impl Drop for CompactionExecutor {
+    fn drop(&mut self) {
+        match self.runtime.take() {
+            Some(runtime) => {
+                runtime.shutdown_background();
+            }
+            None => (),
         }
     }
 }
