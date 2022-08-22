@@ -28,9 +28,9 @@ async fn main() -> Result<()> {
             "{}{}{}{}{}",
             style("ERROR: ").red().bold(),
             style("apply-planner-test").yellow(),
-            style(" paniced! Try ").red().bold(),
+            style(" panicked! Try ").red().bold(),
             style("run-planner-test").yellow(),
-            style(" to find which test case paniced.").red().bold()
+            style(" to find which test case panicked.").red().bold()
         );
         std::process::abort();
     }));
