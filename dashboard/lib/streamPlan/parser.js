@@ -157,10 +157,10 @@ export default class StreamPlanParser {
   /**
    * Randomly select a actor to represent its
    * fragment, and append a property named `representedActorList`
-   * to store all the other actors in the same fragement.
+   * to store all the other actors in the same fragment.
    * 
    * Actors are degree of parallelism of a fragment, such that one of 
-   * the actor in a fragement can represent all the other actor in
+   * the actor in a fragment can represent all the other actor in
    * the same fragment. 
    * 
    * @returns A Set containing actors representing its fragment.

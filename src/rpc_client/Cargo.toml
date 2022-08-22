@@ -8,7 +8,6 @@ anyhow = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-log = "0.4"
 moka = { version = "0.9", features = ["future"] }
 paste = "1"
 risingwave_common = { path = "../common" }
@@ -24,6 +23,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-retry = "0.3"
-tonic = { version = "0.2", package = "madsim-tonic" }
-tracing = { version = "0.1" }
+tonic = { version = "0.2.1", package = "madsim-tonic" }
+tracing = "0.1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

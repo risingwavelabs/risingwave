@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
+use futures::Future;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
@@ -50,6 +51,10 @@ lazy_static::lazy_static! {
 pub type ActorHandle = JoinHandle<()>;
 
 pub struct LocalStreamManagerCore {
+    /// Runtime for the streaming actors.
+    #[cfg(not(madsim))]
+    runtime: &'static tokio::runtime::Runtime,
+
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
@@ -60,8 +65,8 @@ pub struct LocalStreamManagerCore {
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
 
-    /// Stores all actor tokio runtime montioring tasks.
-    actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
+    /// Stores all actor tokio runtime monitoring tasks.
+    actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
 
     /// The state store implement
     state_store: StateStoreImpl,
@@ -217,16 +222,16 @@ impl LocalStreamManager {
         result
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> Vec<LocalSstableInfo> {
+    pub async fn sync_epoch(&self, epoch: u64) -> (Vec<LocalSstableInfo>, bool) {
         let timer = self
             .core
             .lock()
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        let local_sst_info = dispatch_state_store!(self.state_store(), store, {
+        let (local_sst_info, sync_succeed) = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
-                Ok((_, ssts)) => ssts,
+                Ok(sync_result) => (sync_result.uncommitted_ssts, sync_result.sync_succeed),
                 // TODO: Handle sync failure by propagating it back to global barrier manager
                 Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
@@ -235,7 +240,7 @@ impl LocalStreamManager {
             }
         });
         timer.observe_duration();
-        local_sst_info
+        (local_sst_info, sync_succeed)
     }
 
     pub async fn clear_storage_buffer(&self) {
@@ -285,6 +290,7 @@ impl LocalStreamManager {
         let barrier = &Barrier {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
+            checkpoint: true,
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
@@ -369,7 +375,25 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
     ) -> Self {
+        #[cfg(not(madsim))]
+        let runtime = {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
+                builder.worker_threads(worker_threads_num);
+            }
+            builder
+                .thread_name("risingwave-streaming-actor")
+                .enable_all()
+                .build()
+                .unwrap()
+        };
+
         Self {
+            // Leak the runtime to avoid runtime shutting-down in the main async context.
+            // TODO: may manually shutdown the runtime after we implement graceful shutdown for
+            // stream manager.
+            #[cfg(not(madsim))]
+            runtime: Box::leak(Box::new(runtime)),
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
@@ -449,7 +473,7 @@ impl LocalStreamManagerCore {
             .try_collect()?;
 
         let pk_indices = node
-            .get_pk_indices()
+            .get_stream_key()
             .iter()
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
@@ -522,6 +546,19 @@ impl LocalStreamManagerCore {
         .boxed()
     }
 
+    /// Spawn a task using the actor runtime. Fallback to the main runtime if `madsim` is enabled.
+    #[inline(always)]
+    fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        #[cfg(not(madsim))]
+        return self.runtime.spawn(future);
+        #[cfg(madsim)]
+        return tokio::spawn(future);
+    }
+
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
@@ -564,14 +601,14 @@ impl LocalStreamManagerCore {
                     *ENABLE_ASYNC_STACK_TRACE,
                 );
                 let instrumented = monitor.instrument(traced);
-                tokio::spawn(instrumented)
+                self.spawn(instrumented)
             };
             self.handles.insert(actor_id, handle);
 
             let actor_id_str = actor_id.to_string();
 
             let metrics = self.streaming_metrics.clone();
-            let task = tokio::spawn(async move {
+            let actor_monitor_task = self.spawn(async move {
                 loop {
                     metrics
                         .actor_execution_time
@@ -620,7 +657,8 @@ impl LocalStreamManagerCore {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });
-            self.actor_monitor_tasks.insert(actor_id, task);
+            self.actor_monitor_tasks
+                .insert(actor_id, actor_monitor_task);
         }
 
         Ok(())

@@ -36,6 +36,7 @@ pub type SstableIdManagerRef = Arc<SstableIdManager>;
 /// During full GC, SST in object store with id >= watermark SST id will be excluded from orphan SST
 /// candidate and thus won't be deleted.
 pub struct SstableIdManager {
+    // Lock order: `notifier` before `available_sst_ids`.
     notifier: Mutex<Option<Arc<Notify>>>,
     available_sst_ids: Mutex<SstIdRange>,
     remote_fetch_number: u32,
@@ -109,17 +110,24 @@ impl SstableIdManager {
                     return Err(err);
                 }
             };
-            let mut guard = self.available_sst_ids.lock();
-            let available_sst_ids = guard.deref_mut();
-            if new_sst_ids.start_id < available_sst_ids.end_id {
-                self.notifier.lock().take().unwrap().notify_one();
-                return Err(HummockError::meta_error(format!(
-                    "SST id moves backwards. new {} < old {}",
-                    new_sst_ids.start_id, available_sst_ids.end_id
-                )));
-            }
-            *available_sst_ids = new_sst_ids;
+            let err = {
+                let mut guard = self.available_sst_ids.lock();
+                let available_sst_ids = guard.deref_mut();
+                let mut err = None;
+                if new_sst_ids.start_id < available_sst_ids.end_id {
+                    err = Some(Err(HummockError::meta_error(format!(
+                        "SST id moves backwards. new {} < old {}",
+                        new_sst_ids.start_id, available_sst_ids.end_id
+                    ))));
+                } else {
+                    *available_sst_ids = new_sst_ids;
+                }
+                err
+            };
             self.notifier.lock().take().unwrap().notify_one();
+            if let Some(err) = err {
+                return err;
+            }
         }
     }
 
