@@ -21,7 +21,7 @@ pub(super) async fn handle_flush(context: OptimizerContext) -> Result<PgResponse
     let client = context.session_ctx.env().meta_client();
     // The returned epoch >= epoch for flush, but it is okay.
     let max_epoch = client.flush().await?;
-    // Update max committed epoch to ensure read-after-write correctness.
+    // Update max epoch to ensure read-after-write correctness.
     context
         .session_ctx
         .env()

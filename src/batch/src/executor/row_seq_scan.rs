@@ -215,7 +215,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
-                let iter = table.batch_iter(source.epoch).await?;
+                let iter = table
+                    .batch_iter(HummockReadEpoch::Committed(source.epoch))
+                    .await?;
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
                     vec![ScanType::BatchScan(iter)],

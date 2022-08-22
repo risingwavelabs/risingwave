@@ -70,7 +70,8 @@ impl QueryManager {
         let epoch = self
             .hummock_snapshot_manager
             .get_epoch(query_id.clone())
-            .await?;
+            .await?
+            .committed_epoch;
 
         let query_execution = QueryExecution::new(
             query,

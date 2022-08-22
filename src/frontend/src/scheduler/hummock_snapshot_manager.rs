@@ -35,9 +35,15 @@ const UNPIN_INTERVAL_SECS: u64 = 10;
 pub struct HummockSnapshotManager {
     /// Send epoch-related operations to `HummockSnapshotManagerCore` for async batch handling.
     sender: Sender<EpochOperation>,
-    /// The value is pushed from meta node to reduce rpc number.
+
+    /// The `max_committed_epoch` and `max_current_epoch` are pushed from meta node to reduce rpc
+    /// number.
     max_committed_epoch: Arc<AtomicU64>,
 
+    /// We have two epoch(committed and current), We only use `committed_epoch` to pin or unpin,
+    /// because `committed_epoch` always less or equal `current_epoch`, and the data with
+    /// `current_epoch` is always in the shared buffer, so it will never be gc before the data
+    /// of `committed_epoch`.
     max_current_epoch: Arc<AtomicU64>,
 }
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
@@ -45,7 +51,7 @@ pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 enum EpochOperation {
     RequestEpoch {
         query_id: QueryId,
-        sender: Callback<SchedulerResult<u64>>,
+        sender: Callback<SchedulerResult<HummockAllEpoch>>,
     },
     ReleaseEpoch {
         query_id: QueryId,
@@ -125,7 +131,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn get_epoch(&self, query_id: QueryId) -> SchedulerResult<u64> {
+    pub async fn get_epoch(&self, query_id: QueryId) -> SchedulerResult<HummockAllEpoch> {
         let (sender, rc) = once_channel();
         let msg = EpochOperation::RequestEpoch {
             query_id: query_id.clone(),
@@ -196,15 +202,13 @@ impl HummockSnapshotManagerCore {
     /// better epoch freshness.
     async fn get_epoch_for_query_from_rpc(
         &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
-    ) -> u64 {
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockAllEpoch>>)>,
+    ) -> HummockAllEpoch {
         let ret = self.meta_client.get_epoch().await;
         match ret {
-            Ok(HummockAllEpoch {
-                committed_epoch, ..
-            }) => {
-                self.notify_epoch_assigned_for_queries(committed_epoch, batches);
-                committed_epoch
+            Ok(all_epoch) => {
+                self.notify_epoch_assigned_for_queries(all_epoch.clone(), batches);
+                all_epoch
             }
             Err(e) => {
                 for (id, cb) in batches.drain(..) {
@@ -214,41 +218,51 @@ impl HummockSnapshotManagerCore {
                         e
                     ))));
                 }
-                INVALID_EPOCH
+                HummockAllEpoch {
+                    committed_epoch: INVALID_EPOCH,
+                    current_epoch: INVALID_EPOCH,
+                }
             }
         }
     }
 
-    /// Retrieve max committed epoch from locally cached value, which is maintained
-    /// by meta's notification service.
+    /// Retrieve max committed epoch and max current epoch from locally cached value, which is
+    /// maintained by meta's notification service.
     fn get_epoch_for_query_from_push(
         &mut self,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockAllEpoch>>)>,
     ) -> HummockAllEpoch {
         let committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
         let current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
-        self.notify_epoch_assigned_for_queries(committed_epoch, batches);
-        HummockAllEpoch {
+        let all_epoch = HummockAllEpoch {
             committed_epoch,
             current_epoch,
-        }
+        };
+
+        self.notify_epoch_assigned_for_queries(all_epoch.clone(), batches);
+        all_epoch
     }
 
+    /// Add committed epoch in `epoch_to_query_ids`, notify queries with committed epoch and current
+    /// epoch
     fn notify_epoch_assigned_for_queries(
         &mut self,
-        epoch: u64,
-        batches: &mut Vec<(QueryId, Callback<SchedulerResult<u64>>)>,
+        all_epoch: HummockAllEpoch,
+        batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockAllEpoch>>)>,
     ) {
-        let queries = match self.epoch_to_query_ids.get_mut(&epoch) {
+        let committed_epoch = all_epoch.committed_epoch;
+        let queries = match self.epoch_to_query_ids.get_mut(&committed_epoch) {
             None => {
-                self.epoch_to_query_ids.insert(epoch, HashSet::default());
-                self.epoch_to_query_ids.get_mut(&epoch).unwrap()
+                self.epoch_to_query_ids
+                    .insert(committed_epoch, HashSet::default());
+                self.epoch_to_query_ids.get_mut(&committed_epoch).unwrap()
             }
             Some(queries) => queries,
         };
         for (id, cb) in batches.drain(..) {
             queries.insert(id);
-            let _ = cb.send(Ok(epoch));
+            let _ = cb.send(Ok(all_epoch.clone()
+            ));
         }
     }
 

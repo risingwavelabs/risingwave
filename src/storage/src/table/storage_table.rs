@@ -788,16 +788,11 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S, RS>> {
-        self.batch_iter_with_pk_bounds(HummockReadEpoch::Committed(epoch), Row::empty(), ..)
-            .await
-    }
-
-    pub async fn batch_iter_no_checkpoint(
+    pub async fn batch_iter(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        self.batch_iter_with_pk_bounds(HummockReadEpoch::Current(epoch), Row::empty(), ..)
+        self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
 
@@ -806,7 +801,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
     pub async fn batch_dedup_pk_iter(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<BatchDedupPkIter<S, RS>> {
