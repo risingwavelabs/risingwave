@@ -51,13 +51,14 @@ pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
 pub mod store;
 pub mod vacuum;
+mod validator;
 pub mod value;
-
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+pub use validator::*;
 use value::*;
 
 use self::iterator::HummockIterator;

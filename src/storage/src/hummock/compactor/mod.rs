@@ -61,8 +61,8 @@ use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
 use crate::hummock::utils::{MemoryLimiter, MemoryTracker};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, SstableStoreWrite,
-    DEFAULT_ENTRY_SIZE,
+    validate_ssts, CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef,
+    SstableStoreWrite, DEFAULT_ENTRY_SIZE,
 };
 
 pub struct RemoteBuilderFactory {
@@ -413,6 +413,13 @@ impl Compactor {
                                             full_scan_task,
                                             context.context.sstable_store.clone(),
                                             meta_client,
+                                        )
+                                        .await;
+                                    }
+                                    Task::ValidationTask(validation_task) => {
+                                        validate_ssts(
+                                            validation_task,
+                                            context.context.sstable_store.clone(),
                                         )
                                         .await;
                                     }

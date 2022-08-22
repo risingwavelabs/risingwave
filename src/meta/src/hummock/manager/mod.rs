@@ -36,7 +36,7 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
-    LevelType, OverlappingLevel,
+    LevelType, OverlappingLevel, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -986,6 +986,42 @@ where
                     compaction_group_id
                 );
             }
+        }
+
+        if self.env.opts.enable_committed_sst_sanity_check {
+            async {
+                if sstables.is_empty() {
+                    return;
+                }
+                let epoch = match epoch {
+                    EpochType::CommittedEpoch(epoch) => epoch,
+                    EpochType::CurrentEpoch(_) => {
+                        return;
+                    }
+                };
+                let compactor = match self.compactor_manager.random_compactor() {
+                    None => {
+                        tracing::warn!(
+                            "Skip committed SST sanity check due to no available worker"
+                        );
+                        return;
+                    }
+                    Some(compactor) => compactor,
+                };
+                let sst_ids = sstables.iter().map(|(_, sst_id)| sst_id.id).collect_vec();
+                if compactor
+                    .send_task(Task::ValidationTask(ValidationTask {
+                        sst_ids,
+                        sst_id_to_worker_id: sst_to_context.clone(),
+                        epoch,
+                    }))
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Skip committed SST sanity check due to send failure");
+                }
+            }
+            .await;
         }
 
         let mut versioning_guard = write_lock!(self, versioning).await;
