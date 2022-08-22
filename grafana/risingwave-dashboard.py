@@ -199,7 +199,10 @@ def section_compaction(panels):
         ]),
         panels.timeseries_count("Compaction Count", [
             panels.target(
-                "storage_level_compact_frequency", "{{job}} @ {{instance}} @ Group-{{group}} @ Level-{{level_index}}"
+                "sum(storage_level_compact_frequency) by (instance)", "{{instance}} - total"
+            ),
+            panels.target(
+                "sum(storage_level_compact_frequency) by (instance, group)", "{{instance}} - group{{group}}"
             ),
         ]),
 
