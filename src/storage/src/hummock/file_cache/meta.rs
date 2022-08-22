@@ -69,7 +69,7 @@ impl BlockLoc {
 
 /// [`MetaFile`] is a memory mapped file to record the locations of the cache file entries.
 ///
-/// The entrie file will be memory mapped to a memory buffer.
+/// The entire file will be memory mapped to a memory buffer.
 pub struct MetaFile<K>
 where
     K: TieredCacheKey,

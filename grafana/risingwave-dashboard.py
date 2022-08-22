@@ -462,7 +462,7 @@ def section_streaming_actors(outer_panels):
             ]),
             panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
                 panels.target(
-                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upsteam_fragment_id}}"
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upstream_fragment_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
@@ -1248,7 +1248,7 @@ def section_grpc_hummock_meta_client(outer_panels):
                     "sum(irate(state_store_get_new_sst_ids_latency_counts[$__rate_interval]))by(job,instance)", "get_new_sst_ids_latency_counts - {{instance}} "
                 ),
             ]),
-            panels.timeseries_latency("compation_latency", [
+            panels.timeseries_latency("compaction_latency", [
                 panels.target(
                     "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[$__rate_interval])) by (le, job, instance))", "report_compaction_task_latency_p50 - {{instance}}"
                 ),

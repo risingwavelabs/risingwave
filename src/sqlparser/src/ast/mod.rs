@@ -328,7 +328,7 @@ pub enum Expr {
     /// e.g. {1, 2, 3},
     Array(Vec<Expr>),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
-    ArrayIndex { obj: Box<Expr>, indexs: Vec<Expr> },
+    ArrayIndex { obj: Box<Expr>, indices: Vec<Expr> },
 }
 
 impl fmt::Display for Expr {
@@ -515,9 +515,9 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
-            Expr::ArrayIndex { obj, indexs } => {
+            Expr::ArrayIndex { obj, indices } => {
                 write!(f, "{}", obj)?;
-                for i in indexs {
+                for i in indices {
                     write!(f, "[{}]", i)?;
                 }
                 Ok(())
@@ -847,7 +847,7 @@ pub enum Statement {
     /// SET <variable>
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
-    /// least MySQL and PostgreSQL. Not all MySQL-specific syntatic forms are
+    /// least MySQL and PostgreSQL. Not all MySQL-specific syntactic forms are
     /// supported yet.
     SetVariable {
         local: bool,

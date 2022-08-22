@@ -98,14 +98,14 @@ impl HummockStorage {
         let mut overlapped_iters = vec![];
 
         let ReadVersion {
-            shared_buffer_datas,
+            shared_buffer_data,
             pinned_version,
-            sync_uncommitted_datas,
+            sync_uncommitted_data,
         } = self.read_filter(&read_options, &key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
 
-        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
+        for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
                 overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
             }
@@ -120,7 +120,7 @@ impl HummockStorage {
                 .await?,
             ));
         }
-        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
@@ -276,16 +276,16 @@ impl HummockStorage {
         };
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
-            shared_buffer_datas,
+            shared_buffer_data,
             pinned_version,
-            sync_uncommitted_datas,
+            sync_uncommitted_data,
         } = self.read_filter(&read_options, &(key..=key))?;
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
 
         // Query shared buffer. Return the value without iterating SSTs if found
-        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
+        for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
                 if let Some(v) = self.get_from_batch(&batch, key) {
                     return Ok(v);
@@ -306,7 +306,7 @@ impl HummockStorage {
             }
             table_counts += table_count;
         }
-        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,

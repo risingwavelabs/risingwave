@@ -264,14 +264,14 @@ where
         if request.table_id >= NON_RESERVED_PG_CATALOG_TABLE_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
-            if let Ok(table_frgament) = self
+            if let Ok(table_fragment) = self
                 .fragment_manager
                 .select_table_fragments_by_table_id(&table_id)
                 .await
             {
-                option.internal_table_id = HashSet::from_iter(table_frgament.internal_table_ids());
+                option.internal_table_id = HashSet::from_iter(table_fragment.internal_table_ids());
             }
-            option.internal_table_id.insert(request.table_id); // need to handle outter table_id
+            option.internal_table_id.insert(request.table_id); // need to handle outer table_id
                                                                // (mv)
         }
 

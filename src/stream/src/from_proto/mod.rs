@@ -21,6 +21,7 @@ mod dynamic_filter;
 mod expand;
 mod filter;
 mod global_simple_agg;
+mod group_top_n;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
@@ -51,6 +52,7 @@ use self::dynamic_filter::*;
 use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
+use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
@@ -126,5 +128,6 @@ pub fn create_executor(
         NodeBody::Expand => ExpandExecutorBuilder,
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
+        NodeBody::GroupTopN => GroupTopNExecutorBuilder,
     }
 }
