@@ -521,8 +521,6 @@ impl<S: StateStore> StateTable<S> {
             .then(|| self.compute_vnode(pk_prefix, &self.dist_key_in_pk_indices))
     }
 
-    /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
-    /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
         prefix_hint: Option<Vec<u8>>,
@@ -564,7 +562,6 @@ pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a,
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
 /// The row iterator of the storage table.
-/// The wrapper of [`StorageTableIter`] if pk is not persisted.
 pub type StorageIter<S: StateStore> = impl PkAndRowStream;
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
