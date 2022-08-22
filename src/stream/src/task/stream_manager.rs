@@ -60,7 +60,7 @@ pub struct LocalStreamManagerCore {
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
 
-    /// Stores all actor tokio runtime montioring tasks.
+    /// Stores all actor tokio runtime monitoring tasks.
     actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
 
     /// The state store implement

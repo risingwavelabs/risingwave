@@ -265,7 +265,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[3].table_infos.len(), 4);
         ret.add_pending_task(1, &mut levels_handler);
 
-        // the first idle table in L0 is table 6 and its confict with the last job so we can not
+        // the first idle table in L0 is table 6 and its conflict with the last job so we can not
         // pick table 7.
         let picker = LevelCompactionPicker::new(
             1,

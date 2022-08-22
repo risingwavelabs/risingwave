@@ -789,7 +789,7 @@ where
             .await
         {
             tracing::warn!(
-                "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                "Failed to unregister table {}. It will be unregistered eventually.\n{:#?}",
                 table_id,
                 e
             );
