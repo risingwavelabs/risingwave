@@ -22,7 +22,7 @@ use crate::hummock::HummockResult;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 pub struct CompactionExecutor {
-    // TODO: graceful shutdown
+    /// Runtime for compaction tasks.
     #[cfg(not(madsim))]
     runtime: &'static tokio::runtime::Runtime,
 }
@@ -40,6 +40,8 @@ impl CompactionExecutor {
         };
 
         Self {
+            // Leak the runtime to avoid runtime shutting-down in the main async context.
+            // TODO: may manually shutdown the runtime gracefully.
             runtime: Box::leak(Box::new(runtime)),
         }
     }

@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
+use futures::Future;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
@@ -50,6 +51,8 @@ lazy_static::lazy_static! {
 pub type ActorHandle = JoinHandle<()>;
 
 pub struct LocalStreamManagerCore {
+    /// Runtime for the streaming actors.
+    #[cfg(not(madsim))]
     runtime: &'static tokio::runtime::Runtime,
 
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -63,7 +66,7 @@ pub struct LocalStreamManagerCore {
     actors: HashMap<ActorId, stream_plan::StreamActor>,
 
     /// Stores all actor tokio runtime montioring tasks.
-    actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
+    actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
 
     /// The state store implement
     state_store: StateStoreImpl,
@@ -379,6 +382,10 @@ impl LocalStreamManagerCore {
             .unwrap();
 
         Self {
+            // Leak the runtime to avoid runtime shutting-down in the main async context.
+            // TODO: may manually shutdown the runtime after we implement graceful shutdown for
+            // stream manager.
+            #[cfg(not(madsim))]
             runtime: Box::leak(Box::new(runtime)),
             handles: HashMap::new(),
             context: Arc::new(context),
@@ -532,6 +539,19 @@ impl LocalStreamManagerCore {
         .boxed()
     }
 
+    /// Spawn a task using the actor runtime. Fallback to the main runtime if `madsim` is enabled.
+    #[inline(always)]
+    fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        #[cfg(not(madsim))]
+        return self.runtime.spawn(future);
+        #[cfg(madsim)]
+        return tokio::spawn(future);
+    }
+
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
@@ -574,14 +594,14 @@ impl LocalStreamManagerCore {
                     *ENABLE_ASYNC_STACK_TRACE,
                 );
                 let instrumented = monitor.instrument(traced);
-                self.runtime.spawn(instrumented)
+                self.spawn(instrumented)
             };
             self.handles.insert(actor_id, handle);
 
             let actor_id_str = actor_id.to_string();
 
             let metrics = self.streaming_metrics.clone();
-            let actor_monitor_task = self.runtime.spawn(async move {
+            let actor_monitor_task = self.spawn(async move {
                 loop {
                     metrics
                         .actor_execution_time
