@@ -145,7 +145,7 @@ impl Compactor {
             (tracker_id, sstable_id_manager_clone),
             |(tracker_id, sstable_id_manager)| {
                 tokio::spawn(async move {
-                    sstable_id_manager.remove_watermark_sst_id(tracker_id).await;
+                    sstable_id_manager.remove_watermark_sst_id(tracker_id);
                 });
             },
         );
