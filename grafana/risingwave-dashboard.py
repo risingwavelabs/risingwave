@@ -197,9 +197,9 @@ def section_compaction(panels):
                 "sum(storage_level_total_file_size) by (instance, level_index)", "L{{level_index}}"
             ),
         ]),
-        panels.timeseries_count("Compaction Count", [
+        panels.timeseries_count("Compaction Success & Failure Counts", [
             panels.target(
-                "storage_level_compact_frequency", "{{job}} @ {{instance}} @ Group-{{group}} @ Level-{{level_index}}"
+                "sum(storage_level_compact_frequency) by (instance, group, result)", "{{instance}} - {{result}} - group-{{group}}"
             ),
         ]),
 

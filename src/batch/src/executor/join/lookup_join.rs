@@ -169,7 +169,14 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
         let prost_exchange_source = ProstExchangeSource {
             task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId::default()),
+                task_id: Some(ProstTaskId {
+                    // FIXME: We should replace this random generated uuid to current query_id for
+                    // better dashboard. However, due to the lack of info of
+                    // stage_id and task_id, we can not do it now. Now just make sure it will not
+                    // conflict.
+                    query_id: Uuid::new_v4().to_string(),
+                    ..Default::default()
+                }),
                 output_id: 0,
             }),
             host: Some(worker.host.as_ref().unwrap().clone()),
