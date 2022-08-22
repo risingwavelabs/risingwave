@@ -329,12 +329,9 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn update_actor_info(
-        &self,
-        req: stream_service::BroadcastActorInfoTableRequest,
-    ) -> Result<()> {
+    pub fn update_actor_info(&self, actor_infos: &[ActorInfo]) -> Result<()> {
         let mut core = self.core.lock();
-        core.update_actor_info(req)
+        core.update_actor_info(actor_infos)
     }
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
@@ -682,12 +679,9 @@ impl LocalStreamManagerCore {
             .collect::<Result<Vec<_>>>()
     }
 
-    fn update_actor_info(
-        &mut self,
-        req: stream_service::BroadcastActorInfoTableRequest,
-    ) -> Result<()> {
+    fn update_actor_info(&mut self, new_actor_infos: &[ActorInfo]) -> Result<()> {
         let mut actor_infos = self.context.actor_infos.write();
-        for actor in req.get_info() {
+        for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
             if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(
