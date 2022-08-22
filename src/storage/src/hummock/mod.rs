@@ -89,6 +89,8 @@ pub struct HummockStorage {
     compaction_group_client: Arc<dyn CompactionGroupClient>,
 
     sstable_id_manager: SstableIdManagerRef,
+
+    tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {
@@ -148,6 +150,7 @@ impl HummockStorage {
             stats,
             compaction_group_client,
             sstable_id_manager,
+            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
         Ok(instance)
     }
