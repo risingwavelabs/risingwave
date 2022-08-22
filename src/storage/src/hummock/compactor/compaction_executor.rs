@@ -47,6 +47,7 @@ impl CompactionExecutor {
     }
 }
 
+#[cfg(not(madsim))]
 impl Drop for CompactionExecutor {
     fn drop(&mut self) {
         if let Some(runtime) = self.runtime.take() {
