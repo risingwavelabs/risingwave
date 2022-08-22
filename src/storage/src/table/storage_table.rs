@@ -49,7 +49,7 @@ use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
-pub(crate) mod iter_utils;
+mod iter_utils;
 
 pub type AccessType = bool;
 /// Table with `READ_ONLY` is used for batch scan or point lookup.
