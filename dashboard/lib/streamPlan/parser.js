@@ -55,7 +55,7 @@ class StreamNode extends Node {
   }
 
   parseType(nodeProto) {
-    let types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
+    let types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin", "expand"]);
     for (let [type, _] of Object.entries(nodeProto)) {
       if (types.has(type)) {
         return type;
