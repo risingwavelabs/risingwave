@@ -15,6 +15,8 @@
 use core::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::ptr::NonNull;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -30,6 +32,7 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -552,6 +555,9 @@ impl LocalStreamManagerCore {
             let monitor = tokio_metrics::TaskMonitor::new();
             let trace_reporter = self.stack_trace_manager.register(actor_id);
 
+            let metrics = self.streaming_metrics.clone();
+            let actor_id_str = actor_id.to_string();
+
             let handle = {
                 let actor = async move {
                     // unwrap the actor result to panic on error
@@ -565,13 +571,31 @@ impl LocalStreamManagerCore {
                     *ENABLE_ASYNC_STACK_TRACE,
                 );
                 let instrumented = monitor.instrument(traced);
-                tokio::spawn(instrumented)
+
+                let memory_usage_metrics = async move {
+                    loop {
+                        BYTES_ALLOCATED.with(|bytes| {
+                            metrics
+                                .actor_memory_usage
+                                .with_label_values(&[&actor_id_str])
+                                .set(bytes.val() as i64)
+                        });
+
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
+                };
+
+                let allocated = TaskLocalBytesAllocated::default();
+                let allocated = BYTES_ALLOCATED.scope(allocated, async move {
+                    futures::join!(instrumented, memory_usage_metrics);
+                });
+                tokio::spawn(allocated)
             };
             self.handles.insert(actor_id, handle);
 
+            let metrics = self.streaming_metrics.clone();
             let actor_id_str = actor_id.to_string();
 
-            let metrics = self.streaming_metrics.clone();
             let task = tokio::spawn(async move {
                 loop {
                     metrics
@@ -618,6 +642,7 @@ impl LocalStreamManagerCore {
                         .actor_scheduled_cnt
                         .with_label_values(&[&actor_id_str])
                         .set(monitor.cumulative().total_scheduled_count as i64);
+
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });

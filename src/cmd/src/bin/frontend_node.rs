@@ -16,7 +16,7 @@
 
 use tikv_jemallocator::Jemalloc;
 
-#[global_allocator]
+// #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[cfg_attr(coverage, no_coverage)]

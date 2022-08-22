@@ -19,6 +19,9 @@ use std::ops::Deref;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
 
+mod task_local;
+pub use task_local::*;
+
 pub struct StatsAlloc<T> {
     bytes_in_use: AtomicUsize,
 

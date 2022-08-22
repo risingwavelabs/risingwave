@@ -6,6 +6,18 @@ description = "Allocator with statistics"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+ahash = "0.8"
+hashbrown = "0.12"
+tikv-jemallocator = "0.5"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "fs",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]

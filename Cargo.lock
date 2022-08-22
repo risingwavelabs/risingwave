@@ -35,6 +35,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ahash"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57e6e951cfbb2db8de1828d49073a113a29fd7117b1596caa781a258c7e38d72"
+dependencies = [
+ "cfg-if",
+ "getrandom 0.2.7",
+ "once_cell",
+ "version_check",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2076,7 +2088,7 @@ version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
 dependencies = [
- "ahash",
+ "ahash 0.7.6",
 ]
 
 [[package]]
@@ -2085,7 +2097,7 @@ version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 dependencies = [
- "ahash",
+ "ahash 0.7.6",
 ]
 
 [[package]]
@@ -2328,7 +2340,7 @@ version = "0.11.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9709543bd6c25fdc748da2bed0f6855b07b7e93a203ae31332ac2101ab2f4782"
 dependencies = [
- "ahash",
+ "ahash 0.7.6",
  "atty",
  "indexmap",
  "itoa 1.0.3",
@@ -2669,7 +2681,7 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c22974df2eec970953226b378cc167992831227cfe783204b72a0f3f32fd6891"
 dependencies = [
- "ahash",
+ "ahash 0.7.6",
  "async-channel",
  "async-task",
  "bincode",
@@ -5610,6 +5622,10 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stats_alloc"
 version = "0.1.11"
 dependencies = [
+ "ahash 0.8.0",
+ "hashbrown 0.12.3",
+ "madsim-tokio",
+ "tikv-jemallocator",
  "workspace-hack",
 ]
 
@@ -6578,7 +6594,7 @@ dependencies = [
 name = "workspace-hack"
 version = "0.1.11"
 dependencies = [
- "ahash",
+ "ahash 0.7.6",
  "anyhow",
  "auto_enums",
  "auto_enums_derive",
