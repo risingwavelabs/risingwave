@@ -143,6 +143,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Source as i32,
         is_singleton: false,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -215,6 +216,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Others as i32,
         is_singleton: false,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -302,6 +304,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Sink as i32,
         is_singleton: true,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     fragments

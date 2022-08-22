@@ -20,7 +20,7 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::generate_internal_table_name_with_type;
+use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -724,8 +724,8 @@ impl BuildActorGraphState {
 
 /// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct ActorGraphBuilder {
-    /// GlobalFragmentId -> parallel_degree
-    parallelisms: HashMap<FragmentId, u32>,
+    /// Default parallelism.
+    default_parallelism: u32,
 
     fragment_graph: StreamFragmentGraph,
 }
@@ -755,29 +755,35 @@ impl ActorGraphBuilder {
 
         let fragment_graph = StreamFragmentGraph::from_protobuf(fragment_graph.clone(), offset);
 
-        // TODO(Kexiang): now simply use Count(ParallelUnit) as parallelism of each fragment
-        let parallelisms: HashMap<FragmentId, u32> = fragment_graph
-            .fragments()
-            .iter()
-            .map(|(id, fragment)| {
-                let id = id.as_global_id();
-                let parallel_degree = if fragment.is_singleton {
-                    1
-                } else {
-                    default_parallelism
-                };
-                (id, parallel_degree)
-            })
-            .collect();
-
         Ok(Self {
-            parallelisms,
+            default_parallelism,
             fragment_graph,
         })
     }
 
-    /// Build a stream graph by duplicating each fragment as parallel actors.
     pub async fn generate_graph<S>(
+        &self,
+        id_gen_manager: IdGeneratorManagerRef<S>,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
+    where
+        S: MetaStore,
+    {
+        let mut graph = self.generate_graph_inner(id_gen_manager, ctx).await?;
+
+        // Record internal state table ids.
+        for fragment in graph.values_mut() {
+            // Looking at the first actor is enough, since all actors in one fragment have
+            // identical state table id.
+            let actor = fragment.actors.first().unwrap();
+            let stream_node = actor.get_nodes()?.clone();
+            Self::record_internal_state_tables(&stream_node, fragment)?;
+        }
+        Ok(graph)
+    }
+
+    /// Build a stream graph by duplicating each fragment as parallel actors.
+    async fn generate_graph_inner<S>(
         &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
         ctx: &mut CreateMaterializedViewContext,
@@ -794,7 +800,7 @@ impl ActorGraphBuilder {
                 let mut state = BuildActorGraphState::default();
 
                 // Generate actors of the streaming plan
-                self.build_actor_graph(&mut state, &self.fragment_graph)?;
+                self.build_actor_graph(&mut state, &self.fragment_graph, ctx)?;
                 state
             };
 
@@ -845,6 +851,7 @@ impl ActorGraphBuilder {
         &self,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
+        ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // popped out from the heap will be the top-most node in plan, or the sink in stream graph.)
@@ -864,7 +871,7 @@ impl ActorGraphBuilder {
 
         while let Some(fragment_id) = actionable_fragment_id.pop_front() {
             // Build the actors corresponding to the fragment
-            self.build_actor_graph_fragment(fragment_id, state, fragment_graph)?;
+            self.build_actor_graph_fragment(fragment_id, state, fragment_graph, ctx)?;
 
             // Find if we can process more fragments
             for upstream_id in fragment_graph.get_upstreams(fragment_id).keys() {
@@ -892,14 +899,32 @@ impl ActorGraphBuilder {
         fragment_id: GlobalFragmentId,
         state: &mut BuildActorGraphState,
         fragment_graph: &StreamFragmentGraph,
+        ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         let current_fragment = fragment_graph.get_fragment(fragment_id).unwrap().clone();
-
-        let parallel_degree = self
-            .parallelisms
-            .get(&fragment_id.as_global_id())
+        let upstream_table_id = current_fragment
+            .upstream_table_ids
+            .iter()
+            .at_most_one()
             .unwrap()
-            .to_owned();
+            .map(TableId::from);
+        if let Some(upstream_table_id) = upstream_table_id {
+            ctx.chain_fragment_upstream_table_map
+                .insert(fragment_id.as_global_id(), upstream_table_id);
+        }
+
+        let parallel_degree = if current_fragment.is_singleton {
+            1
+        } else if let Some(upstream_table_id) = upstream_table_id {
+            // set fragment parallelism to the parallelism of its dependent table.
+            let upstream_actors = ctx
+                .table_sink_map
+                .get(&upstream_table_id)
+                .expect("upstream actor should exist");
+            upstream_actors.len() as u32
+        } else {
+            self.default_parallelism
+        };
 
         let node = Arc::new(current_fragment.node.unwrap());
         let actor_ids = state
@@ -948,6 +973,69 @@ impl ActorGraphBuilder {
             fragment_id
         );
 
+        Ok(())
+    }
+
+    /// Record internal table ids for stateful operators in meta.
+    fn record_internal_state_tables(
+        stream_node: &StreamNode,
+        fragment: &mut Fragment,
+    ) -> MetaResult<()> {
+        match stream_node.get_node_body()? {
+            NodeBody::Materialize(node) => {
+                let table_id = node.get_table_id();
+                fragment.state_table_ids.push(table_id);
+            }
+            NodeBody::Arrange(node) => {
+                let table_id = node.table.as_ref().unwrap().id;
+                fragment.state_table_ids.push(table_id);
+            }
+            NodeBody::HashAgg(node) => {
+                for table in &node.internal_tables {
+                    fragment.state_table_ids.push(table.id);
+                }
+            }
+            NodeBody::GlobalSimpleAgg(node) => {
+                for table in &node.internal_tables {
+                    fragment.state_table_ids.push(table.id);
+                }
+            }
+            NodeBody::HashJoin(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.left_table.as_ref().unwrap().id);
+                fragment
+                    .state_table_ids
+                    .push(node.right_table.as_ref().unwrap().id);
+            }
+            NodeBody::DynamicFilter(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.left_table.as_ref().unwrap().id);
+                fragment
+                    .state_table_ids
+                    .push(node.right_table.as_ref().unwrap().id);
+            }
+            NodeBody::AppendOnlyTopN(node) => {
+                fragment.state_table_ids.push(node.table_id_l);
+                fragment.state_table_ids.push(node.table_id_h);
+            }
+            NodeBody::GroupTopN(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.table.as_ref().unwrap().id);
+            }
+            NodeBody::TopN(node) => {
+                fragment
+                    .state_table_ids
+                    .push(node.table.as_ref().unwrap().id);
+            }
+            _ => {}
+        }
+        let input_nodes = stream_node.get_input();
+        for input_node in input_nodes {
+            Self::record_internal_state_tables(input_node, fragment)?;
+        }
         Ok(())
     }
 }
