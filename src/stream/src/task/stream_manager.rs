@@ -375,11 +375,17 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
     ) -> Self {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .thread_name("risingwave-streaming-actor")
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
+                builder.worker_threads(worker_threads_num);
+            }
+            builder
+                .thread_name("risingwave-streaming-actor")
+                .enable_all()
+                .build()
+                .unwrap()
+        };
 
         Self {
             // Leak the runtime to avoid runtime shutting-down in the main async context.

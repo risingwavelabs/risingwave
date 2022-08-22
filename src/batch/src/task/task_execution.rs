@@ -168,7 +168,7 @@ pub struct BatchTaskExecution<C> {
     /// Task state.
     state: Mutex<TaskStatus>,
 
-    /// Receivers data of the task.   
+    /// Receivers data of the task.
     receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
     /// Context for task execution
