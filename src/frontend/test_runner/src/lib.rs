@@ -190,13 +190,6 @@ impl TestCase {
             }
         }
 
-        let test_case_copy = self.clone();
-        let _ = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |e| {
-            println!("Panic on {:?}\n{}", test_case_copy, e);
-            std::process::abort();
-        }));
-
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
@@ -544,7 +537,12 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).unwrap();
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
 
-    for c in cases {
+    for (i, c) in cases.into_iter().enumerate() {
+        println!(
+            "Running test#{i}:{}, SQL:\n{}",
+            c.id.clone().unwrap_or_else(|| "<none>".to_string()),
+            c.sql
+        );
         if let Err(e) = c.run(true).await {
             println!("\nTest case failed, the input SQL:\n{}\n{}", c.sql, e);
             failed_num += 1;
