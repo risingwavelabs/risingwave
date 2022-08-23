@@ -33,7 +33,7 @@ pub use compaction_filter::{
     TTLCompactionFilter,
 };
 pub use context::{CompactorContext, Context};
-use futures::future::try_join_all;
+use futures::future::{try_join_all, RemoteHandle};
 use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
@@ -120,16 +120,8 @@ impl Compactor {
     fn request_execution(
         compaction_executor: Arc<CompactionExecutor>,
         split_task: impl Future<Output = HummockResult<CompactOutput>> + Send + 'static,
-    ) -> HummockResult<JoinHandle<HummockResult<CompactOutput>>> {
-        let rx = compaction_executor
-            .send_request(split_task)
-            .map_err(HummockError::compaction_executor)?;
-        Ok(tokio::spawn(async move {
-            match rx.await {
-                Ok(result) => result,
-                Err(err) => Err(HummockError::compaction_executor(err)),
-            }
-        }))
+    ) -> RemoteHandle<HummockResult<CompactOutput>> {
+        compaction_executor.send_request(split_task)
     }
 
     /// Handles a compaction task and reports its status to hummock manager.
@@ -153,7 +145,7 @@ impl Compactor {
             (tracker_id, sstable_id_manager_clone),
             |(tracker_id, sstable_id_manager)| {
                 tokio::spawn(async move {
-                    sstable_id_manager.remove_watermark_sst_id(tracker_id).await;
+                    sstable_id_manager.remove_watermark_sst_id(tracker_id);
                 });
             },
         );
@@ -239,23 +231,17 @@ impl Compactor {
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
-            let rx = match Compactor::request_execution(compaction_executor, async move {
+            let handle = Compactor::request_execution(compaction_executor, async move {
                 compactor_runner
                     .run(filter, multi_filter_key_extractor)
                     .await
-            }) {
-                Ok(rx) => rx,
-                Err(err) => {
-                    tracing::warn!("Failed to schedule compaction execution: {:#?}", err);
-                    return false;
-                }
-            };
-            compaction_futures.push(rx);
+            });
+            compaction_futures.push(handle);
         }
 
         let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
         while let Some(future_result) = buffered.next().await {
-            match future_result.unwrap() {
+            match future_result {
                 Ok((split_index, ssts)) => {
                     output_ssts.push((split_index, ssts));
                 }
