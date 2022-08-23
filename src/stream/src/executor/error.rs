@@ -19,6 +19,7 @@ use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
+use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
@@ -41,9 +42,8 @@ enum StreamExecutorErrorInner {
     #[error("Serialize/deserialize error: {0}")]
     SerdeError(BoxedError),
 
-    // TODO: remove this
     #[error("Sink error: {0}")]
-    SinkError(RwError),
+    SinkError(SinkError),
 
     #[error("RPC error: {0}")]
     RpcError(RpcError),
@@ -67,10 +67,6 @@ enum StreamExecutorErrorInner {
 impl StreamExecutorError {
     pub fn serde_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
-    }
-
-    pub fn sink_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::SinkError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> Self {
@@ -174,6 +170,12 @@ impl From<ConnectorError> for StreamExecutorError {
 impl From<ValueEncodingError> for StreamExecutorError {
     fn from(e: ValueEncodingError) -> Self {
         StreamExecutorErrorInner::SerdeError(Box::new(e)).into()
+    }
+}
+
+impl From<SinkError> for StreamExecutorError {
+    fn from(e: SinkError) -> Self {
+        StreamExecutorErrorInner::SinkError(e).into()
     }
 }
 

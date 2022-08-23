@@ -38,11 +38,7 @@ pub struct SinkExecutor<S: StateStore> {
 }
 
 async fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
-    Ok(Box::new(
-        SinkImpl::new(config)
-            .await
-            .map_err(StreamExecutorError::sink_error)?,
-    ))
+    Ok(Box::new(SinkImpl::new(config).await?))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
@@ -68,12 +64,8 @@ impl<S: StateStore> SinkExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let sink_config = SinkConfig::from_hashmap(self.properties.clone())
-            .map_err(StreamExecutorError::sink_error)?;
-
-        let mut sink = build_sink(sink_config.clone())
-            .await
-            .map_err(StreamExecutorError::sink_error)?;
+        let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
+        let mut sink = build_sink(sink_config.clone()).await?;
 
         // the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.
@@ -85,9 +77,7 @@ impl<S: StateStore> SinkExecutor<S> {
 
         // prepare the external sink before writing if needed.
         if sink.needs_preparation() {
-            sink.prepare(&schema)
-                .await
-                .map_err(StreamExecutorError::sink_error)?;
+            sink.prepare(&schema).await?;
         }
 
         let input = self.input.execute();
@@ -97,22 +87,14 @@ impl<S: StateStore> SinkExecutor<S> {
             match msg? {
                 Message::Chunk(chunk) => {
                     if !in_transaction {
-                        sink.begin_epoch(epoch)
-                            .await
-                            .map_err(StreamExecutorError::sink_error)?;
+                        sink.begin_epoch(epoch).await?;
                         in_transaction = true;
                     }
 
                     let visible_chunk = chunk.clone().compact()?;
-                    if let Err(e) = sink
-                        .write_batch(visible_chunk, &schema)
-                        .await
-                        .map_err(StreamExecutorError::sink_error)
-                    {
-                        sink.abort()
-                            .await
-                            .map_err(StreamExecutorError::sink_error)?;
-                        return Err(e);
+                    if let Err(e) = sink.write_batch(visible_chunk, &schema).await {
+                        sink.abort().await?;
+                        return Err(e.into());
                     }
                     empty_epoch_flag = false;
 
@@ -121,18 +103,14 @@ impl<S: StateStore> SinkExecutor<S> {
                 Message::Barrier(barrier) => {
                     if in_transaction {
                         if empty_epoch_flag {
-                            sink.abort()
-                                .await
-                                .map_err(StreamExecutorError::sink_error)?;
+                            sink.abort().await?;
                             tracing::debug!(
                                 "transaction abort due to empty epoch, epoch: {:?}",
                                 epoch
                             );
                         } else {
                             let start_time = Instant::now();
-                            sink.commit()
-                                .await
-                                .map_err(StreamExecutorError::sink_error)?;
+                            sink.commit().await?;
                             self.metrics
                                 .sink_commit_duration
                                 .with_label_values(&[
