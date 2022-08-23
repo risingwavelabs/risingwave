@@ -286,8 +286,8 @@ impl ObjectStore for DiskObjectStore {
     /// specified in the request is not found, it will be considered as successfully deleted.
     ///
     /// Calling this function is equivalent to calling `delete` individually for each given path.
-    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
-        for &path in paths {
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        for path in paths {
             self.delete(path).await?
         }
         Ok(())

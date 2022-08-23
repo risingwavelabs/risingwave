@@ -397,7 +397,7 @@ impl ObjectStore for S3ObjectStore {
     /// specified in the request is not found, it will be considered as successfully deleted.
     ///
     /// Uses AWS' DeleteObject API. See [AWS Docs](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html) for more details.
-    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         // AWS restricts the number of objects per request to 1000.
         const MAX_LEN: usize = 1000;
 
@@ -409,7 +409,7 @@ impl ObjectStore for S3ObjectStore {
             // Create identifiers from paths.
             let mut obj_ids = Vec::with_capacity(slice.len());
             for path in slice {
-                obj_ids.push(ObjectIdentifier::builder().key(*path).build());
+                obj_ids.push(ObjectIdentifier::builder().key(path).build());
             }
 
             // Build and submit request to delete objects.

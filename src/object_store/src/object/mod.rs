@@ -79,14 +79,16 @@ pub fn parse_object_store_path(path: &str) -> ObjectStorePath<'_> {
 
 /// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
 /// the second contains all remote paths.
-pub fn partition_object_store_paths<'a>(paths: &[&'a str]) -> (Vec<&'a  str>, Vec<&'a  str>) {
+pub fn partition_object_store_paths(paths: &[String]) -> (Vec<String>, Vec<String>) {
+    // ToDo: Currently the result is a copy of the input. Would it be worth it to use an in-place
+    //       partition instead?
     let mut vec_loc = vec![];
     let mut vec_rem = vec![];
 
-    for &path in paths {
+    for path in paths {
         match path.strip_prefix(LOCAL_OBJECT_STORE_PATH_PREFIX) {
-            Some(path) => vec_loc.push(path),
-            None => vec_rem.push(path),
+            Some(path) => vec_loc.push(path.to_string()),
+            None => vec_rem.push(path.to_string()),
         };
     }
 
@@ -150,7 +152,7 @@ pub trait ObjectStore: Send + Sync {
 
     /// Deletes the objects with the given paths permanently from the storage. If an object
     /// specified in the request is not found, it will be considered as successfully deleted.
-    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()>;
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()>;
 
     fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
     where
@@ -311,7 +313,7 @@ impl ObjectStoreImpl {
     ///
     /// If a hybrid storage is used, the method will first attempt to delete objects in local
     /// storage. Only if that is successful, it will remove objects from remote storage.
-    pub async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
+    pub async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         object_store_impl_method_body_slice!(self, delete_objects, paths)
     }
 
@@ -480,7 +482,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .await
     }
 
-    async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         let _timer = self
             .object_store_metrics
             .operation_latency
