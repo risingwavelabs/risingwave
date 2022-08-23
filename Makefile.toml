@@ -112,6 +112,17 @@ if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
 fi
 '''
 
+[tasks.doc]
+category = "Misc"
+description = "Open rustdoc for risingwave"
+dependencies = ["build-docs"]
+script = '''
+#!/bin/bash
+set -e
+
+python -mwebbrowser file://$(pwd)/target/doc/index.html
+'''
+
 [tasks.link-standalone-binaries]
 category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
@@ -241,6 +252,7 @@ cargo clean
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
+env = { RUSTDOCFLAGS = "--enable-index-page -Zunstable-options" }
 script = '''
 #!/bin/bash
 
