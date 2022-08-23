@@ -276,10 +276,17 @@ impl ObjectStore for DiskObjectStore {
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
-        tokio::fs::remove_file(self.new_file_path(path)?.as_path())
-            .await
-            .map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))?;
-        Ok(())
+        let result = tokio::fs::remove_file(self.new_file_path(path)?.as_path()).await;
+
+        // Note that S3 storage considers deleting successful if the `path` does not refer to an
+        // existing object. We therefore ignore if a file does not exist to ensures that
+        // `DiskObjectStore::delete()` behaves the same way as `S3ObjectStore::delete()`.
+        if let Err(e) = &result && e.kind() == ErrorKind::NotFound {
+            Ok(())
+        }
+        else {
+            result.map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))
+        }
     }
 
     /// Deletes the objects with the given paths permanently from the storage. If an object
