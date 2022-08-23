@@ -82,9 +82,9 @@ impl StreamService for StreamServiceImpl {
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
-        let table = request.into_inner();
+        let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(table);
+        let res = self.mgr.update_actor_info(&req.info);
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);

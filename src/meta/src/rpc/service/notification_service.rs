@@ -101,7 +101,7 @@ where
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        let hummock_manager_rdguard = self.hummock_manager.get_read_guard().await;
+        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {
@@ -133,7 +133,7 @@ where
 
                 MetaSnapshot {
                     tables,
-                    hummock_version: Some(hummock_manager_rdguard.current_version.clone()),
+                    hummock_version: Some(hummock_manager_guard.current_version.clone()),
                     ..Default::default()
                 }
             }
