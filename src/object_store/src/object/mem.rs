@@ -128,8 +128,16 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
-        unimplemented!();
+        let mut guard = self.objects.lock().await;
+
+        for &path in paths {
+            guard.remove(path);
+        }
+
+        Ok(())
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {

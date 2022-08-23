@@ -402,7 +402,7 @@ impl ObjectStore for S3ObjectStore {
         const MAX_LEN: usize = 1000;
 
         // If needed, split given set into subsets of size with no more than `MAX_LEN` objects.
-        for start_idx /* includive */ in (0..paths.len()).step_by(MAX_LEN) {
+        for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
             let end_idx /* exclusive */ = cmp::min(paths.len(), start_idx + MAX_LEN);
             let slice = &paths[start_idx..end_idx];
 
