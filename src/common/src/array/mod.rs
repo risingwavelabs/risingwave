@@ -226,8 +226,8 @@ pub enum ArrayMeta {
 impl From<&DataType> for ArrayMeta {
     fn from(data_type: &DataType) -> Self {
         match data_type {
-            DataType::Struct { fields } => ArrayMeta::Struct {
-                children: fields.clone(),
+            DataType::Struct(struct_type) => ArrayMeta::Struct {
+                children: struct_type.fields.clone().into(),
             },
             DataType::List { datatype } => ArrayMeta::List {
                 datatype: datatype.clone(),
