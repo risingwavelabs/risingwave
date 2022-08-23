@@ -48,10 +48,8 @@ pub trait Aggregator: Send + 'static {
     ) -> Result<()>;
 
     /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
-
-    /// `output_and_reset` output the aggregator to `ArrayBuilder` and reset the internal state.
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    /// After `output` the aggregator is reset to initial state.
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 }
 
 pub type BoxedAggState = Box<dyn Aggregator>;

@@ -54,6 +54,22 @@ impl Aggregator for CountStar {
         self.return_type.clone()
     }
 
+    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+        if let (row, true) = input.row_at(row_id)? {
+            let filter_res =
+                if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
+                    v
+                } else {
+                    false
+                };
+
+            if filter_res {
+                self.result += 1;
+            }
+        }
+        Ok(())
+    }
+
     fn update_multi(
         &mut self,
         input: &DataChunk,
@@ -82,32 +98,11 @@ impl Aggregator for CountStar {
         Ok(())
     }
 
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        let res = std::mem::replace(&mut self.result, 0) as i64;
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(self.result as i64)).map_err(Into::into),
+            ArrayBuilderImpl::Int64(b) => b.append(Some(res)).map_err(Into::into),
             _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
         }
-    }
-
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        if let (row, true) = input.row_at(row_id)? {
-            let filter_res =
-                if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
-                    v
-                } else {
-                    false
-                };
-
-            if filter_res {
-                self.result += 1;
-            }
-        }
-        Ok(())
-    }
-
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let res = self.output(builder);
-        self.result = 0;
-        res
     }
 }
