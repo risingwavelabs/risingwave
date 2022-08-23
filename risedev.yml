@@ -26,8 +26,8 @@ risedev:
     # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
-    # - use: prometheus
-    # - use: grafana
+    - use: prometheus
+    - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
