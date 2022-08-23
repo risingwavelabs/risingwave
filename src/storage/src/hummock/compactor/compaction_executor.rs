@@ -49,7 +49,7 @@ impl CompactionExecutor {
         Self {}
     }
 
-    /// Send a request to the executor, returns a [`RemoteHandle`] to retrieve the result.
+    /// Send a request to the executor, returns a [`JoinHandle`] to retrieve the result.
     pub fn execute<F, T>(&self, t: F) -> JoinHandle<T>
     where
         F: Future<Output = T> + Send + 'static,

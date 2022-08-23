@@ -187,7 +187,7 @@ async fn compact_shared_buffer(
             }
             Err(e) => {
                 compact_success = false;
-                tracing::warn!("Shared Buffer Compaction failed with future erro: {:#?}", e);
+                tracing::warn!("Shared Buffer Compaction failed with future error: {:#?}", e);
                 err = Some(HummockError::compaction_executor(
                     "failed while execute in tokio",
                 ));
