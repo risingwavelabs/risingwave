@@ -26,8 +26,8 @@ use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
 use crate::hummock::{
-    HummockValue, InMemWriterBuilder, Sstable, SstableBuilderOptions, SstableIterator,
-    SstableIteratorType, SstableStoreRef, TieredCache,
+    HummockValue, Sstable, SstableBuilderOptions, SstableIterator, SstableIteratorType,
+    SstableStoreRef, TieredCache,
 };
 use crate::monitor::ObjectStoreMetrics;
 
@@ -65,10 +65,6 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         64 << 20,
         TieredCache::none(),
     ))
-}
-
-pub fn mock_sst_writer_builder(opts: &SstableBuilderOptions) -> InMemWriterBuilder {
-    InMemWriterBuilder::from(opts)
 }
 
 /// Generates keys like `key_test_00002` with epoch 233.

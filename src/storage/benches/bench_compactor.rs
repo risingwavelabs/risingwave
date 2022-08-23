@@ -21,6 +21,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::SstableInfo;
@@ -32,7 +33,7 @@ use risingwave_storage::hummock::iterator::{
     UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::multi_builder::{
-    get_writer_builder_for_batch_upload, CapacitySplitTableBuilder, LocalTableBuilderFactory,
+    CapacitySplitTableBuilder, LocalTableBuilderFactory,
 };
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
@@ -40,7 +41,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompactorSstableStore, CompressionAlgorithm, InMemWriter, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
-    SstableStoreWrite, SstableWriter, TieredCache,
+    SstableStoreWrite, SstableWriteMode, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -55,6 +56,36 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         128 << 20,
         TieredCache::none(),
     ))
+}
+
+pub fn default_writer_opts() -> SstableWriterOptions {
+    SstableWriterOptions {
+        mode: SstableWriteMode::Batch,
+        capacity_hint: None,
+        tracker: None,
+    }
+}
+
+pub async fn put_sst(
+    sst_id: HummockSstableId,
+    data: Bytes,
+    meta: SstableMeta,
+    sstable_store: SstableStoreRef,
+    options: SstableWriterOptions,
+    policy: CachePolicy,
+) {
+    let mut writer = sstable_store
+        .clone()
+        .create_sst_writer(sst_id, policy, options)
+        .await
+        .unwrap();
+    for block_meta in &meta.block_metas {
+        let offset = block_meta.offset as usize;
+        let end_offset = offset + block_meta.len as usize;
+        writer.write_block(&data[offset..end_offset]).unwrap();
+    }
+    writer.finish(meta.block_metas.len() as u32).unwrap();
+    sstable_store.put_sst_meta(sst_id, meta).await.unwrap()
 }
 
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
@@ -72,8 +103,9 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
+        enable_sst_streaming_upload: false,
     };
-    let writer = InMemWriter::new_from_options(sstable_id, &opt);
+    let writer = Box::new(InMemWriter::from(&opt));
     let mut builder = SstableBuilder::new_for_test(sstable_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
@@ -87,7 +119,7 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
             .unwrap();
     }
     let output = builder.finish().unwrap();
-    output.writer.finish(output.meta, None).unwrap()
+    (output.writer_output, output.meta)
 }
 
 async fn scan_all_table(sstable_store: SstableStoreRef) {
@@ -119,10 +151,15 @@ fn bench_table_scan(c: &mut Criterion) {
         .unwrap();
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
-        sstable_store1
-            .put_sst(1, meta, data, CachePolicy::NotFill)
-            .await
-            .unwrap();
+        put_sst(
+            1,
+            data,
+            meta,
+            sstable_store1,
+            default_writer_opts(),
+            CachePolicy::NotFill,
+        )
+        .await;
     });
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
@@ -148,12 +185,11 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
+        enable_sst_streaming_upload: false,
     };
-    let writer_builder =
-        get_writer_builder_for_batch_upload(&opt, sstable_store, CachePolicy::NotFill);
     let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
         32,
-        writer_builder,
+        sstable_store,
         opt,
     ));
 
@@ -196,14 +232,24 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let (data2, meta2) = build_table(2, 0..test_key_size, 1);
     let level1 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
-        sstable_store1
-            .put_sst(1, meta1, data1, CachePolicy::Fill)
-            .await
-            .unwrap();
-        sstable_store1
-            .put_sst(2, meta2, data2, CachePolicy::Fill)
-            .await
-            .unwrap();
+        put_sst(
+            1,
+            data1,
+            meta1,
+            sstable_store1.clone(),
+            default_writer_opts(),
+            CachePolicy::Fill,
+        )
+        .await;
+        put_sst(
+            2,
+            data2,
+            meta2,
+            sstable_store1.clone(),
+            default_writer_opts(),
+            CachePolicy::Fill,
+        )
+        .await;
     });
 
     let (data1, meta1) = build_table(1, 0..test_key_size, 2);
@@ -211,14 +257,24 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let sstable_store1 = sstable_store.clone();
     let level2 = generate_tables(vec![(1, meta1.clone()), (2, meta2.clone())]);
     runtime.block_on(async move {
-        sstable_store1
-            .put_sst(3, meta1, data1, CachePolicy::Fill)
-            .await
-            .unwrap();
-        sstable_store1
-            .put_sst(4, meta2, data2, CachePolicy::Fill)
-            .await
-            .unwrap();
+        put_sst(
+            3,
+            data1,
+            meta1,
+            sstable_store1.clone(),
+            default_writer_opts(),
+            CachePolicy::Fill,
+        )
+        .await;
+        put_sst(
+            4,
+            data2,
+            meta2,
+            sstable_store1.clone(),
+            default_writer_opts(),
+            CachePolicy::Fill,
+        )
+        .await;
     });
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {

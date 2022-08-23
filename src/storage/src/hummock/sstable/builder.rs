@@ -33,7 +33,7 @@ use crate::hummock::HummockResult;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
-
+pub const DEFAULT_ENABLE_SST_STREAMING_UPLOAD: bool = false;
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
     /// Approximate sstable capacity.
@@ -48,6 +48,8 @@ pub struct SstableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
     /// Approximate bloom filter capacity.
     pub estimate_bloom_filter_capacity: usize,
+    /// Enable streaming upload.
+    pub enable_sst_streaming_upload: bool,
 }
 
 impl From<&StorageConfig> for SstableBuilderOptions {
@@ -60,6 +62,7 @@ impl From<&StorageConfig> for SstableBuilderOptions {
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: capacity / DEFAULT_ENTRY_SIZE,
+            enable_sst_streaming_upload: options.enable_sst_streaming_upload,
         }
     }
 }
@@ -73,28 +76,23 @@ impl Default for SstableBuilderOptions {
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: DEFAULT_SSTABLE_SIZE / DEFAULT_ENTRY_SIZE,
+            enable_sst_streaming_upload: DEFAULT_ENABLE_SST_STREAMING_UPLOAD,
         }
     }
 }
 
-pub struct SstableBuilderOutput<W>
-where
-    W: SstableWriter,
-{
+pub struct SstableBuilderOutput<WO> {
     pub sstable_id: u64,
     pub meta: SstableMeta,
-    pub writer: W,
+    pub writer_output: WO,
     pub table_ids: Vec<u32>,
 }
 
-pub struct SstableBuilder<W>
-where
-    W: SstableWriter,
-{
+pub struct SstableBuilder<WO> {
     /// Options.
     options: SstableBuilderOptions,
     /// Data writer.
-    writer: W,
+    writer: Box<dyn SstableWriter<Output = WO>>,
     /// Current block builder.
     block_builder: BlockBuilder,
     /// Block metadata vec.
@@ -113,8 +111,12 @@ where
     add_bloom_filter_key_counts: usize,
 }
 
-impl<W: SstableWriter> SstableBuilder<W> {
-    pub fn new_for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
+impl<WO> SstableBuilder<WO> {
+    pub fn new_for_test(
+        sstable_id: u64,
+        writer: Box<dyn SstableWriter<Output = WO>>,
+        options: SstableBuilderOptions,
+    ) -> Self {
         Self {
             writer,
             block_builder: BlockBuilder::new(BlockBuilderOptions {
@@ -141,7 +143,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
     pub fn new(
         sstable_id: u64,
-        writer: W,
+        writer: Box<dyn SstableWriter<Output = WO>>,
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> Self {
@@ -228,7 +230,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> HummockResult<SstableBuilderOutput<W>> {
+    pub fn finish(mut self) -> HummockResult<SstableBuilderOutput<WO>> {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.clone();
 
@@ -262,10 +264,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
             self.add_bloom_filter_key_counts
         );
 
-        Ok(SstableBuilderOutput::<W> {
+        let writer_output = self.writer.finish(meta.block_metas.len() as u32)?;
+        Ok(SstableBuilderOutput::<WO> {
             sstable_id: self.sstable_id,
             meta,
-            writer: self.writer,
+            writer_output,
             table_ids: self.table_ids.into_iter().collect(),
         })
     }
@@ -321,6 +324,7 @@ pub(super) mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
+            ..Default::default()
         };
 
         let b = SstableBuilder::new_for_test(0, mock_sst_writer(&opt), opt);
@@ -355,6 +359,7 @@ pub(super) mod tests {
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
+            ..Default::default()
         };
 
         // build remote table

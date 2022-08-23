@@ -24,8 +24,8 @@ use risingwave_object_store::object::BlockLocation;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    Block, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable, SstableMeta,
-    SstableStoreWrite, SstableStreamingUploader,
+    Block, BoxedSstableWriter, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable,
+    SstableMeta, SstableStoreWrite, SstableWriterOptions,
 };
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
@@ -165,37 +165,20 @@ impl MemoryCollector for CompactorMemoryCollector {
 
 #[async_trait::async_trait]
 impl SstableStoreWrite for CompactorSstableStore {
-    async fn put_sst(
-        &self,
+    async fn create_sst_writer(
+        self: Arc<Self>,
         sst_id: HummockSstableId,
-        meta: SstableMeta,
-        data: Bytes,
         _policy: CachePolicy,
-    ) -> HummockResult<()> {
+        options: SstableWriterOptions,
+    ) -> HummockResult<BoxedSstableWriter> {
         // TODO: fill cache for L0
         self.sstable_store
-            .put_sst(sst_id, meta, data, CachePolicy::NotFill)
+            .clone()
+            .create_sst_writer(sst_id, CachePolicy::NotFill, options)
             .await
     }
 
-    async fn create_put_sst_stream(
-        &self,
-        sst_id: HummockSstableId,
-        _policy: CachePolicy,
-    ) -> HummockResult<SstableStreamingUploader> {
-        // TODO: fill cache for L0
-        self.sstable_store
-            .create_put_sst_stream(sst_id, CachePolicy::NotFill)
-            .await
-    }
-
-    async fn finish_put_sst_stream(
-        &self,
-        uploader: SstableStreamingUploader,
-        meta: SstableMeta,
-    ) -> HummockResult<()> {
-        self.sstable_store
-            .finish_put_sst_stream(uploader, meta)
-            .await
+    async fn put_sst_meta(&self, sst_id: HummockSstableId, meta: SstableMeta) -> HummockResult<()> {
+        self.put_sst_meta(sst_id, meta).await
     }
 }

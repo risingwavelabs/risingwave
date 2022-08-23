@@ -17,31 +17,30 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use tokio::task::JoinHandle;
 
-use super::{
-    BatchUploadWriterBuilder, SstableWriter, SstableWriterBuilder, StreamingUploadWriterBuilder,
-};
-use crate::hummock::utils::MemoryTracker;
+use super::SstableMeta;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
-    SstableStoreWrite,
+    SstableStoreWrite, SstableWriterOptions,
 };
 use crate::monitor::StateStoreMetrics;
 
+pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
+
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
-    type Writer: SstableWriter;
-
-    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<Self::Writer>)>;
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>>;
 }
 
-pub struct SplitTableOutput<WO> {
-    pub sst_info: SstableInfo,
-    pub writer_output: WO,
+pub struct SplitTableOutput {
+    pub sst_id: HummockSstableId,
+    pub meta: SstableMeta,
+    pub upload_join_handle: UploadJoinHandle,
     pub bloom_filter_size: usize,
+    pub table_ids: Vec<u32>,
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -55,12 +54,9 @@ where
     /// When creating a new [`SstableBuilder`], caller use this factory to generate it.
     builder_factory: F,
 
-    sst_outputs:
-        Vec<SplitTableOutput<<<F as TableBuilderFactory>::Writer as SstableWriter>::Output>>,
+    sst_outputs: Vec<SplitTableOutput>,
 
-    current_builder: Option<SstableBuilder<<F as TableBuilderFactory>::Writer>>,
-
-    tracker: Option<MemoryTracker>,
+    current_builder: Option<SstableBuilder<UploadJoinHandle>>,
 
     /// Statistics.
     pub stats: Arc<StateStoreMetrics>,
@@ -76,7 +72,6 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            tracker: None,
             stats,
         }
     }
@@ -86,7 +81,6 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            tracker: None,
             stats: Arc::new(StateStoreMetrics::unused()),
         }
     }
@@ -137,9 +131,8 @@ where
         }
 
         if self.current_builder.is_none() {
-            let (tracker, builder) = self.builder_factory.open_builder().await?;
+            let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
-            self.tracker = Some(tracker);
         }
 
         let builder = self.current_builder.as_mut().unwrap();
@@ -168,104 +161,71 @@ where
                 .sstable_meta_size
                 .observe(meta.encoded_size() as _);
 
-            let sst_info = SstableInfo {
-                id: builder_output.sstable_id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: meta.smallest_key.clone(),
-                    right: meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: meta.estimated_size as u64,
-                table_ids: builder_output.table_ids,
-            };
-
-            debug_assert!(self.tracker.is_some());
-            let writer_output = builder_output.writer.finish(meta, self.tracker.take())?;
             self.sst_outputs.push(SplitTableOutput {
-                sst_info,
-                writer_output,
+                sst_id: builder_output.sstable_id,
+                meta,
+                upload_join_handle: builder_output.writer_output,
                 bloom_filter_size,
+                table_ids: builder_output.table_ids,
             });
         }
         Ok(())
     }
 
     /// Finalizes all the tables to be ids, blocks and metadata.
-    pub fn finish(
-        mut self,
-    ) -> HummockResult<
-        Vec<SplitTableOutput<<<F as TableBuilderFactory>::Writer as SstableWriter>::Output>>,
-    > {
+    pub fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
         self.seal_current()?;
         Ok(self.sst_outputs)
     }
 }
 
-/// The writer will buffer SST data in memory and upload it to `SstableStore` on finish.
-pub fn get_writer_builder_for_batch_upload(
-    opt: &SstableBuilderOptions,
-    sstable_store: Arc<dyn SstableStoreWrite>,
-    policy: CachePolicy,
-) -> BatchUploadWriterBuilder {
-    BatchUploadWriterBuilder::new(opt, sstable_store, policy)
-}
-
-/// The writer will upload blocks of data to object store in a pipelined manner.
-pub fn get_writer_builder_for_streaming_upload(
-    sstable_store: Arc<dyn SstableStoreWrite>,
-    policy: CachePolicy,
-) -> StreamingUploadWriterBuilder {
-    StreamingUploadWriterBuilder::new(sstable_store, policy)
-}
-
 /// Used for unit tests and benchmarks.
-pub struct LocalTableBuilderFactory<B>
-where
-    B: SstableWriterBuilder,
-{
+pub struct LocalTableBuilderFactory {
     next_id: AtomicU64,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     options: SstableBuilderOptions,
+    policy: CachePolicy,
     limiter: MemoryLimiter,
-    writer_builder: B,
 }
 
-impl<B> LocalTableBuilderFactory<B>
-where
-    B: SstableWriterBuilder,
-{
-    pub fn new(next_id: u64, writer_builder: B, options: SstableBuilderOptions) -> Self {
+impl LocalTableBuilderFactory {
+    pub fn new(
+        next_id: u64,
+        sstable_store: Arc<dyn SstableStoreWrite>,
+        options: SstableBuilderOptions,
+    ) -> Self {
         Self {
-            limiter: MemoryLimiter::new(1000000),
             next_id: AtomicU64::new(next_id),
+            sstable_store,
             options,
-            writer_builder,
+            policy: CachePolicy::NotFill,
+            limiter: MemoryLimiter::new(1000000),
         }
     }
 }
 
 #[async_trait::async_trait]
-impl<B> TableBuilderFactory for LocalTableBuilderFactory<B>
-where
-    B: SstableWriterBuilder,
-{
-    type Writer = <B as SstableWriterBuilder>::Writer;
-
-    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
+impl TableBuilderFactory for LocalTableBuilderFactory {
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>> {
         let id = self.next_id.fetch_add(1, SeqCst);
-        let builder = SstableBuilder::new_for_test(
-            id,
-            self.writer_builder.build(id).await?,
-            self.options.clone(),
-        );
         let tracker = self.limiter.require_memory(1).await.unwrap();
-        Ok((tracker, builder))
+        let mut writer_options = SstableWriterOptions::from(&self.options);
+        writer_options.tracker = Some(tracker);
+        let writer = self
+            .sstable_store
+            .clone()
+            .create_sst_writer(id, self.policy, writer_options)
+            .await?;
+        let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
+
+        Ok(builder)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hummock::iterator::test_utils::mock_sst_writer_builder;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
     use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
@@ -281,9 +241,9 @@ mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
+            ..Default::default()
         };
-        let builder_factory =
-            LocalTableBuilderFactory::new(1001, mock_sst_writer_builder(&opts), opts);
+        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
         let results = builder.finish().unwrap();
         assert!(results.is_empty());
@@ -301,8 +261,7 @@ mod tests {
             compression_algorithm: CompressionAlgorithm::None,
             ..Default::default()
         };
-        let builder_factory =
-            LocalTableBuilderFactory::new(1001, mock_sst_writer_builder(&opts), opts);
+        let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::new_for_test(builder_factory);
 
         for i in 0..table_capacity {
@@ -325,7 +284,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
             1001,
-            mock_sst_writer_builder(&opts),
+            mock_sstable_store(),
             opts,
         ));
         let mut epoch = 100;
@@ -365,7 +324,7 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
             1001,
-            mock_sst_writer_builder(&opts),
+            mock_sstable_store(),
             opts,
         ));
 

@@ -52,41 +52,31 @@ pub use sstable_store::{
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::multi_builder::CapacitySplitTableBuilder;
-use super::{HummockResult, SstableBuilderOptions, SstableWriterBuilder};
+use super::multi_builder::{CapacitySplitTableBuilder, UploadJoinHandle};
+use super::{HummockResult, SstableBuilderOptions, SstableWriterOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::multi_builder::{
-    get_writer_builder_for_batch_upload, get_writer_builder_for_streaming_upload, SplitTableOutput,
-    TableBuilderFactory,
-};
-use crate::hummock::utils::{MemoryLimiter, MemoryTracker};
+use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
+use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, SstableStoreWrite,
     DEFAULT_ENTRY_SIZE,
 };
 
-pub struct RemoteBuilderFactory<B>
-where
-    B: SstableWriterBuilder,
-{
+pub struct RemoteBuilderFactory {
     sstable_id_manager: SstableIdManagerRef,
+    sstable_store: Arc<dyn SstableStoreWrite>,
     limiter: Arc<MemoryLimiter>,
     options: SstableBuilderOptions,
+    policy: CachePolicy,
     remote_rpc_cost: Arc<AtomicU64>,
-    writer_builder: B,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
 }
 
 #[async_trait::async_trait]
-impl<B> TableBuilderFactory for RemoteBuilderFactory<B>
-where
-    B: SstableWriterBuilder,
-{
-    type Writer = <B as SstableWriterBuilder>::Writer;
-
-    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder<B::Writer>)> {
+impl TableBuilderFactory for RemoteBuilderFactory {
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
@@ -101,13 +91,20 @@ where
         let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
+        let mut writer_options = SstableWriterOptions::from(&self.options);
+        writer_options.tracker = Some(tracker);
+        let writer = self
+            .sstable_store
+            .clone()
+            .create_sst_writer(table_id, self.policy, writer_options)
+            .await?;
         let builder = SstableBuilder::new(
             table_id,
-            self.writer_builder.build(table_id).await?,
+            writer,
             self.options.clone(),
             self.filter_key_extractor.clone(),
         );
-        Ok((tracker, builder))
+        Ok(builder)
     }
 }
 
@@ -577,67 +574,79 @@ impl Compactor {
             options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
         }
 
-        macro_rules! make_builder_and_compact {
-            ($writer_builder:expr) => {{
-                // Monitor time cost building shared buffer to SSTs.
-                let compact_timer = if self.context.is_share_buffer_compact {
-                    self.context.stats.write_build_l0_sst_duration.start_timer()
-                } else {
-                    self.context.stats.compact_sst_duration.start_timer()
-                };
-
-                let mut builder = self.get_multi_builder(
-                    $writer_builder,
-                    options,
-                    get_id_time.clone(),
-                    filter_key_extractor,
-                );
-
-                Compactor::compact_and_build_sst(
-                    &mut builder,
-                    &self.key_range,
-                    iter,
-                    self.gc_delete_keys,
-                    self.watermark,
-                    compaction_filter,
-                )
-                .await?;
-                let ret = builder.finish()?;
-                compact_timer.observe_duration();
-                ret
-            }};
-        }
-
-        let split_table_outputs = if self.context.options.enable_sst_streaming_upload {
-            let writer_builder = get_writer_builder_for_streaming_upload(
-                self.sstable_store.clone(),
-                self.cache_policy,
-            );
-            make_builder_and_compact!(writer_builder)
+        // Monitor time cost building shared buffer to SSTs.
+        let compact_timer = if self.context.is_share_buffer_compact {
+            self.context.stats.write_build_l0_sst_duration.start_timer()
         } else {
-            let writer_builder = get_writer_builder_for_batch_upload(
-                &options,
-                self.sstable_store.clone(),
-                self.cache_policy,
-            );
-            make_builder_and_compact!(writer_builder)
+            self.context.stats.compact_sst_duration.start_timer()
         };
+
+        let builder_factory = RemoteBuilderFactory {
+            sstable_id_manager: self.context.sstable_id_manager.clone(),
+            sstable_store: self.sstable_store.clone(),
+            limiter: self.context.read_memory_limiter.clone(),
+            options,
+            policy: self.cache_policy,
+            remote_rpc_cost: get_id_time.clone(),
+            filter_key_extractor,
+        };
+
+        // NOTICE: should be user_key overlap, NOT full_key overlap!
+        let mut builder =
+            CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone());
+
+        Compactor::compact_and_build_sst(
+            &mut builder,
+            &self.key_range,
+            iter,
+            self.gc_delete_keys,
+            self.watermark,
+            compaction_filter,
+        )
+        .await?;
+        let split_table_outputs = builder.finish()?;
+        compact_timer.observe_duration();
 
         let mut ssts = Vec::with_capacity(split_table_outputs.len());
         let mut upload_join_handles = vec![];
-        for SplitTableOutput::<JoinHandle<HummockResult<()>>> {
-            sst_info,
-            writer_output,
+
+        for SplitTableOutput {
+            sst_id,
+            meta,
+            upload_join_handle,
             bloom_filter_size,
+            table_ids,
         } in split_table_outputs
         {
-            // bloomfilter occuppy per thousand keys
+            let sst_info = SstableInfo {
+                id: sst_id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: meta.smallest_key.clone(),
+                    right: meta.largest_key.clone(),
+                    inf: false,
+                }),
+                file_size: meta.estimated_size as u64,
+                table_ids,
+            };
+
+            // Bloom filter occuppy per thousand keys.
             self.context
                 .filter_key_extractor_manager
                 .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
-            upload_join_handles.push(writer_output);
+
+            // Upload metadata.
+            let sstable_store_cloned = self.sstable_store.clone();
+            let upload_join_handle =
+                upload_join_handle.then(move |upload_data_result| async move {
+                    upload_data_result.map_err(|e| {
+                        HummockError::other(format!("fail to upload sst data: {:?}", e))
+                    })??;
+                    sstable_store_cloned.put_sst_meta(sst_id, meta).await
+                });
+            upload_join_handles.push(upload_join_handle);
+            // upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
                 self.context
@@ -650,45 +659,16 @@ impl Compactor {
         }
 
         // Wait for all upload to finish
-        try_join_all(upload_join_handles.into_iter().map(|join_handle| {
-            join_handle.map(|result| match result {
-                Ok(upload_result) => upload_result,
-                Err(e) => Err(HummockError::other(format!(
-                    "fail to receive from upload join handle: {:?}",
-                    e
-                ))),
-            })
-        }))
-        .await?;
+        // let _ = try_join_all(upload_join_handles)
+        //     .await
+        //     .map_err(HummockError::other)?;
+        try_join_all(upload_join_handles).await?;
 
         self.context
             .stats
             .get_table_id_total_time_duration
             .observe(get_id_time.load(Ordering::Relaxed) as f64 / 1000.0 / 1000.0);
         Ok(ssts)
-    }
-
-    fn get_multi_builder<B>(
-        &self,
-        writer_builder: B,
-        options: SstableBuilderOptions,
-        remote_rpc_cost: Arc<AtomicU64>,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-    ) -> CapacitySplitTableBuilder<RemoteBuilderFactory<B>>
-    where
-        B: SstableWriterBuilder,
-    {
-        let builder_factory = RemoteBuilderFactory {
-            sstable_id_manager: self.context.sstable_id_manager.clone(),
-            limiter: self.context.read_memory_limiter.clone(),
-            options,
-            remote_rpc_cost,
-            writer_builder,
-            filter_key_extractor,
-        };
-
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone())
     }
 }
 
