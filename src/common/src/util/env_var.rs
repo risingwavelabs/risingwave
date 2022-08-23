@@ -15,13 +15,6 @@
 use std::env;
 use std::ffi::OsStr;
 
-/// Environment variable key for enabling the async stack trace.
-pub const ASYNC_STACK_TRACE_KEY: &str = "RW_ASYNC_STACK_TRACE";
-
-lazy_static::lazy_static! {
-    pub static ref ENABLE_ASYNC_STACK_TRACE: bool = env_var_is_true(ASYNC_STACK_TRACE_KEY);
-}
-
 pub fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
     env::var(key)
         .map(|value| {

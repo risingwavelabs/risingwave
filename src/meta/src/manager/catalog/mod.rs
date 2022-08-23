@@ -347,7 +347,7 @@ where
             }
             core.add_table(table);
             let version = self
-                .broadcast_info_op(Operation::Add, Info::Table(table.to_owned()))
+                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
             Ok(version)
@@ -416,7 +416,7 @@ where
                     }
                     for table in tables_to_drop {
                         database_core.drop_table(&table);
-                        self.broadcast_info_op(Operation::Delete, Info::Table(table))
+                        self.notify_frontend(Operation::Delete, Info::Table(table))
                             .await;
                     }
                     database_core.drop_table(&table);
@@ -425,7 +425,7 @@ where
                     }
 
                     let version = self
-                        .broadcast_info_op(Operation::Delete, Info::Table(table.to_owned()))
+                        .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
                         .await;
 
                     Ok(version)
@@ -500,7 +500,7 @@ where
                         }
                         for table in tables_to_drop {
                             database_core.drop_table(&table);
-                            self.broadcast_info_op(Operation::Delete, Info::Table(table))
+                            self.notify_frontend(Operation::Delete, Info::Table(table))
                                 .await;
                         }
                         for &dependent_relation_id in &table.dependent_relations {
@@ -510,7 +510,7 @@ where
                             .await;
 
                         let version = self
-                            .broadcast_info_op(Operation::Delete, Info::Table(table.to_owned()))
+                            .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
                             .await;
 
                         Ok(version)
@@ -546,8 +546,12 @@ where
             source.insert(self.env.meta_store()).await?;
             core.add_source(source);
 
+            // stream_manager handle the materialized only (mview, table, index,
+            // materialized_source) so we need to notify all_node for this case.
             let version = self
-                .broadcast_info_op(Operation::Add, Info::Source(source.to_owned()))
+                .env
+                .notification_manager()
+                .notify_all_node(Operation::Add, Info::Source(source.to_owned()))
                 .await;
 
             Ok(version)
@@ -596,7 +600,7 @@ where
                             .await;
                     }
                     let version = self
-                        .broadcast_info_op(Operation::Delete, Info::Source(source))
+                        .notify_frontend(Operation::Delete, Info::Source(source))
                         .await;
 
                     Ok(version)
@@ -662,12 +666,12 @@ where
                 self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
-            self.broadcast_info_op(Operation::Add, Info::Table(mview.to_owned()))
+            self.notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
 
             // Currently frontend uses source's version
             let version = self
-                .broadcast_info_op(Operation::Add, Info::Source(source.to_owned()))
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
                 .await;
             Ok(version)
         } else {
@@ -830,13 +834,13 @@ where
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
 
-                self.broadcast_info_op(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
             core.add_index(index);
 
-            self.broadcast_info_op(Operation::Add, Info::Table(table.to_owned()))
+            self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
             let version = self
@@ -960,13 +964,6 @@ where
         self.env
             .notification_manager()
             .notify_frontend(operation, info)
-            .await
-    }
-
-    async fn broadcast_info_op(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.env
-            .notification_manager()
-            .notify_all_node(operation, info)
             .await
     }
 }
