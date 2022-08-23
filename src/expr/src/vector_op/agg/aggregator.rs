@@ -89,50 +89,49 @@ impl AggStateFactory {
             ),
         };
 
-        let initial_agg_state: BoxedAggState =
-            if agg_kind == AggKind::Count && prost.get_args().is_empty() {
-                Box::new(CountStar::new(return_type.clone(), filter))
-            } else if agg_kind == AggKind::StringAgg {
-                let agg_arg = &prost.get_args()[0];
-                let delim_arg = &prost.get_args()[1];
-                debug_assert!(DataType::from(agg_arg.get_type().unwrap()) == DataType::Varchar);
-                debug_assert!(DataType::from(delim_arg.get_type().unwrap()) == DataType::Varchar);
-                let input_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
-                let delim_expr = Arc::from(
-                    InputRefExpression::new(
-                        DataType::Varchar,
-                        delim_arg.get_input()?.get_column_idx() as usize,
-                    )
-                    .boxed(),
-                );
-                Box::new(StringAgg::new(
-                    input_col_idx,
-                    delim_expr,
-                    order_pairs,
-                    order_col_types,
-                ))
-            } else if prost.get_args().len() == 1 {
-                // unary agg call
-                let arg = &prost.get_args()[0];
-                let input_type = DataType::from(arg.get_type()?);
-                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
-                if agg_kind == AggKind::ApproxCountDistinct {
-                    Box::new(ApproxCountDistinct::new(return_type.clone(), 0, filter))
-                } else {
-                    create_agg_state_unary(
-                        input_type,
-                        input_col_idx,
-                        agg_kind,
-                        return_type.clone(),
-                        distinct,
-                        filter,
-                    )?
-                }
+        let initial_agg_state = if agg_kind == AggKind::Count && prost.get_args().is_empty() {
+            Box::new(CountStar::new(return_type.clone(), filter))
+        } else if agg_kind == AggKind::StringAgg {
+            let agg_arg = &prost.get_args()[0];
+            let delim_arg = &prost.get_args()[1];
+            debug_assert!(DataType::from(agg_arg.get_type().unwrap()) == DataType::Varchar);
+            debug_assert!(DataType::from(delim_arg.get_type().unwrap()) == DataType::Varchar);
+            let input_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
+            let delim_expr = Arc::from(
+                InputRefExpression::new(
+                    DataType::Varchar,
+                    delim_arg.get_input()?.get_column_idx() as usize,
+                )
+                .boxed(),
+            );
+            Box::new(StringAgg::new(
+                input_col_idx,
+                delim_expr,
+                order_pairs,
+                order_col_types,
+            ))
+        } else if prost.get_args().len() == 1 {
+            // unary agg call
+            let arg = &prost.get_args()[0];
+            let input_type = DataType::from(arg.get_type()?);
+            let input_col_idx = arg.get_input()?.get_column_idx() as usize;
+            if agg_kind == AggKind::ApproxCountDistinct {
+                Box::new(ApproxCountDistinct::new(return_type.clone(), 0, filter))
             } else {
-                return Err(
-                    ErrorCode::InternalError(format!("Invalid agg call: {:?}", agg_kind)).into(),
-                );
-            };
+                create_agg_state_unary(
+                    input_type,
+                    input_col_idx,
+                    agg_kind,
+                    return_type.clone(),
+                    distinct,
+                    filter,
+                )?
+            }
+        } else {
+            return Err(
+                ErrorCode::InternalError(format!("Invalid agg call: {:?}", agg_kind)).into(),
+            );
+        };
 
         Ok(Self {
             return_type,
