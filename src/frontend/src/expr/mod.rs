@@ -209,7 +209,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction}
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, CorrelatedInputRef}
 
 impl ExprImpl {
     /// Used to check whether the expression has [`CorrelatedInputRef`].
@@ -233,17 +233,25 @@ impl ExprImpl {
             fn visit_subquery(&mut self, subquery: &Subquery) {
                 use crate::binder::BoundSetExpr;
 
-                self.depth += 1;
                 match &subquery.query.body {
-                    BoundSetExpr::Select(select) => select
-                        .select_items
-                        .iter()
-                        .chain(select.group_by.iter())
-                        .chain(select.where_clause.iter())
-                        .for_each(|expr| self.visit_expr(expr)),
-                    BoundSetExpr::Values(_) => {}
+                    BoundSetExpr::Select(select) => {
+                        self.depth += 1;
+                        select
+                            .select_items
+                            .iter()
+                            .chain(select.group_by.iter())
+                            .chain(select.where_clause.iter())
+                            .for_each(|expr| self.visit_expr(expr));
+                        self.depth -= 1;
+                    }
+                    BoundSetExpr::Values(values) => {
+                        values
+                            .rows
+                            .iter()
+                            .flatten()
+                            .for_each(|expr| self.visit_expr(expr));
+                    }
                 }
-                self.depth -= 1;
             }
         }
 
@@ -467,7 +475,7 @@ impl ExprImpl {
                 _ => { return None }
             };
             let list: Vec<_> = inputs.map(|expr|{
-                // Non constant IN will be bount to OR
+                // Non constant IN will be bound to OR
                 assert!(expr.is_const());
                 expr
             }).collect();

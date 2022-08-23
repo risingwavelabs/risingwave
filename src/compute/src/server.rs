@@ -122,7 +122,7 @@ pub async fn compute_node_serve(
         meta_client.clone(),
         client_addr.clone(),
         Box::new(compute_observer_node),
-        WorkerType::Compactor,
+        WorkerType::ComputeNode,
     )
     .await;
 
@@ -225,8 +225,8 @@ pub async fn compute_node_serve(
         state_store,
     );
 
-    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
-    // if this is not the case, we can use the following command to get it printed into the logs
+    // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
+    // this is not the case, we can use the following command to get it printed into the logs
     // periodically.
     //
     // Comment out the following line to enable.

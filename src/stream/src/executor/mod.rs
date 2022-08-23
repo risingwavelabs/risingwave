@@ -85,7 +85,7 @@ mod integration_tests;
 #[cfg(test)]
 mod test_utils;
 
-pub use actor::{Actor, ActorContext, ActorContextRef, OperatorInfo, OperatorInfoStatus};
+pub use actor::{Actor, ActorContext, ActorContextRef};
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use debug::DebugExecutor;
@@ -95,6 +95,7 @@ pub use error::StreamExecutorResult;
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
+pub use group_top_n::GroupTopNExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
@@ -245,6 +246,7 @@ impl Default for Epoch {
 pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
+    pub checkpoint: bool,
 }
 
 impl Barrier {
@@ -252,6 +254,7 @@ impl Barrier {
     pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
             epoch: Epoch::new_test_epoch(epoch),
+            checkpoint: true,
             ..Default::default()
         }
     }
@@ -470,7 +473,10 @@ impl Mutation {
 impl Barrier {
     pub fn to_protobuf(&self) -> ProstBarrier {
         let Barrier {
-            epoch, mutation, ..
+            epoch,
+            mutation,
+            checkpoint,
+            ..
         }: Barrier = self.clone();
         ProstBarrier {
             epoch: Some(ProstEpoch {
@@ -479,6 +485,7 @@ impl Barrier {
             }),
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             span: vec![],
+            checkpoint,
         }
     }
 
@@ -491,6 +498,7 @@ impl Barrier {
             .map(Arc::new);
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
+            checkpoint: prost.checkpoint,
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
         })

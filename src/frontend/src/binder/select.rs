@@ -115,7 +115,7 @@ impl Binder {
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                self.expr_to_field(s, name)
+                Ok(Field::with_name(s.return_type(), name))
             })
             .collect::<Result<Vec<Field>>>()?;
 

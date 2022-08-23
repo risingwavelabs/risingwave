@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
@@ -27,7 +26,6 @@ use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
 use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::monitor::StateStoreMetrics;
 use tokio::sync::mpsc;
 
 fn gen_interleave_shared_buffer_batch_iter(
@@ -109,7 +107,6 @@ fn run_iter<I: HummockIterator<Direction = Forward>>(iter_ref: &RefCell<I>, tota
 fn criterion_benchmark(c: &mut Criterion) {
     let merge_iter = RefCell::new(UnorderedMergeIteratorInner::new(
         gen_interleave_shared_buffer_batch_iter(10000, 100),
-        Arc::new(StateStoreMetrics::unused()),
     ));
     c.bench_with_input(
         BenchmarkId::new("bench-merge-iter", "unordered"),
@@ -123,7 +120,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let ordered_merge_iter = RefCell::new(OrderedMergeIteratorInner::new(
         gen_interleave_shared_buffer_batch_iter(10000, 100),
-        Arc::new(StateStoreMetrics::unused()),
     ));
 
     c.bench_with_input(
@@ -138,7 +134,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let merge_iter = RefCell::new(UnorderedMergeIteratorInner::new(
         gen_interleave_shared_buffer_batch_enum_iter(10000, 100),
-        Arc::new(StateStoreMetrics::unused()),
     ));
     c.bench_with_input(
         BenchmarkId::new("bench-enum-merge-iter", "unordered"),
@@ -152,7 +147,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let ordered_merge_iter = RefCell::new(OrderedMergeIteratorInner::new(
         gen_interleave_shared_buffer_batch_enum_iter(10000, 100),
-        Arc::new(StateStoreMetrics::unused()),
     ));
 
     c.bench_with_input(

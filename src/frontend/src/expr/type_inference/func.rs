@@ -51,7 +51,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
 /// also match `substr(varchar, smallint)` or even `substr(varchar, unknown)` to `substr(varchar,
 /// int)`.
 ///
-/// This correponds to the `PostgreSQL` rules on operators and functions here:
+/// This corresponds to the `PostgreSQL` rules on operators and functions here:
 /// * <https://www.postgresql.org/docs/current/typeconv-oper.html>
 /// * <https://www.postgresql.org/docs/current/typeconv-func.html>
 ///
@@ -61,7 +61,7 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
 ///    both sides are same type.
 /// 3. Rank candidates based on most matching positions. This covers Rule 2, 4a, 4c and 4d in
 ///    `PostgreSQL`. See [`top_matches`] for details.
-/// 4. Attempt to narrow down candidates by selecting type catagories for unknowns. This covers Rule
+/// 4. Attempt to narrow down candidates by selecting type categories for unknowns. This covers Rule
 ///    4e in `PostgreSQL`. See [`narrow_category`] for details.
 /// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
 ///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
@@ -139,7 +139,7 @@ fn is_preferred(t: DataTypeName) -> bool {
 /// valid cast when they are of the same type, because it may deserve special treatment. This is
 /// also the behavior of underlying [`cast_ok_base`].
 ///
-/// Sometimes it is more convenient to include equality when checking whether a formal paramater can
+/// Sometimes it is more convenient to include equality when checking whether a formal parameter can
 /// accept an actual argument. So we introduced `eq_ok` to control this behavior.
 fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool {
     eq_ok && source == target || cast_ok_base(source, target, CastContext::Implicit)
@@ -154,7 +154,7 @@ fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool 
 /// * Rule 4a: If the input cannot implicit cast to expected type at any position, this candidate is
 ///   discarded.
 ///
-/// Correponding implementation in `PostgreSQL`:
+/// Corresponding implementation in `PostgreSQL`:
 /// * Rule 2 on operators: `OpernameGetOprid()` in `namespace.c` [14.0/86a4dc1][rule 2 oper src]
 ///   * Note that unknown-handling logic of `binary_oper_exact()` in `parse_oper.c` is in
 ///     [`infer_type_name`].
@@ -210,11 +210,11 @@ fn top_matches<'a, 'b>(
     best_candidates
 }
 
-/// Attempt to narrow down candidates by selecting type catagories for unknowns. This covers Rule 4e
+/// Attempt to narrow down candidates by selecting type categories for unknowns. This covers Rule 4e
 /// in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
 ///
 /// This is done in 2 phases:
-/// * First, chech each unknown position individually and try to find a type category for it.
+/// * First, check each unknown position individually and try to find a type category for it.
 ///   * If any candidate accept varchar, varchar is selected;
 ///   * otherwise, if all candidate accept the same category, select this category.
 ///     * Also record whether any candidate accept the preferred type within this category.
@@ -223,10 +223,10 @@ fn top_matches<'a, 'b>(
 ///   * it does not agree with the type category assignment;
 ///   * the assigned type category contains a preferred type but the candidate is not preferred.
 ///
-/// If the first phase fails or the second phase gives an empty set, this attempt preserves orginal
+/// If the first phase fails or the second phase gives an empty set, this attempt preserves original
 /// list untouched.
 ///
-/// Correponding implementation in `PostgreSQL`:
+/// Corresponding implementation in `PostgreSQL`:
 /// * Line 1164 - Line 1298 of `func_select_candidate()` in `parse_func.c` [14.0/86a4dc1][rule 4e
 ///   src]
 ///
@@ -298,16 +298,16 @@ fn narrow_category<'a, 'b>(
 /// in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
 ///
 /// If all non-null arguments are same type, assume all unknown arguments are of this type as well.
-/// Discard a candidate if its paramater type cannot be casted from this type.
+/// Discard a candidate if its parameter type cannot be casted from this type.
 ///
-/// If the condition is not met or the result is empty, this attempt preserves orginal list
+/// If the condition is not met or the result is empty, this attempt preserves original list
 /// untouched.
 ///
 /// Note this rule cannot replace special treatment given to binary operators in [Rule 2], because
 /// this runs after varchar-biased Rule 4e ([`narrow_category`]), and has no preference between
 /// exact-match and castable-match.
 ///
-/// Correponding implementation in `PostgreSQL`:
+/// Corresponding implementation in `PostgreSQL`:
 /// * Line 1300 - Line 1355 of `func_select_candidate()` in `parse_func.c` [14.0/86a4dc1][rule 4f
 ///   src]
 ///

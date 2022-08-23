@@ -374,7 +374,7 @@ mod tests {
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(
-            ActorContext::create(),
+            ActorContext::create(123),
             keyspace.clone(),
             Box::new(source),
             agg_calls,

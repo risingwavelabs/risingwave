@@ -49,7 +49,7 @@ impl SystemCatalog {
         TableDesc {
             table_id: self.id,
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
-            pk: self.pk.clone(),
+            stream_key: self.pk.clone(),
             ..Default::default()
         }
     }
