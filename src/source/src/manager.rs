@@ -90,9 +90,9 @@ pub struct SourceDesc {
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 
-    // The column index of row ID. By default it's 0, which means the first column is row ID.
-    // TODO: change to Option<usize> when pk supported in the future.
-    pub row_id_index: usize,
+    // The column index of row ID. If the primary key is specified by users, this will be `None`.
+    pub row_id_index: Option<usize>,
+    pub pk_column_ids: Vec<i32>,
 }
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
@@ -147,7 +147,12 @@ impl SourceManager for MemSourceManager {
             "expected row_id_index >= 0, got {}",
             info.row_id_index
         );
-        let row_id_index = info.row_id_index as usize;
+        let row_id_index = if info.pk_column_ids != vec![0] {
+            None
+        } else {
+            Some(info.row_id_index as usize)
+        };
+        let pk_column_ids = info.pk_column_ids.clone();
 
         let config = ConnectorProperties::extract(info.properties)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
@@ -163,6 +168,7 @@ impl SourceManager for MemSourceManager {
             format,
             columns,
             row_id_index,
+            pk_column_ids,
             metrics: self.metrics.clone(),
         };
 
@@ -194,7 +200,8 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             columns: source_columns,
             format: SourceFormat::Invalid,
-            row_id_index: 0, // always use the first column as row_id
+            row_id_index: Some(0), // always use the first column as row_id
+            pk_column_ids: vec![0],
             metrics: self.metrics.clone(),
         };
 
