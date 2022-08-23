@@ -60,14 +60,6 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
     risingwave_common::config::load_config(&opts.config_path)
 }
 
-fn get_compile_mode() -> &'static str {
-    if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    }
-}
-
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
@@ -77,10 +69,14 @@ pub async fn compute_node_serve(
     // Load the configuration.
     let config = load_config(&opts);
     info!(
-        "Starting compute node with config {:?} in {} mode",
+        "Starting compute node with config {:?} with debug assertions {}",
         config,
-        get_compile_mode()
+        if cfg!(debug_assertions) { "on" } else { "off" }
     );
+
+    if opts.enable_async_stack_trace {
+        info!("Async stack trace is enabled");
+    }
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
@@ -198,6 +194,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
+        opts.enable_async_stack_trace,
     ));
     let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
@@ -244,7 +241,10 @@ pub async fn compute_node_serve(
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .layer(StackTraceMiddlewareLayer::new(grpc_stack_trace_mgr))
+            .layer(StackTraceMiddlewareLayer::new_optional(
+                opts.enable_async_stack_trace
+                    .then_some(grpc_stack_trace_mgr),
+            ))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
