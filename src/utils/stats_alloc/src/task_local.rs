@@ -64,7 +64,10 @@ impl TaskLocalBytesAllocated {
 
     #[inline(always)]
     pub fn val(&self) -> usize {
-        self.0.as_ref().unwrap().load(Ordering::Relaxed)
+        self.0
+            .as_ref()
+            .expect("bytes is invalid")
+            .load(Ordering::Relaxed)
     }
 }
 
