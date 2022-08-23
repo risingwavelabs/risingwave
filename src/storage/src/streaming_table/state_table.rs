@@ -448,7 +448,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let storage_iter = self.iter_with_pk_bounds(epoch, pk_prefix).await?;
+        let storage_iter = self.storage_iter_with_prefix(epoch, pk_prefix).await?;
 
         let mem_table_iter = {
             let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
@@ -463,10 +463,8 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds of
-    /// the next primary key column in `next_col_bounds`.
-    // TODO: support multiple datums or `Row` for `next_col_bounds`.
-    async fn iter_with_pk_bounds(
+    /// Iterates on the table with the given prefix of the pk in `pk_prefix`.
+    async fn storage_iter_with_prefix(
         &self,
         epoch: u64,
         pk_prefix: &Row,
@@ -523,13 +521,25 @@ impl<S: StateStore> StateTable<S> {
             pk_prefix_indices
         );
 
-        self.iter_with_encoded_key_range(
+        let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
+        let vnode = vnode_hint.unwrap_or(0_u8);
+
+        let raw_key_range = prefixed_range((start_key, end_key), &vnode.to_be_bytes());
+        let prefix_hint = prefix_hint
+            .clone()
+            .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
+        let read_options = self.get_read_option(epoch);
+        let iter = StorageIterInner::<S>::new(
+            &self.keyspace,
             prefix_hint,
-            (start_key, end_key),
-            epoch,
-            self.try_compute_vnode_by_pk_prefix(pk_prefix),
+            raw_key_range,
+            read_options,
+            self.data_types.clone(),
         )
-        .await
+        .await?
+        .into_stream();
+
+        Ok(iter)
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
@@ -539,41 +549,6 @@ impl<S: StateStore> StateTable<S> {
             .iter()
             .all(|&d| d < pk_prefix.0.len())
             .then(|| self.compute_vnode(pk_prefix, &self.dist_key_in_pk_indices))
-    }
-
-    async fn iter_with_encoded_key_range<R, B>(
-        &self,
-        prefix_hint: Option<Vec<u8>>,
-        encoded_key_range: R,
-        epoch: u64,
-        vnode_hint: Option<VirtualNode>,
-    ) -> StorageResult<StorageIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        let vnode = vnode_hint.unwrap_or(0_u8);
-
-        let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-        let prefix_hint = prefix_hint
-            .clone()
-            .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
-        let iter = async move {
-            let read_options = self.get_read_option(epoch);
-            let iter = StorageIterInner::<S>::new(
-                &self.keyspace,
-                prefix_hint,
-                raw_key_range,
-                read_options,
-                self.data_types.clone(),
-            )
-            .await?
-            .into_stream();
-            Ok::<_, StorageError>(iter)
-        }
-        .await?;
-
-        Ok(iter)
     }
 }
 
@@ -587,12 +562,12 @@ struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_iter: C,
     _phantom: PhantomData<&'a ()>,
-    /// Mapping from column id to column index. Used for deserializing the row.
+    /// Data type of each column, used for deserializing the row.
     data_types: Vec<DataType>,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
-/// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
+/// It will merge the result of `mem_table_iter` and `state_store_iter`.
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
@@ -607,11 +582,9 @@ where
         }
     }
 
-    /// This function scans kv pairs from the `shared_storage`(`storage_table`) and
-    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is
-    /// (Included(prefix),Excluded(next_key(prefix))), all kv pairs within corresponding prefix will
-    /// be scanned. If a record exist in both `storage_table` and `mem_table`, result
-    /// `mem_table` is returned according to the operation(RowOp) on it.
+    /// This function scans kv pairs from the `shared_storage` and
+    /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
+    /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
@@ -642,7 +615,7 @@ where
                 (Some(Ok((storage_pk, _))), Some((mem_table_pk, _))) => {
                     match storage_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
-                            // yield data from storage table
+                            // yield data from storage
                             let (_, row) = storage_iter.next().await.unwrap()?;
                             yield Cow::Owned(row);
                         }
@@ -710,7 +683,7 @@ where
 struct StorageIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
-    /// Mapping from column id to column index. Used for deserializing the row.
+    /// Data type of each column, used for deserializing the row.
     data_types: Vec<DataType>,
 }
 
