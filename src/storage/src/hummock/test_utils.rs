@@ -162,14 +162,15 @@ pub async fn gen_test_sstable_inner(
     };
     let writer = sstable_store
         .clone()
-        .create_sst_writer(0, policy, writer_opts)
+        .create_sst_writer(sst_id, policy, writer_opts)
         .await
         .unwrap();
-    let mut b = SstableBuilder::new_for_test(0, writer, opts);
+    let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice()).unwrap();
     }
     let output = b.finish().unwrap();
+    output.writer_output.await.unwrap().unwrap();
     let sst = Sstable::new(sst_id, output.meta.clone());
     sstable_store
         .put_sst_meta(sst_id, output.meta)

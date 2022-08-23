@@ -179,6 +179,6 @@ impl SstableStoreWrite for CompactorSstableStore {
     }
 
     async fn put_sst_meta(&self, sst_id: HummockSstableId, meta: SstableMeta) -> HummockResult<()> {
-        self.put_sst_meta(sst_id, meta).await
+        self.sstable_store.put_sst_meta(sst_id, meta).await
     }
 }

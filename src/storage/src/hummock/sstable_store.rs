@@ -452,19 +452,13 @@ impl SstableStoreWrite for SstableStore {
     ) -> HummockResult<BoxedSstableWriter> {
         match &options.mode {
             SstableWriteMode::Batch => Ok(Box::new(BatchUploadWriter::new(
-                sst_id,
-                self.clone(),
-                policy,
-                options,
+                sst_id, self, policy, options,
             ))),
             SstableWriteMode::Streaming => {
                 let data_path = self.get_sst_data_path(sst_id);
+                let uploader = self.store.streaming_upload(&data_path).await?;
                 Ok(Box::new(StreamingUploadWriter::new(
-                    sst_id,
-                    self.clone(),
-                    policy,
-                    self.store.streaming_upload(&data_path).await?,
-                    options,
+                    sst_id, self, policy, uploader, options,
                 )))
             }
         }

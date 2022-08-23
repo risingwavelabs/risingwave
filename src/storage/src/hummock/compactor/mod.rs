@@ -646,7 +646,6 @@ impl Compactor {
                 sstable_store_cloned.put_sst_meta(sst_id, meta).await
             };
             upload_join_handles.push(upload_join_handle);
-            // upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
                 self.context
@@ -658,10 +657,6 @@ impl Compactor {
             }
         }
 
-        // Wait for all upload to finish
-        // let _ = try_join_all(upload_join_handles)
-        //     .await
-        //     .map_err(HummockError::other)?;
         try_join_all(upload_join_handles).await?;
 
         self.context
