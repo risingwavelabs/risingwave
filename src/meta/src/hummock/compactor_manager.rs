@@ -46,8 +46,8 @@ pub struct Compactor {
 
 struct TaskHeartbeat {
     task: CompactTask,
-    num_blocks_sealed: u32,
-    num_blocks_uploaded: u32,
+    num_ssts_sealed: u32,
+    num_ssts_uploaded: u32,
     expire_at: u64,
 }
 
@@ -270,8 +270,8 @@ impl CompactorManager {
             task.task_id,
             TaskHeartbeat {
                 task,
-                num_blocks_sealed: 0,
-                num_blocks_uploaded: 0,
+                num_ssts_sealed: 0,
+                num_ssts_uploaded: 0,
                 expire_at: now + self.task_expiry_seconds,
             },
         );
@@ -304,14 +304,14 @@ impl CompactorManager {
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             for progress in progress_list {
                 if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
-                    if task_ref.num_blocks_sealed < progress.num_blocks_sealed
-                        || task_ref.num_blocks_uploaded < progress.num_blocks_uploaded
+                    if task_ref.num_ssts_sealed < progress.num_ssts_sealed
+                        || task_ref.num_ssts_uploaded < progress.num_ssts_uploaded
                     {
                         // Refresh the expiry of the task as it is showing progress.
                         task_ref.expire_at = now + self.task_expiry_seconds;
                         // Update the task state to the latest state.
-                        task_ref.num_blocks_sealed = progress.num_blocks_sealed;
-                        task_ref.num_blocks_uploaded = progress.num_blocks_uploaded;
+                        task_ref.num_ssts_sealed = progress.num_ssts_sealed;
+                        task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
                     }
                 }
             }

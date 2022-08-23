@@ -91,9 +91,10 @@ impl CompactorRunner {
                 iter,
                 compaction_filter,
                 filter_key_extractor,
-                Some(task_progress),
+                Some(task_progress.clone()),
             )
             .await?;
+        task_progress.on_task_complete();
         Ok((self.split_index, ssts))
     }
 

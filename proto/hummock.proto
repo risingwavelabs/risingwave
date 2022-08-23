@@ -260,11 +260,11 @@ message GetNewSstIdsResponse {
 
 // This is a heartbeat message. Task will be considered dead if
 // `CompactTaskProgress` is not received for a timeout
-// or `num_blocks_sealed`/`num_blocks_uploaded` do not increase for a timeout.
+// or `num_ssts_sealed`/`num_ssts_uploaded` do not increase for a timeout.
 message CompactTaskProgress {
   uint64 task_id = 1;
-  uint32 num_blocks_sealed = 2;
-  uint32 num_blocks_uploaded = 3;
+  uint32 num_ssts_sealed = 2;
+  uint32 num_ssts_uploaded = 3;
 }
 
 message ReportCompactionTaskProgressRequest {

@@ -198,7 +198,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                 let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
                 drop(tracker);
                 if let Some(progress_tracker) = task_progress {
-                    progress_tracker.inc_blocks_uploaded();
+                    progress_tracker.inc_ssts_uploaded();
                 }
                 ret
             });
@@ -208,7 +208,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
                 bloom_filter_size,
             });
             if let Some(progress_tracker) = &self.task_progress {
-                progress_tracker.inc_blocks_sealed();
+                progress_tracker.inc_ssts_sealed();
             }
         }
     }

@@ -452,8 +452,8 @@ impl Compactor {
                             for (&task_id, progress) in task_progress.lock().unwrap().iter() {
                                 progress_list.push(CompactTaskProgress {
                                     task_id,
-                                    num_blocks_sealed: progress.num_blocks_sealed,
-                                    num_blocks_uploaded: progress.num_blocks_uploaded,
+                                    num_ssts_sealed: progress.num_ssts_sealed,
+                                    num_ssts_uploaded: progress.num_ssts_uploaded,
                                 });
                             }
                             if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
