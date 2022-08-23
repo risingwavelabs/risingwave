@@ -561,6 +561,7 @@ impl LocalStreamManagerCore {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 };
+
                 let traced = trace_reporter.optional_trace(
                     actor,
                     format!("Actor {actor_id}"),
@@ -568,25 +569,31 @@ impl LocalStreamManagerCore {
                     Duration::from_millis(1000),
                     *ENABLE_ASYNC_STACK_TRACE,
                 );
+
                 let instrumented = monitor.instrument(traced);
 
-                let memory_usage_metrics = async move {
-                    loop {
-                        BYTES_ALLOCATED.with(|bytes| {
-                            metrics
-                                .actor_memory_usage
-                                .with_label_values(&[&actor_id_str])
-                                .set(bytes.val() as i64)
-                        });
+                let allocation_stated =
+                    BYTES_ALLOCATED.scope(TaskLocalBytesAllocated::new(), async move {
+                        let monitor = async move {
+                            let mut interval = tokio::time::interval(Duration::from_millis(1000));
+                            loop {
+                                interval.tick().await;
+                                BYTES_ALLOCATED.with(|bytes| {
+                                    metrics
+                                        .actor_memory_usage
+                                        .with_label_values(&[&actor_id_str])
+                                        .set(bytes.val() as i64)
+                                });
+                            }
+                        };
+                        tokio::select! {
+                            biased;
+                            _ = monitor => unreachable!(),
+                            _ = instrumented => {},
+                        }
+                    });
 
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                    }
-                };
-
-                let allocated = BYTES_ALLOCATED.scope(TaskLocalBytesAllocated::new(), async move {
-                    futures::join!(instrumented, memory_usage_metrics);
-                });
-                tokio::spawn(allocated)
+                tokio::spawn(allocation_stated)
             };
             self.handles.insert(actor_id, handle);
 
