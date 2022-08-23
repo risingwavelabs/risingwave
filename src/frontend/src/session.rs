@@ -561,7 +561,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         sql: &str,
 
-        // format: indicate the query PgReponse format (Only meaningful for SELECT queries).
+        // format: indicate the query PgResponse format (Only meaningful for SELECT queries).
         // false: TEXT
         // true: BINARY
         format: bool,

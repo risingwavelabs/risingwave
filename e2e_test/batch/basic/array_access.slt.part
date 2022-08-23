@@ -23,3 +23,10 @@ NULL
 
 statement error
 select (ARRAY['foo', 'bar'])[];
+
+# array access is not possible for non-composite types
+statement error
+select (1::INT)[1];
+
+statement error
+select ('a'::VARCHAR)[1];

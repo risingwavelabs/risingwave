@@ -47,7 +47,7 @@ pub trait HummockVersionExt {
         level_idex: usize,
         f: F,
     );
-    fn num_levels(&self) -> usize;
+    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
     fn get_sst_ids(&self) -> Vec<u64>;
@@ -152,9 +152,12 @@ impl HummockVersionExt for HummockVersion {
         }
     }
 
-    fn num_levels(&self) -> usize {
+    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize {
         // l0 is currently separated from all levels
-        self.levels.len() + 1
+        self.levels
+            .get(&compaction_group_id)
+            .map(|group| group.levels.len() + 1)
+            .unwrap_or(0)
     }
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {

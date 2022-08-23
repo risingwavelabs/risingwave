@@ -25,7 +25,7 @@ fn main() {
     println!("This binary is only available in simulation.");
 }
 
-/// Determinisitic simulation end-to-end test runner.
+/// Deterministic simulation end-to-end test runner.
 ///
 /// ENVS:
 ///

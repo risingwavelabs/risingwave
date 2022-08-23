@@ -132,7 +132,12 @@ impl MetaClient {
                 .map(|info| ExtraInfo { info: Some(info) })
                 .collect(),
         };
-        self.inner.heartbeat(request).await?;
+        let resp = self.inner.heartbeat(request).await?;
+        if let Some(status) = resp.status {
+            if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                panic!("{}", status.message);
+            }
+        }
         Ok(())
     }
 
@@ -382,9 +387,6 @@ impl MetaClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
-                        if err.to_string().contains("unknown worker") {
-                            panic!("Already removed by the meta node. Need to restart the worker");
-                        }
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);

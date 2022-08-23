@@ -39,7 +39,7 @@ use crate::hummock::level_handler::LevelHandler;
 const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
-    fn need_compaction(&self, levels: &Levels, level_handlers: &mut [LevelHandler]) -> bool;
+    fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool;
 
     fn pick_compaction(
         &self,
@@ -97,28 +97,26 @@ impl DynamicLevelSelector {
         &self,
         select_level: usize,
         target_level: usize,
-        task_id: HummockCompactionTaskId,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
                 Box::new(TierCompactionPicker::new(
-                    task_id,
                     self.config.clone(),
                     self.overlap_strategy.clone(),
                 ))
             } else {
                 Box::new(LevelCompactionPicker::new(
-                    task_id,
                     target_level,
                     self.config.clone(),
                     self.overlap_strategy.clone(),
                 ))
             }
         } else {
+            assert_eq!(select_level + 1, target_level);
             Box::new(MinOverlappingPicker::new(
-                task_id,
                 select_level,
-                select_level + 1,
+                target_level,
+                self.config.max_bytes_for_level_base,
                 self.overlap_strategy.clone(),
             ))
         }
@@ -185,7 +183,7 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn get_priority_levels(&self, levels: &Levels, handlers: &mut [LevelHandler]) -> SelectContext {
+    fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
         let idle_file_count = levels
@@ -244,16 +242,13 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn generate_task_by_compaction_config(
-        &self,
-        input: CompactionInput,
-        base_level: usize,
-    ) -> CompactionTask {
+    fn create_compaction_task(&self, input: CompactionInput, base_level: usize) -> CompactionTask {
         let target_file_size = if input.target_level == 0 {
             self.config.target_file_size_base
         } else {
             assert!(input.target_level >= base_level);
-            self.config.target_file_size_base << (input.target_level - base_level)
+            let step = (input.target_level - base_level) / 2;
+            self.config.target_file_size_base << step
         };
         let compression_algorithm = if input.target_level == 0 {
             self.config.compression_algorithm[0].clone()
@@ -311,7 +306,7 @@ impl DynamicLevelSelector {
 }
 
 impl LevelSelector for DynamicLevelSelector {
-    fn need_compaction(&self, levels: &Levels, level_handlers: &mut [LevelHandler]) -> bool {
+    fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool {
         let ctx = self.get_priority_levels(levels, level_handlers);
         ctx.score_levels
             .first()
@@ -330,9 +325,10 @@ impl LevelSelector for DynamicLevelSelector {
             if score <= SCORE_BASE {
                 return None;
             }
-            let picker = self.create_compaction_picker(select_level, target_level, task_id);
+            let picker = self.create_compaction_picker(select_level, target_level);
             if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
-                return Some(self.generate_task_by_compaction_config(ret, ctx.base_level));
+                ret.add_pending_task(task_id, level_handlers);
+                return Some(self.create_compaction_task(ret, ctx.base_level));
             }
         }
         None
@@ -357,15 +353,12 @@ impl LevelSelector for DynamicLevelSelector {
             return None;
         }
 
-        let picker = ManualCompactionPicker::new(
-            task_id,
-            self.overlap_strategy.clone(),
-            option,
-            target_level,
-        );
+        let picker =
+            ManualCompactionPicker::new(self.overlap_strategy.clone(), option, target_level);
 
         let ret = picker.pick_compaction(levels, level_handlers)?;
-        Some(self.generate_task_by_compaction_config(ret, ctx.base_level))
+        ret.add_pending_task(task_id, level_handlers);
+        Some(self.create_compaction_task(ret, ctx.base_level))
     }
 
     fn name(&self) -> &'static str {
@@ -484,7 +477,7 @@ pub mod tests {
             .max_level(4)
             .max_bytes_for_level_multiplier(5)
             .max_compaction_bytes(1)
-            .level0_tigger_file_numer(1)
+            .level0_trigger_file_number(1)
             .level0_tier_compact_file_number(2)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
@@ -557,7 +550,7 @@ pub mod tests {
             .max_level(4)
             .max_bytes_for_level_multiplier(5)
             .max_compaction_bytes(10000)
-            .level0_tigger_file_numer(8)
+            .level0_trigger_file_number(8)
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
@@ -585,7 +578,7 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
-        // trival move.
+        // trivial move.
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert!(compaction.input.input_levels[1].table_infos.is_empty());
         assert_eq!(compaction.input.target_level, 0);
@@ -593,7 +586,7 @@ pub mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::new_with(config)
             .max_bytes_for_level_base(100)
-            .level0_tigger_file_numer(8)
+            .level0_trigger_file_number(8)
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let selector = DynamicLevelSelector::new(
@@ -625,7 +618,7 @@ pub mod tests {
         assert_eq!(compaction.input.input_levels[1].table_infos.len(), 1);
         assert_eq!(
             compaction.target_file_size,
-            config.target_file_size_base * 4
+            config.target_file_size_base * 2
         );
         assert_eq!(compaction.compression_algorithm.as_str(), "Lz4",);
         // no compaction need to be scheduled because we do not calculate the size of pending files

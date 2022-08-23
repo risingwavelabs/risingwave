@@ -19,7 +19,6 @@ farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
