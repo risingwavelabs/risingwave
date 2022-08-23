@@ -1027,8 +1027,8 @@ async fn test_hummock_compaction_task_heartbeat() {
     // send heartbeats to the task immediately
     let req = CompactTaskProgress {
         task_id: compact_task.task_id,
-        num_blocks_sealed: 1,
-        num_blocks_uploaded: 1,
+        num_ssts_sealed: 1,
+        num_ssts_uploaded: 1,
     };
     compactor_manager.update_task_heartbeats(context_id, &vec![req]);
 
