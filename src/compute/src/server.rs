@@ -74,10 +74,6 @@ pub async fn compute_node_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
 
-    if opts.enable_async_stack_trace {
-        info!("Async stack trace is enabled");
-    }
-
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
     // Register to the cluster. We're not ready to serve until activate is called.
