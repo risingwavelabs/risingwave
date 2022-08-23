@@ -836,6 +836,10 @@ where
         self.processing_table.lock().await
     }
 
+    // For creating and destroying, compactor and compute must maintain the Catalog for compaction
+    // that it can build the prefix_bloom_filter by Catalog until last barrier through the whole
+    // graph. we notify the `Add` before `Barrier Command` and notify the `Delete` after `Barrier
+    // Command` in StreamManager
     async fn notify_compute_and_compactor(&self, operation: Operation, info: Info) {
         self.notification_manager
             .notify_compute(operation, info.clone())
