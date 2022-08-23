@@ -97,8 +97,8 @@
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
         LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
   batch_plan: |
-    BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at] }
-      BatchExchange { order: [], dist: Single }
+    BatchExchange { order: [], dist: Single }
+      BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at] }
         BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [window_start, t1._row_id] }
@@ -112,8 +112,8 @@
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
         LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
   batch_plan: |
-    BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at] }
-      BatchExchange { order: [], dist: Single }
+    BatchExchange { order: [], dist: Single }
+      BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at] }
         BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [window_start, t1._row_id] }
@@ -175,8 +175,8 @@
           LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
             LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.v1, t1.created_at] }
   batch_plan: |
-    BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
-      BatchExchange { order: [], dist: Single }
+    BatchExchange { order: [], dist: Single }
+      BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
         BatchFilter { predicate: (t1.v1 >= 10:Int32) }
           BatchScan { table: t1, columns: [t1.id, t1.v1, t1.created_at], distribution: SomeShard }
   stream_plan: |

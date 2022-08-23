@@ -372,7 +372,7 @@ impl TestCase {
             || self.batch_plan_proto.is_some()
             || self.batch_error.is_some()
         {
-            let batch_plan = match logical_plan.gen_batch_query_plan() {
+            let batch_plan = match logical_plan.gen_batch_distributed_plan() {
                 Ok(batch_plan) => batch_plan,
                 Err(err) => {
                     ret.batch_error = Some(err.to_string());
