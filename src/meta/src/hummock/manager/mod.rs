@@ -559,11 +559,10 @@ where
     pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
+        compaction: &mut Compaction,
         manual_compaction_option: Option<ManualCompactionOption>,
     ) -> Result<Option<CompactTask>> {
         let start_time = Instant::now();
-        let mut compaction_guard = write_lock!(self, compaction).await;
-        let compaction = compaction_guard.deref_mut();
         // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
         let task_id = self
             .env
@@ -669,20 +668,54 @@ where
         ret
     }
 
+    #[named]
+    pub async fn cancel_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let compaction = compaction_guard.deref_mut();
+        self.report_compact_task_impl(None, compact_task, compaction)
+            .await
+    }
+
+    #[named]
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
-        self.get_compact_task_impl(compaction_group_id, None).await
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let compaction = compaction_guard.deref_mut();
+        while let Some(mut task) = self
+            .get_compact_task_impl(compaction_group_id, compaction, None)
+            .await?
+        {
+            if !CompactStatus::is_trivial_move_task(&task) {
+                return Ok(Some(task));
+            }
+            task.task_status = true;
+            task.sorted_output_ssts = task.input_ssts[0].table_infos.clone();
+            // ignore error because we have cancel the state in compaction status.
+            if let Err(e) = self.report_compact_task_impl(None, &task, compaction).await {
+                task.sorted_output_ssts.clear();
+                tracing::error!("failed to report trivial move: {:?}", e);
+                return Ok(Some(task));
+            }
+        }
+        Ok(None)
     }
 
+    #[named]
     pub async fn manual_get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
-        self.get_compact_task_impl(compaction_group_id, Some(manual_compaction_option))
-            .await
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let compaction = compaction_guard.deref_mut();
+        self.get_compact_task_impl(
+            compaction_group_id,
+            compaction,
+            Some(manual_compaction_option),
+        )
+        .await
     }
 
     /// Assigns a compaction task to a compactor
@@ -721,12 +754,15 @@ where
         Ok(())
     }
 
+    #[named]
     pub async fn report_compact_task(
         &self,
         context_id: HummockContextId,
         compact_task: &CompactTask,
     ) -> Result<bool> {
-        self.report_compact_task_impl(context_id, compact_task, false)
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let compaction = compaction_guard.deref_mut();
+        self.report_compact_task_impl(Some(context_id), compact_task, compaction)
             .await
     }
 
@@ -736,13 +772,11 @@ where
     #[named]
     pub async fn report_compact_task_impl(
         &self,
-        context_id: HummockContextId,
+        context_id: Option<HummockContextId>,
         compact_task: &CompactTask,
-        trivial_move: bool,
+        compaction: &mut Compaction,
     ) -> Result<bool> {
-        let mut compaction_guard = write_lock!(self, compaction).await;
         let start_time = Instant::now();
-        let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(
             compaction
                 .compaction_statuses
@@ -759,7 +793,8 @@ where
 
         // For trivial_move task, there is no need to check the task assignment because
         // we won't populate compact_task_assignment for it.
-        if !trivial_move {
+        let has_assigned_compactor = context_id.is_some();
+        if let Some(context_id) = context_id {
             match assignee_context_id {
                 Some(id) => {
                     // Assignee id mismatch.
@@ -792,7 +827,7 @@ where
             let mut version_delta = HummockVersionDelta {
                 prev_id: old_version.id,
                 max_committed_epoch: old_version.max_committed_epoch,
-                trivial_move,
+                trivial_move: !has_assigned_compactor,
                 ..Default::default()
             };
             let level_deltas = &mut version_delta
@@ -822,7 +857,7 @@ where
             version_delta.id = new_version_id;
             hummock_version_deltas.insert(version_delta.id, version_delta);
 
-            if trivial_move {
+            if !has_assigned_compactor {
                 commit_multi_var!(
                     self,
                     assignee_context_id,
@@ -887,7 +922,7 @@ where
 
         #[cfg(test)]
         {
-            drop(compaction_guard);
+            // drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
