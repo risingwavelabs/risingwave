@@ -548,12 +548,12 @@ struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_iter: C,
     _phantom: PhantomData<&'a ()>,
-    /// Mapping from column id to column index. Used for deserializing the row.
+    /// Data type of each column, used for deserializing the row.
     data_types: Vec<DataType>,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
-/// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
+/// It will merge the result of `mem_table_iter` and `state_store_iter`.
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
@@ -568,11 +568,9 @@ where
         }
     }
 
-    /// This function scans kv pairs from the `shared_storage`(`storage_table`) and
-    /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is
-    /// (Included(prefix),Excluded(next_key(prefix))), all kv pairs within corresponding prefix will
-    /// be scanned. If a record exist in both `storage_table` and `mem_table`, result
-    /// `mem_table` is returned according to the operation(RowOp) on it.
+    /// This function scans kv pairs from the `shared_storage` and
+    /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
+    /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
@@ -603,7 +601,7 @@ where
                 (Some(Ok((storage_pk, _))), Some((mem_table_pk, _))) => {
                     match storage_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
-                            // yield data from storage table
+                            // yield data from storage
                             let (_, row) = storage_iter.next().await.unwrap()?;
                             yield Cow::Owned(row);
                         }
@@ -671,7 +669,7 @@ where
 struct StorageIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
-    /// Mapping from column id to column index. Used for deserializing the row.
+    /// Data type of each column, used for deserializing the row.
     data_types: Vec<DataType>,
 }
 
