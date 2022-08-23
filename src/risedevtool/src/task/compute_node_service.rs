@@ -41,14 +41,12 @@ impl ComputeNodeService {
         }
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(
         cmd: &mut Command,
         config: &ComputeNodeConfig,
         hummock_in_memory_strategy: HummockInMemoryStrategy,
     ) -> Result<()> {
-        let prefix_data = env::var("PREFIX_DATA")?;
-
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
@@ -62,6 +60,7 @@ impl ComputeNodeService {
             .arg("1");
 
         if config.enable_tiered_cache {
+            let prefix_data = env::var("PREFIX_DATA")?;
             cmd.arg("--file-cache-dir").arg(
                 PathBuf::from(prefix_data)
                     .join("filecache")

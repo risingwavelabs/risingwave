@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
-use risingwave_common::cache::{CachableEntry, LruCache};
+use risingwave_common::cache::{CacheableEntry, LruCache};
 use tokio::io::AsyncWriteExt;
 
 use super::{
@@ -106,7 +106,7 @@ pub(super) mod utils {
     }
 }
 
-pub type OpenReadFileHolder = Arc<CachableEntry<PathBuf, File>>;
+pub type OpenReadFileHolder = Arc<CacheableEntry<PathBuf, File>>;
 
 pub struct DiskObjectStore {
     path_prefix: String,

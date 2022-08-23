@@ -210,6 +210,8 @@ message LookupJoinNode {
   repeated common.WorkerNode worker_nodes = 8;
 }
 
+message UnionNode {}
+
 message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
@@ -236,6 +238,7 @@ message PlanNode {
     ExpandNode expand = 28;
     LookupJoinNode lookup_join = 29;
     ProjectSetNode project_set = 30;
+    UnionNode union = 31;
   }
   string identity = 24;
 }

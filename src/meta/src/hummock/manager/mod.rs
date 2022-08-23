@@ -458,7 +458,7 @@ where
         Ok(())
     }
 
-    /// Make sure `max_commited_epoch` is pinned and return it.
+    /// Make sure `max_committed_epoch` is pinned and return it.
     #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
         let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);

@@ -167,17 +167,16 @@ async fn compact_shared_buffer(
         .await?;
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-
-        let rx = compaction_executor
+        let handle = compaction_executor
             .execute(async move { compactor.run(iter, multi_filter_key_extractor).await });
-        compaction_futures.push(rx);
+        compaction_futures.push(handle);
     }
     local_stats.report(stats.as_ref());
 
     let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
     let mut err = None;
     while let Some(future_result) = buffered.next().await {
-        match future_result.unwrap() {
+        match future_result {
             Ok((split_index, ssts)) => {
                 output_ssts.push((split_index, ssts));
             }

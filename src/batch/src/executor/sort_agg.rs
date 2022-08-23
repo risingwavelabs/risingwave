@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_sum_int32_grouped_execeed_limit() -> Result<()> {
+    async fn execute_sum_int32_grouped_exceed_limit() -> Result<()> {
         // mock a child executor
         let schema = Schema {
             fields: vec![

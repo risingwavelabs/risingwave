@@ -28,14 +28,14 @@ use risingwave_object_store::object::{
 use super::{
     Block, BlockCache, Sstable, SstableMeta, TieredCache, TieredCacheKey, TieredCacheValue,
 };
-use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
+use crate::hummock::{BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
-pub type TableHolder = CachableEntry<HummockSstableId, Box<Sstable>>;
+pub type TableHolder = CacheableEntry<HummockSstableId, Box<Sstable>>;
 
 // BEGIN section for tiered cache
 

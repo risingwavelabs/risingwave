@@ -14,35 +14,38 @@
 
 use std::future::Future;
 
-use tokio::task::JoinHandle;
+
+use futures::future::RemoteHandle;
+use futures::FutureExt;
+
+use crate::hummock::compactor::CompactOutput;
+use crate::hummock::HummockResult;
+
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 #[cfg(not(madsim))]
 pub struct CompactionExecutor {
-    runtime: Option<tokio::runtime::Runtime>,
+    /// Runtime for compaction tasks.
+    #[cfg(not(madsim))]
+    runtime: &'static tokio::runtime::Runtime,
 }
 
 #[cfg(not(madsim))]
 impl CompactionExecutor {
     pub fn new(worker_threads_num: Option<usize>) -> Self {
-        let mut builder = tokio::runtime::Builder::new_multi_thread();
-        if let Some(worker_threads_num) = worker_threads_num {
-            builder.worker_threads(worker_threads_num);
-        }
-        let runtime = builder.enable_all().build().unwrap();
-        Self {
-            runtime: Some(runtime),
-        }
-    }
+        let runtime = {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            builder.thread_name("risingwave-compaction");
+            if let Some(worker_threads_num) = worker_threads_num {
+                builder.worker_threads(worker_threads_num);
+            }
+            builder.enable_all().build().unwrap()
+        };
 
-    pub fn execute<F, T>(&self, t: F) -> JoinHandle<T>
-    where
-        F: Future<Output = T> + Send + 'static,
-        T: Send + 'static,
-    {
-        match self.runtime.as_ref() {
-            Some(runtime) => runtime.spawn(t),
-            None => tokio::spawn(t),
+        Self {
+            // Leak the runtime to avoid runtime shutting-down in the main async context.
+            // TODO: may manually shutdown the runtime gracefully.
+            runtime: Box::leak(Box::new(runtime)),
         }
     }
 }
@@ -67,11 +70,17 @@ impl CompactionExecutor {
         Self {}
     }
 
-    pub fn execute<F, T>(&self, t: F) -> JoinHandle<T>
+    /// Send a request to the executor, returns a [`RemoteHandle`] to retrieve the result.
+    pub fn send_request<T>(&self, t: T) -> RemoteHandle<HummockResult<CompactOutput>>
     where
         F: Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
-        tokio::spawn(t)
+        let (t, handle) = t.remote_handle();
+        #[cfg(not(madsim))]
+        let _ = self.runtime.spawn(t);
+        #[cfg(madsim)]
+        let _ = tokio::spawn(t);
+        handle
     }
 }
