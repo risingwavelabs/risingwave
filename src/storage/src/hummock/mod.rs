@@ -14,7 +14,6 @@
 
 //! Hummock is the state store of the streaming system.
 
-use std::fmt;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -229,11 +228,5 @@ impl HummockStorage {
         }
 
         !surely_not_have
-    }
-}
-
-impl fmt::Debug for HummockStorage {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
     }
 }
