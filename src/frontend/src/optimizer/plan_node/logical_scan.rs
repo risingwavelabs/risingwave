@@ -334,7 +334,7 @@ impl LogicalScan {
         Self::new(
             self.table_name.clone(),
             self.is_sys_table,
-            self.required_col_idx.clone(),
+            self.output_col_idx.clone(),
             self.table_desc.clone(),
             self.indexes.clone(),
             self.base.ctx.clone(),
