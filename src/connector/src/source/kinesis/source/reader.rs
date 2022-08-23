@@ -163,7 +163,7 @@ async fn split_reader_into_stream(mut reader: KinesisSplitReader) {
         match reader.next().await {
             Ok(chunk) => yield chunk,
             Err(e) => {
-                log::error!("hang up kinesis reader due to polling error: {}", e);
+                tracing::error!("hang up kinesis reader due to polling error: {}", e);
                 drop(reader);
                 break;
             }
@@ -227,13 +227,16 @@ impl SplitReader for KinesisMultiSplitReader {
                             cache.lock().await.extend(chunk);
                         }
                         Err(e) => {
-                            log::error!("split encountered error: {:?}, shutting down stream", e);
+                            tracing::error!(
+                                "split encountered error: {:?}, shutting down stream",
+                                e
+                            );
                             break;
                         }
                     }
                 }
             }));
-            log::info!("launch kinesis reader with splits: {:?}", self.splits);
+            tracing::info!("launch kinesis reader with splits: {:?}", self.splits);
         }
         loop {
             let mut cache_lock = self.message_cache.lock().await;

@@ -163,7 +163,7 @@ impl ConnectorSourceWorker {
                 }
                 _ = interval.tick() => {
                     if let Err(e) = self.tick().await {
-                        log::error!("error happened when tick from connector source worker: {}", e.to_string());
+                        tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
                     }
                 }
             }
@@ -621,7 +621,7 @@ where
 
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
-            log::warn!("source {} already registered", source.get_id());
+            tracing::warn!("source {} already registered", source.get_id());
             revert_funcs.clear();
             return Ok(());
         }
@@ -640,7 +640,7 @@ where
     ) -> MetaResult<()> {
         let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
         let current_splits_ref = worker.current_splits.clone();
-        log::info!("spawning new watcher for source {}", source.id);
+        tracing::info!("spawning new watcher for source {}", source.id);
 
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -670,7 +670,7 @@ where
         }
 
         if core.source_fragments.contains_key(&source_id) {
-            log::warn!(
+            tracing::warn!(
                 "dropping source {}, but associated fragments still exists",
                 source_id
             );
@@ -684,7 +684,7 @@ where
                 .await
             {
                 tracing::warn!(
-                    "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
+                    "Failed to unregister source {}. It will be unregistered eventually.\n{:#?}",
                     source_id,
                     e
                 );
@@ -714,7 +714,7 @@ where
                     })
                     .collect(),
             })));
-            log::debug!("pushing down mutation {:#?}", command);
+            tracing::debug!("pushing down mutation {:#?}", command);
 
             tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
                 let command = command.clone();
@@ -737,7 +737,7 @@ where
         loop {
             ticker.tick().await;
             if let Err(e) = self.tick().await {
-                log::error!(
+                tracing::error!(
                     "error happened while running source manager tick: {}",
                     e.to_string()
                 );

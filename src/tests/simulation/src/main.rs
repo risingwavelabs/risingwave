@@ -25,7 +25,7 @@ fn main() {
     println!("This binary is only available in simulation.");
 }
 
-/// Determinisitic simulation end-to-end test runner.
+/// Deterministic simulation end-to-end test runner.
 ///
 /// ENVS:
 ///
@@ -41,7 +41,7 @@ pub struct Args {
     files: String,
 
     /// The number of frontend nodes.
-    #[clap(long, default_value = "1")]
+    #[clap(long, default_value = "2")]
     frontend_nodes: usize,
 
     /// The number of compute nodes.
@@ -54,8 +54,8 @@ pub struct Args {
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 
-    #[clap(short, long, default_value = "1")]
-    jobs: usize,
+    #[clap(short, long)]
+    jobs: Option<usize>,
 }
 
 #[cfg(madsim)]
@@ -141,8 +141,8 @@ async fn main() {
     client_node
         .spawn(async move {
             let glob = &args.files;
-            if args.jobs > 1 {
-                run_parallel_slt_task(glob, &frontend_ip, args.jobs)
+            if let Some(jobs) = args.jobs {
+                run_parallel_slt_task(glob, &frontend_ip, jobs)
                     .await
                     .unwrap();
             } else {

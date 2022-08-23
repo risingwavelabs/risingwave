@@ -36,6 +36,7 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_connector", Level::INFO)
         .with_target("risingwave_frontend", Level::INFO)
         .with_target("risingwave_meta", Level::INFO)
+        .with_target("risingwave_tracing", Level::INFO)
         .with_target("pgwire", Level::ERROR)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
@@ -213,7 +214,9 @@ fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle<()> {
 /// Currently, the following env variables will be read:
 ///
 /// * `RW_WORKER_THREADS`: number of tokio worker threads. If not set, it will use tokio's default
-///   config (equivalent to CPU cores).
+///   config (equivalent to CPU cores). Note: This will not effect the dedicated runtimes for each
+///   service which are controlled by their own configurations, like streaming actors, compactions,
+///   etc.
 /// * `RW_DEADLOCK_DETECTION`: whether to enable deadlock detection. If not set, will enable in
 ///   debug mode, and disable in release mode.
 /// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
@@ -250,5 +253,10 @@ where
         spawn_prof_thread(profile_path);
     }
 
-    builder.enable_all().build().unwrap().block_on(f)
+    builder
+        .thread_name("risingwave-main")
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(f)
 }

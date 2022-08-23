@@ -61,7 +61,7 @@ pub trait RowSerialize: Clone {
 /// cell-based encoding and row-based encoding.
 #[derive(Clone)]
 pub struct ColumnDescMapping {
-    /// output_columns are some of the columns that to be partialy scan.
+    /// output_columns are some of the columns that to be partially scan.
     pub output_columns: Vec<ColumnDesc>,
 
     /// The output column's column index in output row, which is used in cell-based deserialize.
