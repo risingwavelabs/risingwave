@@ -231,9 +231,10 @@ macro_rules! object_store_impl_method_body {
 }
 
 /// This macro routes the object store operation to the real implementation by the ObjectStoreImpl
-/// enum type and the `path`.
+/// enum type and the `paths`. It is a modification of the macro above to work with a slice of
+/// strings instead of just a single one.
 ///
-/// For `path`, if the `path` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
+/// If an entry in `paths` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
 /// operation should be performed on the local object store, and otherwise the operation should be
 /// performed on remote object store.
 macro_rules! object_store_impl_method_body_slice {
@@ -242,15 +243,15 @@ macro_rules! object_store_impl_method_body_slice {
             let (paths_loc, paths_rem) = partition_object_store_paths($paths);
             match $object_store {
                 ObjectStoreImpl::InMem(in_mem) => {
-                    assert!(paths_loc.len() == 0, "get local path in pure in-mem object store: {:?}", $paths);
+                    assert!(paths_loc.is_empty(), "get local path in pure in-mem object store: {:?}", $paths);
                     in_mem.$method_name(&paths_rem $(, $args)*).await
                 },
                 ObjectStoreImpl::Disk(disk) => {
-                    assert!(paths_loc.len() == 0, "get local path in pure disk object store: {:?}", $paths);
+                    assert!(paths_loc.is_empty(), "get local path in pure disk object store: {:?}", $paths);
                     disk.$method_name(&paths_rem $(, $args)*).await
                 },
                 ObjectStoreImpl::S3(s3) => {
-                    assert!(paths_loc.len() == 0, "get local path in pure s3 object store: {:?}", $paths);
+                    assert!(paths_loc.is_empty(), "get local path in pure s3 object store: {:?}", $paths);
                     s3.$method_name(&paths_rem $(, $args)*).await
                 },
                 ObjectStoreImpl::Hybrid {
