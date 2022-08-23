@@ -186,7 +186,6 @@ impl AggStateFactory {
         } else {
             Ok(Box::new(CountStar::new(
                 self.return_type.clone(),
-                0,
                 self.filter.clone(),
             )))
         }

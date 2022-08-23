@@ -21,16 +21,16 @@ use crate::vector_op::agg::aggregator::Aggregator;
 
 pub struct CountStar {
     return_type: DataType,
-    result: usize,
     filter: ExpressionRef,
+    result: usize,
 }
 
 impl CountStar {
-    pub fn new(return_type: DataType, result: usize, filter: ExpressionRef) -> Self {
+    pub fn new(return_type: DataType, filter: ExpressionRef) -> Self {
         Self {
             return_type,
-            result,
             filter,
+            result: 0,
         }
     }
 
