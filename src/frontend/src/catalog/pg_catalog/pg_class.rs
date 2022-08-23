@@ -16,8 +16,8 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 
-/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise similar to a table. 
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
+/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
+/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
 pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
 pub const PG_CLASS_COLUMNS: &[PgCatalogColumnsDef] = &[
     (DataType::Int32, "oid"),
