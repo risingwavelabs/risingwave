@@ -77,6 +77,8 @@ const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
     [10000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
+const MAX_COMBINATION_SIZE: usize = 3;
+const MAX_CONJUNCTION_SIZE: usize = 8;
 
 pub struct IndexSelectionRule {}
 
@@ -88,8 +90,7 @@ impl Rule for IndexSelectionRule {
             return None;
         }
 
-        let mut primary_table_scan_io_estimator = TableScanIoEstimator::new(logical_scan);
-        let primary_cost = primary_table_scan_io_estimator.estimate(logical_scan.predicate());
+        let primary_cost = self.estimate_table_scan_cost(logical_scan);
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
         let mut min_cost = primary_cost.clone();
@@ -105,8 +106,8 @@ impl Rule for IndexSelectionRule {
                     p2s_mapping,
                 );
 
-                let mut index_table_scan_io_estimator = TableScanIoEstimator::new(&index_scan);
-                let index_cost = index_table_scan_io_estimator.estimate(index_scan.predicate());
+                let index_cost = self.estimate_table_scan_cost(&index_scan);
+
                 if index_cost.le(&min_cost) {
                     min_cost = index_cost;
                     final_plan = index_scan.into();
@@ -121,8 +122,7 @@ impl Rule for IndexSelectionRule {
             }
         }
 
-        // TODO: support merge index
-        if let Some((merge_index, merge_index_cost)) = self.merge_index_selection(logical_scan) {
+        if let Some((merge_index, merge_index_cost)) = self.index_merge_selection(logical_scan) {
             if merge_index_cost.le(&min_cost) {
                 min_cost = merge_index_cost;
                 final_plan = merge_index;
@@ -194,20 +194,12 @@ impl IndexSelectionRule {
             .iter()
             .zip_eq(index.primary_table.order_key.iter())
             .map(|(x, y)| {
-                ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
-                    ExprType::Equal,
-                    vec![
-                        ExprImpl::InputRef(Box::new(InputRef::new(
-                            x.index,
-                            index.index_table.columns[x.index].data_type().clone(),
-                        ))),
-                        ExprImpl::InputRef(Box::new(InputRef::new(
-                            y.index + index.index_item.len(),
-                            index.primary_table.columns[y.index].data_type().clone(),
-                        ))),
-                    ],
-                    DataType::Boolean,
-                )))
+                Self::create_equal_expr(
+                    x.index,
+                    index.index_table.columns[x.index].data_type().clone(),
+                    y.index + index.index_item.len(),
+                    index.primary_table.columns[y.index].data_type().clone(),
+                )
             })
             .chain(new_predicate.into_iter())
             .collect_vec();
@@ -230,10 +222,7 @@ impl IndexSelectionRule {
             .expect("must be a logical scan");
 
         // 3. calculate the cost
-        let mut index_table_scan_io_estimator =
-            TableScanIoEstimator::new(index_scan_with_predicate);
-        let index_cost =
-            index_table_scan_io_estimator.estimate(index_scan_with_predicate.predicate());
+        let index_cost = self.estimate_table_scan_cost(index_scan_with_predicate);
         // lookup cost = index cost * LOOKUP_COST_CONST
         let lookup_cost = index_cost.mul(&IndexCost::new(LOOKUP_COST_CONST));
 
@@ -249,15 +238,17 @@ impl IndexSelectionRule {
         (lookup_join, lookup_cost)
     }
 
-    /// Merge Index Selection
-    /// Deal with predicate like a = 1 or b = 1, we can merge index `idx_a` (for a = 1) and index
-    /// `idx_b` (for b = 1) to find out all the rows we need.
-    fn merge_index_selection(&self, logical_scan: &LogicalScan) -> Option<(PlanRef, IndexCost)> {
+    /// Index Merge Selection
+    /// Deal with predicate like a = 1 or b = 1
+    /// Merge index scans from a table, currently merge is union semantic.
+    fn index_merge_selection(&self, logical_scan: &LogicalScan) -> Option<(PlanRef, IndexCost)> {
         let predicate = logical_scan.predicate().clone();
+        // 1. choose lowest cost index merge path
         let paths = self.gen_paths(&predicate.conjunctions, logical_scan);
         let (index_access, index_access_cost) = self.choose_min_cost_path(&paths)?;
 
-        // the schema of index_access is primary table order key.
+        // 2. lookup primary table
+        // the schema of index_access is the order key of primary table .
         let schema: &Schema = index_access.schema();
         let index_access_len = schema.len();
 
@@ -281,20 +272,12 @@ impl IndexSelectionRule {
             .iter()
             .enumerate()
             .map(|(x, y)| {
-                ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
-                    ExprType::Equal,
-                    vec![
-                        ExprImpl::InputRef(Box::new(InputRef::new(
-                            x,
-                            schema.fields[x].data_type.clone(),
-                        ))),
-                        ExprImpl::InputRef(Box::new(InputRef::new(
-                            y.column_idx + index_access_len,
-                            primary_table_desc.columns[y.column_idx].data_type.clone(),
-                        ))),
-                    ],
-                    DataType::Boolean,
-                )))
+                Self::create_equal_expr(
+                    x,
+                    schema.fields[x].data_type.clone(),
+                    y.column_idx + index_access_len,
+                    primary_table_desc.columns[y.column_idx].data_type.clone(),
+                )
             })
             .chain(new_predicate.into_iter())
             .collect_vec();
@@ -302,10 +285,10 @@ impl IndexSelectionRule {
         let on = Condition { conjunctions };
         let join = LogicalJoin::new(index_access, primary_table_scan.into(), JoinType::Inner, on);
 
-        // 2. push down predicate, so we can calculate the cost of index lookup
+        // 3 push down predicate, so we can calculate the cost of index lookup
         let join_ref = join.predicate_pushdown(Condition::true_cond());
 
-        // 3. keep the same schema with original logical_scan
+        // 4. keep the same schema with original logical_scan
         let scan_output_col_idx = logical_scan.output_col_idx();
         let lookup_join = join_ref.prune_col(
             &scan_output_col_idx
@@ -320,17 +303,18 @@ impl IndexSelectionRule {
         ))
     }
 
-    /// Any one path generated by `gen_paths` can be used to access.
+    /// Generate possible paths that can be used to access.
+    /// The schema of output is the order key of primary table, so it can be used to lookup primary table later.
     fn gen_paths(&self, conjunctions: &[ExprImpl], logical_scan: &LogicalScan) -> Vec<PlanRef> {
         let mut result = vec![];
         for expr in conjunctions {
-            let mut index_to_be_merged = vec![];
+            // it's OR clause!
             if let ExprImpl::FunctionCall(function_call) = expr &&
                 function_call.get_expr_type() == ExprType::Or {
-                let disjunctions = to_disjunctions(expr.clone());
 
-                // Clustering the disjunction by column index
-                // a = 1 or b = 2 or b = 3 -> {a = 1}, {b = 2 or b = 3}
+                let mut index_to_be_merged = vec![];
+
+                let disjunctions = to_disjunctions(expr.clone());
                 for (column_index, expr) in self.clustering_disjunction(disjunctions) {
                     let mut index_paths = vec![];
                     let conjunctions = to_conjunctions(expr);
@@ -350,16 +334,18 @@ impl IndexSelectionRule {
                     }
                 }
 
-            }
-
-            if let Some(path) = self.merge_index(index_to_be_merged) {
-                result.push(path)
+                if let Some(path) = self.merge(index_to_be_merged) {
+                    result.push(path)
+                }
             }
         }
 
         result
     }
 
+    /// Clustering the disjunction by column index
+    /// a = 1 or b = 2 or b = 3 -> <a, (a = 1)>, <b, (b = 2 or b = 3)>
+    /// a = 1 or (b = 2 and c = 3) -> <a, (a = 1)>, <None, (b = 2 and c = 3)>
     fn clustering_disjunction(
         &self,
         disjunctions: Vec<ExprImpl>,
@@ -398,23 +384,34 @@ impl IndexSelectionRule {
     }
 
     /// Given a conjunctions from one arm of an OR clause, generate all matching index path
-    /// (including primary index) for the relation. `column_index` (refers to primary table) is a
-    /// hint can be used to prune index.
+    /// (including primary index) for the relation.
+    /// `column_index` (refers to primary table) is a hint can be used to prune index.
+    /// Steps:
+    /// 1. Take the combination of `conjunctions` to extract the potential clauses.
+    /// 2. For each potential clauses, generate index path if it can.
     fn gen_index_path(
         &self,
         column_index: Option<usize>,
         conjunctions: &[ExprImpl],
         logical_scan: &LogicalScan,
     ) -> Vec<PlanRef> {
-        if column_index.is_some() {
-            assert_eq!(conjunctions.len(), 1);
+        // Assumption: use at most `MAX_COMBINATION_SIZE` clauses, we can determine which is the
+        // best index.
+        let mut combinations = vec![];
+        for i in 1..min(conjunctions.len(), MAX_COMBINATION_SIZE) + 1 {
+            combinations.extend(
+                conjunctions
+                    .iter()
+                    .take(min(conjunctions.len(), MAX_CONJUNCTION_SIZE))
+                    .combinations(i),
+            );
         }
 
         let mut result = vec![];
 
-        // TODO: prune conjunctions in case of too large
         for index in logical_scan.indexes() {
             if column_index.is_some() {
+                assert_eq!(conjunctions.len(), 1);
                 let p2s_mapping = index.primary_to_secondary_mapping();
                 match p2s_mapping.get(column_index.as_ref().unwrap()) {
                     None => continue, // not found, prune this index
@@ -427,17 +424,45 @@ impl IndexSelectionRule {
                 }
             }
 
-            // try this index
-            let condition = Condition {
-                conjunctions: conjunctions.to_vec(),
-            };
-            match self.build_index_access(index.clone(), condition, logical_scan.ctx().clone()) {
-                None => {}
-                Some(index_access) => {
+            // try secondary index
+            for conj in &combinations {
+                let condition = Condition {
+                    conjunctions: conj.iter().map(|&x| x.to_owned()).collect(),
+                };
+                if let Some(index_access) =
+                    self.build_index_access(index.clone(), condition, logical_scan.ctx().clone())
+                {
                     result.push(index_access);
                 }
-            };
+            }
         }
+
+        // try primary index
+        let primary_table_desc = logical_scan.table_desc();
+        if let Some(idx) = column_index {
+            assert_eq!(conjunctions.len(), 1);
+            if primary_table_desc.order_key[0].column_idx != idx {
+                return result;
+            }
+        }
+
+        let primary_access = LogicalScan::new(
+            logical_scan.table_name().to_string(),
+            false,
+            primary_table_desc
+                .order_key
+                .iter()
+                .map(|x| x.column_idx)
+                .collect_vec(),
+            primary_table_desc.clone().into(),
+            vec![],
+            logical_scan.ctx(),
+            Condition {
+                conjunctions: conjunctions.to_vec(),
+            },
+        );
+
+        result.push(primary_access.into());
 
         result
     }
@@ -486,7 +511,7 @@ impl IndexSelectionRule {
         )
     }
 
-    fn merge_index(&self, paths: Vec<PlanRef>) -> Option<PlanRef> {
+    fn merge(&self, paths: Vec<PlanRef>) -> Option<PlanRef> {
         if paths.is_empty() {
             return None;
         }
@@ -502,46 +527,67 @@ impl IndexSelectionRule {
                     unreachable!();
                 }
             })
+            .sorted_by(|a, b| {
+                // sort inputs to make plan deterministic
+                a.as_logical_scan()
+                    .expect("expect to be a logical scan")
+                    .table_name()
+                    .cmp(
+                        b.as_logical_scan()
+                            .expect("expect to be a logical scan")
+                            .table_name(),
+                    )
+            })
             .collect_vec();
 
         Some(LogicalUnion::create(false, new_paths))
     }
 
     fn choose_min_cost_path(&self, paths: &[PlanRef]) -> Option<(PlanRef, IndexCost)> {
-        if paths.is_empty() {
-            return None;
-        }
-
-        let mut min_cost = IndexCost::default();
-        let mut min_cost_plan: PlanRef = paths[0].clone();
-
-        for path in paths {
-            if let Some(scan) = path.as_logical_scan() {
-                let mut table_scan_io_estimator = TableScanIoEstimator::new(scan);
-                let cost = table_scan_io_estimator.estimate(scan.predicate());
-                if cost.le(&min_cost) {
-                    min_cost = cost;
-                    min_cost_plan = scan.clone().into();
+        paths
+            .iter()
+            .map(|path| {
+                if let Some(scan) = path.as_logical_scan() {
+                    let cost = self.estimate_table_scan_cost(scan);
+                    (scan.clone().into(), cost)
+                } else if let Some(union) = path.as_logical_union() {
+                    let cost = union
+                        .inputs()
+                        .iter()
+                        .map(|input| {
+                            self.estimate_table_scan_cost(
+                                input.as_logical_scan().expect("expect to be a scan"),
+                            )
+                        })
+                        .reduce(|a, b| a.add(&b))
+                        .unwrap();
+                    (union.clone().into(), cost)
+                } else {
+                    unreachable!()
                 }
-            } else if let Some(union) = path.as_logical_union() {
-                let union: &LogicalUnion = union;
-                let mut total_cost = IndexCost::new(0);
-                for input in union.inputs() {
-                    let scan = input.as_logical_scan()?;
-                    let mut table_scan_io_estimator = TableScanIoEstimator::new(scan);
-                    let cost = table_scan_io_estimator.estimate(scan.predicate());
-                    total_cost = total_cost.add(&cost);
-                }
-                if total_cost.le(&min_cost) {
-                    min_cost = total_cost;
-                    min_cost_plan = union.clone().into();
-                }
-            } else {
-                unreachable!()
-            }
-        }
+            })
+            .min_by(|(_, cost1), (_, cost2)| Ord::cmp(cost1, cost2))
+    }
 
-        Some((min_cost_plan, min_cost))
+    fn estimate_table_scan_cost(&self, scan: &LogicalScan) -> IndexCost {
+        let mut table_scan_io_estimator = TableScanIoEstimator::new(scan);
+        table_scan_io_estimator.estimate(scan.predicate())
+    }
+
+    fn create_equal_expr(
+        left: usize,
+        left_data_type: DataType,
+        right: usize,
+        right_data_type: DataType,
+    ) -> ExprImpl {
+        ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+            ExprType::Equal,
+            vec![
+                ExprImpl::InputRef(Box::new(InputRef::new(left, left_data_type))),
+                ExprImpl::InputRef(Box::new(InputRef::new(right, right_data_type))),
+            ],
+            DataType::Boolean,
+        )))
     }
 }
 
@@ -683,7 +729,7 @@ enum MatchItem {
     All,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug, PartialOrd, Ord)]
 struct IndexCost(usize);
 
 impl Default for IndexCost {
