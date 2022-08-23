@@ -1,8 +1,10 @@
 query II rowsort
 select * from nexmark_q8;
 ----
-1000 vicky noris 2015-07-15 00:00:00
-1002 kate jones 2015-07-15 00:00:00
-1003 peter jones 2015-07-15 00:00:00
+1008 vicky white 2015-07-15 00:00:00
+1002 kate jones  2015-07-15 00:00:00
 1006 saul abrams 2015-07-15 00:00:00
-1009 peter noris 2015-07-15 00:00:00
+1018 peter jones 2015-07-15 00:00:00
+1000 vicky noris 2015-07-15 00:00:00
+1004 john white  2015-07-15 00:00:00
+1014 paul abrams 2015-07-15 00:00:00
