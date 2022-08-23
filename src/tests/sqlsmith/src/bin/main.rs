@@ -89,7 +89,6 @@ async fn create_tables(
 
     let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(opt);
-    setup_sql.push_str(&sql);
     let statements = parse_sql(&sql);
     let mut tables = statements
         .iter()
