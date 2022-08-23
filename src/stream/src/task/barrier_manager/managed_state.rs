@@ -14,7 +14,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::once;
+use std::mem::take;
 
+use itertools::Itertools;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use tokio::sync::oneshot;
 
@@ -39,7 +41,7 @@ enum ManagedBarrierStateInner {
         remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
-        collect_notifier: Option<oneshot::Sender<CollectResult>>,
+        collect_notifier: oneshot::Sender<CollectResult>,
     },
 }
 
@@ -71,21 +73,24 @@ impl ManagedBarrierState {
         };
 
         if to_notify {
-            let mut max_collect_epoch = 0;
-            for (epoch, inner) in &mut self.epoch_barrier_state_map {
-                match inner {
+            let result = self
+                .epoch_barrier_state_map
+                .iter()
+                .find_or_last(|(_, inner)| match inner {
                     ManagedBarrierStateInner::Issued {
                         remaining_actors, ..
-                    } => {
-                        if !remaining_actors.is_empty() {
-                            break;
-                        }
-                    }
-                    _ => break,
-                }
+                    } => !remaining_actors.is_empty(),
+                    _ => true,
+                })
+                .map(|(key, _)| *key);
+            let result = match result {
+                Some(epoch) => self.epoch_barrier_state_map.split_off(&epoch),
+                None => take(&mut self.epoch_barrier_state_map),
+            };
+            result.into_iter().for_each(|(epoch, inner)| {
                 let create_mview_progress = self
                     .create_mview_progress
-                    .remove(epoch)
+                    .remove(&epoch)
                     .unwrap_or_default()
                     .into_iter()
                     .map(|(actor, state)| CreateMviewProgress {
@@ -93,10 +98,11 @@ impl ManagedBarrierState {
                         done: matches!(state, ChainState::Done),
                         consumed_epoch: match state {
                             ChainState::ConsumingUpstream(consumed_epoch) => consumed_epoch,
-                            ChainState::Done => *epoch,
+                            ChainState::Done => epoch,
                         },
                     })
                     .collect();
+
                 match inner {
                     ManagedBarrierStateInner::Issued {
                         collect_notifier, ..
@@ -105,17 +111,14 @@ impl ManagedBarrierState {
                         let result = CollectResult {
                             create_mview_progress,
                         };
-                        let collect_notifier = collect_notifier.take().unwrap();
+                        // let collect_notifier = collect_notifier.take().unwrap();
                         if collect_notifier.send(result).is_err() {
                             warn!("failed to notify barrier collection with epoch {}", epoch)
                         }
                     }
                     _ => unreachable!(),
                 }
-                max_collect_epoch = *epoch;
-            }
-            self.epoch_barrier_state_map
-                .retain(|k, _| k > &max_collect_epoch);
+            })
         }
     }
 
@@ -177,7 +180,7 @@ impl ManagedBarrierState {
                     .collect();
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
-                    collect_notifier: Some(collect_notifier),
+                    collect_notifier,
                 }
             }
             Some(ManagedBarrierStateInner::Issued { .. }) => {
@@ -190,7 +193,7 @@ impl ManagedBarrierState {
                 let remaining_actors = actor_ids_to_collect.into_iter().collect();
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
-                    collect_notifier: Some(collect_notifier),
+                    collect_notifier,
                 }
             }
         };
