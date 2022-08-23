@@ -1,3 +1,22 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// FIXME: This is a false-positive clippy test, remove this while bumping toolchain.
+// https://github.com/tokio-rs/tokio/issues/4836
+// https://github.com/rust-lang/rust-clippy/issues/8493
+#![expect(clippy::declare_interior_mutable_const)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -7,9 +26,15 @@ use tokio::task_local;
 #[derive(Clone, Copy)]
 pub struct TaskLocalBytesAllocated(Option<&'static AtomicUsize>);
 
+impl Default for TaskLocalBytesAllocated {
+    fn default() -> Self {
+        Self(Some(Box::leak(Box::new_in(AtomicUsize::new(0), System))))
+    }
+}
+
 impl TaskLocalBytesAllocated {
     pub fn new() -> Self {
-        Self(Some(Box::leak(Box::new_in(AtomicUsize::new(0), System))))
+        Self::default()
     }
 
     pub const fn invalid() -> Self {
@@ -23,6 +48,8 @@ impl TaskLocalBytesAllocated {
         }
     }
 
+    /// # Safety
+    /// The caller must ensure that `self` is valid.
     #[inline(always)]
     pub unsafe fn add_unchecked(&self, val: usize) {
         self.0.unwrap_unchecked().fetch_add(val, Ordering::Relaxed);
