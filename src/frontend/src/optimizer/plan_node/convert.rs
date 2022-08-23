@@ -93,10 +93,10 @@ pub trait ToLocalBatch {
 ///   `to_distributed_with_required`
 /// - Or, if a better plan can be generated when a required order is given, you can implement
 ///   `to_distributed_with_required`, and implement `to_distributed` with
-///   `to_distributed_with_required(&Order::any())`.
+///   `to_distributed_with_required(&Order::any(), &RequiredDist::Any)`
 pub trait ToDistributedBatch {
-    /// `to_distributed` is equivalent to `to_distributed_with_required(RequiredDist::Any,
-    /// &Order::any())`
+    /// `to_distributed` is equivalent to `to_distributed_with_required(&Order::any(),
+    /// &RequiredDist::Any)`
     fn to_distributed(&self) -> Result<PlanRef>;
     /// insert the exchange in batch physical plan to satisfy the required Distribution and Order.
     fn to_distributed_with_required(
