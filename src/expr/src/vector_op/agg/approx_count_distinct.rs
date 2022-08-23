@@ -165,18 +165,13 @@ impl Aggregator for ApproxCountDistinct {
         Ok(())
     }
 
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         let result = self.calculate_result();
+        self.registers = [0; NUM_OF_REGISTERS];
         match builder {
             ArrayBuilderImpl::Int64(b) => b.append(Some(result)).map_err(Into::into),
             _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
         }
-    }
-
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let res = self.output(builder);
-        self.registers = [0; NUM_OF_REGISTERS];
-        res
     }
 }
 
@@ -228,7 +223,7 @@ mod tests {
             for row_id in 0..data_chunk.cardinality() {
                 agg.update_single(&data_chunk, row_id).unwrap();
             }
-            agg.output_and_reset(&mut builder).unwrap();
+            agg.output(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();
@@ -253,7 +248,7 @@ mod tests {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
             agg.update_multi(&data_chunk, 0, data_chunk.cardinality())
                 .unwrap();
-            agg.output_and_reset(&mut builder).unwrap();
+            agg.output(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();
