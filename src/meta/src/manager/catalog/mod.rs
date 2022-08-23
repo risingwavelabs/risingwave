@@ -547,7 +547,9 @@ where
             core.add_source(source);
 
             let version = self
-                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .env
+                .notification_manager()
+                .notify_all_node(Operation::Add, Info::Source(source.to_owned()))
                 .await;
 
             Ok(version)
