@@ -661,7 +661,6 @@ where
 
         #[cfg(test)]
         {
-            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
@@ -762,8 +761,15 @@ where
     ) -> Result<bool> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
-        self.report_compact_task_impl(Some(context_id), compact_task, compaction)
-            .await
+        let ret = self
+            .report_compact_task_impl(Some(context_id), compact_task, compaction)
+            .await?;
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
+        }
+        Ok(ret)
     }
 
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
@@ -919,12 +925,6 @@ where
         );
 
         self.try_send_compaction_request(compact_task.compaction_group_id);
-
-        #[cfg(test)]
-        {
-            // drop(compaction_guard);
-            self.check_state_consistency().await;
-        }
 
         Ok(true)
     }
