@@ -32,7 +32,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::{CachePolicy, HummockResult};
+use crate::hummock::{CachePolicy, HummockError, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
@@ -177,13 +177,20 @@ async fn compact_shared_buffer(
     let mut err = None;
     while let Some(future_result) = buffered.next().await {
         match future_result {
-            Ok((split_index, ssts)) => {
+            Ok(Ok((split_index, ssts))) => {
                 output_ssts.push((split_index, ssts));
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 compact_success = false;
                 tracing::warn!("Shared Buffer Compaction failed with error: {:#?}", e);
                 err = Some(e);
+            }
+            Err(e) => {
+                compact_success = false;
+                tracing::warn!("Shared Buffer Compaction failed with future erro: {:#?}", e);
+                err = Some(HummockError::compaction_executor(
+                    "failed while execute in tokio",
+                ));
             }
         }
     }

@@ -32,7 +32,7 @@ pub use compaction_filter::{
     TTLCompactionFilter,
 };
 pub use context::{CompactorContext, Context};
-use futures::future::{try_join_all, RemoteHandle};
+use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
@@ -131,7 +131,13 @@ impl Compactor {
                 return false;
             }
         };
-
+        let sstable_id_manager_clone = context.sstable_id_manager.clone();
+        let _guard = scopeguard::guard(
+            (tracker_id, sstable_id_manager_clone),
+            |(tracker_id, sstable_id_manager)| {
+                sstable_id_manager.remove_watermark_sst_id(tracker_id);
+            },
+        );
 
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -224,13 +230,21 @@ impl Compactor {
         let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
         while let Some(future_result) = buffered.next().await {
             match future_result {
-                Ok((split_index, ssts)) => {
+                Ok(Ok((split_index, ssts))) => {
                     output_ssts.push((split_index, ssts));
+                }
+                Ok(Err(e)) => {
+                    compact_success = false;
+                    tracing::warn!(
+                        "Compaction task {} failed with error: {:#?}",
+                        compact_task.task_id,
+                        e
+                    );
                 }
                 Err(e) => {
                     compact_success = false;
                     tracing::warn!(
-                        "Compaction task {} failed with error: {:#?}",
+                        "Compaction task {} failed with join handle error: {:#?}",
                         compact_task.task_id,
                         e
                     );
@@ -261,10 +275,6 @@ impl Compactor {
                 context.sstable_store.delete_cache(table.id);
             }
         }
-        context
-            .sstable_id_manager
-            .remove_watermark_sst_id(tracker_id)
-            .await;
         compact_success
     }
 
