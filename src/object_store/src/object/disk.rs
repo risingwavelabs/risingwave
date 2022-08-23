@@ -282,8 +282,15 @@ impl ObjectStore for DiskObjectStore {
         Ok(())
     }
 
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    ///
+    /// Calling this function is equivalent to calling `delete` individually for each given path.
     async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
-        unimplemented!();
+        for &path in paths {
+            self.delete(path).await?
+        }
+        Ok(())
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
