@@ -146,7 +146,7 @@ mod tests {
             },
         );
 
-        // Add 4 LIstValues to ArrayBuilder
+        // Add 4 ListValues to ArrayBuilder
         (1..=4).for_each(|i| {
             builder
                 .append(Some(ListRef::ValueRef {
