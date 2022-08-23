@@ -106,6 +106,7 @@ async fn create_tables(
     // Generate some mviews
     for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        setup_sql.push_str(&format!("{};", &create_sql));
         client.execute(&create_sql, &[]).await.unwrap();
         tables.push(table.clone());
         mviews.push(table);
