@@ -28,10 +28,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::f64::consts::PI;
 
-use super::NEXMARK_BASE_TIME;
-use crate::source::nexmark::NexmarkProperties;
+use crate::source::nexmark::utils::{build_channel_url_map, get_base_url};
+use crate::source::nexmark::{NexmarkProperties, NEXMARK_BASE_TIME};
+
+pub const CHANNEL_NUMBER: usize = 10_000;
 
 #[derive(PartialEq)]
 enum RateShape {
@@ -52,12 +55,20 @@ pub struct NexmarkConfig {
     /// 1 implies no out-of-order events. 1000 implies every 1000 events per
     /// generator are emitted in pseudo-random order.
     pub out_of_order_group_size: usize,
+    /// Average idealized size of a 'new person' event, in bytes.
+    pub avg_person_byte_size: usize,
+    /// Average idealized size of a 'new auction' event, in bytes.
+    pub avg_auction_byte_size: usize,
+    /// Average idealized size of a 'bid' event, in bytes.
+    pub avg_bid_byte_size: usize,
     /// Ratio of auctions for 'hot' sellers compared to all other people.
     pub hot_seller_ratio: usize,
     /// Ratio of bids to 'hot' auctions compared to all other auctions.
     pub hot_auction_ratio: usize,
     /// Ratio of bids for 'hot' bidders compared to all other people.
     pub hot_bidder_ratio: usize,
+    /// Ratio of bids for 'hot' channels compared to all other channels.
+    pub hot_channel_ratio: usize,
     /// Event id of first event to be generated.
     /// Event ids are unique over all generators, and are used as a seed to
     /// generate each event's data.
@@ -117,10 +128,16 @@ pub struct NexmarkConfig {
     pub us_states: Vec<String>,
     /// The collection of U.S. cities.
     pub us_cities: Vec<String>,
+    /// The collection of hot_channels.
+    pub hot_channels: Vec<String>,
+    /// The collection of hot urls.
+    pub hot_urls: Vec<String>,
     /// The collection of first names.
     pub first_names: Vec<String>,
     /// The collection of last names.
     pub last_names: Vec<String>,
+    /// The collection of channels and urls
+    pub channel_url_map: HashMap<usize, (String, String)>,
     /// Number of event generators to use. Each generates events in its own
     /// timeline.
     pub num_event_generators: usize,
@@ -131,9 +148,13 @@ impl NexmarkConfig {
         let active_people = properties.active_people.unwrap_or(1000);
         let in_flight_auctions = properties.in_flight_auctions.unwrap_or(100);
         let out_of_order_group_size = properties.out_of_order_group_size.unwrap_or(1);
+        let avg_person_byte_size = properties.avg_person_byte_size.unwrap_or(200);
+        let avg_auction_byte_size = properties.avg_auction_byte_size.unwrap_or(500);
+        let avg_bid_byte_size = properties.avg_bid_byte_size.unwrap_or(100);
         let hot_seller_ratio = properties.hot_seller_ratio.unwrap_or(4);
         let hot_auction_ratio = properties.hot_auction_ratio.unwrap_or(2);
         let hot_bidder_ratio = properties.hot_bidder_ratio.unwrap_or(4);
+        let hot_channel_ratio = properties.hot_channel_ratio.unwrap_or(2);
         let first_event_id = properties.hot_first_event_id.unwrap_or(0);
         let first_event_number = properties.first_event_number.unwrap_or(0);
         let num_categories = properties.num_categories.unwrap_or(5);
@@ -166,6 +187,8 @@ impl NexmarkConfig {
         let last_names = split_string_arg(properties.last_names.unwrap_or_else(|| {
             "shultz,abrams,spencer,white,bartels,walton,smith,jones,noris".to_string()
         }));
+        let hot_channels = split_string_arg("Google,Facebook,Baidu,Apple".to_string());
+        let hot_urls = (0..4).map(get_base_url).collect();
         let rate_shape = if properties.rate_shape.unwrap_or_else(|| "sine".to_string()) == "sine" {
             RateShape::Sine
         } else {
@@ -217,13 +240,19 @@ impl NexmarkConfig {
             }
         }
 
+        let channel_url_map = build_channel_url_map(CHANNEL_NUMBER);
+
         Ok(NexmarkConfig {
             active_people,
             in_flight_auctions,
             out_of_order_group_size,
+            avg_person_byte_size,
+            avg_auction_byte_size,
+            avg_bid_byte_size,
             hot_seller_ratio,
             hot_auction_ratio,
             hot_bidder_ratio,
+            hot_channel_ratio,
             first_event_id,
             first_event_number,
             base_time,
@@ -248,8 +277,11 @@ impl NexmarkConfig {
             sine_approx_steps,
             us_states,
             us_cities,
+            hot_channels,
+            hot_urls,
             first_names,
             last_names,
+            channel_url_map,
             num_event_generators: generators as usize,
         })
     }

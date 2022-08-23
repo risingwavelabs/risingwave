@@ -223,6 +223,20 @@ pub enum ArrayMeta {
     List { datatype: Box<DataType> },
 }
 
+impl From<&DataType> for ArrayMeta {
+    fn from(data_type: &DataType) -> Self {
+        match data_type {
+            DataType::Struct(struct_type) => ArrayMeta::Struct {
+                children: struct_type.fields.clone().into(),
+            },
+            DataType::List { datatype } => ArrayMeta::List {
+                datatype: datatype.clone(),
+            },
+            _ => ArrayMeta::Simple,
+        }
+    }
+}
+
 /// Implement `compact` on array, which removes element according to `visibility`.
 trait CompactableArray: Array {
     /// Select some elements from `Array` based on `visibility` bitmap.
