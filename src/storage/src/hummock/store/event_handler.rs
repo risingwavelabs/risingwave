@@ -15,42 +15,48 @@
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::memtable::Memtable;
 use super::version::OrderIdx;
-use super::SyncFutureTrait;
+use crate::hummock::local_version_manager::SyncResult;
+use crate::hummock::HummockResult;
+
+// TODO: may use a different type
+pub type StateStoreId = u64;
 
 #[allow(unused)]
-pub struct HummockWriteQueueItem<M>
-where
-    M: Memtable,
-{
+pub struct Batch {
     /// Immutable memtable.
-    imm_mem: Arc<M>,
+    imm_mem: Arc<Memtable>,
     /// Idx to identify immutable memtable in state store.
     idx: OrderIdx,
     /// table_id to identify table configuration for writes.
     table_id: StateTableId,
+    /// store_id to identify the state store instance.
+    store_id: StateStoreId,
+    // TODO: may add more
+}
+
+pub enum HummockEvent {
+    /// Flushes a batch to persistent storage.
+    Flush(Batch),
+
+    /// Persists all flushed batches prior to this event.
+    // Question: do we need to provide an epoch or an epoch range?
+    Sync(oneshot::Sender<SyncResult>),
+    // TODO: may add more (e.g. event to add state store instance)
+}
+
+#[allow(unused)]
+pub struct HummockEventHandler {
+    receiver: mpsc::UnboundedReceiver<HummockEvent>,
     // TODO: may add more
 }
 
 #[allow(unused)]
-pub struct HummockWriteQueue<M>
-where
-    M: Memtable,
-{
-    receiver: mpsc::Receiver<HummockWriteQueueItem<M>>,
-    // TODO: may add more
-}
-
-impl<M> HummockWriteQueue<M>
-where
-    M: Memtable,
-{
-    // Question: do we need to provide an epoch or an epoch range?
-    /// Forces a flush to persistent storage.
-    pub fn sync(&self) -> impl SyncFutureTrait<'_> {
-        async move { unimplemented!() }
+impl HummockEventHandler {
+    fn handle(&self) -> HummockResult<()> {
+        unimplemented!()
     }
 }

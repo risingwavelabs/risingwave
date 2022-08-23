@@ -18,70 +18,52 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
-use super::memtable::Memtable;
-use super::version::{HummockReadVersion, OrderIdx, StagingData, VersionUpdate};
-use super::write_queue::HummockWriteQueueItem;
-use super::{
-    EmptyFutureTrait, FlushFutureTrait, GetFutureTrait, IterFutureTrait, ReadOptions, StateStore,
-};
+use super::event_handler::HummockEvent;
+use super::version::{HummockReadVersion, VersionUpdate};
+use super::{GetFutureTrait, IterFutureTrait, ReadOptions, StateStore};
 use crate::define_local_state_store_associated_type;
+use crate::error::StorageResult;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
+use crate::streaming_table::mem_table::MemTable;
 
 #[allow(unused)]
-pub struct HummockStorageCore<M>
-where
-    M: Memtable,
-{
+pub struct HummockStorageCore {
     /// Mutable memtable.
-    memtable: M,
+    memtable: MemTable,
 
     /// Read handle.
-    read_version: HummockReadVersion<M>,
+    read_version: HummockReadVersion,
 
-    /// Write handle.
-    queue_writer: mpsc::Sender<HummockWriteQueueItem<M>>,
+    /// Event sender.
+    event_sender: mpsc::UnboundedSender<HummockEvent>,
 }
 
 #[allow(unused)]
 #[derive(Clone)]
-pub struct HummockStorage<M>
-where
-    M: Memtable,
-{
-    core: Arc<Mutex<HummockStorageCore<M>>>,
+pub struct HummockStorage {
+    core: Arc<Mutex<HummockStorageCore>>,
 }
 
 #[allow(unused)]
-impl<M> HummockStorage<M>
-where
-    M: Memtable,
-{
-    /// See `HummockReadVersion::update_committed` for more details.
-    pub fn update_committed(&mut self, info: VersionUpdate) -> HummockResult<()> {
-        unimplemented!()
-    }
-
-    /// See `HummockReadVersion::update_staging` for more details.
-    pub fn update_staging(&mut self, info: StagingData<M>, idx: OrderIdx) -> HummockResult<()> {
+impl HummockStorage {
+    /// See `HummockReadVersion::update` for more details.
+    pub fn update(&mut self, info: VersionUpdate) -> HummockResult<()> {
         unimplemented!()
     }
 }
 
 #[allow(unused)]
-impl<M> StateStore for HummockStorage<M>
-where
-    M: Memtable,
-{
+impl StateStore for HummockStorage {
     type Iter = HummockStateStoreIter;
 
     define_local_state_store_associated_type!();
 
-    fn insert(&self, key: Bytes, val: Bytes, epoch: u64) -> Self::InsertFuture<'_> {
-        async move { unimplemented!() }
+    fn insert(&self, key: Bytes, val: Bytes) -> StorageResult<()> {
+        unimplemented!()
     }
 
-    fn delete(&self, key: Bytes, epoch: u64) -> Self::DeleteFuture<'_> {
-        async move { unimplemented!() }
+    fn delete(&self, key: Bytes) -> StorageResult<()> {
+        unimplemented!()
     }
 
     fn get(&self, key: &[u8], epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
@@ -101,7 +83,11 @@ where
         async move { unimplemented!() }
     }
 
-    fn flush(&self) -> Self::FlushFuture<'_> {
-        async move { unimplemented!() }
+    fn flush(&self) -> StorageResult<usize> {
+        unimplemented!()
+    }
+
+    fn advance_write_epoch(&mut self, new_epoch: u64) -> StorageResult<()> {
+        unimplemented!()
     }
 }

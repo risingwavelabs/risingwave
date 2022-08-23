@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod event_handler;
 pub mod memtable;
 pub mod state_store;
 pub mod version;
-pub mod write_queue;
 
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_hummock_sdk::LocalSstableInfo;
 
 use crate::error::StorageResult;
 use crate::StateStoreIter;
@@ -29,10 +28,6 @@ use crate::StateStoreIter;
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
     Future<Output = StorageResult<I>> + Send;
-pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
-pub trait FlushFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
-pub trait SyncFutureTrait<'a> =
-    Future<Output = StorageResult<(usize, Vec<LocalSstableInfo>)>> + Send;
 
 #[macro_export]
 macro_rules! define_local_state_store_associated_type {
@@ -42,9 +37,6 @@ macro_rules! define_local_state_store_associated_type {
                                                             where
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
-        type InsertFuture<'a> = impl EmptyFutureTrait<'a>;
-        type DeleteFuture<'a> = impl EmptyFutureTrait<'a>;
-        type FlushFuture<'a> = impl FlushFutureTrait<'a>;
     };
 }
 
@@ -60,12 +52,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     where
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
-
-    type InsertFuture<'a>: EmptyFutureTrait<'a>;
-
-    type DeleteFuture<'a>: EmptyFutureTrait<'a>;
-
-    type FlushFuture<'a>: FlushFutureTrait<'a>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -85,14 +71,19 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: AsRef<[u8]> + Send;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
-    fn insert(&self, key: Bytes, val: Bytes, epoch: u64) -> Self::InsertFuture<'_>;
+    fn insert(&self, key: Bytes, val: Bytes) -> StorageResult<()>;
 
     /// Deletes a key-value entry from the state store. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&self, key: Bytes, epoch: u64) -> Self::DeleteFuture<'_>;
+    fn delete(&self, key: Bytes) -> StorageResult<()>;
 
     /// Triggers a flush to persistent storage for the in-memory states.
-    fn flush(&self) -> Self::FlushFuture<'_>;
+    fn flush(&self) -> StorageResult<usize>;
+
+    /// Updates the monotonically increasing write epoch to `new_epoch`.
+    /// All writes after this function is called will be tagged with `new_epoch`. In other words,
+    /// the previous write epoch is sealed.
+    fn advance_write_epoch(&mut self, new_epoch: u64) -> StorageResult<()>;
 }
 
 #[allow(unused)]
