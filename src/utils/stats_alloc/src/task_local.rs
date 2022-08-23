@@ -43,12 +43,14 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
             .try_with(|bytes| {
                 bytes.0.as_ref().fetch_add(layout.size(), Ordering::Relaxed);
                 let ptr = GLOBAL_ALLOC.alloc(new_layout);
+                dbg!(bytes.0.as_ptr() as usize, ptr);
                 *(ptr as *mut usize) = bytes.0.as_ptr() as usize;
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
             })
             .unwrap_or_else(|_| {
                 let ptr = GLOBAL_ALLOC.alloc(new_layout);
+                dbg!((1, ptr));
                 *(ptr as *mut usize) = 0;
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
@@ -59,7 +61,8 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
         let new_layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
         let ptr = ptr.sub(usize::BITS as usize);
-        let bytes = ptr as *const AtomicUsize;
+        dbg!((2, ptr));
+        let bytes = (*(ptr as *const usize)) as *const AtomicUsize;
         if let Some(bytes) = bytes.as_ref() {
             bytes.fetch_sub(layout.size(), Ordering::Relaxed);
         }
@@ -74,12 +77,12 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
                 bytes.0.as_ref().fetch_add(layout.size(), Ordering::Relaxed);
                 let ptr = GLOBAL_ALLOC.alloc_zeroed(new_layout);
                 *(ptr as *mut usize) = bytes.0.as_ptr() as usize;
+                dbg!(bytes.0.as_ptr() as usize, ptr);
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
             })
             .unwrap_or_else(|_| {
                 let ptr = GLOBAL_ALLOC.alloc_zeroed(new_layout);
-                *(ptr as *mut usize) = 0;
                 let ptr = ptr.add(usize::BITS as usize);
                 ptr
             })
@@ -89,7 +92,7 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
         let new_layout =
             Layout::from_size_align_unchecked(layout.size() + usize::BITS as usize, layout.align());
         let ptr = ptr.sub(usize::BITS as usize);
-        let bytes = ptr as *const AtomicUsize;
+        let bytes = (*(ptr as *const usize)) as *const AtomicUsize;
         if let Some(bytes) = bytes.as_ref() {
             bytes.fetch_add(new_size, Ordering::Relaxed);
             bytes.fetch_sub(layout.size(), Ordering::Relaxed);
