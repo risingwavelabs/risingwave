@@ -304,7 +304,8 @@ impl IndexSelectionRule {
     }
 
     /// Generate possible paths that can be used to access.
-    /// The schema of output is the order key of primary table, so it can be used to lookup primary table later.
+    /// The schema of output is the order key of primary table, so it can be used to lookup primary
+    /// table later.
     fn gen_paths(&self, conjunctions: &[ExprImpl], logical_scan: &LogicalScan) -> Vec<PlanRef> {
         let mut result = vec![];
         for expr in conjunctions {
