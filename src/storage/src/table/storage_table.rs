@@ -24,7 +24,6 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
@@ -37,6 +36,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_pb::catalog::Table;
+use tracing::trace;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
@@ -107,7 +107,7 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde, const T: AccessType> {
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. For READ_WRITE instances, the table will also check whether the writed rows
+    /// executor. For READ_WRITE instances, the table will also check whether the written rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
 
@@ -321,6 +321,17 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     /// Disable sanity check on this storage table.
     pub fn disable_sanity_check(&mut self) {
         self.disable_sanity_check = true;
+    }
+
+    /// Update the vnode bitmap of this storage table, used for fragment scaling or migration.
+    pub(super) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        if self.dist_key_indices.is_empty() {
+            assert_eq!(
+                new_vnodes, self.vnodes,
+                "should not update vnode bitmap for singleton table"
+            );
+        }
+        self.vnodes = new_vnodes;
     }
 
     pub fn schema(&self) -> &Schema {

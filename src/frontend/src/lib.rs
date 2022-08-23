@@ -54,7 +54,7 @@ mod scheduler;
 pub mod session;
 mod stream_fragmenter;
 mod utils;
-extern crate log;
+extern crate tracing;
 mod meta_client;
 pub mod test_utils;
 mod user;

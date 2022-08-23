@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -40,29 +39,6 @@ pub struct SourceCatalog {
     pub source_type: SourceType,
     pub append_only: bool,
     pub owner: u32,
-}
-
-impl SourceCatalog {
-    /// Extract `field_descs` from `column_desc` and add in source catalog.
-    pub fn flatten(mut self) -> Self {
-        let mut catalogs = vec![];
-        for col in &self.columns {
-            // Extract `field_descs` and return `column_catalogs`.
-            catalogs.append(
-                &mut col
-                    .column_desc
-                    .flatten()
-                    .into_iter()
-                    .map(|c| ColumnCatalog {
-                        column_desc: c,
-                        is_hidden: col.is_hidden,
-                    })
-                    .collect_vec(),
-            )
-        }
-        self.columns = catalogs.clone();
-        self
-    }
 }
 
 impl From<&ProstSource> for SourceCatalog {

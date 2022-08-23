@@ -25,7 +25,6 @@ use bytes::BufMut;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
@@ -36,6 +35,7 @@ use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, prefixed_range, range_of_prefix};
 use risingwave_pb::catalog::Table;
+use tracing::trace;
 
 use super::mem_table::{MemTable, RowOp};
 use crate::error::{StorageError, StorageResult};
@@ -86,7 +86,7 @@ pub struct StateTable<S: StateStore> {
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. The table will also check whether the writed rows
+    /// executor. The table will also check whether the written rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
 

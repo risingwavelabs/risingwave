@@ -33,9 +33,11 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ExtraInfoSourceRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
+use risingwave_storage::hummock::compactor::{
+    CompactionExecutor, Compactor, CompactorContext, Context,
+};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::MemoryLimiter;
+use risingwave_storage::hummock::{CompactorSstableStore, MemoryLimiter};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -120,7 +122,7 @@ pub async fn compute_node_serve(
         meta_client.clone(),
         client_addr.clone(),
         Box::new(compute_observer_node),
-        WorkerType::Compactor,
+        WorkerType::ComputeNode,
     )
     .await;
 
@@ -142,9 +144,6 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
         extra_info_sources.push(storage.sstable_id_manager());
-        let memory_limiter = Arc::new(MemoryLimiter::new(
-            storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
-        ));
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
         if opts.state_store == "hummock+memory"
@@ -152,8 +151,13 @@ pub async fn compute_node_serve(
             || storage_config.disable_remote_compactor
         {
             tracing::info!("start embedded compactor");
+            let read_memory_limiter = Arc::new(MemoryLimiter::new(
+                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
+            ));
             // todo: set shutdown_sender in HummockStorage.
-            let compactor_context = Arc::new(CompactorContext {
+            let write_memory_limit =
+                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2;
+            let context = Arc::new(Context {
                 options: storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
@@ -161,14 +165,24 @@ pub async fn compute_node_serve(
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: filter_key_extractor_manager.clone(),
-                memory_limiter: memory_limiter.clone(),
+                read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager(),
             });
+            // TODO: use normal sstable store for single-process mode.
+            let compact_sstable_store = CompactorSstableStore::new(
+                storage.sstable_store(),
+                Arc::new(MemoryLimiter::new(write_memory_limit)),
+            );
+            let compactor_context = Arc::new(CompactorContext {
+                context,
+                sstable_store: Arc::new(compact_sstable_store),
+            });
+
             let (handle, shutdown_sender) =
                 Compactor::start_compactor(compactor_context, hummock_meta_client, 1);
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
+        monitor_cache(storage.sstable_store(), &registry).unwrap();
     }
 
     sub_tasks.push(MetaClient::start_heartbeat_loop(
@@ -210,8 +224,8 @@ pub async fn compute_node_serve(
         state_store,
     );
 
-    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
-    // if this is not the case, we can use the following command to get it printed into the logs
+    // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
+    // this is not the case, we can use the following command to get it printed into the logs
     // periodically.
     //
     // Comment out the following line to enable.

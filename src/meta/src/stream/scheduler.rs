@@ -25,7 +25,6 @@ use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, Worker
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use super::record_table_vnode_mappings;
 use crate::manager::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
@@ -238,11 +237,7 @@ where
             data,
             ..Default::default()
         });
-        // Looking at the first actor is enough, since all actors in one fragment have identical
-        // state table id.
-        let actor = fragment.actors.first().unwrap();
-        let stream_node = actor.get_nodes()?.clone();
-        record_table_vnode_mappings(&stream_node, fragment)?;
+
         Ok(vnode_mapping)
     }
 
@@ -280,6 +275,7 @@ mod test {
     use itertools::Itertools;
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -322,6 +318,10 @@ mod test {
                         fragment_id: id,
                         nodes: Some(StreamNode {
                             node_body: Some(NodeBody::TopN(TopNNode {
+                                table: Some(Table {
+                                    id: 0,
+                                    ..Default::default()
+                                }),
                                 ..Default::default()
                             })),
                             ..Default::default()

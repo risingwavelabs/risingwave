@@ -186,7 +186,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 vnodes: Bitmap::from(vnodes).into(),
                 dist_key_indices,
             },
-            // This is possbile for dml. vnode_bitmap is not filled by scheduler.
+            // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
             None => Distribution::all_vnodes(dist_key_indices),
         };
@@ -200,7 +200,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
-            let batch_stats = source.context().stats();
+            let batch_stats = source.context().stats().unwrap();
             let table = RowBasedStorageTable::new_partial(
                 state_store.clone(),
                 table_id,

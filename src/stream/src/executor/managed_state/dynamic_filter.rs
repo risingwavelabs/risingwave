@@ -39,7 +39,7 @@ pub struct RangeCache<S: StateStore> {
     //       storing as `BTreeSet<(ScalarImpl, Row)>`.
     //       We could solve it if `ScalarImpl` had a successor/predecessor function.
     cache: BTreeMap<ScalarImpl, HashSet<Row>>,
-    state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: RowBasedStateTable<S>,
     /// The current range stored in the cache.
     /// Any request for a set of values outside of this range will result in a scan
     /// from storage

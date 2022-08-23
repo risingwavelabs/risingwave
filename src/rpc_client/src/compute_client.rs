@@ -20,7 +20,9 @@ use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
-use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
+use risingwave_pb::monitor_service::{
+    ProfilingRequest, ProfilingResponse, StackTraceRequest, StackTraceResponse,
+};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -138,6 +140,15 @@ impl ComputeClient {
             .monitor_client
             .to_owned()
             .stack_trace(StackTraceRequest::default())
+            .await?
+            .into_inner())
+    }
+
+    pub async fn profile(&self, sleep_s: u64) -> Result<ProfilingResponse> {
+        Ok(self
+            .monitor_client
+            .to_owned()
+            .profiling(ProfilingRequest { sleep_s })
             .await?
             .into_inner())
     }

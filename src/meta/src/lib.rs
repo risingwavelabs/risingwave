@@ -42,8 +42,6 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
-extern crate core;
-
 mod barrier;
 mod dashboard;
 mod error;
@@ -127,6 +125,23 @@ pub struct MetaNodeOpts {
     /// It is mainly useful for playgrounds.
     #[clap(long)]
     dangerous_max_idle_secs: Option<u64>,
+
+    /// Interval of GC metadata in meta store and stale SSTs in object store.
+    #[clap(long, default_value = "30")]
+    vacuum_interval_sec: u64,
+
+    /// Threshold used by worker node to filter out new SSTs when scanning object store, during
+    /// full SST GC.
+    #[clap(long, default_value = "604800")]
+    sst_retention_time_sec: u64,
+
+    /// Compaction scheduler retries compactor selection with this interval.
+    #[clap(long, default_value = "5")]
+    compactor_selection_retry_interval_sec: u64,
+
+    /// The spin interval when collecting global GC watermark in hummock
+    #[clap(long, default_value = "5")]
+    collect_gc_watermark_spin_interval_sec: u64,
 }
 
 fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
@@ -185,7 +200,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 checkpoint_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,
-                ..Default::default()
+                vacuum_interval_sec: opts.vacuum_interval_sec,
+                sst_retention_time_sec: opts.sst_retention_time_sec,
+                compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
+                collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
             },
         )
         .await

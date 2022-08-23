@@ -132,7 +132,12 @@ impl MetaClient {
                 .map(|info| ExtraInfo { info: Some(info) })
                 .collect(),
         };
-        self.inner.heartbeat(request).await?;
+        let resp = self.inner.heartbeat(request).await?;
+        if let Some(status) = resp.status {
+            if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                panic!("{}", status.message);
+            }
+        }
         Ok(())
     }
 
@@ -382,9 +387,6 @@ impl MetaClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
-                        if err.to_string().contains("unknown worker") {
-                            panic!("Already removed by the meta node. Need to restart the worker");
-                        }
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
@@ -576,6 +578,15 @@ impl HummockMetaClient for MetaClient {
         self.inner.trigger_manual_compaction(req).await?;
         Ok(())
     }
+
+    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+        self.inner
+            .trigger_full_gc(TriggerFullGcRequest {
+                sst_retention_time_sec,
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -681,6 +692,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
+            ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

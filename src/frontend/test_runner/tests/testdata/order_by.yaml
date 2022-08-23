@@ -11,7 +11,7 @@
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id] }
       StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
-    /* output names are not quailified after table names */
+    /* output names are not qualified after table names */
     create table t (v1 bigint, v2 double precision);
     select t.* from t order by v1;
   batch_plan: |

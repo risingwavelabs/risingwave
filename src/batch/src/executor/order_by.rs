@@ -56,12 +56,9 @@ impl Executor for OrderByExecutor {
 impl BoxedExecutorBuilder for OrderByExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 1,
-            "OrderByExecutor should have only 1 child!"
-        );
+        let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let order_by_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -74,7 +71,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
             .map(OrderPair::from_prost)
             .collect();
         Ok(Box::new(OrderByExecutor::new(
-            inputs.remove(0),
+            child,
             order_pairs,
             source.plan_node().get_identity().clone(),
         )))
@@ -521,9 +518,10 @@ mod tests {
     async fn test_encoding_for_struct_list() {
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataType::Struct {
-                    fields: Arc::new([DataType::Varchar, DataType::Float32]),
-                }),
+                Field::unnamed(DataType::new_struct(
+                    vec![DataType::Varchar, DataType::Float32],
+                    vec![],
+                )),
                 Field::unnamed(DataType::List {
                     datatype: Box::new(DataType::Int64),
                 }),

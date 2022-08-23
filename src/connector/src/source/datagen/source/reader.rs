@@ -50,7 +50,7 @@ impl SplitReader for DatagenSplitReader {
         let mut split_id = SplitId::default();
         let mut events_so_far = u64::default();
         if let Some(splits) = state {
-            log::debug!("Splits for datagen found! {:?}", splits);
+            tracing::debug!("Splits for datagen found! {:?}", splits);
             for split in splits {
                 // TODO: currently, assume there's only on split in one reader
                 split_id = split.id();
@@ -112,7 +112,7 @@ impl SplitReader for DatagenSplitReader {
                         // seed
                         Ok(seed) => seed ^ split_index,
                         Err(e) => {
-                            log::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
+                            tracing::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
                             split_index
                         }
                     }

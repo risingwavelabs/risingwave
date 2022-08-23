@@ -197,9 +197,9 @@ def section_compaction(panels):
                 "sum(storage_level_total_file_size) by (instance, level_index)", "L{{level_index}}"
             ),
         ]),
-        panels.timeseries_count("Compaction Count", [
+        panels.timeseries_count("Compaction Success & Failure Counts", [
             panels.target(
-                "storage_level_compact_frequency", "{{job}} @ {{instance}} @ Group-{{group}} @ Level-{{level_index}}"
+                "sum(storage_level_compact_frequency) by (instance, group, result)", "{{instance}} - {{result}} - group-{{group}}"
             ),
         ]),
 
@@ -283,6 +283,18 @@ def section_compaction(panels):
         panels.timeseries_bytes("Hummock Version Size", [
             panels.target(
                 "version_size", "version size"
+            ),
+        ]),
+
+        panels.timeseries_bytes("Hummock Sstable BloomFilter Size", [
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_bloom_filter_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
+            ),
+        ]),
+
+        panels.timeseries_bytes("Hummock Sstable Meta Size", [
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_sstable_meta_size_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_sstable_meta_size_count[$__rate_interval]))", "avg  - {{job}} @ {{instance}}"
             ),
         ]),
     ]
@@ -450,7 +462,7 @@ def section_streaming_actors(outer_panels):
             ]),
             panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
                 panels.target(
-                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upsteam_fragment_id}}"
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upstream_fragment_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
@@ -602,6 +614,18 @@ def section_streaming_exchange(outer_panels):
             panels.timeseries_bytes_per_sec("Fragment Exchange Recv Throughput", [
                 panels.target(
                     "rate(stream_exchange_frag_recv_size[$__rate_interval])", "{{up_fragment_id}}->{{down_fragment_id}}"
+                ),
+            ]),
+        ]),
+    ]
+
+def section_batch_exchange(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed("Batch Exchange", [
+            panels.timeseries_row("Exchange Recv Row Number", [
+                panels.target(
+                    "batch_exchange_recv_row_number", "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}"
                 ),
             ]),
         ]),
@@ -761,14 +785,30 @@ def section_hummock(panels):
                 "sum(rate(state_store_iter_size_sum[$__rate_interval])) by(job, instance) / sum(rate(state_store_iter_size_count[$__rate_interval])) by (job, instance)", "{{job}} @ {{instance}}"
             ),
         ]),
-        panels.timeseries_count("Read Bloom Filter", [
+        
+        panels.timeseries_ops("Read Bloom Filter", [
             panels.target(
                 "sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)", "bloom filter true negative  - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum(rate(state_store_bloom_filter_might_positive_counts[$__rate_interval])) by (job,instance)", "bloom filter might positive  - {{job}} @ {{instance}}"
+                "sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance)", "bloom filter check count  - {{job}} @ {{instance}}"
             ),
         ]),
+        
+        panels.timeseries_percentage(" Filter-Cache Hit Rate", [
+            panels.target(
+                "(sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)) / (sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance))", "bloom filter hit rate - {{job}} @ {{instance}}"
+            ),
+
+            panels.target(
+                "((sum(rate(state_store_sst_store_block_request_counts{type='meta_total'}[$__rate_interval])) by (job,instance)) - (sum(rate(state_store_sst_store_block_request_counts{type='meta_miss'}[$__rate_interval])) by (job,instance))) / (sum(rate(state_store_sst_store_block_request_counts{type='meta_total'}[$__rate_interval])) by (job,instance))", "meta cache hit rate - {{job}} @ {{instance}}"
+            ),
+
+            panels.target(
+                "((sum(rate(state_store_sst_store_block_request_counts{type='data_total'}[$__rate_interval])) by (job,instance)) - (sum(rate(state_store_sst_store_block_request_counts{type='data_miss'}[$__rate_interval])) by (job,instance))) / (sum(rate(state_store_sst_store_block_request_counts{type='data_total'}[$__rate_interval])) by (job,instance))", "block cache hit rate - {{job}} @ {{instance}}"
+            ),
+        ]),
+
         panels.timeseries_count("Read Merged SSTs", [
             panels.target(
                 "histogram_quantile(0.9, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, instance))", "# merged ssts p90  - {{job}} @ {{instance}}", True
@@ -1208,7 +1248,7 @@ def section_grpc_hummock_meta_client(outer_panels):
                     "sum(irate(state_store_get_new_sst_ids_latency_counts[$__rate_interval]))by(job,instance)", "get_new_sst_ids_latency_counts - {{instance}} "
                 ),
             ]),
-            panels.timeseries_latency("compation_latency", [
+            panels.timeseries_latency("compaction_latency", [
                 panels.target(
                     "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[$__rate_interval])) by (le, job, instance))", "report_compaction_task_latency_p50 - {{instance}}"
                 ),
@@ -1244,6 +1284,7 @@ dashboard = Dashboard(
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
+        *section_batch_exchange(panels),
         *section_hummock(panels),
         *section_hummock_manager(panels),
         *section_grpc_meta_catalog_service(panels),
