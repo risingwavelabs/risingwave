@@ -128,7 +128,7 @@ pub async fn compute_node_serve(
     .unwrap();
 
     let local_version_manager = match &state_store {
-        HummockStateStore(monitored) => Arc::downgrade(monitored.inner.local_version_manager()),
+        HummockStateStore(monitored) => monitored.local_version_manager(),
         _ => {
             panic!();
         }
@@ -136,7 +136,6 @@ pub async fn compute_node_serve(
 
     let compute_observer_node =
         ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
-    // todo use ObserverManager
     let observer_manager = ObserverManager::new(
         meta_client.clone(),
         client_addr.clone(),

@@ -219,12 +219,6 @@ impl LocalVersionManager {
             sstable_id_manager,
         });
 
-        // Pin and get the latest version.
-        // tokio::spawn(LocalVersionManager::start_pin_worker(
-        // Arc::downgrade(&local_version_manager),
-        // hummock_meta_client.clone(),
-        // ));
-
         // Unpin unused version.
         tokio::spawn(LocalVersionManager::start_unpin_worker(
             Arc::downgrade(&local_version_manager),
@@ -715,59 +709,6 @@ impl LocalVersionManager {
                 }
             }
             retry_count += 1;
-        }
-    }
-
-    #[allow(dead_code)]
-    async fn start_pin_worker(
-        local_version_manager_weak: Weak<LocalVersionManager>,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) {
-        let min_execute_interval = Duration::from_millis(100);
-        let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
-        min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            min_execute_interval_tick.tick().await;
-            let local_version_manager = match local_version_manager_weak.upgrade() {
-                None => {
-                    tracing::info!("Shutdown hummock pin worker");
-                    return;
-                }
-                Some(local_version_manager) => local_version_manager,
-            };
-
-            let last_pinned = local_version_manager
-                .local_version
-                .read()
-                .pinned_version()
-                .id();
-
-            match Self::pin_version_with_retry(
-                hummock_meta_client.clone(),
-                last_pinned,
-                usize::MAX,
-                || {
-                    // Should stop when the `local_version_manager` in this thread is the only
-                    // strong reference to the object.
-                    local_version_manager_weak.strong_count() == 1
-                },
-            )
-            .await
-            {
-                Some(Ok(pinned_version_payload)) => {
-                    local_version_manager
-                        .try_update_pinned_version(Some(last_pinned), pinned_version_payload);
-                }
-                Some(Err(_)) => {
-                    unreachable!(
-                        "since the max_retry is `usize::MAX`, this should never return `Err`"
-                    );
-                }
-                None => {
-                    tracing::info!("Shutdown hummock pin worker");
-                    return;
-                }
-            };
         }
     }
 }

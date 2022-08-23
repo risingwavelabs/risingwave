@@ -4293,6 +4293,7 @@ dependencies = [
 name = "risingwave_common_service"
 version = "0.1.11"
 dependencies = [
+ "async-trait",
  "hyper",
  "madsim-tokio",
  "madsim-tonic",
@@ -4607,6 +4608,7 @@ dependencies = [
 name = "risingwave_hummock_test"
 version = "0.1.11"
 dependencies = [
+ "async-trait",
  "bytes",
  "fail",
  "futures",
@@ -4615,6 +4617,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_object_store",
