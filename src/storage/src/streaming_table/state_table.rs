@@ -577,7 +577,7 @@ struct StateTableRowIter<'a, M, C> {
     data_types: Vec<DataType>,
 }
 
-/// `StateTableRowIter` is able to read the just written data (uncommited data).
+/// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
