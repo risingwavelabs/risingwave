@@ -308,12 +308,17 @@ impl LocalVersionManager {
             }
         }
 
+        drop(old_version);
+        let mut new_version = self.local_version.write();
+        // check again to prevent other thread changes new_version.
+        if new_version.pinned_version().id() >= new_version_id {
+            return false;
+        }
+
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
 
-        drop(old_version);
-        let mut new_version = self.local_version.write();
         let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
         RwLockWriteGuard::unlock_fair(new_version);
         for cleaned_epoch in cleaned_epochs {
