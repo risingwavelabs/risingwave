@@ -440,9 +440,9 @@ impl<'a> ListRef<'a> {
 
     pub fn value_at(&self, index: usize) -> ArrayResult<DatumRef<'a>> {
         match self {
-            ListRef::Indexed { arr, .. } => {
+            ListRef::Indexed { arr, idx } => {
                 if index <= arr.value.len() {
-                    Ok(arr.value.value_at(index - 1))
+                    Ok(arr.value.value_at(arr.offsets[*idx] + index - 1))
                 } else {
                     Ok(None)
                 }
