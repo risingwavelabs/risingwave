@@ -90,8 +90,7 @@ pub struct SourceDesc {
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 
-    // The column index of row ID. By default it's 0, which means the first column is row ID.
-    // TODO: change to Option<usize> when pk supported in the future.
+    // The column index of row ID. If the primary key is specified by users, this will be `None`.
     pub row_id_index: Option<usize>,
     pub pk_column_ids: Vec<i32>,
 }
@@ -151,7 +150,7 @@ impl SourceManager for MemSourceManager {
         let row_id_index = if info.pk_column_ids != vec![0] {
             None
         } else {
-            Some(0)
+            Some(info.row_id_index)
         };
         let pk_column_ids = info.pk_column_ids.clone();
 
