@@ -113,8 +113,9 @@ pub mod grpc_middleware {
     use async_stack_trace::{SpanValue, StackTraceManager};
     use futures::Future;
     use hyper::Body;
-    use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
     use tokio::sync::Mutex;
+    use tower::layer::util::Identity;
+    use tower::util::Either;
     use tower::{Layer, Service};
 
     /// Manages the stack trace of `gRPC` requests that are currently served by the compute node.
@@ -124,10 +125,21 @@ pub mod grpc_middleware {
     pub struct StackTraceMiddlewareLayer {
         manager: GrpcStackTraceManagerRef,
     }
+    pub type OptionalStackTraceMiddlewareLayer = Either<StackTraceMiddlewareLayer, Identity>;
 
     impl StackTraceMiddlewareLayer {
         pub fn new(manager: GrpcStackTraceManagerRef) -> Self {
             Self { manager }
+        }
+
+        pub fn new_optional(
+            manager: Option<GrpcStackTraceManagerRef>,
+        ) -> OptionalStackTraceMiddlewareLayer {
+            if let Some(manager) = manager {
+                Either::A(Self::new(manager))
+            } else {
+                Either::B(Identity::new())
+            }
         }
     }
 
@@ -179,12 +191,11 @@ pub mod grpc_middleware {
                 let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
 
                 sender
-                    .optional_trace(
+                    .trace(
                         inner.call(req),
                         root_span,
                         false,
                         Duration::from_millis(100),
-                        *ENABLE_ASYNC_STACK_TRACE,
                     )
                     .await
             }
