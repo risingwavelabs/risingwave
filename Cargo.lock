@@ -1085,8 +1085,8 @@ version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57ff02e8ad8e06ab9731d5dc72dc23bef9200778eae1a89d555d8c42e5d4a86"
 dependencies = [
- "prost 0.11.0",
- "prost-types 0.11.1",
+ "prost",
+ "prost-types",
  "tonic",
  "tracing-core",
 ]
@@ -1103,7 +1103,7 @@ dependencies = [
  "futures",
  "hdrhistogram",
  "humantime",
- "prost-types 0.11.1",
+ "prost-types",
  "serde",
  "serde_json",
  "thread_local",
@@ -1639,7 +1639,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ddd9c55213f01e9316a52a2f691f30f2aacd0a2a534f87fb84bdc9d5e507ea4"
 dependencies = [
  "http",
- "prost 0.11.0",
+ "prost",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -2757,7 +2757,7 @@ checksum = "8935b76be4cc11e9f254c513fd6d31afe1585e21edb4c5d19b29ff6b2a9445a5"
 dependencies = [
  "prettyplease",
  "proc-macro2",
- "prost-build 0.11.1",
+ "prost-build",
  "quote",
  "syn",
  "tonic-build",
@@ -3374,8 +3374,8 @@ checksum = "b237671f44cffe48853b93cba79d2613a62c8250b902a93f11f4be4539c84287"
 dependencies = [
  "heck",
  "itertools",
- "prost 0.11.0",
- "prost-types 0.11.1",
+ "prost",
+ "prost-types",
 ]
 
 [[package]]
@@ -3707,44 +3707,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71adf41db68aa0daaefc69bb30bcd68ded9b9abaad5d1fbb6304c4fb390e083e"
-dependencies = [
- "bytes",
- "prost-derive 0.10.1",
-]
-
-[[package]]
-name = "prost"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "399c3c31cdec40583bb68f0b18403400d01ec4289c383aa047560439952c4dd7"
 dependencies = [
  "bytes",
- "prost-derive 0.11.0",
-]
-
-[[package]]
-name = "prost-build"
-version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae5a4388762d5815a9fc0dea33c56b021cdc8dde0c55e0c9ca57197254b0cab"
-dependencies = [
- "bytes",
- "cfg-if",
- "cmake",
- "heck",
- "itertools",
- "lazy_static",
- "log",
- "multimap",
- "petgraph",
- "prost 0.10.4",
- "prost-types 0.10.1",
- "regex",
- "tempfile",
- "which",
+ "prost-derive",
 ]
 
 [[package]]
@@ -3760,24 +3728,11 @@ dependencies = [
  "log",
  "multimap",
  "petgraph",
- "prost 0.11.0",
- "prost-types 0.11.1",
+ "prost",
+ "prost-types",
  "regex",
  "tempfile",
  "which",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b670f45da57fb8542ebdbb6105a925fe571b67f9e7ed9f47a06a84e72b4e7cc"
-dependencies = [
- "anyhow",
- "itertools",
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -3806,22 +3761,12 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d0a014229361011dc8e69c8a1ec6c2e8d0f2af7c91e3ea3f5b2170298461e68"
-dependencies = [
- "bytes",
- "prost 0.10.4",
-]
-
-[[package]]
-name = "prost-types"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4dfaa718ad76a44b3415e6c4d53b17c8f99160dcb3a99b10470fce8ad43f6e3e"
 dependencies = [
  "bytes",
- "prost 0.11.0",
+ "prost",
 ]
 
 [[package]]
@@ -3862,9 +3807,8 @@ dependencies = [
 
 [[package]]
 name = "pulsar"
-version = "4.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31a5a4fbe9363c113b7e25ae76dd2d6455411c815d688977be6f0b68ae5e73b8"
+version = "5.0.0"
+source = "git+https://github.com/skyzh/pulsar-rs?rev=7fab6a9#7fab6a9a6dd7d79ccd6d06031a4d9948dc2ed2a2"
 dependencies = [
  "async-trait",
  "bit-vec",
@@ -3878,9 +3822,9 @@ dependencies = [
  "native-tls",
  "nom 7.1.1",
  "pem",
- "prost 0.10.4",
- "prost-build 0.10.4",
- "prost-derive 0.10.1",
+ "prost",
+ "prost-build",
+ "prost-derive",
  "rand 0.8.5",
  "regex",
  "tokio",
@@ -4211,7 +4155,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
- "prost 0.11.0",
+ "prost",
  "rand 0.8.5",
  "rdkafka",
  "risingwave_common",
@@ -4349,7 +4293,7 @@ dependencies = [
  "procfs",
  "procinfo",
  "prometheus",
- "prost 0.11.0",
+ "prost",
  "rand 0.8.5",
  "regex",
  "risingwave_pb",
@@ -4382,6 +4326,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4438,7 +4383,7 @@ dependencies = [
  "paste",
  "pprof",
  "prometheus",
- "prost 0.11.0",
+ "prost",
  "rand 0.8.5",
  "rdkafka",
  "risingwave_batch",
@@ -4504,7 +4449,7 @@ dependencies = [
  "mysql_async",
  "num-traits",
  "paste",
- "prost 0.11.0",
+ "prost",
  "pulsar",
  "rand 0.8.5",
  "rdkafka",
@@ -4579,7 +4524,7 @@ dependencies = [
  "memcomparable",
  "num-traits",
  "paste",
- "prost 0.11.0",
+ "prost",
  "regex",
  "risingwave_common",
  "risingwave_pb",
@@ -4622,7 +4567,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "pgwire",
- "prost 0.11.0",
+ "prost",
  "rand 0.8.5",
  "risingwave_batch",
  "risingwave_common",
@@ -4674,7 +4619,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "parking_lot 0.12.1",
- "prost 0.11.0",
+ "prost",
  "risingwave_common",
  "risingwave_pb",
  "workspace-hack",
@@ -4733,7 +4678,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
- "prost 0.11.0",
+ "prost",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_common_service",
@@ -4796,9 +4741,9 @@ dependencies = [
  "madsim-tonic-build",
  "pbjson",
  "pbjson-build",
- "prost 0.11.0",
+ "prost",
  "prost-helpers",
- "prost-types 0.11.1",
+ "prost-types",
  "serde",
  "workspace-hack",
 ]
@@ -4874,6 +4819,7 @@ dependencies = [
  "risingwave_meta",
  "sqllogictest",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4904,7 +4850,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
- "prost 0.11.0",
+ "prost",
  "protobuf",
  "protobuf-codegen-pure",
  "rand 0.8.5",
@@ -5011,6 +4957,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "minitrace",
  "minstant",
  "moka",
  "nix",
@@ -5019,7 +4966,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
- "prost 0.11.0",
+ "prost",
  "rand 0.8.5",
  "regex",
  "risingwave_common",
@@ -5028,6 +4975,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
+ "risingwave_tracing",
  "scopeguard",
  "serde",
  "smallvec",
@@ -5079,7 +5027,7 @@ dependencies = [
  "paste",
  "pin-project",
  "prometheus",
- "prost 0.11.0",
+ "prost",
  "rand 0.8.5",
  "rdkafka",
  "risingwave_common",
@@ -5112,6 +5060,18 @@ name = "risingwave_test_runner"
 version = "0.1.11"
 dependencies = [
  "fail",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_tracing"
+version = "0.1.11"
+dependencies = [
+ "anyhow",
+ "futures",
+ "madsim-tokio",
+ "minitrace",
+ "tracing",
  "workspace-hack",
 ]
 
@@ -6042,8 +6002,8 @@ dependencies = [
  "hyper-timeout",
  "percent-encoding",
  "pin-project",
- "prost 0.11.0",
- "prost-derive 0.11.0",
+ "prost",
+ "prost-derive",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -6062,7 +6022,7 @@ checksum = "2fbcd2800e34e743b9ae795867d5f77b535d3a3be69fd731e39145719752df8c"
 dependencies = [
  "prettyplease",
  "proc-macro2",
- "prost-build 0.11.1",
+ "prost-build",
  "quote",
  "syn",
 ]
@@ -6589,8 +6549,10 @@ dependencies = [
  "chrono",
  "clap 3.2.17",
  "criterion",
+ "crossbeam-channel",
  "crossbeam-deque",
  "crossbeam-epoch",
+ "crossbeam-utils",
  "either",
  "fail",
  "fixedbitset",
@@ -6624,7 +6586,6 @@ dependencies = [
  "petgraph",
  "postgres-types",
  "prometheus",
- "prost 0.10.4",
  "rand 0.8.5",
  "regex",
  "regex-automata",

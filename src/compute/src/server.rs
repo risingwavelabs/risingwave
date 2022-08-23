@@ -37,7 +37,9 @@ use risingwave_storage::hummock::compactor::{
     CompactionExecutor, Compactor, CompactorContext, Context,
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{CompactorSstableStore, MemoryLimiter};
+use risingwave_storage::hummock::{
+    CompactorSstableStore, MemoryLimiter, TieredCacheMetricsBuilder,
+};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -60,14 +62,6 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
     risingwave_common::config::load_config(&opts.config_path)
 }
 
-fn get_compile_mode() -> &'static str {
-    if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    }
-}
-
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
@@ -77,9 +71,9 @@ pub async fn compute_node_serve(
     // Load the configuration.
     let config = load_config(&opts);
     info!(
-        "Starting compute node with config {:?} in {} mode",
+        "Starting compute node with config {:?} with debug assertions {}",
         config,
-        get_compile_mode()
+        if cfg!(debug_assertions) { "on" } else { "off" }
     );
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
@@ -137,6 +131,7 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         filter_key_extractor_manager.clone(),
+        TieredCacheMetricsBuilder::new(registry.clone()),
     )
     .await
     .unwrap();
@@ -169,13 +164,13 @@ pub async fn compute_node_serve(
                 sstable_id_manager: storage.sstable_id_manager(),
             });
             // TODO: use normal sstable store for single-process mode.
-            let compact_sstable_store = CompactorSstableStore::new(
+            let compactor_sstable_store = CompactorSstableStore::new(
                 storage.sstable_store(),
                 Arc::new(MemoryLimiter::new(write_memory_limit)),
             );
             let compactor_context = Arc::new(CompactorContext {
                 context,
-                sstable_store: Arc::new(compact_sstable_store),
+                sstable_store: Arc::new(compactor_sstable_store),
             });
 
             let (handle, shutdown_sender) =
@@ -198,6 +193,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
+        opts.enable_async_stack_trace,
     ));
     let source_mgr = Arc::new(MemSourceManager::new(source_metrics));
     let grpc_stack_trace_mgr = GrpcStackTraceManagerRef::default();
@@ -224,8 +220,8 @@ pub async fn compute_node_serve(
         state_store,
     );
 
-    // Generally, one may use `risedev ctl stream trace` to manually get the trace reports. However,
-    // if this is not the case, we can use the following command to get it printed into the logs
+    // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
+    // this is not the case, we can use the following command to get it printed into the logs
     // periodically.
     //
     // Comment out the following line to enable.
@@ -244,7 +240,10 @@ pub async fn compute_node_serve(
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .layer(StackTraceMiddlewareLayer::new(grpc_stack_trace_mgr))
+            .layer(StackTraceMiddlewareLayer::new_optional(
+                opts.enable_async_stack_trace
+                    .then_some(grpc_stack_trace_mgr),
+            ))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
