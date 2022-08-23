@@ -99,15 +99,10 @@ where
         Ok(())
     }
 
-    pub(super) fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
-        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))?;
+    pub(super) fn output_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
+        let res = std::mem::replace(&mut self.result, self.init_result.clone());
+        builder.append(res.as_ref().map(|x| x.as_scalar_ref()))?;
         Ok(())
-    }
-
-    pub(super) fn output_and_reset_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
-        let res = self.output_concrete(builder);
-        self.result = self.init_result.clone();
-        res
     }
 
     /// `apply_filter_on_row` apply a filter on the given row, and return if the row satisfies the
@@ -170,21 +165,9 @@ macro_rules! impl_aggregator {
                 }
             }
 
-            fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+            fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                 if let ArrayBuilderImpl::$result_variant(b) = builder {
                     self.output_concrete(b)
-                } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($result_variant)
-                    ))
-                    .into())
-                }
-            }
-
-            fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-                if let ArrayBuilderImpl::$result_variant(b) = builder {
-                    self.output_and_reset_concrete(b)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Builder fail to match {}.",

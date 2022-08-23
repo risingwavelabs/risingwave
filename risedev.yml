@@ -26,8 +26,8 @@ risedev:
     # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
-    # - use: prometheus
-    # - use: grafana
+    - use: prometheus
+    - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
@@ -252,16 +252,19 @@ risedev:
       id: compute-node-0
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
+      enable-async-stack-trace: true
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
+      enable-async-stack-trace: true
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
+      enable-async-stack-trace: true
 
     - use: frontend
       id: frontend-node-0
@@ -322,6 +325,32 @@ risedev:
       exporter-port: 1224
       enable-tiered-cache: true
     - use: frontend
+    - use: compactor
+
+  ci-3cn-3fe:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+      enable-tiered-cache: true
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+      enable-tiered-cache: true
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+      enable-tiered-cache: true
+    - use: frontend
+      port: 4565
+    - use: frontend
+      port: 4566
+    - use: frontend
+      port: 4567
     - use: compactor
 
   ci-kafka:
@@ -428,6 +457,9 @@ template:
 
     # Id of this instance
     id: compute-node-${port}
+
+    # Whether to enable async stack trace for this compute node.
+    enable-async-stack-trace: false
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
