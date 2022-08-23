@@ -483,7 +483,7 @@ impl<S: StateStore> StateTable<S> {
             || self.dist_key_indices != pk_prefix_indices
         {
             trace!(
-                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                "storage_iter_with_prefix dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
                 self.keyspace.table_id(),
                 pk_prefix,
                 self.dist_key_indices,
@@ -497,7 +497,7 @@ impl<S: StateStore> StateTable<S> {
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "storage_iter_with_prefix table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
             self.keyspace.table_id(),
             prefix_hint,
             start_key,
