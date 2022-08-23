@@ -131,8 +131,13 @@ impl AggCall {
             },
             (AggKind::Sum, _) => return invalid(),
 
+            // ApproxCountDistinct
+            (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
+            (AggKind::ApproxCountDistinct, _) => return invalid(),
+
             // Count
-            (AggKind::Count | AggKind::ApproxCountDistinct, _) => DataType::Int64,
+            (AggKind::Count, [] | [_]) => DataType::Int64,
+            (AggKind::Count, _) => return invalid(),
 
             // StringAgg
             (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
