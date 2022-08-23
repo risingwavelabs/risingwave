@@ -520,6 +520,48 @@ mod tests {
 
     #[tokio::test]
     #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
+    async fn test_delete_objects() {
+        let test_dir = TempDir::new().unwrap();
+        let test_root_path = test_dir.path().to_str().unwrap();
+        let store = DiskObjectStore::new(test_root_path);
+        let mut payload = gen_test_payload();
+
+        let str_list = vec![
+            String::from("test1.obj"),
+            String::from("test2.obj"),
+            String::from("test3.obj"),
+        ];
+
+        let path_list = str_list
+            .iter()
+            .map(|str| {
+                let mut path = PathBuf::from(test_root_path);
+                path.push(str);
+                path
+            })
+            .collect_vec();
+
+        for i in 0..2 {
+            store
+                .upload(str_list[i].as_str(), Bytes::from(payload.clone()))
+                .await
+                .unwrap();
+            assert!(path_list[i].exists());
+
+            payload.reverse();
+        }
+
+        assert!(!path_list[2].exists());
+
+        store.delete_objects(&str_list).await.unwrap();
+
+        for path in path_list {
+            assert!(!path.exists());
+        }
+    }
+
+    #[tokio::test]
+    #[cfg_attr(madsim, ignore)] // TODO: remove this when madsim supports fs
     async fn test_read_not_exists() {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();

@@ -321,4 +321,26 @@ mod tests {
             assert_eq!(store.list("").await.unwrap().len(), paths.len() - i - 1);
         }
     }
+
+    #[tokio::test]
+    async fn test_delete_objects() {
+        let block1 = Bytes::from("123456");
+        let block2 = Bytes::from("987654");
+
+        let store = InMemObjectStore::new();
+        store.upload("/abc", block1).await.unwrap();
+        store.upload("/klm", block2).await.unwrap();
+
+        assert_eq!(store.list("").await.unwrap().len(), 2);
+
+        let str_list = [
+            String::from("/abc"),
+            String::from("/klm"),
+            String::from("/xyz"),
+        ];
+
+        store.delete_objects(&str_list).await.unwrap();
+
+        assert_eq!(store.list("").await.unwrap().len(), 0);
+    }
 }
