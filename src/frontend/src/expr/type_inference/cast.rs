@@ -99,13 +99,13 @@ pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastCont
 fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     match (source, target) {
         (
-            &DataType::List {
-                datatype: ref child_source,
+            DataType::List {
+                datatype: source_elem,
             },
-            &DataType::List {
-                datatype: ref target_source,
+            DataType::List {
+                datatype: target_elem,
             },
-        ) => cast_ok(child_source.as_ref(), target_source.as_ref(), allows),
+        ) => cast_ok(source_elem, target_elem, allows),
         _ => false,
     }
 }
