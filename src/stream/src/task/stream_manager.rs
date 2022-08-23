@@ -585,8 +585,7 @@ impl LocalStreamManagerCore {
                     }
                 };
 
-                let allocated = TaskLocalBytesAllocated::default();
-                let allocated = BYTES_ALLOCATED.scope(allocated, async move {
+                let allocated = BYTES_ALLOCATED.scope(TaskLocalBytesAllocated::new(), async move {
                     futures::join!(instrumented, memory_usage_metrics);
                 });
                 tokio::spawn(allocated)
