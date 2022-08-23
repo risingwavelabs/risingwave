@@ -434,7 +434,7 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let storage_iter = self.iter_with_pk_bounds(epoch, pk_prefix).await?;
+        let storage_iter = self.storage_iter_with_prefix(epoch, pk_prefix).await?;
 
         let mem_table_iter = {
             let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
@@ -449,10 +449,8 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds of
-    /// the next primary key column in `next_col_bounds`.
-    // TODO: support multiple datums or `Row` for `next_col_bounds`.
-    async fn iter_with_pk_bounds(
+    /// Iterates on the table with the given prefix of the pk in `pk_prefix`.
+    async fn storage_iter_with_prefix(
         &self,
         epoch: u64,
         pk_prefix: &Row,
@@ -509,13 +507,25 @@ impl<S: StateStore> StateTable<S> {
             pk_prefix_indices
         );
 
-        self.iter_with_encoded_key_range(
+        let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
+        let vnode = vnode_hint.unwrap_or(0_u8);
+
+        let raw_key_range = prefixed_range((start_key, end_key), &vnode.to_be_bytes());
+        let prefix_hint = prefix_hint
+            .clone()
+            .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
+        let read_options = self.get_read_option(epoch);
+        let iter = StorageIterInner::<S>::new(
+            &self.keyspace,
             prefix_hint,
-            (start_key, end_key),
-            epoch,
-            self.try_compute_vnode_by_pk_prefix(pk_prefix),
+            raw_key_range,
+            read_options,
+            self.data_types.clone(),
         )
-        .await
+        .await?
+        .into_stream();
+
+        Ok(iter)
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
@@ -525,41 +535,6 @@ impl<S: StateStore> StateTable<S> {
             .iter()
             .all(|&d| d < pk_prefix.0.len())
             .then(|| self.compute_vnode(pk_prefix, &self.dist_key_in_pk_indices))
-    }
-
-    async fn iter_with_encoded_key_range<R, B>(
-        &self,
-        prefix_hint: Option<Vec<u8>>,
-        encoded_key_range: R,
-        epoch: u64,
-        vnode_hint: Option<VirtualNode>,
-    ) -> StorageResult<StorageIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        let vnode = vnode_hint.unwrap_or(0_u8);
-
-        let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-        let prefix_hint = prefix_hint
-            .clone()
-            .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
-        let iter = async move {
-            let read_options = self.get_read_option(epoch);
-            let iter = StorageIterInner::<S>::new(
-                &self.keyspace,
-                prefix_hint,
-                raw_key_range,
-                read_options,
-                self.data_types.clone(),
-            )
-            .await?
-            .into_stream();
-            Ok::<_, StorageError>(iter)
-        }
-        .await?;
-
-        Ok(iter)
     }
 }
 
