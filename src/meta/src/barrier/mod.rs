@@ -22,7 +22,6 @@ use anyhow::anyhow;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::debug;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
@@ -42,6 +41,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::{oneshot, watch, RwLock};
 use tokio::task::JoinHandle;
+use tracing::debug;
 use uuid::Uuid;
 
 use self::command::CommandContext;
@@ -83,7 +83,7 @@ struct ScheduledBarriers {
 /// Since the checkpoints might be concurrent, the meta store of table fragments is only updated
 /// after the command is committed. When resolving the actor info for those commands after this
 /// command, this command might be in-flight and the changes are not yet committed, so we need to
-/// record these uncommited changes and assume they will be eventually successful.
+/// record these uncommitted changes and assume they will be eventually successful.
 ///
 /// See also [`CheckpointControl::can_actor_send_or_collect`].
 #[derive(Debug, Clone)]
@@ -237,7 +237,7 @@ struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order.
     command_ctx_queue: VecDeque<EpochNode<S>>,
 
-    // Below for uncommited changes for the inflight barriers.
+    // Below for uncommitted changes for the inflight barriers.
     /// In addition to the actors with status `Running`. The barrier needs to send or collect the
     /// actors of these tables.
     creating_tables: HashSet<TableId>,
@@ -305,7 +305,7 @@ where
             CommandChanges::CreateTable(table) => {
                 assert!(
                     !self.dropping_tables.contains(&table),
-                    "confict table in concurrent checkpoint"
+                    "conflict table in concurrent checkpoint"
                 );
                 assert!(
                     self.creating_tables.insert(table),
@@ -333,7 +333,7 @@ where
             CommandChanges::DropTable(table) => {
                 assert!(
                     !self.creating_tables.contains(&table),
-                    "confict table in concurrent checkpoint"
+                    "conflict table in concurrent checkpoint"
                 );
                 assert!(
                     self.dropping_tables.insert(table),

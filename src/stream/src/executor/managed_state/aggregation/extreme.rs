@@ -61,7 +61,7 @@ pub struct GenericExtremeState<S: StateStore> {
     total_count: usize,
 
     /// Cache for the top N elements in the state. Note that the cache
-    /// won't store group_key so the column indices should be offseted
+    /// won't store group_key so the column indices should be offsetted
     /// by group_key.len(), which is handled by `state_row_to_cache_row`.
     cache: Cache<Datum>,
 

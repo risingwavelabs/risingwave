@@ -6,7 +6,6 @@ edition = "2021"
 
 [dependencies]
 hyper = "0.14"
-log = "0.4"
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../" }
 risingwave_pb = { path = "../../prost" }
@@ -16,3 +15,4 @@ tonic = { version = "0.2.1", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors"] }
 tracing = "0.1"
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }

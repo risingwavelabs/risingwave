@@ -26,7 +26,6 @@ use crate::hummock::compaction::{CompactionInput, CompactionPicker, ManualCompac
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
-    compact_task_id: u64,
     overlap_strategy: Arc<dyn OverlapStrategy>,
     option: ManualCompactionOption,
     target_level: usize,
@@ -34,13 +33,11 @@ pub struct ManualCompactionPicker {
 
 impl ManualCompactionPicker {
     pub fn new(
-        compact_task_id: u64,
         overlap_strategy: Arc<dyn OverlapStrategy>,
         option: ManualCompactionOption,
         target_level: usize,
     ) -> Self {
         Self {
-            compact_task_id,
             overlap_strategy,
             option,
             target_level,
@@ -50,7 +47,7 @@ impl ManualCompactionPicker {
     fn pick_l0_to_sub_level(
         &self,
         l0: &OverlappingLevel,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         let mut input_levels = vec![];
         let mut sub_level_id = 0;
@@ -81,16 +78,6 @@ impl ManualCompactionPicker {
             }
         }
 
-        for level in &input_levels {
-            if !level.table_infos.is_empty() {
-                level_handlers[level.level_idx as usize].add_pending_task(
-                    self.compact_task_id,
-                    self.target_level,
-                    &level.table_infos,
-                );
-            }
-        }
-
         Some(CompactionInput {
             input_levels,
             target_level: self.target_level,
@@ -101,7 +88,7 @@ impl ManualCompactionPicker {
     fn pick_l0_to_base_level(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         let l0 = levels.l0.as_ref().unwrap();
         let mut input_levels = vec![];
@@ -173,15 +160,7 @@ impl ManualCompactionPicker {
             level_type: LevelType::Nonoverlapping as i32,
             table_infos: target_input_ssts,
         });
-        for level in &input_levels {
-            if !level.table_infos.is_empty() {
-                level_handlers[level.level_idx as usize].add_pending_task(
-                    self.compact_task_id,
-                    self.target_level,
-                    &level.table_infos,
-                );
-            }
-        }
+
         Some(CompactionInput {
             input_levels,
             target_level: self.target_level,
@@ -194,7 +173,7 @@ impl CompactionPicker for ManualCompactionPicker {
     fn pick_compaction(
         &self,
         levels: &Levels,
-        level_handlers: &mut [LevelHandler],
+        level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
         if self.option.level == 0 {
             if !self.option.sst_ids.is_empty() {
@@ -278,19 +257,6 @@ impl CompactionPicker for ManualCompactionPicker {
             return None;
         }
 
-        level_handlers[level].add_pending_task(
-            self.compact_task_id,
-            target_level,
-            &select_input_ssts,
-        );
-        if !target_input_ssts.is_empty() {
-            level_handlers[target_level].add_pending_task(
-                self.compact_task_id,
-                target_level,
-                &target_input_ssts,
-            );
-        }
-
         Some(CompactionInput {
             input_levels: vec![
                 InputLevel {
@@ -324,7 +290,7 @@ pub mod tests {
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     #[test]
-    fn test_manaul_compaction_picker() {
+    fn test_manual_compaction_picker() {
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -381,14 +347,12 @@ pub mod tests {
 
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
+            result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(2, result.input_levels[0].table_infos.len());
             assert_eq!(3, result.input_levels[1].table_infos.len());
@@ -402,14 +366,12 @@ pub mod tests {
             let option = ManualCompactionOption::default();
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
             );
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
+            result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(3, result.input_levels[0].table_infos.len());
             assert_eq!(3, result.input_levels[1].table_infos.len());
@@ -434,15 +396,13 @@ pub mod tests {
 
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
             );
 
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
+            result.add_pending_task(0, &mut levels_handler);
 
             assert_eq!(1, result.input_levels[0].table_infos.len());
             assert_eq!(2, result.input_levels[1].table_infos.len());
@@ -474,15 +434,12 @@ pub mod tests {
 
             let target_level = option.level + 1;
             let picker = ManualCompactionPicker::new(
-                0,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
             );
 
-            let result = picker
-                .pick_compaction(&levels, &mut levels_handler)
-                .unwrap();
+            let result = picker.pick_compaction(&levels, &levels_handler).unwrap();
 
             assert_eq!(1, result.input_levels[0].table_infos.len());
             assert_eq!(2, result.input_levels[1].table_infos.len());

@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 coarsetime = "0.1"
-futures = "0.3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 indextree = "4.4"
 itertools = "0.10"

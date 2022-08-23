@@ -76,7 +76,7 @@ pub struct StateTable<S: StateStore> {
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. The table will also check whether the writed rows
+    /// executor. The table will also check whether the written rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
 

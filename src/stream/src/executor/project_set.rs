@@ -62,7 +62,7 @@ impl ProjectSetExecutor {
 pub struct ProjectSetExecutor {
     input: BoxedExecutor,
     info: ExecutorInfo,
-    /// Expressions of the current project_setion.
+    /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
 }
 

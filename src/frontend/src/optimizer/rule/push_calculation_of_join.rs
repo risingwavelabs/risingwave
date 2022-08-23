@@ -132,7 +132,7 @@ impl PushCalculationOfJoinRule {
             }
             let (ty, left, right) = func.clone().decompose_as_binary();
             // we just cast the return types of inputs of equal conditions for `HashJoin`.
-            // non-equal conditions don't need unnecssary explicit cast.
+            // non-equal conditions don't need unnecessary explicit cast.
             let can_cast = ty == Type::Equal;
             let left_input_bits = left.collect_input_refs(left_col_num + right_col_num);
             let right_input_bits = right.collect_input_refs(left_col_num + right_col_num);
