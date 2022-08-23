@@ -116,7 +116,7 @@ impl S3StreamingUploader {
         self.join_handles.push(tokio::spawn(async move {
             let timer = metrics
                 .operation_latency
-                .with_label_values(&["s3_upload_part"])
+                .with_label_values(&["s3", "s3_upload_part"])
                 .start_timer();
             let upload_output = client_cloned
                 .upload_part()

@@ -278,12 +278,13 @@ pub struct MonitoredStreamingUploader {
 
 impl MonitoredStreamingUploader {
     pub fn new(
+        media_type: &str,
         handle: BoxedStreamingUploader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
     ) -> Self {
         let timer = object_store_metrics
             .operation_latency
-            .with_label_values(&["streaming_upload"])
+            .with_label_values(&[media_type, "streaming_upload"])
             .start_timer();
         Self {
             inner: handle,
@@ -354,6 +355,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
         let handle = self.inner.streaming_upload(path).await?;
         Ok(MonitoredStreamingUploader::new(
+            self.inner.store_media_type().as_str(),
             handle,
             self.object_store_metrics.clone(),
         ))
