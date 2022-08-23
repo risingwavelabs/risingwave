@@ -18,17 +18,19 @@
 #![expect(clippy::declare_interior_mutable_const)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use tokio::task_local;
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct TaskLocalBytesAllocated(Option<&'static AtomicUsize>);
+struct TaskLocalBytesAllocated(Option<&'static AtomicUsize>);
 
 impl Default for TaskLocalBytesAllocated {
     fn default() -> Self {
-        Self(Some(Box::leak(Box::new_in(AtomicUsize::new(0), System))))
+        Self(Some(Box::leak(Box::new_in(0.into(), System))))
     }
 }
 
@@ -58,7 +60,10 @@ impl TaskLocalBytesAllocated {
     #[inline(always)]
     pub fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
-            bytes.fetch_sub(val, Ordering::Relaxed);
+            let old_bytes = bytes.fetch_sub(val, Ordering::Relaxed);
+            if old_bytes - val == 0 {
+                unsafe { Box::from_raw_in(bytes.as_mut_ptr(), System) };
+            }
         }
     }
 
@@ -72,7 +77,32 @@ impl TaskLocalBytesAllocated {
 }
 
 task_local! {
-    pub static BYTES_ALLOCATED: TaskLocalBytesAllocated;
+    static BYTES_ALLOCATED: TaskLocalBytesAllocated;
+}
+
+pub async fn allocation_stat<Fut, T, F>(future: Fut, interval: Duration, mut report: F) -> T
+where
+    Fut: Future<Output = T>,
+    F: FnMut(usize),
+{
+    BYTES_ALLOCATED
+        .scope(TaskLocalBytesAllocated::new(), async move {
+            let _guard = Box::new(114514);
+            let monitor = async move {
+                let mut interval = tokio::time::interval(interval);
+                loop {
+                    interval.tick().await;
+                    BYTES_ALLOCATED.with(|bytes| report(bytes.val()));
+                }
+            };
+            let output = tokio::select! {
+                biased;
+                _ = monitor => unreachable!(),
+                output = future => output,
+            };
+            output
+        })
+        .await
 }
 
 #[inline(always)]

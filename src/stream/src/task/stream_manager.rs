@@ -30,7 +30,6 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -572,26 +571,16 @@ impl LocalStreamManagerCore {
 
                 let instrumented = monitor.instrument(traced);
 
-                let allocation_stated =
-                    BYTES_ALLOCATED.scope(TaskLocalBytesAllocated::new(), async move {
-                        let monitor = async move {
-                            let mut interval = tokio::time::interval(Duration::from_millis(1000));
-                            loop {
-                                interval.tick().await;
-                                BYTES_ALLOCATED.with(|bytes| {
-                                    metrics
-                                        .actor_memory_usage
-                                        .with_label_values(&[&actor_id_str])
-                                        .set(bytes.val() as i64)
-                                });
-                            }
-                        };
-                        tokio::select! {
-                            biased;
-                            _ = monitor => unreachable!(),
-                            _ = instrumented => {},
-                        }
-                    });
+                let allocation_stated = stats_alloc::allocation_stat(
+                    instrumented,
+                    Duration::from_millis(1000),
+                    move |bytes| {
+                        metrics
+                            .actor_memory_usage
+                            .with_label_values(&[&actor_id_str])
+                            .set(bytes as i64)
+                    },
+                );
 
                 tokio::spawn(allocation_stated)
             };
