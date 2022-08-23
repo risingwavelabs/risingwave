@@ -226,7 +226,10 @@ async fn main() {
     // Test batch
     // Queries we generate are complex, can cause overflow in
     // local execution mode.
-    client.query("SET query_mode TO distributed;", &[]).await;
+    client
+        .query("SET query_mode TO distributed;", &[])
+        .await
+        .unwrap();
     for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("Executing: {}", sql);
