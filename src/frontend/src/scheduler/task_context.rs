@@ -68,7 +68,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         None
     }
 
-    fn create_task_metrics(&self, _: String) -> Option<BatchTaskMetrics> {
+    fn get_task_metrics(&self) -> Option<BatchTaskMetrics> {
         None
     }
 }

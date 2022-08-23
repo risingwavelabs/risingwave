@@ -21,6 +21,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_source::SourceManagerRef;
 use risingwave_storage::StateStoreImpl;
 
+use super::TaskId;
 use crate::executor::{BatchMetrics, BatchTaskMetrics};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
@@ -64,15 +65,16 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// None indicates that not collect batch metrics.
     fn stats(&self) -> Option<Arc<BatchMetrics>>;
 
-    /// Create task level metrics.
+    /// get task level metrics.
     /// None indicates that not collect task metrics.
-    fn create_task_metrics(&self, query_id: String) -> Option<BatchTaskMetrics>;
+    fn get_task_metrics(&self) -> Option<BatchTaskMetrics>;
 }
 
 /// Batch task context on compute node.
 #[derive(Clone)]
 pub struct ComputeNodeContext {
     env: BatchEnvironment,
+    task_metrics: BatchTaskMetrics,
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -102,8 +104,8 @@ impl BatchTaskContext for ComputeNodeContext {
         Some(self.env.stats())
     }
 
-    fn create_task_metrics(&self, query_id: String) -> Option<BatchTaskMetrics> {
-        Some(self.env.create_task_metrics(query_id))
+    fn get_task_metrics(&self) -> Option<BatchTaskMetrics> {
+        Some(self.task_metrics.clone())
     }
 }
 
@@ -112,10 +114,12 @@ impl ComputeNodeContext {
     pub fn new_for_test() -> Self {
         Self {
             env: BatchEnvironment::for_test(),
+            task_metrics: BatchTaskMetrics::unused(),
         }
     }
 
-    pub fn new(env: BatchEnvironment) -> Self {
-        Self { env }
+    pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
+        let task_metrics = env.create_task_metrics(task_id);
+        Self { env, task_metrics }
     }
 }

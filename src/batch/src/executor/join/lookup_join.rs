@@ -259,7 +259,7 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
         let task_id = self.task_id.clone();
 
         let executor_builder =
-            ExecutorBuilder::new(&plan_node, &task_id, self.context.clone(), self.epoch, None);
+            ExecutorBuilder::new(&plan_node, &task_id, self.context.clone(), self.epoch);
 
         executor_builder.build().await
     }

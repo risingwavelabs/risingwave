@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,92 +14,52 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
-use std::sync::RwLock;
-use std::time::Duration;
-
-use prometheus::core::{AtomicU64, GenericCounterVec};
+use prometheus::core::{AtomicU64, Collector, GenericCounterVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_with_registry,
+    exponential_buckets, histogram_opts, opts, register_histogram_with_registry,
     register_int_counter_vec_with_registry, Histogram, Registry,
 };
 use tokio::sync::mpsc::Sender;
 
+use crate::task::TaskId;
+
 pub struct BatchTaskMetricsManager {
     registry: Registry,
-    delete_queue_sender: Sender<DeleteRecord>,
-    exchange_recv_row_number: GenericCounterVec<AtomicU64>,
+    sender: Sender<Box<dyn Collector>>,
 }
 
 impl BatchTaskMetricsManager {
     pub fn new(registry: Registry) -> Self {
-        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
-            "batch_exchange_recv_row_number",
-            "Total number of row that have been received from upstream source",
-            &[
-                "query_id",
-                "source_stage_id",
-                "target_stage_id",
-                "source_task_id",
-                "target_task_id"
-            ],
-            registry
-        )
-        .unwrap();
-
         // Spawn a deletor.
-        // TaskMetricsManager will create task metrics for each BatchExecution and task metrics will
-        // record all the label it used. When the BatchExecution is finished, the task metrics will
-        // send all record to the delete queue. deletor is responsible for reading
-        // unused record from delete queue periodically and remove them from metrics.
-        // The deletor will remove the record after several minutes. Because it's important not to
-        // delete it immediately since promethues pull data periodically.
+        // TaskMetricsManager will create BatchTaskMetrics for each BatchExecution and
+        // BatchTaskMetrics will create their own Collector. When the BatchExecution is
+        // done, BatchTaskMetrics will send their Collectors to the delete_queue.
+        // The deletor will unregister the Collectors from the registry periodically.
+        // We store the collector in delete_cache first and unregister it next time to make sure the
+        // metrics be collected by prometheus.
         let (delete_queue_sender, mut delete_queue_receiver) =
-            tokio::sync::mpsc::channel::<DeleteRecord>(1024);
-        let exchange_recv_row_number_clone = exchange_recv_row_number.clone();
+            tokio::sync::mpsc::channel::<Box<dyn Collector>>(1024);
+        let deletor_registry = registry.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
-            let mut delete_cache: Vec<DeleteRecord> = Vec::new();
+            let mut delete_cache: Vec<Box<dyn Collector>> = Vec::new();
             let mut connect = true;
             while connect {
                 // run every minute.
                 let _ = interval.tick().await;
 
                 // delete all record in delete_cache .
-                while let Some(delete_record) = delete_cache.pop() {
-                    let query_id = delete_record.query_id;
-                    for (metric_name, vec) in &delete_record.records {
-                        match metric_name.as_str() {
-                            "exchange_recv_row_number" => {
-                                for [source_stage_id, target_stage_id, source_task_id, target_task_id] in
-                                    vec
-                                {
-                                    if exchange_recv_row_number_clone
-                                        .remove_label_values(&[
-                                            &query_id,
-                                            &source_stage_id.to_string(),
-                                            &target_stage_id.to_string(),
-                                            &source_task_id.to_string(),
-                                            &target_task_id.to_string(),
-                                        ])
-                                        .is_err()
-                                    {
-                                        // Already remove, just skip it.
-                                    }
-                                }
-                            }
-                            _ => {
-                                unimplemented!("Never reach here");
-                            }
-                        }
+                while let Some(collector) = delete_cache.pop() {
+                    if deletor_registry.unregister(collector).is_err() {
+                        // Ignore: collector is not registered.
                     }
                 }
 
                 // read from delete queue and push into delete_cache.
                 loop {
                     match delete_queue_receiver.try_recv() {
-                        Ok(delete_record) => {
-                            delete_cache.push(delete_record);
+                        Ok(collector) => {
+                            delete_cache.push(collector);
                         }
                         Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                             break;
@@ -114,81 +77,72 @@ impl BatchTaskMetricsManager {
 
         Self {
             registry,
-            delete_queue_sender,
-            exchange_recv_row_number,
+            sender: delete_queue_sender,
         }
     }
 
-    pub fn create_task_metrics(&self, query_id: String) -> BatchTaskMetrics {
-        BatchTaskMetrics {
-            query_id,
-            record: RwLock::new(HashMap::new()),
-            exchange_recv_row_number: self.exchange_recv_row_number.clone(),
-            delete_queue_sender: self.delete_queue_sender.clone(),
-        }
+    pub fn create_task_metrics(&self, id: TaskId) -> BatchTaskMetrics {
+        BatchTaskMetrics::new(self.registry.clone(), id, Some(self.sender.clone()))
     }
 
     /// Create a new `BatchTaskMetricsManager` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(prometheus::Registry::new())
+        let (delete_queue_sender, _) = tokio::sync::mpsc::channel::<Box<dyn Collector>>(1);
+        Self {
+            sender: delete_queue_sender,
+            registry: prometheus::Registry::new(),
+        }
     }
 }
 
+#[derive(Clone)]
 pub struct BatchTaskMetrics {
-    pub query_id: String,
-
-    /// Used to delete the label haved been recorded.
-    /// record definition:
-    /// HashMap { Key: metrics_name ,
-    ///           Value: the list of labels [ source_stage_id,
-    /// target_stage_id,source_task_id,target_task_id]         }
-    pub record: RwLock<HashMap<String, Vec<[u32; 4]>>>,
+    sender: Option<Sender<Box<dyn Collector>>>,
     pub exchange_recv_row_number: GenericCounterVec<AtomicU64>,
-    /// Used to send DeleteRecor to delete_queue.
-    delete_queue_sender: Sender<DeleteRecord>,
-}
-
-#[derive(Debug)]
-pub struct DeleteRecord {
-    query_id: String,
-    records: HashMap<String, Vec<[u32; 4]>>,
 }
 
 impl BatchTaskMetrics {
-    /// After we create a new label for a metric, we should record it first.
-    pub fn add_record(
-        &self,
-        metric_name: String,
-        source_stage_id: u32,
-        target_stage_id: u32,
-        source_task_id: u32,
-        target_task_id: u32,
-    ) {
-        let mut record = self.record.write().unwrap();
-        let vec = record.entry(metric_name).or_insert(Vec::new());
-        vec.push([
-            source_stage_id,
-            target_stage_id,
-            source_task_id,
-            target_task_id,
-        ]);
+    pub fn new(registry: Registry, id: TaskId, sender: Option<Sender<Box<dyn Collector>>>) -> Self {
+        let opt = {
+            let const_labels = HashMap::from([
+                ("query_id".to_string(), id.query_id),
+                ("target_staget_id".to_string(), id.stage_id.to_string()),
+                ("target_task_id".to_string(), id.task_id.to_string()),
+            ]);
+            opts!(
+                "batch_exchange_recv_row_number",
+                "Total number of row that have been received from upstream source",
+            )
+            .const_labels(const_labels)
+        };
+        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
+            opt,
+            &["source_stage_id", "source_task_id"],
+            registry
+        )
+        .unwrap();
+        Self {
+            sender,
+            exchange_recv_row_number,
+        }
     }
 
     /// This function execute after the exucution done.
     /// Send all the record to the delete queue.
     pub async fn clear_record(&self) {
-        if self.record.read().unwrap().is_empty() {
-            return;
+        if let Some(sender) = self.sender.as_ref() {
+            if sender
+                .send(Box::new(self.exchange_recv_row_number.clone()))
+                .await
+                .is_err()
+            {
+                error!("Failed to send delete record to delete queue");
+            }
         }
+    }
 
-        let delete_record = DeleteRecord {
-            query_id: self.query_id.clone(),
-            records: self.record.read().unwrap().clone(),
-        };
-        if self.delete_queue_sender.send(delete_record).await.is_err() {
-            // The error handle may need to modify.
-            error!("Failed to send delete record to delete queue");
-        };
+    pub fn unused() -> Self {
+        Self::new(prometheus::Registry::new(), TaskId::default(), None)
     }
 }
 

@@ -19,6 +19,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
+use super::TaskId;
 use crate::executor::monitor::BatchMetrics;
 use crate::executor::{BatchTaskMetrics, BatchTaskMetricsManager};
 use crate::task::BatchManager;
@@ -131,7 +132,7 @@ impl BatchEnvironment {
         self.stats.clone()
     }
 
-    pub fn create_task_metrics(&self, query_id: String) -> BatchTaskMetrics {
-        self.task_metrics_manager.create_task_metrics(query_id)
+    pub fn create_task_metrics(&self, task_id: TaskId) -> BatchTaskMetrics {
+        self.task_metrics_manager.create_task_metrics(task_id)
     }
 }

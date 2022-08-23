@@ -11,9 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::sync::Arc;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -44,7 +41,7 @@ pub struct GenericExchangeExecutor<C> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<Arc<BatchTaskMetrics>>,
+    metrics: Option<BatchTaskMetrics>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -130,7 +127,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             schema: Schema { fields },
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
-            metrics: source.task_metrics(),
+            metrics: source.context().get_task_metrics(),
         }))
     }
 }
@@ -155,7 +152,7 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
         let mut stream = select_all(
             self.sources
                 .into_iter()
-                .map(|source| data_chunk_stream(source, self.metrics.clone(), self.task_id.clone()))
+                .map(|source| data_chunk_stream(source, self.metrics.clone()))
                 .collect_vec(),
         )
         .boxed();
@@ -168,11 +165,7 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(
-    mut source: ExchangeSourceImpl,
-    metrics: Option<Arc<BatchTaskMetrics>>,
-    target_id: TaskId,
-) {
+async fn data_chunk_stream(mut source: ExchangeSourceImpl, metrics: Option<BatchTaskMetrics>) {
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
@@ -180,21 +173,11 @@ async fn data_chunk_stream(
             }
             if let Some(metrics) = metrics.as_ref() {
                 let source_id = source.get_task_id();
-                metrics.add_record(
-                    "exchange_recv_row_number".to_string(),
-                    source_id.stage_id,
-                    target_id.stage_id,
-                    source_id.task_id,
-                    target_id.task_id,
-                );
                 metrics
                     .exchange_recv_row_number
                     .with_label_values(&[
-                        &target_id.query_id,
                         &source_id.stage_id.to_string(),
-                        &target_id.stage_id.to_string(),
                         &source_id.task_id.to_string(),
-                        &target_id.task_id.to_string(),
                     ])
                     .inc_by(res.cardinality().try_into().unwrap());
             }

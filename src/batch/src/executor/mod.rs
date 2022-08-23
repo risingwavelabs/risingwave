@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::sync::Arc;
-
 use anyhow::anyhow;
 mod delete;
 mod expand;
@@ -117,7 +115,6 @@ pub struct ExecutorBuilder<'a, C> {
     pub task_id: &'a TaskId,
     context: C,
     epoch: u64,
-    task_metrics: Option<Arc<BatchTaskMetrics>>,
 }
 
 macro_rules! build_executor {
@@ -133,31 +130,18 @@ macro_rules! build_executor {
 }
 
 impl<'a, C: Clone> ExecutorBuilder<'a, C> {
-    pub fn new(
-        plan_node: &'a PlanNode,
-        task_id: &'a TaskId,
-        context: C,
-        epoch: u64,
-        task_metrics: Option<Arc<BatchTaskMetrics>>,
-    ) -> Self {
+    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
         Self {
             plan_node,
             task_id,
             context,
             epoch,
-            task_metrics,
         }
     }
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(
-            plan_node,
-            self.task_id,
-            self.context.clone(),
-            self.epoch,
-            self.task_metrics.clone(),
-        )
+        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
     }
 
     pub fn plan_node(&self) -> &PlanNode {
@@ -170,11 +154,6 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
     pub fn epoch(&self) -> u64 {
         self.epoch
-    }
-
-    // Used to distribute BatchTaskMetrics from BatchTaskExecution to Executor.
-    pub fn task_metrics(&self) -> Option<Arc<BatchTaskMetrics>> {
-        self.task_metrics.clone()
     }
 }
 
@@ -253,7 +232,6 @@ mod tests {
             task_id,
             ComputeNodeContext::new_for_test(),
             u64::MAX,
-            None,
         );
         let child_plan = &PlanNode {
             ..Default::default()
