@@ -17,15 +17,14 @@ use std::future::Future;
 use tokio::task::JoinHandle;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
-#[cfg(not(madsim))]
 pub struct CompactionExecutor {
     /// Runtime for compaction tasks.
     #[cfg(not(madsim))]
     runtime: &'static tokio::runtime::Runtime,
 }
 
-#[cfg(not(madsim))]
 impl CompactionExecutor {
+    #[cfg(not(madsim))]
     pub fn new(worker_threads_num: Option<usize>) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
