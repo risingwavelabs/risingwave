@@ -22,7 +22,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 #[cfg(any(test, feature = "test"))]
@@ -313,7 +313,7 @@ impl LocalVersionManager {
         }
 
         drop(old_version);
-        let mut new_version = self.local_version().write();
+        let mut new_version = self.local_version.write();
         let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
         RwLockWriteGuard::unlock_fair(new_version);
         for cleaned_epoch in cleaned_epochs {
