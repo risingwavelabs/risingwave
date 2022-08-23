@@ -17,7 +17,7 @@ use std::sync::Arc;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
+use risingwave_sqlparser::ast::{DropStatement, ExplainType, ObjectType, Statement};
 
 use self::util::handle_with_properties;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -60,16 +60,27 @@ pub async fn handle(
     match stmt {
         Statement::Explain {
             statement,
-            verbose,
-            trace,
-            distsql,
-            ..
+            describe_alias,
+            analyze,
+            options,
         } => {
-            if distsql {
-                return Err(
-                    ErrorCode::NotImplemented("explain distsql".to_string(), None.into()).into(),
-                );
-            }
+            match options.explain_type {
+                ExplainType::Logical => {
+                    return Err(ErrorCode::NotImplemented(
+                        "explain logical".to_string(),
+                        None.into(),
+                    )
+                    .into())
+                }
+                ExplainType::Physical => {}
+                ExplainType::DistSQL => {
+                    return Err(ErrorCode::NotImplemented(
+                        "explain distsql".to_string(),
+                        None.into(),
+                    )
+                    .into())
+                }
+            };
 
             match statement.as_ref() {
                 Statement::CreateTable { with_options, .. }
@@ -81,7 +92,7 @@ pub async fn handle(
                 _ => {}
             }
 
-            explain::handle_explain(context, *statement, verbose, trace)
+            explain::handle_explain(context, *statement, options.verbose, options.trace)
         }
         Statement::CreateSource {
             is_materialized,

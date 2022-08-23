@@ -2357,33 +2357,66 @@ impl Parser {
         })
     }
 
-    pub fn parse_explain(&mut self, describe_alias: bool) -> Result<Statement, ParserError> {
-        let mut analyze = false;
-        let mut distsql = false;
-        let mut verbose = false;
-        let mut trace = false;
-        while let Some(keyword) = self.parse_one_of_keywords(&[
-            Keyword::ANALYZE,
-            Keyword::DISTSQL,
-            Keyword::VERBOSE,
-            Keyword::TRACE,
-        ]) {
+    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+        if let Some(keyword) = self.parse_one_of_keywords(&[Keyword::TRUE, Keyword::FALSE]) {
             match keyword {
-                Keyword::ANALYZE => analyze = true,
-                Keyword::DISTSQL => distsql = true,
-                Keyword::VERBOSE => verbose = true,
-                Keyword::TRACE => trace = true,
-                _ => unreachable!("{}", keyword),
+                Keyword::TRUE => true,
+                Keyword::FALSE => false,
+                _ => unreachable!(),
             }
+        } else {
+            default
         }
+    }
+
+    pub fn parse_explain(&mut self, describe_alias: bool) -> Result<Statement, ParserError> {
+        let mut options = ExplainOptions::default();
+        let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
+            while let Some(keyword) = parser.parse_one_of_keywords(&[
+                Keyword::VERBOSE,
+                Keyword::TRACE,
+                Keyword::TYPE,
+                Keyword::LOGICAL,
+                Keyword::PHYSICAL,
+                Keyword::DISTSQL,
+            ]) {
+                match keyword {
+                    Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
+                    Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
+                    Keyword::TYPE => {
+                        let explain_type = parser.expect_one_of_keywords(&[
+                            Keyword::LOGICAL,
+                            Keyword::PHYSICAL,
+                            Keyword::DISTSQL,
+                        ])?;
+                        match explain_type {
+                            Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
+                            Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
+                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                            _ => unreachable!("{}", keyword),
+                        }
+                    }
+                    Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
+                    Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
+                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                    _ => unreachable!("{}", keyword),
+                }
+            }
+            Ok(())
+        };
+
+        let analyze = self.parse_keyword(Keyword::ANALYZE);
+        if self.consume_token(&Token::LParen) {
+            self.parse_comma_separated(parse_explain_option)?;
+            self.expect_token(&Token::RParen)?;
+        }
+
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
             describe_alias,
             analyze,
-            verbose,
-            trace,
             statement: Box::new(statement),
-            distsql,
+            options,
         })
     }
 
