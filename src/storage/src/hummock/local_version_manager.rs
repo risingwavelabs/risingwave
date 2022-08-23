@@ -271,7 +271,7 @@ impl LocalVersionManager {
         last_pinned: Option<u64>,
         pin_resp_payload: pin_version_response::Payload,
     ) -> bool {
-        let old_version = self.local_version.upgradable_read();
+        let old_version = self.local_version.read();
         if let Some(last_pinned_id) = last_pinned {
             if old_version.pinned_version().id() != last_pinned_id {
                 return false;
@@ -312,20 +312,14 @@ impl LocalVersionManager {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
 
-        let mut new_version = old_version.clone();
+        drop(old_version);
+        let mut new_version = self.local_version().write();
         let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
-        let sstable_id_manager_clone = self.sstable_id_manager.clone();
-        tokio::spawn(async move {
-            for cleaned_epoch in cleaned_epochs {
-                sstable_id_manager_clone.remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
-            }
-        });
-        {
-            let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
-            *guard = new_version;
-            RwLockWriteGuard::unlock_fair(guard);
+        RwLockWriteGuard::unlock_fair(new_version);
+        for cleaned_epoch in cleaned_epochs {
+            self.sstable_id_manager
+                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
         }
-
         self.worker_context
             .version_update_notifier_tx
             .send(new_version_id)
