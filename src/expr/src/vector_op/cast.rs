@@ -219,7 +219,6 @@ pub fn bool_out(input: bool) -> Result<String> {
     Ok(if input { "t".into() } else { "f".into() })
 }
 
-
 /// This macro helps to cast individual scalars.
 macro_rules! gen_cast_impl {
     ([$source:expr, $source_ty:expr, $target_ty:expr], $( { $input:ident, $cast:ident, $func:expr } ),* $(,)?) => {
@@ -316,7 +315,7 @@ macro_rules! for_each_cast {
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
-/// 
+///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
 pub fn list_cast(
     input: ListRef,
