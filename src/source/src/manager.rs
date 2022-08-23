@@ -150,7 +150,7 @@ impl SourceManager for MemSourceManager {
         let row_id_index = if info.pk_column_ids != vec![0] {
             None
         } else {
-            Some(info.row_id_index)
+            Some(info.row_id_index as usize)
         };
         let pk_column_ids = info.pk_column_ids.clone();
 
