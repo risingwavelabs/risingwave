@@ -89,7 +89,6 @@ async fn create_tables(
 
     let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(opt);
-    setup_sql.push_str(&sql);
     let statements = parse_sql(&sql);
     let mut tables = statements
         .iter()
@@ -106,6 +105,7 @@ async fn create_tables(
     // Generate some mviews
     for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        setup_sql.push_str(&format!("{};", &create_sql));
         client.execute(&create_sql, &[]).await.unwrap();
         tables.push(table.clone());
         mviews.push(table);
@@ -224,6 +224,12 @@ async fn main() {
     let (tables, mviews, setup_sql) = create_tables(&mut rng, &opt, &client).await;
 
     // Test batch
+    // Queries we generate are complex, can cause overflow in
+    // local execution mode.
+    client
+        .query("SET query_mode TO distributed;", &[])
+        .await
+        .unwrap();
     for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("Executing: {}", sql);
