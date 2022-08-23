@@ -460,6 +460,11 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_bytes("Actor Memory Usage", [
+                panels.target(
+                    "rate(actor_memory_usage[$__rate_interval])", "{{actor_id}}"
+                ),
+            ]),
             panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
                 panels.target(
                     "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upstream_fragment_id}}"
