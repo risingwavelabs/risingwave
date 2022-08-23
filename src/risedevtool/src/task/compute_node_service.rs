@@ -59,6 +59,10 @@ impl ComputeNodeService {
             .arg("--metrics-level")
             .arg("1");
 
+        if config.enable_async_stack_trace {
+            cmd.arg("--enable-async-stack-trace");
+        }
+
         if config.enable_tiered_cache {
             let prefix_data = env::var("PREFIX_DATA")?;
             cmd.arg("--file-cache-dir").arg(

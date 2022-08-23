@@ -163,11 +163,6 @@ impl HummockStorage {
         check_bloom_filter: bool,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
-        if check_bloom_filter && sstable.value().surely_not_have_user_key(key) {
-            stats.bloom_filter_true_negative_count += 1;
-            return Ok(None);
-        }
-
         if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), key, stats) {
             return Ok(None);
         }

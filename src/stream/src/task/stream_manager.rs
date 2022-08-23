@@ -26,7 +26,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -78,7 +77,7 @@ pub struct LocalStreamManagerCore {
     pub(crate) config: StreamingConfig,
 
     /// Manages the stack traces of all actors.
-    stack_trace_manager: StackTraceManager<ActorId>,
+    stack_trace_manager: Option<StackTraceManager<ActorId>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -142,12 +141,14 @@ impl LocalStreamManager {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
+        enable_async_stack_trace: bool,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
             state_store,
             streaming_metrics,
             config,
+            enable_async_stack_trace,
         ))
     }
 
@@ -163,7 +164,12 @@ impl LocalStreamManager {
                 tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
                 let mut core = self.core.lock();
 
-                for (k, trace) in core.stack_trace_manager.get_all() {
+                for (k, trace) in core
+                    .stack_trace_manager
+                    .as_mut()
+                    .expect("async stack trace not enabled")
+                    .get_all()
+                {
                     println!(">> Actor {}\n\n{}", k, &*trace);
                 }
             }
@@ -173,10 +179,10 @@ impl LocalStreamManager {
     /// Get stack trace reports for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
         let mut core = self.core.lock();
-        core.stack_trace_manager
-            .get_all()
-            .map(|(k, v)| (*k, v.clone()))
-            .collect()
+        match &mut core.stack_trace_manager {
+            Some(mgr) => mgr.get_all().map(|(k, v)| (*k, v.clone())).collect(),
+            None => Default::default(),
+        }
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
@@ -361,9 +367,16 @@ impl LocalStreamManagerCore {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
+        enable_async_stack_trace: bool,
     ) -> Self {
         let context = SharedContext::new(addr);
-        Self::new_inner(state_store, context, streaming_metrics, config)
+        Self::new_inner(
+            state_store,
+            context,
+            streaming_metrics,
+            config,
+            enable_async_stack_trace,
+        )
     }
 
     fn new_inner(
@@ -371,6 +384,7 @@ impl LocalStreamManagerCore {
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
+        enable_async_stack_trace: bool,
     ) -> Self {
         #[cfg(not(madsim))]
         let runtime = {
@@ -398,7 +412,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
-            stack_trace_manager: Default::default(),
+            stack_trace_manager: enable_async_stack_trace.then(Default::default),
         }
     }
 
@@ -413,6 +427,7 @@ impl LocalStreamManagerCore {
             SharedContext::for_test(),
             streaming_metrics,
             StreamingConfig::default(),
+            false,
         )
     }
 
@@ -583,20 +598,26 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_reporter = self.stack_trace_manager.register(actor_id);
+            let trace_reporter = self
+                .stack_trace_manager
+                .as_mut()
+                .map(|m| m.register(actor_id));
 
             let handle = {
                 let actor = async move {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 };
-                let traced = trace_reporter.optional_trace(
-                    actor,
-                    format!("Actor {actor_id}"),
-                    true,
-                    Duration::from_millis(1000),
-                    *ENABLE_ASYNC_STACK_TRACE,
-                );
+                #[auto_enums::auto_enum(Future)]
+                let traced = match trace_reporter {
+                    Some(trace_reporter) => trace_reporter.trace(
+                        actor,
+                        format!("Actor {actor_id}"),
+                        true,
+                        Duration::from_millis(1000),
+                    ),
+                    None => actor,
+                };
                 let instrumented = monitor.instrument(traced);
                 self.spawn(instrumented)
             };
