@@ -206,8 +206,9 @@ impl CompactorManager {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-        self.remove_compactor(context_id);
         let mut guard = self.inner.write();
+        guard.compactors.retain(|c| *c != context_id);
+        guard.compactor_map.remove(&context_id);
         guard.compactors.push(context_id);
         guard.compactor_map.insert(
             context_id,
@@ -222,11 +223,9 @@ impl CompactorManager {
     }
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
-        {
-            let mut guard = self.inner.write();
-            guard.compactors.retain(|c| *c != context_id);
-            guard.compactor_map.remove(&context_id);
-        }
+        let mut guard = self.inner.write();
+        guard.compactors.retain(|c| *c != context_id);
+        guard.compactor_map.remove(&context_id);
         // Any existing task from the heartbeats table that has not been externally
         // cancelled will be eventually purged
         tracing::info!("Removed compactor session {}", context_id);
