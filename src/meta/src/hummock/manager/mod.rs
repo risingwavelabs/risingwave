@@ -1256,7 +1256,7 @@ where
         if let Some(sender) = self.compaction_scheduler.read().as_ref() {
             sender
                 .try_send(compaction_group)
-                .map_err(|e| Error::InternalError(e.to_string()))
+                .map_err(|e| Error::InternalError(anyhow::anyhow!(e.to_string())))
         } else {
             Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
         }

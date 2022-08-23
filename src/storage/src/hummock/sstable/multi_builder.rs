@@ -276,7 +276,6 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
-            None,
         );
         let results = builder.finish();
         assert!(results.is_empty());
@@ -301,7 +300,6 @@ mod tests {
             get_id_and_builder,
             CachePolicy::NotFill,
             mock_sstable_store(),
-            None,
         );
 
         for i in 0..table_capacity {
@@ -325,7 +323,6 @@ mod tests {
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
-            None,
         );
         let mut epoch = 100;
 
@@ -365,7 +362,6 @@ mod tests {
             LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
-            None,
         );
 
         builder

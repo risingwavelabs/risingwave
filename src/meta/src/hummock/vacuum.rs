@@ -323,8 +323,9 @@ mod tests {
     async fn test_vacuum_basic() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::default());
-        let vacuum = Arc::new(VacuumTrigger::new(
+        let compactor_manager = Arc::new(CompactorManager::new(1));
+        let vacuum = Arc::new(VacuumManager::new(
+            env,
             hummock_manager.clone(),
             compactor_manager.clone(),
         ));
