@@ -118,10 +118,21 @@ pub enum TieredCacheError {
 
 pub type Result<T> = core::result::Result<T, TieredCacheError>;
 
-pub enum TieredCacheOptions {
-    NoneCache,
+pub struct TieredCacheMetricsBuilder(Option<prometheus::Registry>);
+
+impl TieredCacheMetricsBuilder {
+    pub fn new(registry: prometheus::Registry) -> Self {
+        Self(Some(registry))
+    }
+
+    pub fn unused() -> Self {
+        Self(None)
+    }
+
     #[cfg(target_os = "linux")]
-    FileCache(file_cache::cache::FileCacheOptions),
+    pub fn file(self) -> file_cache::metrics::FileCacheMetrics {
+        file_cache::metrics::FileCacheMetrics::new(self.0.unwrap())
+    }
 }
 
 pub enum TieredCache<K, V>
@@ -157,16 +168,13 @@ where
         Self::NoneCache(PhantomData::default())
     }
 
-    #[allow(clippy::unused_async)]
-    pub async fn open(options: TieredCacheOptions) -> Result<Self> {
-        match options {
-            TieredCacheOptions::NoneCache => Ok(Self::NoneCache(PhantomData::default())),
-            #[cfg(target_os = "linux")]
-            TieredCacheOptions::FileCache(options) => {
-                let file_cache = file_cache::cache::FileCache::open(options).await?;
-                Ok(Self::FileCache(file_cache))
-            }
-        }
+    #[cfg(target_os = "linux")]
+    pub async fn file(
+        options: file_cache::cache::FileCacheOptions,
+        metrics: file_cache::metrics::FileCacheMetricsRef,
+    ) -> Result<Self> {
+        let cache = file_cache::cache::FileCache::open(options, metrics).await?;
+        Ok(Self::FileCache(cache))
     }
 
     #[allow(unused_variables)]

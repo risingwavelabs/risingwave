@@ -16,13 +16,13 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 
-/// The catalog `pg_user` provides access to information about database users.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
+/// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
+/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
 pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
 pub const PG_CLASS_COLUMNS: &[PgCatalogColumnsDef] = &[
     (DataType::Int32, "oid"),
-    (DataType::Varchar, "classname"),
-    (DataType::Int32, "namespaceoid"),
-    (DataType::Int32, "owneroid"),
-    (DataType::Varchar, "classkind"),
+    (DataType::Varchar, "relname"),
+    (DataType::Int32, "relnamespace"),
+    (DataType::Int32, "relowner"),
+    (DataType::Varchar, "relkind"),
 ];
