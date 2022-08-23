@@ -423,7 +423,7 @@ impl ObjectStore for S3ObjectStore {
                 .await?;
 
             // Check if there were errors.
-            if let Some(err_list) = delete_output.errors() && err_list.len() > 0 {
+            if let Some(err_list) = delete_output.errors() && !err_list.is_empty() {
                 return Err(ObjectError::internal(format!("DeleteObjects request returned exception for some objects: {:?}", err_list)));
             }
         }

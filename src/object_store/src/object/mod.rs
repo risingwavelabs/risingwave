@@ -258,15 +258,14 @@ macro_rules! object_store_impl_method_body_slice {
                     remote: remote,
                 } => {
                     // Process local paths.
-                    let result_loc = match local.as_ref() {
-                        ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(&paths_loc $(, $args)*).await,
-                        ObjectStoreImpl::Disk(disk) => disk.$method_name(&paths_loc $(, $args)*).await,
+                    match local.as_ref() {
+                        ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(&paths_loc $(, $args)*).await?,
+                        ObjectStoreImpl::Disk(disk) => disk.$method_name(&paths_loc $(, $args)*).await?,
                         ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
                     };
 
-                    if result_loc.is_err() { return result_loc; }
-
+                    // Process remote paths.
                     match remote.as_ref() {
                         ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(&paths_rem $(, $args)*).await,
                         ObjectStoreImpl::Disk(disk) => disk.$method_name(&paths_rem $(, $args)*).await,

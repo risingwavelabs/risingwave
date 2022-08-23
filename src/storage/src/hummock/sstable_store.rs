@@ -241,7 +241,7 @@ impl SstableStore {
     }
 
     /// Deletes all SSTs specified in the given list of IDs from storage and cache.
-    pub async fn delete_list(&self, sst_id_list: &[HummockSstableId])-> HummockResult<()> {
+    pub async fn delete_list(&self, sst_id_list: &[HummockSstableId]) -> HummockResult<()> {
         let mut paths = Vec::with_capacity(sst_id_list.len() * 2);
 
         for &sst_id in sst_id_list {
