@@ -33,7 +33,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 pub mod compute_observer;
 pub mod rpc;

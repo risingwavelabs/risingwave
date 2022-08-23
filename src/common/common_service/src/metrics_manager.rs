@@ -16,11 +16,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use hyper::{Body, Request, Response};
-use log::info;
 use prometheus::{Encoder, Registry, TextEncoder};
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
+use tracing::info;
 
 pub struct MetricsManager {}
 

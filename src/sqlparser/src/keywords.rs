@@ -245,7 +245,7 @@ define_keywords!(
     INDEX,
     INDICATOR,
     INNER,
-    INOUT,
+    INPUT,
     INSENSITIVE,
     INSERT,
     INT,

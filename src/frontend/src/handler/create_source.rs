@@ -22,7 +22,9 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
-use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
+use super::create_table::{
+    bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
+};
 use super::privilege::check_privileges;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
@@ -87,6 +89,10 @@ pub async fn handle_create_source(
 ) -> Result<PgResponse> {
     let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
 
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
+    let (columns, pk_column_ids) =
+        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, stmt.constraints)?;
+
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
@@ -105,16 +111,16 @@ pub async fn handle_create_source(
             row_format: RowFormatType::Json as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
-            columns: bind_sql_columns(stmt.columns)?,
-            pk_column_ids: vec![0],
+            columns,
+            pk_column_ids,
         },
         SourceSchema::DebeziumJson => StreamSourceInfo {
             properties: with_properties.clone(),
             row_format: RowFormatType::DebeziumJson as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
-            columns: bind_sql_columns(stmt.columns)?,
-            pk_column_ids: vec![0],
+            columns,
+            pk_column_ids,
         },
     };
 
@@ -172,34 +178,26 @@ pub mod tests {
             .clone();
         assert_eq!(source.name, "t");
 
-        // Only check stream source
-        let catalogs = source.columns;
-        let mut columns = vec![];
-
-        // Get all column descs
-        for catalog in catalogs {
-            columns.append(&mut catalog.column_desc.flatten());
-        }
-        let columns = columns
+        let columns = source
+            .columns
             .iter()
-            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let city_type = DataType::Struct {
-            fields: vec![DataType::Varchar, DataType::Varchar].into(),
-        };
+        let city_type = DataType::new_struct(
+            vec![DataType::Varchar, DataType::Varchar],
+            vec!["address".to_string(), "zipcode".to_string()],
+        );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "id" => DataType::Int32,
-            "country.zipcode" => DataType::Varchar,
             "zipcode" => DataType::Int64,
-            "country.city.address" => DataType::Varchar,
-            "country.address" => DataType::Varchar,
-            "country.city" => city_type.clone(),
-            "country.city.zipcode" => DataType::Varchar,
             "rate" => DataType::Float32,
-            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+            "country" => DataType::new_struct(
+                vec![DataType::Varchar,city_type,DataType::Varchar],
+                vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
+            ),
         };
         assert_eq!(columns, expected_columns);
     }
