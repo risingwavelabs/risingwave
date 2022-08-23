@@ -3,10 +3,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::task_local;
 
-pub struct TaskLocalAllocator;
-
-static GLOBAL_ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct TaskLocalBytesAllocated(Option<&'static AtomicUsize>);
@@ -59,21 +55,24 @@ fn wrap_layout(layout: Layout) -> (Layout, usize) {
     (wrapped_layout, offset)
 }
 
-struct TaskLocalAlloc;
+pub struct TaskLocalAlloc<A>(pub A);
 
-unsafe impl GlobalAlloc for TaskLocalAlloc {
+unsafe impl<A> GlobalAlloc for TaskLocalAlloc<A>
+where
+    A: GlobalAlloc,
+{
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let (wrapped_layout, offset) = wrap_layout(layout);
 
         BYTES_ALLOCATED
             .try_with(|&bytes| {
                 bytes.add_unchecked(layout.size());
-                let ptr = GLOBAL_ALLOC.alloc(wrapped_layout);
+                let ptr = self.0.alloc(wrapped_layout);
                 *ptr.cast() = bytes;
                 ptr.wrapping_add(offset)
             })
             .unwrap_or_else(|_| {
-                let ptr = GLOBAL_ALLOC.alloc(wrapped_layout);
+                let ptr = self.0.alloc(wrapped_layout);
                 *ptr.cast() = TaskLocalBytesAllocated::invalid();
                 ptr.wrapping_add(offset)
             })
@@ -86,7 +85,7 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
         let bytes: TaskLocalBytesAllocated = *ptr.cast();
         bytes.sub(layout.size());
 
-        GLOBAL_ALLOC.dealloc(ptr, wrapped_layout);
+        self.0.dealloc(ptr, wrapped_layout);
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
@@ -95,12 +94,12 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
         BYTES_ALLOCATED
             .try_with(|&bytes| {
                 bytes.add_unchecked(layout.size());
-                let ptr = GLOBAL_ALLOC.alloc_zeroed(wrapped_layout);
+                let ptr = self.0.alloc_zeroed(wrapped_layout);
                 *ptr.cast() = bytes;
                 ptr.wrapping_add(offset)
             })
             .unwrap_or_else(|_| {
-                let ptr = GLOBAL_ALLOC.alloc_zeroed(wrapped_layout);
+                let ptr = self.0.alloc_zeroed(wrapped_layout);
                 *ptr.cast() = TaskLocalBytesAllocated::invalid();
                 ptr.wrapping_add(offset)
             })
@@ -114,7 +113,7 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
         bytes.add(new_size);
         bytes.sub(layout.size());
 
-        let ptr = GLOBAL_ALLOC.realloc(ptr, wrapped_layout, new_size + offset);
+        let ptr = self.0.realloc(ptr, wrapped_layout, new_size + offset);
         if ptr.is_null() {
             ptr
         } else {
@@ -123,6 +122,3 @@ unsafe impl GlobalAlloc for TaskLocalAlloc {
         }
     }
 }
-
-#[global_allocator]
-static TASK_LOCAL_ALLOC: TaskLocalAlloc = TaskLocalAlloc;

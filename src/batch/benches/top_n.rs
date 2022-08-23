@@ -22,7 +22,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
 
-// #[global_allocator]
+#[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_top_n_executor(

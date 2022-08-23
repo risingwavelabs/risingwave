@@ -28,7 +28,7 @@ use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
 
-// #[global_allocator]
+#[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {

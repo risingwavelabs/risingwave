@@ -22,7 +22,7 @@ use risingwave_common::util::sort_util::OrderType;
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
 
-// #[global_allocator]
+#[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_sort_merge_join_executor(

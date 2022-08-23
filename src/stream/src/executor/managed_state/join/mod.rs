@@ -28,7 +28,6 @@ use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
-use stats_alloc::TaskLocalAllocator;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;

@@ -14,10 +14,11 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
+use stats_alloc::TaskLocalAlloc;
 use tikv_jemallocator::Jemalloc;
 
-// #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+#[global_allocator]
+static GLOBAL: TaskLocalAlloc<Jemalloc> = TaskLocalAlloc(Jemalloc);
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() {

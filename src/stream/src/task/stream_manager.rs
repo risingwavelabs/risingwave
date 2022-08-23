@@ -15,8 +15,6 @@
 use core::time::Duration;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::ptr::NonNull;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use anyhow::anyhow;
