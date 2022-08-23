@@ -59,7 +59,7 @@ pub struct BackwardUserIterator {
     min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<PinnedVersion>>,
+    _version: Option<PinnedVersion>,
 }
 
 impl BackwardUserIterator {
@@ -82,7 +82,7 @@ impl BackwardUserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> Self {
         Self {
             iterator,
@@ -288,7 +288,7 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
         DirectedUserIterator::Backward(BackwardUserIterator::with_epoch(

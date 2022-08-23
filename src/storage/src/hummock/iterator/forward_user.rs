@@ -60,7 +60,7 @@ pub trait DirectedUserIteratorBuilder {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator;
 }
 
@@ -145,7 +145,7 @@ pub struct UserIterator {
     min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<PinnedVersion>>,
+    _version: Option<PinnedVersion>,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -175,7 +175,7 @@ impl UserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> Self {
         Self {
             iterator,
@@ -321,7 +321,7 @@ impl DirectedUserIteratorBuilder for UserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
         DirectedUserIterator::Forward(Self::new(

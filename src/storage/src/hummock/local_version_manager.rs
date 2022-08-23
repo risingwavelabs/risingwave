@@ -290,15 +290,15 @@ impl LocalVersionManager {
             return false;
         }
 
-        let newly_pinned_version = match pin_resp_payload {
+        let (newly_pinned_version, version_deltas) = match pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = old_version.pinned_version().version();
-                for version_delta in version_deltas.delta {
-                    version_to_apply.apply_version_delta(&version_delta);
+                for version_delta in &version_deltas.delta {
+                    version_to_apply.apply_version_delta(version_delta);
                 }
-                version_to_apply
+                (version_to_apply, Some(version_deltas.delta))
             }
-            Payload::PinnedVersion(version) => version,
+            Payload::PinnedVersion(version) => (version, None),
         };
 
         for levels in newly_pinned_version.levels.values() {
@@ -313,7 +313,7 @@ impl LocalVersionManager {
         }
 
         let mut new_version = old_version.clone();
-        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
+        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version, version_deltas);
         let sstable_id_manager_clone = self.sstable_id_manager.clone();
         tokio::spawn(async move {
             for cleaned_epoch in cleaned_epochs {
@@ -648,7 +648,7 @@ impl LocalVersionManager {
         LocalVersion::read_filter(&self.local_version, read_epoch, key_range)
     }
 
-    pub fn get_pinned_version(&self) -> Arc<PinnedVersion> {
+    pub fn get_pinned_version(&self) -> PinnedVersion {
         self.local_version.read().pinned_version().clone()
     }
 

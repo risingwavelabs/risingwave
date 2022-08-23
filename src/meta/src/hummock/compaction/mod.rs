@@ -26,7 +26,9 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockLevelsExt, LevelDeltasSummary,
+};
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
@@ -269,15 +271,21 @@ impl CompactStatus {
 
         removed_levels.sort();
         removed_levels.dedup();
-        new_version.apply_compact_ssts(
-            compact_task.compaction_group_id,
-            &removed_levels,
-            &removed_table,
-            compact_task.target_level,
-            compact_task.target_sub_level_id,
-            compact_task.sorted_output_ssts.clone(),
-        );
 
+        new_version
+            .levels
+            .get_mut(&compact_task.compaction_group_id)
+            .expect("compaction group id should exist")
+            .apply_compact_ssts(
+                LevelDeltasSummary {
+                    delete_sst_levels: removed_levels,
+                    delete_sst_ids_set: removed_table,
+                    insert_sst_level_id: compact_task.target_level,
+                    insert_sub_level_id: compact_task.target_sub_level_id,
+                    insert_table_infos: compact_task.sorted_output_ssts.clone(),
+                },
+                false,
+            );
         new_version
     }
 
