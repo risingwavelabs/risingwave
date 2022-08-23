@@ -481,7 +481,15 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     async fn delete_objects(&self, paths: &[&str]) -> ObjectResult<()> {
-        unimplemented!();
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["delete_objects"])
+            .start_timer();
+        self.inner
+            .delete_objects(paths)
+            .stack_trace("object_store_delete_objects")
+            .await
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
