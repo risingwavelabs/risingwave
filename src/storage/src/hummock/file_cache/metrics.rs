@@ -15,14 +15,14 @@
 use std::sync::Arc;
 
 use prometheus::{
-    register_gauge_with_registry, register_histogram_with_registry,
-    register_int_counter_with_registry, Gauge, Histogram, IntCounter, Registry,
+    register_counter_with_registry, register_histogram_with_registry,
+    register_int_counter_with_registry, Counter, Histogram, IntCounter, Registry,
 };
 
 pub struct FileCacheMetrics {
-    pub disk_read_throughput: Gauge,
+    pub disk_read_throughput: Counter,
     pub disk_read_latency: Histogram,
-    pub disk_write_throughput: Gauge,
+    pub disk_write_throughput: Counter,
     pub disk_write_latency: Histogram,
 
     pub insert_latency: Histogram,
@@ -35,7 +35,7 @@ pub struct FileCacheMetrics {
 impl FileCacheMetrics {
     pub fn new(registry: Registry) -> Self {
         Self {
-            disk_read_throughput: register_gauge_with_registry!(
+            disk_read_throughput: register_counter_with_registry!(
                 "file_cache_disk_read_throughput",
                 "file cache disk read throughput",
                 registry,
@@ -48,7 +48,7 @@ impl FileCacheMetrics {
                 registry,
             )
             .unwrap(),
-            disk_write_throughput: register_gauge_with_registry!(
+            disk_write_throughput: register_counter_with_registry!(
                 "file_cache_disk_write_throughput",
                 "file cache disk write throughput",
                 registry,

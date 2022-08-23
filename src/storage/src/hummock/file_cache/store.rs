@@ -112,7 +112,7 @@ where
         self.store
             .metrics
             .disk_write_throughput
-            .add(self.buffer.len() as f64);
+            .inc_by(self.buffer.len() as f64);
         let timer = self.store.metrics.disk_write_latency.start_timer();
         let boff = self.store.cache_file.append(self.buffer).await? as u32 / self.block_size as u32;
         timer.observe_duration();
@@ -281,7 +281,7 @@ where
         let timer = self.metrics.disk_read_latency.start_timer();
         let buf = self.cache_file.read(offset, blen).await?;
         timer.observe_duration();
-        self.metrics.disk_read_throughput.add(buf.len() as f64);
+        self.metrics.disk_read_throughput.inc_by(buf.len() as f64);
 
         Ok(buf[..bloc.len as usize].to_vec())
     }
