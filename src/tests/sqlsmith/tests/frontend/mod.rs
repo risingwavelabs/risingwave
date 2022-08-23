@@ -57,7 +57,7 @@ fn get_seed_table_sql() -> String {
 /// Prints failing queries and their setup code.
 /// NOTE: This depends on convention of test suites
 /// not writing to stderr, unless the test fails.
-/// (This applies to nextest).
+/// (This applies to nexmark).
 fn reproduce_failing_queries(setup: &str, failing: &str) {
     eprintln!(
         "
