@@ -283,13 +283,15 @@ impl PlanRoot {
         plan
     }
 
-    /// Optimize and generate the batch physical plan without exchange nodes.
+    /// Optimize and generate a singleton batch physical plan without exchange nodes.
     fn gen_batch_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
+
+        assert!(*plan.distribution() == Distribution::Single, "{}", plan);
 
         struct HasExchange;
         impl PlanVisitor<bool> for HasExchange {

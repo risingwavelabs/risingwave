@@ -52,9 +52,8 @@ pub trait ToStream {
 /// `ToBatch` allows to convert a logical plan node to batch physical node
 /// with an optional required order.
 ///
-/// Distribution is not considered and exchange nodes are not inserted, so the batch physical is not
-/// ready for execution. Should use either [`ToLocalBatch`] or [`ToDistributedBatch`] after
-/// `ToBatch`.
+/// The generated plan has single distribution and doesn't have any exchange nodes inserted.
+/// Use either [`ToLocalBatch`] or [`ToDistributedBatch`] after `ToBatch` to get a distributed plan.
 ///
 /// To implement this trait you can choose one of the two ways:
 /// - Implement `to_batch` and use the default implementation of `to_batch_with_order_required`
