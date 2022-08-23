@@ -102,16 +102,11 @@ where
         Ok(())
     }
 
-    fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
+    fn output_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
+        let res = std::mem::replace(&mut self.result, None);
         builder
-            .append(self.result.as_ref().map(|x| x.as_scalar_ref()))
+            .append(res.as_ref().map(|x| x.as_scalar_ref()))
             .map_err(Into::into)
-    }
-
-    fn output_and_reset_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
-        let res = self.output_concrete(builder);
-        self.result = None;
-        res
     }
 
     fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
@@ -175,21 +170,9 @@ macro_rules! impl_aggregator {
                 }
             }
 
-            fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+            fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                 if let ArrayBuilderImpl::$result_variant(b) = builder {
                     self.output_concrete(b)
-                } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($result_variant)
-                    ))
-                    .into())
-                }
-            }
-
-            fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-                if let ArrayBuilderImpl::$result_variant(b) = builder {
-                    self.output_and_reset_concrete(b)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Builder fail to match {}.",
