@@ -202,28 +202,25 @@ pub fn run() {
         .map(|i| Trial::test(
             format!("run_sqlsmith_on_frontend_{}", i),
             move || {
+                let SqlsmithEnv {
+                    session,
+                    tables,
+                    setup_sql,
+                } = &*SQLSMITH_ENV;
+                let data = i;
+                test_batch_query(session.clone(), tables.clone(), data, setup_sql);
+                let test_stream_query =
+                    test_stream_query(session.clone(), tables.clone(), data, setup_sql);
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(test_stream_query);
                 Ok(())
             }
         ))
         .collect();
 
-    // run_tests(&args, tests, |test| {
-    //     let SqlsmithEnv {
-    //         session,
-    //         tables,
-    //         setup_sql,
-    //     } = &*SQLSMITH_ENV;
-    //     test_batch_query(session.clone(), tables.clone(), test.data, setup_sql);
-    //     let test_stream_query =
-    //         test_stream_query(session.clone(), tables.clone(), test.data, setup_sql);
-    //     tokio::runtime::Builder::new_multi_thread()
-    //         .enable_all()
-    //         .build()
-    //         .unwrap()
-    //         .block_on(test_stream_query);
-    //     Outcome::Passed
-    // })
-    // .exit();
 
     libtest_mimic::run(&args, tests).exit();
 }
