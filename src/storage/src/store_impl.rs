@@ -27,7 +27,9 @@ use spin::Mutex;
 
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-use crate::hummock::{HummockStorage, SstableStore, StorageControlMsg, TieredCache};
+use crate::hummock::{
+    HummockStorage, SstableStore, StorageControlMsg, TieredCache, TieredCacheMetricsBuilder,
+};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
 use crate::StateStore;
@@ -92,6 +94,7 @@ macro_rules! dispatch_state_store {
 }
 
 impl StateStoreImpl {
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
         #[allow(unused)] file_cache_dir: &str,
@@ -100,6 +103,7 @@ impl StateStoreImpl {
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        #[allow(unused)] tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
     ) -> StorageResult<Self> {
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
@@ -109,16 +113,17 @@ impl StateStoreImpl {
             TieredCache::none()
         } else {
             use crate::hummock::file_cache::cache::FileCacheOptions;
-            use crate::hummock::{HummockError, TieredCacheOptions};
+            use crate::hummock::HummockError;
 
-            let options = TieredCacheOptions::FileCache(FileCacheOptions {
+            let options = FileCacheOptions {
                 dir: file_cache_dir.to_string(),
                 capacity: config.file_cache.capacity,
                 total_buffer_capacity: config.file_cache.total_buffer_capacity,
                 cache_file_fallocate_unit: config.file_cache.cache_file_fallocate_unit,
                 flush_buffer_hooks: vec![],
-            });
-            TieredCache::open(options)
+            };
+            let metrics = Arc::new(tiered_cache_metrics_builder.file());
+            TieredCache::file(options, metrics)
                 .await
                 .map_err(HummockError::tiered_cache)?
         };

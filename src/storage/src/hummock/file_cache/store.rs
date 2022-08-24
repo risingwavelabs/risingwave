@@ -24,6 +24,7 @@ use risingwave_common::cache::{LruCache, LruCacheEventListener};
 use super::error::{Error, Result};
 use super::file::{CacheFile, CacheFileOptions};
 use super::meta::{BlockLoc, MetaFile, SlotId};
+use super::metrics::FileCacheMetricsRef;
 use super::{utils, DioBuffer, DIO_BUFFER_ALLOCATOR};
 use crate::hummock::{HashBuilder, TieredCacheKey, TieredCacheValue};
 
@@ -108,7 +109,13 @@ where
 
         let mut slots = Vec::with_capacity(self.blocs.len());
 
+        self.store
+            .metrics
+            .disk_write_throughput
+            .inc_by(self.buffer.len() as f64);
+        let timer = self.store.metrics.disk_write_latency.start_timer();
         let boff = self.store.cache_file.append(self.buffer).await? as u32 / self.block_size as u32;
+        timer.observe_duration();
 
         for bloc in &mut self.blocs {
             bloc.bidx += boff;
@@ -129,6 +136,8 @@ pub struct StoreOptions {
     pub capacity: usize,
     pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
+
+    pub metrics: FileCacheMetricsRef,
 }
 
 pub struct Store<K, V>
@@ -146,6 +155,8 @@ where
 
     meta_file: Arc<RwLock<MetaFile<K>>>,
     cache_file: CacheFile,
+
+    metrics: FileCacheMetricsRef,
 
     _phantom: PhantomData<V>,
 }
@@ -196,6 +207,8 @@ where
 
             meta_file: Arc::new(RwLock::new(mf)),
             cache_file: cf,
+
+            metrics: options.metrics,
 
             _phantom: PhantomData::default(),
         })
@@ -264,7 +277,12 @@ where
             .ok_or(Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
+
+        let timer = self.metrics.disk_read_latency.start_timer();
         let buf = self.cache_file.read(offset, blen).await?;
+        timer.observe_duration();
+        self.metrics.disk_read_throughput.inc_by(buf.len() as f64);
+
         Ok(buf[..bloc.len as usize].to_vec())
     }
 
