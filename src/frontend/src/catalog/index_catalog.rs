@@ -39,6 +39,10 @@ pub struct IndexCatalog {
     pub index_table: Arc<TableCatalog>,
 
     pub primary_table: Arc<TableCatalog>,
+
+    pub primary_to_secondary_mapping: HashMap<usize, usize>,
+
+    pub secondary_to_primary_mapping: HashMap<usize, usize>,
 }
 
 impl IndexCatalog {
@@ -60,12 +64,26 @@ impl IndexCatalog {
             })
             .collect_vec();
 
+        let primary_to_secondary_mapping = index_item
+            .iter()
+            .enumerate()
+            .map(|(i, input_ref)| (input_ref.index, i))
+            .collect();
+
+        let secondary_to_primary_mapping = index_item
+            .iter()
+            .enumerate()
+            .map(|(i, input_ref)| (i, input_ref.index))
+            .collect();
+
         IndexCatalog {
             id: index_prost.id.into(),
             name: index_prost.name.clone(),
             index_item,
             index_table: Arc::new(index_table.clone()),
             primary_table: Arc::new(primary_table.clone()),
+            primary_to_secondary_mapping,
+            secondary_to_primary_mapping,
         }
     }
 
@@ -97,21 +115,13 @@ impl IndexCatalog {
     }
 
     /// a mapping maps column index of secondary index to column index of primary table
-    pub fn secondary_to_primary_mapping(&self) -> HashMap<usize, usize> {
-        self.index_item
-            .iter()
-            .enumerate()
-            .map(|(i, input_ref)| (i, input_ref.index))
-            .collect()
+    pub fn secondary_to_primary_mapping(&self) -> &HashMap<usize, usize> {
+        &self.secondary_to_primary_mapping
     }
 
     /// a mapping maps column index of primary table to column index of secondary index
-    pub fn primary_to_secondary_mapping(&self) -> HashMap<usize, usize> {
-        self.index_item
-            .iter()
-            .enumerate()
-            .map(|(i, input_ref)| (input_ref.index, i))
-            .collect()
+    pub fn primary_to_secondary_mapping(&self) -> &HashMap<usize, usize> {
+        &self.primary_to_secondary_mapping
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstIndex {

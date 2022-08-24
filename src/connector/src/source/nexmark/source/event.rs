@@ -30,15 +30,15 @@
 
 use std::cmp::{max, min};
 
-use chrono::NaiveDateTime;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
-use crate::source::nexmark::config::NexmarkConfig;
+use crate::source::nexmark::config::{NexmarkConfig, CHANNEL_NUMBER};
+use crate::source::nexmark::utils::{milli_ts_to_timestamp_string, NexmarkRng};
 
-const MIN_STRING_LENGTH: usize = 3;
+type Id = usize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventType {
@@ -46,38 +46,6 @@ pub enum EventType {
     Auction,
     Bid,
 }
-
-trait NexmarkRng {
-    fn gen_string(&mut self, max: usize) -> String;
-    fn gen_price(&mut self) -> usize;
-}
-
-impl NexmarkRng for SmallRng {
-    fn gen_string(&mut self, max: usize) -> String {
-        let len = self.gen_range(MIN_STRING_LENGTH..max);
-        String::from(
-            (0..len)
-                .map(|_| {
-                    if self.gen_range(0..13) == 0 {
-                        String::from(" ")
-                    } else {
-                        ::std::char::from_u32('a' as u32 + self.gen_range(0..26))
-                            .unwrap()
-                            .to_string()
-                    }
-                })
-                .collect::<Vec<String>>()
-                .join("")
-                .trim(),
-        )
-    }
-
-    fn gen_price(&mut self) -> usize {
-        (10.0_f32.powf((*self).gen::<f32>() * 6.0) * 100.0).round() as usize
-    }
-}
-
-type Id = usize;
 
 /// The `Nexmark` Event, including `Person`, `Auction`, and `Bid`.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
@@ -156,26 +124,40 @@ pub struct Person {
     pub state: String,
     /// A millisecond timestamp for the event origin.
     pub date_time: String,
+    /// Extra information
+    pub extra: String,
 }
 
 impl Person {
     /// Creates a new `Person` event.
     fn new(id: usize, time: usize, rng: &mut SmallRng, nex: &NexmarkConfig) -> Self {
+        let id = Self::last_id(id, nex) + nex.first_person_id;
+        let name = format!(
+            "{} {}",
+            nex.first_names.choose(rng).unwrap(),
+            nex.last_names.choose(rng).unwrap(),
+        );
+        let email_address = format!("{}@{}.com", rng.gen_string(7), rng.gen_string(5));
+        let credit_card = (0..4)
+            .map(|_| format!("{:04}", rng.gen_range(0..10000)))
+            .collect::<Vec<String>>()
+            .join(" ");
+        let city = nex.us_cities.choose(rng).unwrap().clone();
+        let state = nex.us_states.choose(rng).unwrap().clone();
+
+        let current_size =
+            8 + name.len() + email_address.len() + credit_card.len() + city.len() + state.len();
+        let extra = rng.gen_next_extra(current_size, nex.avg_person_byte_size);
+
         Self {
-            id: Self::last_id(id, nex) + nex.first_person_id,
-            name: format!(
-                "{} {}",
-                nex.first_names.choose(rng).unwrap(),
-                nex.last_names.choose(rng).unwrap(),
-            ),
-            email_address: format!("{}@{}.com", rng.gen_string(7), rng.gen_string(5)),
-            credit_card: (0..4)
-                .map(|_| format!("{:04}", rng.gen_range(0..10000)))
-                .collect::<Vec<String>>()
-                .join(" "),
-            city: nex.us_cities.choose(rng).unwrap().clone(),
-            state: nex.us_states.choose(rng).unwrap().clone(),
+            id,
+            name,
+            email_address,
+            credit_card,
+            city,
+            state,
             date_time: milli_ts_to_timestamp_string(time),
+            extra,
         }
     }
 
@@ -216,6 +198,8 @@ pub struct Auction {
     pub seller: Id,
     /// The ID of the category this auction belongs to.
     pub category: Id,
+    /// Extra information
+    pub extra: String,
 }
 
 impl Auction {
@@ -226,24 +210,37 @@ impl Auction {
         rng: &mut SmallRng,
         nex: &NexmarkConfig,
     ) -> Self {
+        let id = Self::last_id(id, nex) + nex.first_auction_id;
+        let item_name = rng.gen_string(20);
+        let description = rng.gen_string(100);
         let initial_bid = rng.gen_price();
-        let seller = if rng.gen_range(0..nex.hot_seller_ratio) > 0 {
+
+        let reserve = initial_bid + rng.gen_price();
+        let date_time = milli_ts_to_timestamp_string(time);
+        let expires =
+            milli_ts_to_timestamp_string(time + Self::next_length(events_so_far, rng, time, nex));
+        let mut seller = if rng.gen_range(0..nex.hot_seller_ratio) > 0 {
             (Person::last_id(id, nex) / nex.hot_seller_ratio_2) * nex.hot_seller_ratio_2
         } else {
             Person::next_id(id, rng, nex)
         };
+        seller += nex.first_person_id;
+        let category = nex.first_category_id + rng.gen_range(0..nex.num_categories);
+
+        let current_size = 8 + item_name.len() + description.len() + 8 + 8 + 8 + 8 + 8;
+        let extra = rng.gen_next_extra(current_size, nex.avg_auction_byte_size);
+
         Auction {
-            id: Self::last_id(id, nex) + nex.first_auction_id,
-            item_name: rng.gen_string(20),
-            description: rng.gen_string(100),
+            id,
+            item_name,
+            description,
             initial_bid,
-            reserve: initial_bid + rng.gen_price(),
-            date_time: milli_ts_to_timestamp_string(time),
-            expires: milli_ts_to_timestamp_string(
-                time + Self::next_length(events_so_far, rng, time, nex),
-            ),
-            seller: seller + nex.first_person_id,
-            category: nex.first_category_id + rng.gen_range(0..nex.num_categories),
+            reserve,
+            date_time,
+            expires,
+            seller,
+            category,
+            extra,
         }
     }
 
@@ -296,8 +293,14 @@ pub struct Bid {
     pub bidder: Id,
     /// The price in cents that the person bid for.
     pub price: usize,
+    /// The channel of this bid
+    pub channel: String,
+    /// The url of this bid
+    pub url: String,
     /// A millisecond timestamp for the event origin.
     pub date_time: String,
+    /// Extra information
+    pub extra: String,
 }
 
 impl Bid {
@@ -312,22 +315,32 @@ impl Bid {
         } else {
             Person::next_id(id, rng, nex)
         };
+
+        let price = rng.gen_price();
+
+        let (channel, url) = if rng.gen_range(0..nex.hot_channel_ratio) > 0 {
+            let index = rng.gen_range(0..nex.hot_channels.len());
+            (nex.hot_channels[index].clone(), nex.hot_urls[index].clone())
+        } else {
+            nex.channel_url_map
+                .get(&rng.gen_range(0..CHANNEL_NUMBER))
+                .unwrap()
+                .clone()
+        };
+
+        let current_size = 8 + 8 + 8 + 8;
+        let extra = rng.gen_next_extra(current_size, nex.avg_bid_byte_size);
+
         Bid {
             auction: auction + nex.first_auction_id,
             bidder: bidder + nex.first_person_id,
-            price: rng.gen_price(),
+            price,
             date_time: milli_ts_to_timestamp_string(time),
+            channel,
+            url,
+            extra,
         }
     }
-}
-
-fn milli_ts_to_timestamp_string(milli_ts: usize) -> String {
-    NaiveDateTime::from_timestamp(
-        milli_ts as i64 / 1000,
-        (milli_ts % (1000_usize)) as u32 * 1000000,
-    )
-    .format("%Y-%m-%d %H:%M:%S%.f")
-    .to_string()
 }
 
 #[cfg(test)]
@@ -337,17 +350,6 @@ mod tests {
 
     use super::*;
     use crate::source::nexmark::{NexmarkProperties, NEXMARK_BASE_TIME};
-
-    #[test]
-    fn test_milli_ts_to_timestamp_string() -> Result<()> {
-        let mut init_ts = milli_ts_to_timestamp_string(0);
-        assert_eq!(init_ts, "1970-01-01 00:00:00");
-        init_ts = milli_ts_to_timestamp_string(1);
-        assert_eq!(init_ts, "1970-01-01 00:00:00.001");
-        init_ts = milli_ts_to_timestamp_string(1000);
-        assert_eq!(init_ts, "1970-01-01 00:00:01");
-        Ok(())
-    }
 
     #[test]
     fn test_event() -> Result<()> {
@@ -365,7 +367,7 @@ mod tests {
         let (event_2, _) = Event::new(0, &config, NEXMARK_BASE_TIME);
         assert_eq!(event_1, event_2);
 
-        let event_1_payload = r#"{"id":1000,"name":"vicky noris","email_address":"vzbhp@wxv.com","credit_card":"4355 0142 3460 9324","city":"boise","state":"ca","date_time":"2015-07-15 00:00:00"}"#.to_string();
+        let event_1_payload = r#"{"id":1000,"name":"vicky noris","email_address":"vzbhp@wxv.com","credit_card":"4355 0142 3460 9324","city":"boise","state":"ca","date_time":"2015-07-15 00:00:00","extra":"cllnesmssnthtljklifqbqcyhcjwiuoaudxxwcnnwgmsmwgqelplzyckqzuoaitfpxubgpkjtqjhktelmbskvjkxrhziyowxibbgnqneuaiazqduhkynvgeisbxtknbxmqmzbgnptlrcyigjginataks"}"#.to_string();
         assert_eq!(event_1.to_json(), event_1_payload);
         Ok(())
     }
