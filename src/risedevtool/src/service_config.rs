@@ -27,6 +27,7 @@ pub struct ComputeNodeConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub enable_async_stack_trace: bool,
     pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
