@@ -505,7 +505,12 @@ impl<S: StateStore> StateTable<S> {
             let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
             let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
             let encoded_key_range = range_of_prefix(&encoded_prefix);
-            self.mem_table.iter(encoded_key_range)
+
+            let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
+            let vnode = vnode_hint.unwrap_or(0_u8);
+            let encoded_key_range_with_vnode =
+                prefixed_range(encoded_key_range, &vnode.to_be_bytes());
+            self.mem_table.iter(encoded_key_range_with_vnode)
         };
 
         Ok(
