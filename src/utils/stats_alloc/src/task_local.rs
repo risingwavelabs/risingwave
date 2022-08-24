@@ -19,7 +19,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering, fence};
 use std::time::Duration;
 
 use tokio::task_local;
@@ -60,8 +60,9 @@ impl TaskLocalBytesAllocated {
     #[inline(always)]
     pub fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
-            let old_bytes = bytes.fetch_sub(val, Ordering::Relaxed);
-            if old_bytes - val == 0 {
+            let old_bytes = bytes.fetch_sub(val, Ordering::Release);
+            if old_bytes == val {
+                fence(Ordering::Acquire);
                 unsafe { Box::from_raw_in(bytes.as_mut_ptr(), System) };
             }
         }
