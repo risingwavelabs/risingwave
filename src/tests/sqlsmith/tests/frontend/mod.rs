@@ -165,15 +165,18 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
     }
 }
 
-/// Setup schema, session for sqlsmith query tests to run.
-/// It is synchronous as constrained by the `libtest_mimic` framework.
-fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
-    // tokio runtime is required by frontend to execute query phases.
+fn build_runtime() -> Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(setup_sqlsmith_with_seed_inner(seed))
+}
+
+/// Setup schema, session for sqlsmith query tests to run.
+/// It is synchronous as constrained by the `libtest_mimic` framework.
+/// NOTE: tokio runtime is required by frontend to execute query phases.
+fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
+    build_runtime().block_on(setup_sqlsmith_with_seed_inner(seed))
 }
 
 async fn setup_sqlsmith_with_seed_inner(seed: u64) -> SqlsmithEnv {
@@ -210,11 +213,7 @@ pub fn run() {
                 test_batch_query(session.clone(), tables.clone(), data, setup_sql);
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), data, setup_sql);
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
-                    .block_on(test_stream_query);
+                build_runtime().block_on(test_stream_query);
                 Ok(())
             })
         })
