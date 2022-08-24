@@ -23,13 +23,13 @@ use risingwave_frontend_test_runner::{resolve_testcase_id, TestCase};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    std::panic::set_hook(Box::new(move |_e| {
+    std::panic::set_hook(Box::new(move |e| {
         println!(
-            "{}{}{}{}{}",
+            "{}{}{}{}{}\n{e}",
             style("ERROR: ").red().bold(),
             style("apply-planner-test").yellow(),
             style(" panicked! Try ").red().bold(),
-            style("run-planner-test").yellow(),
+            style("run-planner-test --no-fail-fast").yellow(),
             style(" to find which test case panicked.").red().bold()
         );
         std::process::abort();
