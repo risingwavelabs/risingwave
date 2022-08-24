@@ -2675,9 +2675,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04290f01f1420bb76af0324fe7d7f9a23fa84c58046d7222ce29a57ab751f770"
+checksum = "f26e34ff2d7e2d3c0e7403ef85848ed3667f9c89fc50321d62d480c03388f8cf"
 dependencies = [
  "ahash",
  "async-channel",
