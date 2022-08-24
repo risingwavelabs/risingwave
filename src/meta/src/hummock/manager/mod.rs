@@ -34,9 +34,9 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactTaskAssignment, HummockAllEpoch,
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, Level, LevelDelta, LevelType, OverlappingLevel,
+    pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
+    HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
+    LevelType, OverlappingLevel,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -488,10 +488,8 @@ where
         }
 
         Ok(HummockSnapshot {
-            epoch: Some(HummockAllEpoch {
-                committed_epoch: max_committed_epoch,
-                current_epoch: max_current_epoch,
-            }),
+            committed_epoch: max_committed_epoch,
+            current_epoch: max_current_epoch,
         })
     }
 
@@ -499,10 +497,8 @@ where
         let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
         let max_current_epoch = self.max_current_epoch.load(Ordering::Relaxed);
         Ok(HummockSnapshot {
-            epoch: Some(HummockAllEpoch {
-                committed_epoch: max_committed_epoch,
-                current_epoch: max_current_epoch,
-            }),
+            committed_epoch: max_committed_epoch,
+            current_epoch: max_current_epoch,
         })
     }
 
@@ -539,7 +535,7 @@ where
         // visible in the snapshot.
         let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
         // Ensure the unpin will not clean the latest one.
-        let snapshot_committed_epoch = hummock_snapshot.epoch.unwrap().committed_epoch;
+        let snapshot_committed_epoch = hummock_snapshot.committed_epoch;
         #[cfg(not(test))]
         {
             assert!(snapshot_committed_epoch <= max_committed_epoch);
@@ -1102,10 +1098,8 @@ where
             .notify_frontend_asynchronously(
                 Operation::Update, // Frontends don't care about operation.
                 Info::HummockSnapshot(HummockSnapshot {
-                    epoch: Some(HummockAllEpoch {
-                        committed_epoch: max_committed_epoch,
-                        current_epoch: max_current_epoch,
-                    }),
+                    committed_epoch: max_committed_epoch,
+                    current_epoch: max_current_epoch,
                 }),
             );
         self.env

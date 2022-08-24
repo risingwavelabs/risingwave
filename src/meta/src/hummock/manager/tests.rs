@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, F
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{
-    HummockAllEpoch, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
 
 use crate::hummock::compaction::ManualCompactionOption;
@@ -91,7 +91,7 @@ async fn test_hummock_pin_unpin() {
         .is_empty());
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
-        assert_eq!(pin_result.epoch.unwrap().committed_epoch, epoch);
+        assert_eq!(pin_result.committed_epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_snapshots_epoch(&pinned_snapshots), vec![epoch]);
         assert_eq!(pinned_snapshots[0].context_id, context_id);
@@ -112,12 +112,12 @@ async fn test_unpin_snapshot_before() {
 
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
-        assert_eq!(pin_result.epoch.clone().unwrap().committed_epoch, epoch);
+        assert_eq!(pin_result.committed_epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
         assert_eq!(pinned_snapshots[0].context_id, context_id);
         assert_eq!(
             pinned_snapshots[0].minimal_pinned_snapshot,
-            pin_result.epoch.unwrap().committed_epoch
+            pin_result.committed_epoch
         );
     }
 
@@ -127,10 +127,8 @@ async fn test_unpin_snapshot_before() {
             .unpin_snapshot_before(
                 context_id,
                 HummockSnapshot {
-                    epoch: Some(HummockAllEpoch {
-                        committed_epoch: epoch,
-                        current_epoch: epoch,
-                    }),
+                    committed_epoch: epoch,
+                    current_epoch: epoch,
                 },
             )
             .await
@@ -147,10 +145,8 @@ async fn test_unpin_snapshot_before() {
             .unpin_snapshot_before(
                 context_id,
                 HummockSnapshot {
-                    epoch: Some(HummockAllEpoch {
-                        committed_epoch: epoch + 1,
-                        current_epoch: epoch + 1,
-                    }),
+                    committed_epoch: epoch + 1,
+                    current_epoch: epoch + 1,
                 },
             )
             .await
@@ -723,15 +719,8 @@ async fn test_pin_snapshot_response_lost() {
 
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
-    let mut epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(
-        epoch_recorded_in_frontend.unwrap().committed_epoch,
-        epoch - 1
-    );
+    let mut epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -752,27 +741,13 @@ async fn test_pin_snapshot_response_lost() {
 
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(
-        epoch_recorded_in_frontend.unwrap().committed_epoch,
-        epoch - 1
-    );
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(
-        epoch_recorded_in_frontend.unwrap().committed_epoch,
-        epoch - 1
-    );
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -793,15 +768,8 @@ async fn test_pin_snapshot_response_lost() {
 
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(
-        epoch_recorded_in_frontend.unwrap().committed_epoch,
-        epoch - 1
-    );
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -822,15 +790,8 @@ async fn test_pin_snapshot_response_lost() {
 
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(
-        epoch_recorded_in_frontend.unwrap().committed_epoch,
-        epoch - 1
-    );
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 }
 
 #[tokio::test]
