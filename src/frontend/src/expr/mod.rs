@@ -209,7 +209,12 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, CorrelatedInputRef}
+// The `CorrelatedInputRef` variant is excluded purposely to avoid confusion. In most cases the
+// function you want is `has_correlated_input_ref_by_depth`. When an expr contains a
+// `CorrelatedInputRef` with lower depth, the whole expr is still considered to be uncorrelated, and
+// can be checked with `has_subquery` as well. See examples on `BoundQuery::is_correlated` for
+// details.
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction}
 
 impl ExprImpl {
     /// Used to check whether the expression has [`CorrelatedInputRef`].
@@ -233,16 +238,15 @@ impl ExprImpl {
             fn visit_subquery(&mut self, subquery: &Subquery) {
                 use crate::binder::BoundSetExpr;
 
+                self.depth += 1;
                 match &subquery.query.body {
                     BoundSetExpr::Select(select) => {
-                        self.depth += 1;
                         select
                             .select_items
                             .iter()
                             .chain(select.group_by.iter())
                             .chain(select.where_clause.iter())
                             .for_each(|expr| self.visit_expr(expr));
-                        self.depth -= 1;
                     }
                     BoundSetExpr::Values(values) => {
                         values
@@ -252,6 +256,7 @@ impl ExprImpl {
                             .for_each(|expr| self.visit_expr(expr));
                     }
                 }
+                self.depth -= 1;
             }
         }
 
