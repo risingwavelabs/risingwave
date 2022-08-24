@@ -329,6 +329,13 @@ def section_object_storage(panels):
             panels.target(
                 "sum(rate(object_store_operation_latency_count[$__rate_interval])) by (le, type, job, instance)", "{{type}} - {{job}} @ {{instance}}"
             ),
+            panels.target(
+                "sum(rate(object_store_operation_latency_count{type=~'upload|delete'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-write - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(object_store_operation_latency_count{type=~'read|readv|list|metadata'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-read - {{job}} @ {{instance}}"
+            ),
+
         ]),
         panels.timeseries_bytes("Operation Size", [
             panels.target(
