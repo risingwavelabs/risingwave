@@ -61,7 +61,7 @@ pub struct HashAggExecutorBuilder {
 }
 
 impl HashAggExecutorBuilder {
-    fn deserialize(
+    pub fn deserialize(
         hash_agg_node: &HashAggNode,
         child: BoxedExecutor,
         task_id: TaskId,
