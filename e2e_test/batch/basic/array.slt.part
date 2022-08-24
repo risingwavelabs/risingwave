@@ -91,3 +91,34 @@ select x[2] from t;
 
 statement ok
 drop table t;
+
+## Test single quote style array syntax.
+
+# Test assign cast.
+statement ok
+create table t(arr int[]);
+
+statement ok
+insert into t values ('{1, 2, 3}'), ('{4, 5, 6}');
+
+query T
+select pg_typeof(arr) from t;
+----
+integer[]
+integer[]
+
+statement ok
+drop table t;
+
+# Test explicit and implicit cast
+query T
+select pg_typeof(arr) from (values ('{1, 2, 3}'::integer[]), ('{4, 5, 6}')) as t(arr);
+----
+integer[]
+integer[]
+
+query T
+select pg_typeof(arr::integer[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t(arr);
+----
+integer[]
+integer[]

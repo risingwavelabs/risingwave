@@ -106,6 +106,12 @@ fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> b
                 datatype: target_elem,
             },
         ) => cast_ok(source_elem, target_elem, allows),
+        (
+            DataType::Varchar,
+            DataType::List {
+                datatype: target_elem,
+            },
+        ) => cast_ok(&DataType::Varchar, target_elem, allows),
         _ => false,
     }
 }
