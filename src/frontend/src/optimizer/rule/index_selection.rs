@@ -285,7 +285,7 @@ impl IndexSelectionRule {
         let on = Condition { conjunctions };
         let join = LogicalJoin::new(index_access, primary_table_scan.into(), JoinType::Inner, on);
 
-        // 3 push down predicate, so we can calculate the cost of index lookup
+        // 3 push down predicate
         let join_ref = join.predicate_pushdown(Condition::true_cond());
 
         // 4. keep the same schema with original logical_scan
@@ -306,6 +306,9 @@ impl IndexSelectionRule {
     /// Generate possible paths that can be used to access.
     /// The schema of output is the order key of primary table, so it can be used to lookup primary
     /// table later.
+    /// Method `gen_paths` handles the complex condition recursively which may contains nested `AND`
+    /// and `OR`. However, Method `gen_index_path` handles one arm of an OR clause which is a
+    /// basic unit for index selection.
     fn gen_paths(&self, conjunctions: &[ExprImpl], logical_scan: &LogicalScan) -> Vec<PlanRef> {
         let mut result = vec![];
         for expr in conjunctions {
@@ -344,9 +347,12 @@ impl IndexSelectionRule {
         result
     }
 
-    /// Clustering the disjunction by column index
-    /// a = 1 or b = 2 or b = 3 -> <a, (a = 1)>, <b, (b = 2 or b = 3)>
-    /// a = 1 or (b = 2 and c = 3) -> <a, (a = 1)>, <None, (b = 2 and c = 3)>
+    /// Clustering disjunction or expr by column index. If expr is complex, classify them as `None`
+    /// class
+    ///
+    /// a = 1, b = 2, b = 3 -> [a, (a = 1)], [b, (b = 2 or b = 3)]
+    ///
+    /// a = 1, (b = 2 and c = 3) -> [a, (a = 1)], [None, (b = 2 and c = 3)]
     fn clustering_disjunction(
         &self,
         disjunctions: Vec<ExprImpl>,
@@ -384,8 +390,8 @@ impl IndexSelectionRule {
         map
     }
 
-    /// Given a conjunctions from one arm of an OR clause, generate all matching index path
-    /// (including primary index) for the relation.
+    /// Given a conjunctions from one arm of an OR clause (basic unit to index selection), generate
+    /// all matching index path (including primary index) for the relation.
     /// `column_index` (refers to primary table) is a hint can be used to prune index.
     /// Steps:
     /// 1. Take the combination of `conjunctions` to extract the potential clauses.
