@@ -137,6 +137,13 @@ select pg_typeof(arr::varchar[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t
 varchar[]
 varchar[]
 
+# Test explicit cast to nested varchar array
+query T
+select pg_typeof(arr::integer[][]) from (values ('{{1}, {2}, {3}}'), ('{{4}, {5}, {6}}')) as t(arr);
+----
+integer[][]
+integer[][]
+
 # Test explicit cast to varchar array. Varchar values should be trimmed
 query T
 select (arr::varchar[])[1] from (values ('{  1   b  ?, 2, 3}'), ('{  4   a , 5, 6}')) as t(arr);
