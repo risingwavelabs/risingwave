@@ -38,7 +38,7 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::streaming_table::state_table::StateTable;
 use risingwave_storage::table::storage_table::RowBasedStorageTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -372,14 +372,20 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
-    let mut state = RowBasedStateTable::new_without_distribution(
+    let mut state = StateTable::new_without_distribution(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = state.storage_table().clone();
+    let table = RowBasedStorageTable::new_for_test(
+        memory_state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        vec![OrderType::Ascending],
+        vec![0],
+    );
 
     let epoch: u64 = 0;
 
