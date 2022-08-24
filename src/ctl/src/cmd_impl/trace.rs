@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::ASYNC_STACK_TRACE_KEY;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::ComputeClientPool;
@@ -56,7 +55,7 @@ pub async fn trace() -> anyhow::Result<()> {
 
     if all_actor_traces.is_empty() && all_rpc_traces.is_empty() {
         println!(
-            "No traces found. No actors are running, or `{ASYNC_STACK_TRACE_KEY}` is not set?"
+            "No traces found. No actors are running, or `--enable-async-stack-trace` not set?"
         );
     } else {
         println!("--- Actor Traces ---");

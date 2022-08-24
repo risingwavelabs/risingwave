@@ -2,10 +2,10 @@
 - id: create_tables
   sql: |
     /* T: updatable; Tk: Hash(k) distribution; AO: append-only; S: single distribution */
-    create table T  (k int, v int, o int);
-    create index Tk on T(k) include(k, v, o);
+    create table T  (k int, v int, o int, s varchar);
+    create index Tk on T(k) include(k, v, o, s);
     create materialized view S as select * from T order by o limit 100;
-    create table AO (k int, v int, o int) with (appendonly = true);
+    create table AO (k int, v int, o int, s varchar) with (appendonly = true);
 - id: extreme_on_single
   before:
   - create_tables
@@ -55,18 +55,18 @@
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by v) as a1 from S;
+    select string_agg(s, ',' order by v) as a1 from S;
   batch_plan: |
-    BatchSimpleAgg { aggs: [string_agg(s.v, ',':Varchar order_by(s.v ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [s.v, ',':Varchar] }
-          BatchScan { table: s, columns: [s.v], distribution: UpstreamHashShard() }
+        BatchProject { exprs: [s.s, ',':Varchar, s.v] }
+          BatchScan { table: s, columns: [s.v, s.s], distribution: UpstreamHashShard() }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
-      StreamProject { exprs: [string_agg(s.v, ',':Varchar order_by(s.v ASC NULLS LAST))] }
-        StreamGlobalSimpleAgg { aggs: [count, string_agg(s.v, ',':Varchar order_by(s.v ASC NULLS LAST))] }
-          StreamProject { exprs: [s.v, ',':Varchar, s.t._row_id] }
-            StreamTableScan { table: s, columns: [s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
+      StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
+        StreamGlobalSimpleAgg { aggs: [count, string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))] }
+          StreamProject { exprs: [s.s, ',':Varchar, s.v, s.t._row_id] }
+            StreamTableScan { table: s, columns: [s.v, s.s, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
 - id: extreme_on_T
   before:
   - create_tables
@@ -159,31 +159,31 @@
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from T;
+    select string_agg(s, ',' order by o) as a1 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
-      StreamProject { exprs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-        StreamGlobalSimpleAgg { aggs: [count, string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+      StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+        StreamGlobalSimpleAgg { aggs: [count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
           StreamExchange { dist: Single }
-            StreamProject { exprs: [t.v, ',':Varchar, t.o, t._row_id] }
-              StreamTableScan { table: t, columns: [t.v, t.o, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            StreamProject { exprs: [t.s, ',':Varchar, t.o, t._row_id] }
+              StreamTableScan { table: t, columns: [t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - id: string_agg_on_AO
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from AO;
+    select string_agg(s, ',' order by o) as a1 from AO;
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
-      StreamProject { exprs: [string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
-        StreamAppendOnlyGlobalSimpleAgg { aggs: [count, string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
+      StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
+        StreamAppendOnlyGlobalSimpleAgg { aggs: [count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
           StreamExchange { dist: Single }
-            StreamProject { exprs: [ao.v, ',':Varchar, ao.o, ao._row_id] }
-              StreamTableScan { table: ao, columns: [ao.v, ao.o, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
+            StreamProject { exprs: [ao.s, ',':Varchar, ao.o, ao._row_id] }
+              StreamTableScan { table: ao, columns: [ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
 - id: extreme_count_on_T
   before:
   - create_tables
@@ -218,60 +218,60 @@
   before:
   - create_tables
   sql: |
-    select count(v) as a1, string_agg(v, ',' order by o) as a2 from T;
+    select count(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a1, a2], pk_columns: [] }
-      StreamProject { exprs: [count(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-        StreamGlobalSimpleAgg { aggs: [count, count(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+      StreamProject { exprs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+        StreamGlobalSimpleAgg { aggs: [count, count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
           StreamExchange { dist: Single }
-            StreamProject { exprs: [t.v, ',':Varchar, t.o, t._row_id] }
-              StreamTableScan { table: t, columns: [t.v, t.o, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
+              StreamTableScan { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - id: count_string_agg_on_AO
   before:
   - create_tables
   sql: |
-    select count(v) as a1, string_agg(v, ',' order by o) as a2 from AO;
+    select count(v) as a1, string_agg(s, ',' order by o) as a2 from AO;
   stream_plan: |
     StreamMaterialize { columns: [a1, a2], pk_columns: [] }
-      StreamProject { exprs: [count(ao.v), string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
-        StreamAppendOnlyGlobalSimpleAgg { aggs: [count, count(ao.v), string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
+      StreamProject { exprs: [count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
+        StreamAppendOnlyGlobalSimpleAgg { aggs: [count, count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
           StreamExchange { dist: Single }
-            StreamProject { exprs: [ao.v, ',':Varchar, ao.o, ao._row_id] }
-              StreamTableScan { table: ao, columns: [ao.v, ao.o, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
+            StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
+              StreamTableScan { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
 - id: extreme_string_agg_on_T
   before:
   - create_tables
   sql: |
-    select max(v) as a1, string_agg(v, ',' order by o) as a2 from T;
+    select max(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [t.v, ',':Varchar, t.o] }
-          BatchScan { table: t, columns: [t.v, t.o], distribution: SomeShard }
+        BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
+          BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a1, a2], pk_columns: [] }
-      StreamProject { exprs: [max(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-        StreamGlobalSimpleAgg { aggs: [count, max(t.v), string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+      StreamProject { exprs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+        StreamGlobalSimpleAgg { aggs: [count, max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
           StreamExchange { dist: Single }
-            StreamProject { exprs: [t.v, ',':Varchar, t.o, t._row_id] }
-              StreamTableScan { table: t, columns: [t.v, t.o, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            StreamProject { exprs: [t.v, t.s, ',':Varchar, t.o, t._row_id] }
+              StreamTableScan { table: t, columns: [t.v, t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - id: extreme_string_agg_on_AO
   before:
   - create_tables
   sql: |
-    select max(v) as a1, string_agg(v, ',' order by o) as a2 from AO;
+    select max(v) as a1, string_agg(s, ',' order by o) as a2 from AO;
   stream_plan: |
     StreamMaterialize { columns: [a1, a2], pk_columns: [] }
-      StreamProject { exprs: [max(ao.v), string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
-        StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max(ao.v), string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
+      StreamProject { exprs: [max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
+        StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
           StreamExchange { dist: Single }
-            StreamProject { exprs: [ao.v, ',':Varchar, ao.o, ao._row_id] }
-              StreamTableScan { table: ao, columns: [ao.v, ao.o, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
+            StreamProject { exprs: [ao.v, ao.s, ',':Varchar, ao.o, ao._row_id] }
+              StreamTableScan { table: ao, columns: [ao.v, ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
 - id: extreme_on_T_by_k
   before:
   - create_tables
@@ -453,65 +453,65 @@
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from T group by k;
+    select string_agg(s, ',' order by o) as a1 from T group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
-        BatchHashAgg { group_key: [t.k], aggs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+      BatchProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+        BatchHashAgg { group_key: [t.k], aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
           BatchExchange { order: [], dist: HashShard(t.k) }
-            BatchProject { exprs: [t.k, t.v, ',':Varchar, t.o] }
-              BatchScan { table: t, columns: [t.k, t.v, t.o], distribution: SomeShard }
+            BatchProject { exprs: [t.k, t.s, ',':Varchar, t.o] }
+              BatchScan { table: t, columns: [t.k, t.o, t.s], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a1, t.k(hidden)], pk_columns: [t.k] }
-      StreamProject { exprs: [string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST)), t.k] }
-        StreamHashAgg { group_key: [t.k], aggs: [count, string_agg(t.v, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+      StreamProject { exprs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST)), t.k] }
+        StreamHashAgg { group_key: [t.k], aggs: [count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
           StreamExchange { dist: HashShard(t.k) }
-            StreamProject { exprs: [t.k, t.v, ',':Varchar, t.o, t._row_id] }
-              StreamTableScan { table: t, columns: [t.k, t.v, t.o, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            StreamProject { exprs: [t.k, t.s, ',':Varchar, t.o, t._row_id] }
+              StreamTableScan { table: t, columns: [t.k, t.o, t.s, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - id: string_agg_on_Tk_by_k
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from Tk group by k;
+    select string_agg(s, ',' order by o) as a1 from Tk group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [string_agg(tk.v, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
-        BatchHashAgg { group_key: [tk.k], aggs: [string_agg(tk.v, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
-          BatchProject { exprs: [tk.k, tk.v, ',':Varchar, tk.o] }
-            BatchScan { table: tk, columns: [tk.k, tk.v, tk.o], distribution: UpstreamHashShard(tk.k) }
+      BatchProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
+        BatchHashAgg { group_key: [tk.k], aggs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
+          BatchProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o] }
+            BatchScan { table: tk, columns: [tk.k, tk.o, tk.s], distribution: UpstreamHashShard(tk.k) }
   stream_plan: |
     StreamMaterialize { columns: [a1, tk.k(hidden)], pk_columns: [tk.k] }
-      StreamProject { exprs: [string_agg(tk.v, ',':Varchar order_by(tk.o ASC NULLS LAST)), tk.k] }
-        StreamHashAgg { group_key: [tk.k], aggs: [count, string_agg(tk.v, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
-          StreamProject { exprs: [tk.k, tk.v, ',':Varchar, tk.o, tk.t._row_id] }
-            StreamTableScan { table: tk, columns: [tk.k, tk.v, tk.o, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
+      StreamProject { exprs: [string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST)), tk.k] }
+        StreamHashAgg { group_key: [tk.k], aggs: [count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))] }
+          StreamProject { exprs: [tk.k, tk.s, ',':Varchar, tk.o, tk.t._row_id] }
+            StreamTableScan { table: tk, columns: [tk.k, tk.o, tk.s, tk.t._row_id], pk: [tk.t._row_id], distribution: UpstreamHashShard(tk.k) }
 - id: string_agg_on_S_by_k
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from S group by k;
+    select string_agg(s, ',' order by o) as a1 from S group by k;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST))] }
-        BatchHashAgg { group_key: [s.k], aggs: [string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST))] }
-          BatchProject { exprs: [s.k, s.v, ',':Varchar, s.o] }
-            BatchScan { table: s, columns: [s.k, s.v, s.o], distribution: UpstreamHashShard() }
+      BatchProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))] }
+        BatchHashAgg { group_key: [s.k], aggs: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))] }
+          BatchProject { exprs: [s.k, s.s, ',':Varchar, s.o] }
+            BatchScan { table: s, columns: [s.k, s.o, s.s], distribution: UpstreamHashShard() }
   stream_plan: |
     StreamMaterialize { columns: [a1, s.k(hidden)], pk_columns: [s.k] }
-      StreamProject { exprs: [string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST)), s.k] }
-        StreamHashAgg { group_key: [s.k], aggs: [count, string_agg(s.v, ',':Varchar order_by(s.o ASC NULLS LAST))] }
+      StreamProject { exprs: [string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST)), s.k] }
+        StreamHashAgg { group_key: [s.k], aggs: [count, string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))] }
           StreamExchange { dist: HashShard(s.k) }
-            StreamProject { exprs: [s.k, s.v, ',':Varchar, s.o, s.t._row_id] }
-              StreamTableScan { table: s, columns: [s.k, s.v, s.o, s.t._row_id], pk: [s.t._row_id], distribution: Single }
+            StreamProject { exprs: [s.k, s.s, ',':Varchar, s.o, s.t._row_id] }
+              StreamTableScan { table: s, columns: [s.k, s.o, s.s, s.t._row_id], pk: [s.t._row_id], distribution: Single }
 - id: string_agg_on_AO_by_k
   before:
   - create_tables
   sql: |
-    select string_agg(v, ',' order by o) as a1 from AO group by k;
+    select string_agg(s, ',' order by o) as a1 from AO group by k;
   stream_plan: |
     StreamMaterialize { columns: [a1, ao.k(hidden)], pk_columns: [ao.k] }
-      StreamProject { exprs: [string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST)), ao.k] }
-        StreamAppendOnlyHashAgg { group_key: [ao.k], aggs: [count, string_agg(ao.v, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
+      StreamProject { exprs: [string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST)), ao.k] }
+        StreamAppendOnlyHashAgg { group_key: [ao.k], aggs: [count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))] }
           StreamExchange { dist: HashShard(ao.k) }
-            StreamProject { exprs: [ao.k, ao.v, ',':Varchar, ao.o, ao._row_id] }
-              StreamTableScan { table: ao, columns: [ao.k, ao.v, ao.o, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }
+            StreamProject { exprs: [ao.k, ao.s, ',':Varchar, ao.o, ao._row_id] }
+              StreamTableScan { table: ao, columns: [ao.k, ao.o, ao.s, ao._row_id], pk: [ao._row_id], distribution: UpstreamHashShard(ao._row_id) }

@@ -38,6 +38,7 @@ use super::{
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
+/// Limit number of the cached entries (one per join key) on each side
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -673,9 +674,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut check_join_condition = |row_update: &RowRef<'_>,
                                         row_matched: &Row|
          -> StreamExecutorResult<bool> {
-            // TODO(yuhao-su): We should find a better way to eval the
-            // expression without concat
-            // two rows.
+            // TODO(yuhao-su): We should find a better way to eval the expression without concat two
+            // rows.
             let mut cond_match = true;
             // if there are non-equi expressions
             if let Some(ref mut cond) = cond {

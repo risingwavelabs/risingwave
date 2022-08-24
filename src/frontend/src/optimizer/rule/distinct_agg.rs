@@ -157,7 +157,7 @@ impl DistinctAggRule {
                     if agg_call.filter.always_true() {
                         return None;
                     }
-                    // convert distinct agg with real filter to count(*) with orginal filter.
+                    // convert distinct agg with real filter to count(*) with original filter.
                     agg_call = PlanAggCall::count_star().with_condition(agg_call.filter);
                 }
                 Some(agg_call)
@@ -201,7 +201,7 @@ impl DistinctAggRule {
                 // distinct-agg with real filter has its corresponding middle agg, which is count(*)
                 // with its original filter.
                 if !agg_call.filter.always_true() {
-                    // make sure count(*) with orginal filter > 0.
+                    // make sure count(*) with original filter > 0.
                     let check_count = FunctionCall::new(
                         ExprType::GreaterThan,
                         vec![
@@ -239,7 +239,8 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::SingleValue
-                    | AggKind::ApproxCountDistinct => (),
+                    | AggKind::ApproxCountDistinct
+                    | AggKind::ArrayAgg => (),
                     AggKind::Count => {
                         indices_of_count.push(i);
                         agg_call.agg_kind = AggKind::Sum;

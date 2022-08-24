@@ -155,20 +155,23 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
-        let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
-        if let Some(idx) = self
-            .column_ids
-            .iter()
-            .position(|column_id| *column_id == row_id_column_id)
-        {
-            let (ops, mut columns, bitmap) = chunk.into_inner();
-            if append_only {
-                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
-            } else {
-                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
+        // if row_id_index is None, pk is not row_id, so no need to gen row_id and refill chunk
+        if let Some(row_id_index) = row_id_index {
+            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+            if let Some(idx) = self
+                .column_ids
+                .iter()
+                .position(|column_id| *column_id == row_id_column_id)
+            {
+                let (ops, mut columns, bitmap) = chunk.into_inner();
+                if append_only {
+                    columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
+                } else {
+                    columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
+                }
+                return StreamChunk::new(ops, columns, bitmap);
             }
-            return StreamChunk::new(ops, columns, bitmap);
         }
         chunk
     }
@@ -290,7 +293,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             Mutation::SourceChangeSplit(mapping) => {
                                 if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
                                     if let Some(target_state) = self.get_diff(target_splits) {
-                                        log::info!(
+                                        tracing::info!(
                                             "actor {:?} apply source split change to {:?}",
                                             self.ctx.id,
                                             target_state
@@ -309,6 +312,21 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                             Mutation::Pause => stream.pause_source(),
                             Mutation::Resume => stream.resume_source(),
+                            Mutation::Update { vnode_bitmaps, .. } => {
+                                // Update row id generator if vnode mapping is changed.
+                                // Note that: since update barrier will only occurs between pause
+                                // and resume barrier, duplicated row id won't be generated.
+                                if let Some(vnode_bitmaps) = vnode_bitmaps.get(&self.ctx.id) {
+                                    let vnode_id =
+                                        vnode_bitmaps.next_set_bit(0).unwrap_or(0) as u32;
+                                    if self.row_id_generator.vnode_id != vnode_id {
+                                        self.row_id_generator = RowIdGenerator::with_epoch(
+                                            vnode_id,
+                                            *UNIX_SINGULARITY_DATE_EPOCH,
+                                        );
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
