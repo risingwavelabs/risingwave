@@ -98,7 +98,7 @@ pub async fn handle_create_source(
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             assert_eq!(columns.len(), 1);
-            assert_eq!(pk_column_ids, vec![1.into()]);
+            assert_eq!(pk_column_ids, vec![0.into()]);
             assert_eq!(row_id_index, Some(0));
             columns.extend(extract_protobuf_table_schema(protobuf_schema)?);
             StreamSourceInfo {
