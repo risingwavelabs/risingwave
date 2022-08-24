@@ -125,8 +125,13 @@ impl AggStateFactory {
                 ))
             }
             (AggKind::ArrayAgg, [arg]) => {
-                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
-                create_array_agg_state(return_type, input_col_idx, order_pairs, order_col_types)
+                let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
+                create_array_agg_state(
+                    return_type.clone(),
+                    agg_col_idx,
+                    order_pairs,
+                    order_col_types,
+                )?
             }
             (agg_kind, [arg]) => {
                 // other unary agg call

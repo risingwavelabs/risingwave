@@ -19,6 +19,7 @@ use risingwave_common::util::sort_util::OrderPair;
 
 use crate::vector_op::agg::aggregator::Aggregator;
 
+#[derive(Clone)]
 pub struct ArrayAggUnordered {
     return_type: DataType,
     agg_col_idx: usize,
@@ -35,14 +36,8 @@ impl ArrayAggUnordered {
         }
     }
 
-    fn get_result(&self) -> ListValue {
-        ListValue::new(self.result.clone())
-    }
-
     fn get_result_and_reset(&mut self) -> ListValue {
-        let res = self.get_result();
-        self.result.clear();
-        res
+        ListValue::new(std::mem::take(&mut self.result))
     }
 }
 
@@ -70,20 +65,7 @@ impl Aggregator for ArrayAggUnordered {
         Ok(())
     }
 
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        if let ArrayBuilderImpl::List(builder) = builder {
-            builder
-                .append(Some(self.get_result().as_scalar_ref()))
-                .map_err(Into::into)
-        } else {
-            Err(
-                ErrorCode::InternalError(format!("Builder fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
-        }
-    }
-
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::List(builder) = builder {
             builder
                 .append(Some(self.get_result_and_reset().as_scalar_ref()))
