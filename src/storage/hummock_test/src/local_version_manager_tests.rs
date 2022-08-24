@@ -506,9 +506,9 @@ async fn test_sst_gc_watermark() {
         HummockSstableId::MAX
     );
 
-    for i in 0..2 {
+    for epoch in epochs.iter() {
         let result = local_version_manager
-            .sync_shared_buffer(epochs[i])
+            .sync_shared_buffer(*epoch)
             .await
             .unwrap();
         assert!(result.sync_succeed);
