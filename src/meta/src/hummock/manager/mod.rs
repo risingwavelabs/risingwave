@@ -576,7 +576,16 @@ where
                 .get_mut(&compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
         );
-        let current_version = read_lock!(self, versioning).await.current_version.clone();
+        let (current_version, watermark) = {
+            let versioning_guard = read_lock!(self, versioning).await;
+            let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
+            let watermark = versioning_guard
+                .pinned_snapshots
+                .values()
+                .map(|v| v.minimal_pinned_snapshot)
+                .fold(max_committed_epoch, std::cmp::min);
+            (versioning_guard.current_version.clone(), watermark)
+        };
         let can_trivial_move = manual_compaction_option.is_none();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
@@ -590,17 +599,41 @@ where
             }
             Some(task) => task,
         };
-        compact_task.watermark = {
-            let versioning_guard = read_lock!(self, versioning).await;
-            let max_committed_epoch = current_version.max_committed_epoch;
-            versioning_guard
-                .pinned_snapshots
-                .values()
-                .map(|v| v.minimal_pinned_snapshot)
-                .fold(max_committed_epoch, std::cmp::min)
-        };
+        compact_task.watermark = watermark;
 
-        if !CompactStatus::is_trivial_move_task(&compact_task) || !can_trivial_move {
+        if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
+            compact_status.report_compact_task(&compact_task);
+            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            let mut versioning_guard = write_lock!(self, versioning).await;
+            let new_version_id = current_version.id + 1;
+            let versioning = versioning_guard.deref_mut();
+            let mut hummock_version_deltas =
+                BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+            apply_version_delta(
+                &mut hummock_version_deltas,
+                &current_version,
+                &compact_task,
+                true,
+            );
+            let mut new_version =
+                CompactStatus::apply_compact_result(&compact_task, current_version);
+            new_version.id = new_version_id;
+            commit_multi_var!(self, None, hummock_version_deltas)?;
+            /// this task has been finished and does not need to be schedule.
+            compact_task.task_status = true;
+            versioning.current_version = new_version;
+            trigger_sst_stat(
+                &self.metrics,
+                Some(
+                    compaction
+                        .compaction_statuses
+                        .get(&compaction_group_id)
+                        .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
+                ),
+                &versioning.current_version,
+                compaction_group_id,
+            );
+        } else {
             let existing_table_ids_from_meta = self
                 .compaction_group_manager
                 .internal_table_ids_by_compaction_group_id(compaction_group_id)
@@ -662,39 +695,7 @@ where
                 &current_version,
                 compaction_group_id,
             );
-        } else {
-            compact_status.report_compact_task(&compact_task);
-            let mut versioning_guard = write_lock!(self, versioning).await;
-            let new_version_id = current_version.id + 1;
-            let versioning = versioning_guard.deref_mut();
-            let mut hummock_version_deltas =
-                BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            apply_version_delta(
-                &mut hummock_version_deltas,
-                &current_version,
-                &compact_task,
-                true,
-            );
-            let mut new_version =
-                CompactStatus::apply_compact_result(&compact_task, current_version);
-            new_version.id = new_version_id;
-            commit_multi_var!(self, None, hummock_version_deltas)?;
-            // this task has been finished.
-            compact_task.task_status = true;
-            versioning.current_version = new_version;
-            trigger_sst_stat(
-                &self.metrics,
-                Some(
-                    compaction
-                        .compaction_statuses
-                        .get(&compaction_group_id)
-                        .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
-                ),
-                &versioning.current_version,
-                compaction_group_id,
-            );
-        };
-
+        }
         #[cfg(test)]
         {
             drop(compaction_guard);
