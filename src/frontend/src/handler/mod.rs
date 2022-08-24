@@ -60,8 +60,8 @@ pub async fn handle(
     match stmt {
         Statement::Explain {
             statement,
-            describe_alias,
-            analyze,
+            describe_alias: _,
+            analyze: _,
             options,
         } => {
             match options.explain_type {

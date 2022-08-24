@@ -1809,7 +1809,6 @@ fn parse_explain_analyze_with_simple_select() {
             trace: true,
             verbose: true,
             explain_type: ExplainType::DistSQL,
-            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1819,7 +1818,6 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSQL,
-            ..Default::default()
         },
     );
     run_explain_analyze(
@@ -1829,7 +1827,6 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSQL,
-            ..Default::default()
         },
     );
 }
