@@ -399,8 +399,7 @@ fn scalar_cast(
             DataType::List {
                 datatype: target_elem_type,
             },
-        ) => str_to_list(source.try_into()?, target_elem_type)
-            .map(Scalar::to_scalar_value),
+        ) => str_to_list(source.try_into()?, target_elem_type).map(Scalar::to_scalar_value),
         (source_type, target_type) => {
             for_each_cast!(gen_cast_impl, source, source_type, target_type,)
         }
