@@ -46,6 +46,7 @@ impl BatchTaskMetricsManager {
             let mut connect = true;
             while connect {
                 // run every minute.
+                trace!("BatchTaskMetricsManager Deletor is running...");
                 let _ = interval.tick().await;
 
                 // delete all record in delete_cache .
@@ -86,7 +87,7 @@ impl BatchTaskMetricsManager {
     }
 
     /// Create a new `BatchTaskMetricsManager` instance used in tests or other places.
-    pub fn unused() -> Self {
+    pub fn for_test() -> Self {
         let (delete_queue_sender, _) = tokio::sync::mpsc::channel::<Box<dyn Collector>>(1);
         Self {
             sender: delete_queue_sender,
@@ -141,7 +142,8 @@ impl BatchTaskMetrics {
         }
     }
 
-    pub fn unused() -> Self {
+    /// Create a new `BatchTaskMetrics` instance used in tests or other places.
+    pub fn for_test() -> Self {
         Self::new(prometheus::Registry::new(), TaskId::default(), None)
     }
 }
@@ -165,7 +167,7 @@ impl BatchMetrics {
     }
 
     /// Create a new `BatchMetrics` instance used in tests or other places.
-    pub fn unused() -> Self {
+    pub fn for_test() -> Self {
         Self::new(prometheus::Registry::new())
     }
 }

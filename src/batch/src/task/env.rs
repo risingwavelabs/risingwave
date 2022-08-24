@@ -94,8 +94,8 @@ impl BatchEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
-            task_metrics_manager: Arc::new(BatchTaskMetricsManager::unused()),
-            stats: Arc::new(BatchMetrics::unused()),
+            task_metrics_manager: Arc::new(BatchTaskMetricsManager::for_test()),
+            stats: Arc::new(BatchMetrics::for_test()),
         }
     }
 

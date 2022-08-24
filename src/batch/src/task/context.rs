@@ -114,7 +114,7 @@ impl ComputeNodeContext {
     pub fn new_for_test() -> Self {
         Self {
             env: BatchEnvironment::for_test(),
-            task_metrics: BatchTaskMetrics::unused(),
+            task_metrics: BatchTaskMetrics::for_test(),
         }
     }
 
