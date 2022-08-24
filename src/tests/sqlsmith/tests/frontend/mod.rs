@@ -26,6 +26,7 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
 };
+use tokio::runtime::Runtime;
 
 /// Environment for Sqlsmith to generate and test queries
 pub struct SqlsmithEnv {
