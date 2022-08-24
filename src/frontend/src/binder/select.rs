@@ -44,12 +44,23 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn exprs(&self) -> impl Iterator<Item = &ExprImpl> {
         self.select_items
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
             .chain(self.having.iter())
+    }
+
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
+        self.select_items
+            .iter_mut()
+            .chain(self.group_by.iter_mut())
+            .chain(self.where_clause.iter_mut())
+    }
+
+    pub fn is_correlated(&self) -> bool {
+        self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth())
             || match self.from.as_ref() {
                 Some(relation) => relation.is_correlated(),
@@ -62,14 +73,10 @@ impl BoundSelect {
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         let mut correlated_indices = vec![];
-        self.select_items
-            .iter_mut()
-            .chain(self.group_by.iter_mut())
-            .chain(self.where_clause.iter_mut())
-            .for_each(|expr| {
-                correlated_indices
-                    .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
-            });
+        self.exprs_mut().for_each(|expr| {
+            correlated_indices
+                .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
+        });
 
         if let Some(relation) = self.from.as_mut() {
             correlated_indices
