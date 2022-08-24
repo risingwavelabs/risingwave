@@ -93,7 +93,6 @@ message HummockSnapshot {
   uint64 current_epoch = 2;
 }
 
-
 message PinVersionRequest {
   uint32 context_id = 1;
   uint64 last_pinned = 2;

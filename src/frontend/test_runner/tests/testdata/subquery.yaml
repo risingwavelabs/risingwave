@@ -158,11 +158,7 @@
       LogicalProject { exprs: [1:Int32] }
         LogicalJoin { type: Inner, on: true, output: all }
           LogicalAgg { aggs: [] }
-            LogicalProject { exprs: [] }
-              LogicalAgg { group_key: [1:Int32, flag], aggs: [] }
-                LogicalExpand { column_subsets: [[1:Int32]] }
-                  LogicalProject { exprs: [1:Int32] }
-                    LogicalScan { table: t1, columns: [] }
+            LogicalScan { table: t1, columns: [] }
           LogicalScan { table: t2, columns: [] }
   batch_plan: |
     BatchSimpleAgg { aggs: [count(1:Int32)] }
@@ -171,11 +167,6 @@
           BatchSimpleAgg { aggs: [] }
             BatchExchange { order: [], dist: Single }
               BatchSimpleAgg { aggs: [] }
-                BatchProject { exprs: [] }
-                  BatchHashAgg { group_key: [1:Int32, flag], aggs: [] }
-                    BatchExchange { order: [], dist: HashShard(1:Int32, flag) }
-                      BatchExpand { column_subsets: [[1:Int32]] }
-                        BatchProject { exprs: [1:Int32] }
-                          BatchScan { table: t1, columns: [], distribution: SomeShard }
+                BatchScan { table: t1, columns: [], distribution: SomeShard }
           BatchExchange { order: [], dist: Single }
             BatchScan { table: t2, columns: [], distribution: SomeShard }

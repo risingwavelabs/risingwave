@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::vec;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -186,18 +185,12 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let chunk = chunk?.compact()?;
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let mut err_flag = Ok(());
                 let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {
                     self.agg_factories
                         .iter()
                         .map(AggStateFactory::create_agg_state)
-                        .collect::<Result<Vec<_>>>()
-                        .unwrap_or_else(|x| {
-                            err_flag = Err(x);
-                            vec![]
-                        })
+                        .collect()
                 });
-                err_flag?;
 
                 // TODO: currently not a vectorized implementation
                 states
