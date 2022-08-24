@@ -329,6 +329,13 @@ def section_object_storage(panels):
             panels.target(
                 "sum(rate(object_store_operation_latency_count[$__rate_interval])) by (le, type, job, instance)", "{{type}} - {{job}} @ {{instance}}"
             ),
+            panels.target(
+                "sum(rate(object_store_operation_latency_count{type=~'upload|delete'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-write - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(object_store_operation_latency_count{type=~'read|readv|list|metadata'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-read - {{job}} @ {{instance}}"
+            ),
+
         ]),
         panels.timeseries_bytes("Operation Size", [
             panels.target(
@@ -944,7 +951,7 @@ def section_hummock_tiered_cache(panels):
                 "histogram_quantile(0.9, sum(rate(file_cache_get_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache get @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(file_cache_get_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache get @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(file_cache_get_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache get @ {{instance}}"
             ),
             panels.target(
                 "histogram_quantile(0.5, sum(rate(file_cache_insert_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache insert @ {{instance}}"
@@ -953,7 +960,7 @@ def section_hummock_tiered_cache(panels):
                 "histogram_quantile(0.9, sum(rate(file_cache_insert_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache insert @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(file_cache_insert_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache insert @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(file_cache_insert_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache insert @ {{instance}}"
             ),
             panels.target(
                 "histogram_quantile(0.5, sum(rate(file_cache_erase_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache erase @ {{instance}}"
@@ -962,7 +969,7 @@ def section_hummock_tiered_cache(panels):
                 "histogram_quantile(0.9, sum(rate(file_cache_erase_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache erase @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(file_cache_erase_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache erase @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(file_cache_erase_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache erase @ {{instance}}"
             ),
             panels.target(
                 "histogram_quantile(0.5, sum(rate(file_cache_disk_read_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache disk read @ {{instance}}"
@@ -971,7 +978,7 @@ def section_hummock_tiered_cache(panels):
                 "histogram_quantile(0.9, sum(rate(file_cache_disk_read_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache disk read @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(file_cache_disk_read_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache disk read @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(file_cache_disk_read_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache disk read @ {{instance}}"
             ),
             panels.target(
                 "histogram_quantile(0.5, sum(rate(file_cache_disk_write_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache disk write @ {{instance}}"
@@ -980,7 +987,7 @@ def section_hummock_tiered_cache(panels):
                 "histogram_quantile(0.9, sum(rate(file_cache_disk_write_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache disk write @ {{instance}}"
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(file_cache_disk_write_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache disk write @ {{instance}}"
+                "histogram_quantile(0.99, sum(rate(file_cache_disk_write_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache disk write @ {{instance}}"
             ),
         ]),
         panels.timeseries_bytes_per_sec("Throughput", [
