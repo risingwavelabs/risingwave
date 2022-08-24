@@ -55,7 +55,7 @@ fn main() {
                     .join(file_name);
 
                 let file_content = std::fs::read_to_string(path).unwrap();
-                build_runtime().block_on(run_test_file(&test_case_name, &file_content));
+                build_runtime().block_on(run_test_file(&test_case_name, &file_content))?;
                 Ok(())
             }));
         }
