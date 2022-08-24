@@ -305,9 +305,9 @@ impl Condition {
                 }
             }
 
-            return Ok(Some((non_overlap_scan_ranges, Condition::true_cond())));
+            Ok(Some((non_overlap_scan_ranges, Condition::true_cond())))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
