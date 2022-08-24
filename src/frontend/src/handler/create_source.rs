@@ -16,7 +16,9 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
+use risingwave_pb::catalog::{
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
+};
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_source::ProtobufParser;
@@ -90,37 +92,44 @@ pub async fn handle_create_source(
     let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
 
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
-    let (columns, pk_column_ids) =
-        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, stmt.constraints)?;
+    let (columns, pk_column_ids, row_id_index) =
+        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
-            columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
+            todo!();
+            let mut columns = extract_protobuf_table_schema(protobuf_schema)?;
+            if let Some(row_id_index) = row_id_index {
+                columns.insert(
+                    row_id_index,
+                    ColumnCatalog::row_id_column(todo!()).to_protobuf(),
+                );
+            }
+            // TODO: why hardcoding pk_column_ids here?
             StreamSourceInfo {
                 properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                row_id_index: 0,
+                row_id_index: todo!(),
                 columns,
-                pk_column_ids: vec![0],
+                pk_column_ids: todo!(),
             }
         }
         SourceSchema::Json => StreamSourceInfo {
             properties: with_properties.clone(),
             row_format: RowFormatType::Json as i32,
             row_schema_location: "".to_string(),
-            row_id_index: 0,
+            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
             columns,
-            pk_column_ids,
+            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
         },
         SourceSchema::DebeziumJson => StreamSourceInfo {
             properties: with_properties.clone(),
             row_format: RowFormatType::DebeziumJson as i32,
             row_schema_location: "".to_string(),
-            row_id_index: 0,
+            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
             columns,
-            pk_column_ids,
+            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
         },
     };
 

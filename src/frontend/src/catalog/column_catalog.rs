@@ -56,9 +56,9 @@ impl ColumnCatalog {
     }
 
     /// Creates a row ID column (for implicit primary key).
-    pub fn row_id_column() -> Self {
+    pub fn row_id_column(column_id: ColumnId) -> Self {
         Self {
-            column_desc: row_id_column_desc(),
+            column_desc: row_id_column_desc(column_id),
             is_hidden: true,
         }
     }

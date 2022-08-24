@@ -18,7 +18,7 @@ use async_stack_trace::StackTrace;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
-use risingwave_pb::catalog::Source;
+use risingwave_pb::catalog::{ColumnIndex, Source};
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
@@ -236,7 +236,7 @@ impl StreamServiceImpl {
 
         let id = TableId::new(source.id); // TODO: use SourceId instead
 
-        match &source.get_info()? {
+        match source.get_info()? {
             Info::StreamSource(info) => {
                 self.env
                     .source_manager()
@@ -251,9 +251,12 @@ impl StreamServiceImpl {
                     .map(|c| c.column_desc.unwrap().into())
                     .collect_vec();
 
-                self.env
-                    .source_manager()
-                    .create_table_source(&id, columns)?;
+                self.env.source_manager().create_table_source(
+                    &id,
+                    columns,
+                    info.row_id_index.as_ref().map(|index| index.index as _),
+                    info.pk_column_ids.clone(),
+                )?;
             }
         };
 
