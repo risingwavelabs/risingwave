@@ -39,10 +39,12 @@ impl TaskLocalBytesAllocated {
         Self::default()
     }
 
+    /// Create an invalid counter.
     pub const fn invalid() -> Self {
         Self(None)
     }
 
+    /// Adds to the current counter.
     #[inline(always)]
     pub fn add(&self, val: usize) {
         if let Some(bytes) = self.0 {
@@ -50,6 +52,8 @@ impl TaskLocalBytesAllocated {
         }
     }
 
+    /// Adds to the current counter without validity check.
+    ///
     /// # Safety
     /// The caller must ensure that `self` is valid.
     #[inline(always)]
@@ -57,11 +61,18 @@ impl TaskLocalBytesAllocated {
         self.0.unwrap_unchecked().fetch_add(val, Ordering::Relaxed);
     }
 
+    /// Substract from the counter value, and `drop` the counter while the count reaches zero.
     #[inline(always)]
     pub fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
+            // Use Release to synchronize with the below deletion.
             let old_bytes = bytes.fetch_sub(val, Ordering::Release);
             if old_bytes == val {
+                // This fence is needed to prevent reordering of use of the counter and deletion of
+                // the counter. Because it is marked `Release`, the decreasing of the counter
+                // synchronizes with this `Acquire` fence. This means that use of the counter
+                // happens before decreasing the counter, which happens before this fence, which
+                // happens before the deletion of the counter.
                 fence(Ordering::Acquire);
                 unsafe { Box::from_raw_in(bytes.as_mut_ptr(), System) };
             }
@@ -88,6 +99,9 @@ where
 {
     BYTES_ALLOCATED
         .scope(TaskLocalBytesAllocated::new(), async move {
+            // The guard has the same lifetime as the counter so that the counter will keep positive
+            // in the whole scope. When the scope exits, the guard is released, so the counter can
+            // reach zero eventually and then `drop` itself.
             let _guard = Box::new(114514);
             let monitor = async move {
                 let mut interval = tokio::time::interval(interval);
