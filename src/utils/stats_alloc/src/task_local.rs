@@ -46,7 +46,7 @@ impl TaskLocalBytesAllocated {
 
     /// Adds to the current counter.
     #[inline(always)]
-    pub fn add(&self, val: usize) {
+    fn add(&self, val: usize) {
         if let Some(bytes) = self.0 {
             bytes.fetch_add(val, Ordering::Relaxed);
         }
@@ -57,16 +57,18 @@ impl TaskLocalBytesAllocated {
     /// # Safety
     /// The caller must ensure that `self` is valid.
     #[inline(always)]
-    pub unsafe fn add_unchecked(&self, val: usize) {
+    unsafe fn add_unchecked(&self, val: usize) {
         self.0.unwrap_unchecked().fetch_add(val, Ordering::Relaxed);
     }
 
     /// Subtracts from the counter value, and `drop` the counter while the count reaches zero.
     #[inline(always)]
-    pub fn sub(&self, val: usize) {
+    fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
             // Use Release to synchronize with the below deletion.
             let old_bytes = bytes.fetch_sub(val, Ordering::Release);
+            // If the counter reaches zero, delete the counter. Note that we've ensured there's no
+            // zero deltas in `wrap_layout`, so there'll be no more uses of the counter.
             if old_bytes == val {
                 // This fence is needed to prevent reordering of use of the counter and deletion of
                 // the counter. Because it is marked `Release`, the decreasing of the counter
@@ -122,6 +124,8 @@ where
 
 #[inline(always)]
 fn wrap_layout(layout: Layout) -> (Layout, usize) {
+    debug_assert_ne!(layout.size(), 0, "the size of layout must be non-zero");
+
     let (wrapped_layout, offset) = Layout::new::<TaskLocalBytesAllocated>()
         .extend(layout)
         .expect("wrapping layout overflow");
