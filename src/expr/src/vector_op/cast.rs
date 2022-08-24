@@ -337,7 +337,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
     Ok(ListValue::new(
         chars
             .as_str()
-            .split(",")
+            .split(',')
             .map(|s| {
                 Some(ScalarRefImpl::Utf8(s.trim()))
                     .map(|scalar_ref| {
