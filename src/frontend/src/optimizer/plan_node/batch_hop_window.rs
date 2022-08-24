@@ -82,7 +82,7 @@ impl ToDistributedBatch for BatchHopWindow {
             .rewrite_required_distribution(required_dist);
         let new_input = self
             .input()
-            .to_distributed_with_required(&Order::any(), &input_required)?;
+            .to_distributed_with_required(required_order, &input_required)?;
         let new_logical = self.logical.clone_with_input(new_input);
         let batch_plan = BatchHopWindow::new(new_logical);
         let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into())?;
