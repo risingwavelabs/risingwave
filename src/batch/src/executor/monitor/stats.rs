@@ -23,6 +23,10 @@ use tokio::sync::mpsc::Sender;
 
 use crate::task::TaskId;
 
+// When execution is done, it need to call clear_record() in BatchTaskMetrics.
+// The clear_record() will send the Collector to delete_queue, if the queue is full, the execution
+// will be blocked so that user can't get the result immediately.
+const DELETE_QUEUE_SIZE: usize = 4096;
 pub struct BatchTaskMetricsManager {
     registry: Registry,
     sender: Sender<Box<dyn Collector>>,
@@ -38,7 +42,7 @@ impl BatchTaskMetricsManager {
         // We store the collector in delete_cache first and unregister it next time to make sure the
         // metrics be collected by prometheus.
         let (delete_queue_sender, mut delete_queue_receiver) =
-            tokio::sync::mpsc::channel::<Box<dyn Collector>>(4096);
+            tokio::sync::mpsc::channel::<Box<dyn Collector>>(DELETE_QUEUE_SIZE);
         let deletor_registry = registry.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
