@@ -67,7 +67,7 @@ fn create_hash_agg_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecuto
     .unwrap()
 }
 
-async fn executr_hash_agg_executor(executor: BoxedExecutor) {
+async fn execute_hash_agg_executor(executor: BoxedExecutor) {
     let mut stream = executor.execute();
     while let Some(ret) = stream.next().await {
         black_box(ret.unwrap());
@@ -86,7 +86,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                 let chunk_num = SIZE / chunk_size;
                 b.to_async(&rt).iter_batched(
                     || create_hash_agg_executor(chunk_size, chunk_num),
-                    |e| executr_hash_agg_executor(e),
+                    |e| execute_hash_agg_executor(e),
                     BatchSize::SmallInput,
                 );
             },
