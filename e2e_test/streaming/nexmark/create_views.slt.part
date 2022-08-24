@@ -10,3 +10,4 @@ include ./views/q10.slt.part
 include ./views/q14.slt.part
 include ./views/q15.slt.part
 include ./views/q17.slt.part
+include ./views/q20.slt.part
