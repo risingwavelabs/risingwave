@@ -28,7 +28,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterato
 use crate::hummock::shared_buffer::SharedBufferIteratorType;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator, SstableIteratorType};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 
 pub enum DirectedUserIterator {
     Forward(UserIterator),
@@ -56,7 +56,6 @@ pub trait DirectedUserIteratorBuilder {
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>,
         >,
-        stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
@@ -146,6 +145,8 @@ pub struct UserIterator {
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
     _version: Option<Arc<PinnedVersion>>,
+
+    stats: StoreLocalStatistic,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -185,6 +186,7 @@ impl UserIterator {
             last_val: Vec::new(),
             read_epoch,
             min_epoch,
+            stats: StoreLocalStatistic::default(),
             _version: version,
         }
     }
@@ -196,10 +198,12 @@ impl UserIterator {
     ///   (may reach to the end and thus not valid)
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
+        self.stats.processed_key_count += 1;
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
+            self.stats.scan_key_count += 1;
 
             // handle multi-version
             if self.last_key.as_slice() != key
@@ -307,6 +311,7 @@ impl UserIterator {
     }
 
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
         self.iterator.collect_local_statistic(stats);
     }
 }
@@ -317,7 +322,6 @@ impl DirectedUserIteratorBuilder for UserIterator {
 
     fn create(
         iterator_iter: impl IntoIterator<Item = UserIteratorPayloadType<Forward, SstableIterator>>,
-        _stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,

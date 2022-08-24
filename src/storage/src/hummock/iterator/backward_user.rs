@@ -26,7 +26,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{BackwardSstableIterator, HummockResult};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 
 /// [`BackwardUserIterator`] can be used by user directly.
 pub struct BackwardUserIterator {
@@ -60,6 +60,9 @@ pub struct BackwardUserIterator {
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
     _version: Option<Arc<PinnedVersion>>,
+
+    /// Store scan statistic
+    stats: StoreLocalStatistic,
 }
 
 impl BackwardUserIterator {
@@ -94,6 +97,7 @@ impl BackwardUserIterator {
             last_delete: true,
             read_epoch,
             min_epoch,
+            stats: StoreLocalStatistic::default(),
             _version: version,
         }
     }
@@ -146,11 +150,13 @@ impl BackwardUserIterator {
             self.last_delete = true;
             return Ok(());
         }
+        self.stats.processed_key_count += 1;
 
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
+            self.stats.scan_key_count += 1;
 
             if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
@@ -272,6 +278,7 @@ impl BackwardUserIterator {
     }
 
     pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
         self.iterator.collect_local_statistic(stats);
     }
 }
@@ -284,7 +291,6 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
         iterator_iter: impl IntoIterator<
             Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
         >,
-        _stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
