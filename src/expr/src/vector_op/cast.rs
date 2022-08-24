@@ -316,8 +316,8 @@ macro_rules! for_each_cast {
 
 #[inline(always)]
 pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-    // Remove whitespace.
-    let trimmed: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    // Trim input
+    let trimmed = input.trim();
 
     // Ensure input string is correctly braced.
     let mut chars = trimmed.chars();
@@ -330,13 +330,23 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
         "Last character should be right brace '}}'"
     );
 
+    // Return a new ListValue.
+    // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn is
+    // cast into the target DataType. If the target DataType is of type Varchar, then no casting is
+    // needed.
     Ok(ListValue::new(
         chars
             .as_str()
             .split(",")
-            .map(|datum_ref| {
-                Some(ScalarRefImpl::Utf8(datum_ref))
-                    .map(|scalar_ref| scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type))
+            .map(|s| {
+                Some(ScalarRefImpl::Utf8(s.trim()))
+                    .map(|scalar_ref| {
+                        if target_elem_type == &DataType::Varchar {
+                            Ok(scalar_ref.into_scalar_impl())
+                        } else {
+                            scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type)
+                        }
+                    })
                     .transpose()
             })
             .try_collect()?,
