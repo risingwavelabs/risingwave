@@ -996,7 +996,7 @@ pub enum Statement {
         analyze: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
-        /// options of the explain statment
+        /// options of the explain statement
         options: ExplainOptions,
     },
     /// CREATE USER
