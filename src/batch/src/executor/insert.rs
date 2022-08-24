@@ -229,7 +229,7 @@ mod tests {
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2().unwrap();
         let mut reader = source
-            .stream_reader(vec![0.into(), 1.into(), 2.into(), 3.into()])
+            .stream_reader(vec![0.into(), 1.into(), 2.into()])
             .await?;
 
         // Insert
@@ -239,9 +239,6 @@ mod tests {
             Box::new(mock_executor),
         ));
         let handle = tokio::spawn(async move {
-            let fields = &insert_executor.schema().fields;
-            assert_eq!(fields[0].data_type, DataType::Int64);
-
             let mut stream = insert_executor.execute();
             let result = stream.next().await.unwrap().unwrap();
 
@@ -259,15 +256,8 @@ mod tests {
         // Read
         let chunk = reader.next().await?;
 
-        // Row id column
-        assert!(chunk.columns()[0]
-            .array()
-            .as_int64()
-            .iter()
-            .all(|x| x.is_none()));
-
         assert_eq!(
-            chunk.columns()[1]
+            chunk.columns()[0]
                 .array()
                 .as_int32()
                 .iter()
@@ -276,7 +266,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[2]
+            chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()
@@ -295,7 +285,7 @@ mod tests {
         )
         .unwrap()
         .into();
-        assert_eq!(*chunk.columns()[3].array(), array);
+        assert_eq!(*chunk.columns()[2].array(), array);
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.

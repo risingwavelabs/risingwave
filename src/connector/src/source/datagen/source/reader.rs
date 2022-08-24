@@ -219,10 +219,6 @@ mod tests {
     async fn test_generator() -> Result<()> {
         let mock_datum = vec![
             Column {
-                name: "_".to_string(),
-                data_type: DataType::Int64,
-            },
-            Column {
                 name: "random_int".to_string(),
                 data_type: DataType::Int32,
             },

@@ -366,7 +366,7 @@ mod tests {
             ),
             (
                 "create table t (v1 int, v2 int, primary key (v1))",
-                Ok(&[2]),
+                Ok(&[0]),
             ),
             (
                 "create table t (v1 int, primary key (v2), v2 int)",
