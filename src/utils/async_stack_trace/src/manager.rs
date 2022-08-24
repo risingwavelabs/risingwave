@@ -37,7 +37,7 @@ pub struct StackTraceReport {
 impl Default for StackTraceReport {
     fn default() -> Self {
         Self {
-            report: "<not reported>\n".to_string(),
+            report: "<initial>\n".to_string(),
             capture_time: std::time::Instant::now(),
         }
     }
@@ -119,6 +119,7 @@ impl TraceReporter {
             self.trace(future, root_span, report_detached, interval)
                 .await
         } else {
+            drop(self); // drop self so that the manager will find that the reporter is closed.
             future.await
         }
     }
