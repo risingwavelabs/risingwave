@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;

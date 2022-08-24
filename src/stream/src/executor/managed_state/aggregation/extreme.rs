@@ -25,7 +25,7 @@ use risingwave_common::types::*;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::Cache;

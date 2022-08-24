@@ -17,7 +17,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -139,7 +139,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::streaming_table::state_table::StateTable;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
     use super::*;
     use crate::executor::aggregation::AggArgs;

@@ -27,7 +27,7 @@ use risingwave_common::bail;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 

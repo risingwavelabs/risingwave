@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod storage_table;
+pub mod streaming_table;
 
 #[cfg(test)]
 pub mod test_relational_table;

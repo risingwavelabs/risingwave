@@ -19,8 +19,8 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::memory::MemoryStateStore;
-use crate::streaming_table::state_table::StateTable;
 use crate::table::storage_table::RowBasedStorageTable;
+use crate::table::streaming_table::state_table::StateTable;
 use crate::table::{Distribution, TableIter};
 
 /// There are three struct in relational layer, StateTable, MemTable and CellBasedTable.

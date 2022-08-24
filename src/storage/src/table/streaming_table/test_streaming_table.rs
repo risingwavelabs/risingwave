@@ -20,7 +20,7 @@ use risingwave_common::util::sort_util::OrderType;
 
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
-use crate::streaming_table::state_table::StateTable;
+use crate::table::streaming_table::state_table::StateTable;
 
 // test state table
 #[tokio::test]

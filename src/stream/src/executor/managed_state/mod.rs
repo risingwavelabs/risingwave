@@ -18,7 +18,7 @@ pub mod join;
 pub mod top_n;
 
 use risingwave_common::array::Row;
-use risingwave_storage::streaming_table::state_table::{RowStream, StateTable};
+use risingwave_storage::table::streaming_table::state_table::{RowStream, StateTable};
 use risingwave_storage::StateStore;
 
 use crate::executor::StreamExecutorResult;

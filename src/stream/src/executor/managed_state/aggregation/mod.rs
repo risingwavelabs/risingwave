@@ -24,7 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 

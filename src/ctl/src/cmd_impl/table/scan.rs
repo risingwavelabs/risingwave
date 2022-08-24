@@ -18,7 +18,7 @@ use risingwave_frontend::TableCatalog;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 

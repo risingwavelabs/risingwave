@@ -20,7 +20,7 @@ use std::ops::RangeBounds;
 use anyhow::anyhow;
 use risingwave_common::array::Row;
 use risingwave_common::types::ScalarImpl;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;

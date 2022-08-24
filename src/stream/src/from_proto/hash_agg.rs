@@ -17,7 +17,7 @@
 use std::marker::PhantomData;
 
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_call::build_agg_call_from_prost;
 use super::*;

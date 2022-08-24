@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::hash_join::*;

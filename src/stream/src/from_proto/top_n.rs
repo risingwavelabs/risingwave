@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::TopNExecutor;

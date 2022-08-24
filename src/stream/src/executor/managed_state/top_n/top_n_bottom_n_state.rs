@@ -24,7 +24,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::error::StreamExecutorResult;

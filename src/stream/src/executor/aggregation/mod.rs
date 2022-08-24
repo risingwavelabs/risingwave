@@ -33,7 +33,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;

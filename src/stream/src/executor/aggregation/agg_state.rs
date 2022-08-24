@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::types::Datum;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;

@@ -25,7 +25,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::{Cache, ManagedTableState};
@@ -255,7 +255,7 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::streaming_table::state_table::StateTable;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
     use super::ManagedStringAggState;
     use crate::common::StateTableColumnMapping;
