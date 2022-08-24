@@ -19,7 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
 /// error`[E0582`]: binding for associated type `Output` references lifetime `'a`,
 /// which does not appear in the trait input types.
-pub trait RTFn<'a, T, R>: Send + 'static
+pub trait RTFn<'a, T, R>: Send + Clone + 'static
 where
     T: Array,
     R: Array,
@@ -36,6 +36,7 @@ where
     T: Array,
     R: Array,
     Z: Send
+        + Clone
         + 'static
         + Fn(
             Option<<R as Array>::RefItem<'a>>,
@@ -149,6 +150,7 @@ pub fn count_list(r: Option<i64>, i: Option<ListRef<'_>>) -> Result<Option<i64>>
     count(r, i)
 }
 
+#[derive(Clone)]
 pub struct SingleValue {
     count: usize,
 }

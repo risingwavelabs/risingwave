@@ -71,7 +71,8 @@ impl ObjectStoreMetrics {
             exponential_buckets(0.0001, 2.0, 21).unwrap(), // max 104s
         );
         let operation_latency =
-            register_histogram_vec_with_registry!(latency_opts, &["type"], registry).unwrap();
+            register_histogram_vec_with_registry!(latency_opts, &["media_type", "type"], registry)
+                .unwrap();
         let mut buckets = vec![];
         for i in 0..4 {
             buckets.push((4096 << (i * 2)) as f64);
