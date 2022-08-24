@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::{env, panic};
 
 use itertools::Itertools;
-use libtest_mimic::{run_tests, Arguments, Outcome, Test};
+use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -199,30 +199,31 @@ pub fn run() {
 
     let num_tests = 512;
     let tests = (0..num_tests)
-        .map(|i| Test {
-            name: format!("run_sqlsmith_on_frontend_{}", i),
-            kind: "".into(),
-            is_ignored: false,
-            is_bench: false,
-            data: i,
-        })
+        .map(|i| Trial::test(
+            format!("run_sqlsmith_on_frontend_{}", i),
+            move || {
+                Ok(())
+            }
+        ))
         .collect();
 
-    run_tests(&args, tests, |test| {
-        let SqlsmithEnv {
-            session,
-            tables,
-            setup_sql,
-        } = &*SQLSMITH_ENV;
-        test_batch_query(session.clone(), tables.clone(), test.data, setup_sql);
-        let test_stream_query =
-            test_stream_query(session.clone(), tables.clone(), test.data, setup_sql);
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(test_stream_query);
-        Outcome::Passed
-    })
-    .exit();
+    // run_tests(&args, tests, |test| {
+    //     let SqlsmithEnv {
+    //         session,
+    //         tables,
+    //         setup_sql,
+    //     } = &*SQLSMITH_ENV;
+    //     test_batch_query(session.clone(), tables.clone(), test.data, setup_sql);
+    //     let test_stream_query =
+    //         test_stream_query(session.clone(), tables.clone(), test.data, setup_sql);
+    //     tokio::runtime::Builder::new_multi_thread()
+    //         .enable_all()
+    //         .build()
+    //         .unwrap()
+    //         .block_on(test_stream_query);
+    //     Outcome::Passed
+    // })
+    // .exit();
+
+    libtest_mimic::run(&args, tests).exit();
 }
