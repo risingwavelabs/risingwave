@@ -1,0 +1,29 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 varchar, v2 int, v3 int)
+
+statement ok
+insert into t values ('aaa', 1, 1), ('bbb', 0, 2), ('ccc', 0, 5), ('ddd', 1, 4)
+
+query T
+select b from (select unnest(a) from (select array_agg(v3) as v3_arr from t) g(a)) p(b) order by b;
+----
+1
+2
+4
+5
+
+query T
+select array_agg(v1 order by v3 desc) from t
+----
+{ccc,ddd,bbb,aaa}
+
+query T
+select array_agg(v1 order by v2 asc, v3 desc) from t
+----
+{ccc,bbb,ddd,aaa}
+
+statement ok
+drop table t
