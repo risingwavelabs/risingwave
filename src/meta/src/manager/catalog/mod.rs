@@ -546,8 +546,12 @@ where
             source.insert(self.env.meta_store()).await?;
             core.add_source(source);
 
+            // stream_manager handle the materialized only (mview, table, index,
+            // materialized_source) so we need to notify all_node for this case.
             let version = self
-                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+                .env
+                .notification_manager()
+                .notify_all_node(Operation::Add, Info::Source(source.to_owned()))
                 .await;
 
             Ok(version)

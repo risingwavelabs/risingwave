@@ -235,7 +235,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 states
                     .into_iter()
                     .zip_eq(&mut agg_builders)
-                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
+                    .try_for_each(|(mut aggregator, builder)| aggregator.output(builder))?;
             }
             if !has_next {
                 break; // exit loop

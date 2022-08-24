@@ -38,6 +38,7 @@ use super::{
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
+/// Limit number of the cached entries (one per join key) on each side
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -830,10 +831,7 @@ mod tests {
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
-    ) -> (
-        StateTable<MemoryStateStore>,
-        StateTable<MemoryStateStore>,
-    ) {
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();
 
         // The last column is for degree.

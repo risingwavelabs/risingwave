@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::{internal_error, Result};
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::DynamicFilterExecutor;
@@ -54,14 +54,14 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         // Only write the RHS value if this actor is in charge of vnode 0
         let is_right_table_writer = vnodes.is_set(0)?;
 
-        let state_table_l = RowBasedStateTable::from_table_catalog(
+        let state_table_l = StateTable::from_table_catalog(
             node.get_left_table()?,
             store.clone(),
             Some(vnodes),
         );
 
         let state_table_r =
-            RowBasedStateTable::from_table_catalog(node.get_right_table()?, store, None);
+            StateTable::from_table_catalog(node.get_right_table()?, store, None);
 
         Ok(Box::new(DynamicFilterExecutor::new(
             params.actor_context,

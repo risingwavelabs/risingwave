@@ -34,6 +34,10 @@ use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
 
+/// Limit number of the cached entries in an extreme aggregation call
+// TODO: estimate a good cache size instead of hard-coding
+const EXTREME_CACHE_SIZE: usize = 1024;
+
 mod extreme;
 
 mod string_agg;
@@ -208,16 +212,14 @@ impl<S: StateStore> ManagedStateImpl<S> {
             AggKind::Max | AggKind::Min if agg_call.append_only => Ok(Self::Value(
                 ManagedValueState::new(agg_call, row_count, group_key, state_table).await?,
             )),
-            AggKind::Max | AggKind::Min => {
-                Ok(Self::Table(Box::new(GenericExtremeState::new(
-                    agg_call,
-                    group_key,
-                    pk_indices,
-                    state_table_col_mapping,
-                    row_count.unwrap(),
-                    1024, // TODO: estimate a good cache size instead of hard-coding
-                ))))
-            }
+            AggKind::Max | AggKind::Min => Ok(Self::Table(Box::new(GenericExtremeState::new(
+                agg_call,
+                group_key,
+                pk_indices,
+                state_table_col_mapping,
+                row_count.unwrap(),
+                EXTREME_CACHE_SIZE,
+            )))),
             AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
                 agg_call,
                 group_key,

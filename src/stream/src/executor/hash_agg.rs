@@ -39,6 +39,9 @@ use crate::executor::aggregation::{
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
+/// Limit number of cached entries (one per group key)
+const HASH_AGG_CACHE_SIZE: usize = 1 << 16;
+
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
 ///
@@ -123,9 +126,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
         // // TODO: enable sanity check for hash agg executor <https://github.com/singularity-data/risingwave/issues/3885>
-        // for state_table in &mut state_tables {
-        //     state_table.disable_sanity_check();
-        // }
+        for state_table in &mut state_tables {
+            state_table.disable_sanity_check();
+        }
 
         Ok(Self {
             input,
@@ -409,7 +412,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
-        let mut state_map = EvictableHashMap::new(1 << 16);
+        let mut state_map = EvictableHashMap::new(HASH_AGG_CACHE_SIZE);
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;

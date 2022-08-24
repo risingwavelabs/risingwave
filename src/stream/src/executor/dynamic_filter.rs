@@ -394,10 +394,8 @@ mod tests {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::ActorContext;
 
-    fn create_in_memory_state_table() -> (
-        StateTable<MemoryStateStore>,
-        StateTable<MemoryStateStore>,
-    ) {
+    fn create_in_memory_state_table() -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>)
+    {
         let mem_state = MemoryStateStore::new();
 
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);

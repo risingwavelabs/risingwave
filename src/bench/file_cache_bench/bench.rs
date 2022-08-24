@@ -19,8 +19,10 @@ use std::time::{Duration, Instant};
 use bytes::{Buf, BufMut};
 use clap::Parser;
 use itertools::Itertools;
+use prometheus::Registry;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions};
+use risingwave_storage::hummock::file_cache::metrics::FileCacheMetrics;
 use risingwave_storage::hummock::{TieredCacheKey, TieredCacheValue};
 use tokio::sync::oneshot;
 
@@ -94,7 +96,10 @@ pub async fn run() {
         flush_buffer_hooks: vec![hook],
     };
 
-    let cache: FileCache<Index, CacheValue> = FileCache::open(options).await.unwrap();
+    let cache: FileCache<Index, CacheValue> =
+        FileCache::open(options, Arc::new(FileCacheMetrics::new(Registry::new())))
+            .await
+            .unwrap();
 
     let iostat_path = dev_stat_path(&args.path);
 
