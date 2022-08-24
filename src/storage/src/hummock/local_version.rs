@@ -330,6 +330,7 @@ impl LocalVersion {
         }
         self.sync_uncommitted_data.clear();
         self.shared_buffer.clear();
+        self.replicated_batches.clear();
         cleaned_epoch
     }
 }
