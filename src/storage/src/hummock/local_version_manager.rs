@@ -396,6 +396,13 @@ impl LocalVersionManager {
         is_remote_batch: bool,
         table_id: u32,
     ) -> HummockResult<usize> {
+        let max_sync_epoch = self.local_version.read().get_max_sync_epoch();
+        assert!(
+            epoch > max_sync_epoch,
+            "write epoch must greater than sync epoch, write epoch{}, sync epoch{}",
+            epoch,
+            max_sync_epoch
+        );
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
 
         let batch = SharedBufferBatch::new(

@@ -122,6 +122,10 @@ impl LocalVersion {
         }
     }
 
+    pub fn get_max_sync_epoch(&self) -> HummockEpoch {
+        self.max_sync_epoch
+    }
+
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
         self.shared_buffer.get_mut(&epoch)
     }
