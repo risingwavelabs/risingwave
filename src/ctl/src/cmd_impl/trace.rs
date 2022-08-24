@@ -14,14 +14,14 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::bail;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::stream_service::ActorTraceRequest;
-use risingwave_rpc_client::StreamClientPool;
+use risingwave_pb::monitor_service::StackTraceResponse;
+use risingwave_rpc_client::ComputeClientPool;
 
 use crate::common::MetaServiceOpts;
 
-pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
+pub async fn trace() -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
 
@@ -30,32 +30,41 @@ pub async fn trace(actor_id: Option<u32>) -> anyhow::Result<()> {
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = StreamClientPool::new(u64::MAX);
+    let clients = ComputeClientPool::new(u64::MAX);
 
-    let mut all_traces = BTreeMap::new();
+    let mut all_actor_traces = BTreeMap::new();
+    let mut all_rpc_traces = BTreeMap::new();
 
     // FIXME: the compute node may not be accessible directly from risectl, we may let the meta
     // service collect the reports from all compute nodes in the future.
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let traces = client
-            .actor_trace(ActorTraceRequest::default())
-            .await?
-            .actor_traces;
-        all_traces.extend(traces);
+        let StackTraceResponse {
+            actor_traces,
+            rpc_traces,
+        } = client.stack_trace().await?;
+
+        all_actor_traces.extend(actor_traces);
+        all_rpc_traces.extend(rpc_traces.into_iter().map(|(k, v)| {
+            (
+                format!("{} ({})", HostAddr::from(cn.get_host().unwrap()), k),
+                v,
+            )
+        }));
     }
 
-    if let Some(actor_id) = actor_id {
-        if let Some(trace) = all_traces.get(&actor_id) {
-            println!("{trace}");
-        } else {
-            bail!("Actor {actor_id} not found. Not running, or `RW_ASYNC_STACK_TRACE` is not set?");
-        }
-    } else if all_traces.is_empty() {
-        println!("No traces found. No actors are running, or `RW_ASYNC_STACK_TRACE` is not set?");
+    if all_actor_traces.is_empty() && all_rpc_traces.is_empty() {
+        println!(
+            "No traces found. No actors are running, or `--enable-async-stack-trace` not set?"
+        );
     } else {
-        for (key, trace) in all_traces {
+        println!("--- Actor Traces ---");
+        for (key, trace) in all_actor_traces {
             println!(">> Actor {key}\n{trace}");
+        }
+        println!("--- RPC Traces ---");
+        for (key, trace) in all_rpc_traces {
+            println!(">> RPC {key}\n{trace}");
         }
     }
 

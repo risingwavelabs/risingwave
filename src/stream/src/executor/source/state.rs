@@ -15,12 +15,12 @@
 use std::fmt::Debug;
 
 use bytes::Bytes;
-use log::error;
 use risingwave_common::bail;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
+use tracing::error;
 
 use crate::executor::StreamExecutorResult;
 
@@ -96,6 +96,7 @@ impl<S: StateStore> SourceStateHandler<S> {
         self.keyspace
             .get(
                 state_identifier.as_str(),
+                true,
                 ReadOptions {
                     epoch,
                     table_id: Some(self.keyspace.table_id()),

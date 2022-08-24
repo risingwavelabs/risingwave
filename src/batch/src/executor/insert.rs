@@ -127,9 +127,10 @@ impl InsertExecutor {
 impl BoxedExecutorBuilder for InsertExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "Insert executor should 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
         let insert_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::Insert
@@ -143,7 +144,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .context()
                 .source_manager_ref()
                 .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
-            inputs.remove(0),
+            child,
         )))
     }
 }
@@ -173,9 +174,10 @@ mod tests {
         let store = MemoryStateStore::new();
 
         // Make struct field
-        let struct_field = Field::unnamed(DataType::Struct {
-            fields: vec![DataType::Int32, DataType::Int32, DataType::Int32].into(),
-        });
+        let struct_field = Field::unnamed(DataType::new_struct(
+            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            vec![],
+        ));
 
         // Schema for mock executor.
         let mut schema = schema_test_utils::ii();

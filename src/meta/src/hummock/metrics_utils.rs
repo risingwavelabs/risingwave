@@ -37,7 +37,7 @@ pub fn trigger_commit_stat(metrics: &MetaMetrics, current_version: &HummockVersi
 
 pub fn trigger_sst_stat(
     metrics: &MetaMetrics,
-    compact_status: &CompactStatus,
+    compact_status: Option<&CompactStatus>,
     current_version: &HummockVersion,
     compaction_group_id: CompactionGroupId,
 ) {
@@ -56,27 +56,31 @@ pub fn trigger_sst_stat(
         });
         level_sst_size / 1024
     };
-    for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
+
+    for idx in 0..current_version.num_levels(compaction_group_id) {
         let sst_num = level_sst_cnt(idx);
-        let compact_cnt = level_handler.get_pending_file_count();
         let level_label = format!(
             "{}_{}",
             idx,
-            StaticCompactionGroupId::from_u64(compaction_group_id).unwrap(),
+            StaticCompactionGroupId::from_u64(compaction_group_id).unwrap()
         );
         metrics
             .level_sst_num
             .with_label_values(&[&level_label])
             .set(sst_num as i64);
         metrics
-            .level_compact_cnt
-            .with_label_values(&[&level_label])
-            .set(compact_cnt as i64);
-        metrics
             .level_file_size
             .with_label_values(&[&level_label])
             .set(level_sst_size(idx) as i64);
+        if let Some(compact_status) = compact_status {
+            let compact_cnt = compact_status.level_handlers[idx].get_pending_file_count();
+            metrics
+                .level_compact_cnt
+                .with_label_values(&[&level_label])
+                .set(compact_cnt as i64);
+        }
     }
+
     let level_label = format!("cg{}_l0_sub", compaction_group_id);
     let sst_num = current_version
         .get_compaction_group_levels(compaction_group_id)
@@ -105,17 +109,19 @@ pub fn trigger_sst_stat(
             )
             .is_ok()
     {
-        for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-            let sst_num = level_sst_cnt(idx);
-            let sst_size = level_sst_size(idx);
-            let compact_cnt = level_handler.get_pending_file_count();
-            tracing::info!(
-                "Level {} has {} SSTs, the total size of which is {}KB, while {} of those are being compacted to bottom levels",
-                idx,
-                sst_num,
-                sst_size,
-                compact_cnt,
-            );
+        if let Some(compact_status) = compact_status {
+            for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
+                let sst_num = level_sst_cnt(idx);
+                let sst_size = level_sst_size(idx);
+                let compact_cnt = level_handler.get_pending_file_count();
+                tracing::info!(
+                    "Level {} has {} SSTs, the total size of which is {}KB, while {} of those are being compacted to bottom levels",
+                    idx,
+                    sst_num,
+                    sst_size,
+                    compact_cnt,
+                );
+            }
         }
     }
 }

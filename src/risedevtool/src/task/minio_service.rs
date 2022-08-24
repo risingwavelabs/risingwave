@@ -39,7 +39,7 @@ impl MinioService {
         Ok(Command::new(self.minio_path()?))
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MinioConfig) -> Result<()> {
         cmd.arg("server")
             .arg("--address")

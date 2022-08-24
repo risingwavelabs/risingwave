@@ -24,7 +24,6 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
@@ -37,6 +36,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_pb::catalog::Table;
+use tracing::trace;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
@@ -107,7 +107,7 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde, const T: AccessType> {
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. For READ_WRITE instances, the table will also check whether the writed rows
+    /// executor. For READ_WRITE instances, the table will also check whether the written rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
 
@@ -116,9 +116,6 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde, const T: AccessType> {
 
     /// Used for catalog table_properties
     table_option: TableOption,
-
-    // TODO: check and build bloom_filter_key by read_pattern_prefix_column
-    _read_pattern_prefix_column: u32,
 }
 
 impl<S: StateStore, RS: RowSerde, const T: AccessType> std::fmt::Debug
@@ -158,7 +155,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
             pk_indices,
             distribution,
             table_options,
-            0,
         )
     }
 }
@@ -185,7 +181,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
             pk_indices,
             distribution,
             Default::default(),
-            0,
         )
     }
 
@@ -247,6 +242,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
+
         let distribution = match vnodes {
             Some(vnodes) => Distribution {
                 dist_key_indices,
@@ -254,6 +250,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             },
             None => Distribution::fallback(),
         };
+
         Self::new_inner(
             store,
             TableId::new(table_catalog.id),
@@ -266,7 +263,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             pk_indices,
             distribution,
             TableOption::build_table_option(table_catalog.get_properties()),
-            table_catalog.read_pattern_prefix_column,
         )
     }
 
@@ -283,7 +279,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             vnodes,
         }: Distribution,
         table_option: TableOption,
-        read_pattern_prefix_column: u32,
     ) -> Self {
         let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
 
@@ -320,13 +315,23 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             vnodes,
             disable_sanity_check: false,
             table_option,
-            _read_pattern_prefix_column: read_pattern_prefix_column,
         }
     }
 
     /// Disable sanity check on this storage table.
     pub fn disable_sanity_check(&mut self) {
         self.disable_sanity_check = true;
+    }
+
+    /// Update the vnode bitmap of this storage table, used for fragment scaling or migration.
+    pub(super) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        if self.dist_key_indices.is_empty() {
+            assert_eq!(
+                new_vnodes, self.vnodes,
+                "should not update vnode bitmap for singleton table"
+            );
+        }
+        self.vnodes = new_vnodes;
     }
 
     pub fn schema(&self) -> &Schema {
@@ -399,9 +404,19 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let mut deserializer = RS::create_deserializer(self.mapping.clone());
         let read_options = self.get_read_option(epoch);
+        assert!(pk.size() <= self.pk_indices.len());
+        let key_indices = (0..pk.size())
+            .into_iter()
+            .map(|index| self.pk_indices[index])
+            .collect_vec();
+
         if let Some(value) = self
             .keyspace
-            .get(&serialized_pk, read_options.clone())
+            .get(
+                &serialized_pk,
+                self.dist_key_indices == key_indices,
+                read_options.clone(),
+            )
             .await?
         {
             let deserialize_res = deserializer
@@ -700,7 +715,21 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             false,
         );
 
-        let prefix_hint = if pk_prefix.size() == 0 {
+        assert!(pk_prefix.size() <= self.pk_indices.len());
+        let pk_prefix_indices = (0..pk_prefix.size())
+            .into_iter()
+            .map(|index| self.pk_indices[index])
+            .collect_vec();
+        let prefix_hint = if self.dist_key_indices.is_empty()
+            || self.dist_key_indices != pk_prefix_indices
+        {
+            trace!(
+                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                self.keyspace.table_id(),
+                pk_prefix,
+                self.dist_key_indices,
+                pk_prefix_indices
+            );
             None
         } else {
             let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
@@ -709,10 +738,14 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         };
 
         trace!(
-            "iter_with_pk_bounds: prefix_hint {:?} start_key: {:?}, end_key: {:?}",
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            self.keyspace.table_id(),
             prefix_hint,
             start_key,
-            end_key
+            end_key,
+            pk_prefix,
+            self.dist_key_indices,
+            pk_prefix_indices
         );
 
         self.iter_with_encoded_key_range(

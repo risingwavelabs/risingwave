@@ -24,6 +24,7 @@ use lazy_static::lazy_static;
 use parking_lot::RwLock;
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::local_version_manager::SyncResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -109,7 +110,12 @@ impl StateStore for MemoryStateStore {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        _check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
             // We do not really care about vnodes here, so we just use the default value.
@@ -238,10 +244,13 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
-            Ok(0)
+            Ok(SyncResult {
+                sync_succeed: true,
+                ..Default::default()
+            })
         }
     }
 
@@ -371,6 +380,7 @@ mod tests {
             state_store
                 .get(
                     b"a",
+                    true,
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
@@ -385,6 +395,7 @@ mod tests {
             state_store
                 .get(
                     b"b",
+                    true,
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
@@ -399,6 +410,7 @@ mod tests {
             state_store
                 .get(
                     b"c",
+                    true,
                     ReadOptions {
                         epoch: 0,
                         table_id: Default::default(),
@@ -413,6 +425,7 @@ mod tests {
             state_store
                 .get(
                     b"a",
+                    true,
                     ReadOptions {
                         epoch: 1,
                         table_id: Default::default(),
@@ -427,6 +440,7 @@ mod tests {
             state_store
                 .get(
                     b"b",
+                    true,
                     ReadOptions {
                         epoch: 1,
                         table_id: Default::default(),
@@ -441,6 +455,7 @@ mod tests {
             state_store
                 .get(
                     b"c",
+                    true,
                     ReadOptions {
                         epoch: 1,
                         table_id: Default::default(),

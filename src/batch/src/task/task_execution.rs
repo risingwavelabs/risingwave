@@ -62,14 +62,6 @@ impl Debug for TaskOutputId {
     }
 }
 
-pub(crate) enum TaskState {
-    Pending,
-    Running,
-    Blocking,
-    Finished,
-    Failed,
-}
-
 impl From<&ProstTaskId> for TaskId {
     fn from(prost: &ProstTaskId) -> Self {
         TaskId {
@@ -176,7 +168,7 @@ pub struct BatchTaskExecution<C> {
     /// Task state.
     state: Mutex<TaskStatus>,
 
-    /// Receivers data of the task.   
+    /// Receivers data of the task.
     receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
     /// Context for task execution
@@ -224,7 +216,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// to a particular shuffling strategy. For example, in hash shuffling, the result will be
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
-    /// such, parallel consumers are able to consume the result idependently.
+    /// such, parallel consumers are able to consume the result independently.
     pub async fn async_execute(self: Arc<Self>) -> Result<()> {
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -386,7 +378,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn abort_task(&self) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
-            self.change_state(TaskStatus::Aborting);
+            // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
             if sender.send(0).is_err() {
                 warn!("The task has already died before this request, so the abort did no-op")

@@ -402,10 +402,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .await
         .unwrap();
     let compaction_scheduler = Arc::new(CompactionScheduler::new(
+        env.clone(),
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
-    let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
+    let vacuum_trigger = Arc::new(hummock::VacuumManager::new(
+        env.clone(),
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));

@@ -328,8 +328,9 @@
     create table a(a1 int);
     create table b(b1 int);
     select * from a join lateral (select * from b where a1 = b1);
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported,
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
+  binder_error: |-
+    Feature is not yet implemented: lateral subqueries are not yet supported
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -491,6 +492,35 @@
     select * from t1 join t2 using (v3);
   binder_error: 'Item not found: column "v3" specified in USING clause does not exist
     in left table'
+- sql: |
+    /* Ensure that we can correctly bind nested joins */
+    create table t1(v1 int, v2 int);
+    create table t2(v3 int, v4 int);
+    create table t3(v5 int, v6 int);
+    create table t4(v7 int, v8 int);
+    select * from (t1 join t2 on v1=v3) full join (t3 join t4 on v5=v7) on v2=v6 and v4=v8;
+  logical_plan: |
+    LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
+      LogicalJoin { type: FullOuter, on: (t1.v2 = t3.v6) AND (t2.v4 = t4.v8), output: all }
+        LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
+          LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
+          LogicalScan { table: t2, columns: [t2._row_id, t2.v3, t2.v4] }
+        LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
+          LogicalScan { table: t3, columns: [t3._row_id, t3.v5, t3.v6] }
+          LogicalScan { table: t4, columns: [t4._row_id, t4.v7, t4.v8] }
+- sql: |
+    /* Ensure that we can correctly bind nested joins with ambiguous column names */
+    create table t1(x int);
+    create table t2(x int);
+    create table t3(x int);
+    select *, x, t1.x, t2.x, t3.x from t1 full join (t2 full join t3 using (x)) using (x);
+  logical_plan: |
+    LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x), Coalesce(t1.x, t2.x, t3.x), t1.x, t2.x, t3.x] }
+      LogicalJoin { type: FullOuter, on: (t1.x = Coalesce(t2.x, t3.x)), output: all }
+        LogicalScan { table: t1, columns: [t1._row_id, t1.x] }
+        LogicalJoin { type: FullOuter, on: (t2.x = t3.x), output: all }
+          LogicalScan { table: t2, columns: [t2._row_id, t2.x] }
+          LogicalScan { table: t3, columns: [t3._row_id, t3.x] }
 - sql: |
     /* Ensure that non-trivial ambiguous references can be resolved */
     create table a(x int);

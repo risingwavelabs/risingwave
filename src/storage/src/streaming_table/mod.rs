@@ -12,13 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! value encoding is an encoding format which converts the data into a form that do not guarantee
-//! directly compared with memcmp.
-
-#![deny(missing_docs)]
-
-mod de;
-mod ser;
-
-pub use de::Deserializer;
-pub use ser::Serializer;
+pub mod mem_table;
+pub mod state_table;
+#[cfg(test)]
+pub mod test_streaming_table;

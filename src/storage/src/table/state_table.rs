@@ -96,6 +96,15 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         self.storage_table.disable_sanity_check();
     }
 
+    /// Update the vnode bitmap of this state table, used for fragment scaling or migration.
+    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
+        assert!(
+            !self.is_dirty(),
+            "vnode bitmap should only be updated when state table is clean"
+        );
+        self.storage_table.update_vnode_bitmap(vnode_bitmap);
+    }
+
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
     pub fn storage_table(&self) -> &StorageTableBase<S, RS, READ_WRITE> {
         &self.storage_table
@@ -234,7 +243,7 @@ struct StateTableRowIter<'a, M, C> {
     _phantom: PhantomData<&'a ()>,
 }
 
-/// `StateTableRowIter` is able to read the just written data (uncommited data).
+/// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where

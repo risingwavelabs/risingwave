@@ -49,6 +49,7 @@ impl BoundSelect {
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
+            .chain(self.having.iter())
             .any(|expr| expr.has_correlated_input_ref_by_depth())
             || match self.from.as_ref() {
                 Some(relation) => relation.is_correlated(),
@@ -114,7 +115,7 @@ impl Binder {
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                self.expr_to_field(s, name)
+                Ok(Field::with_name(s.return_type(), name))
             })
             .collect::<Result<Vec<Field>>>()?;
 

@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
@@ -81,9 +82,9 @@ impl StreamService for StreamServiceImpl {
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
-        let table = request.into_inner();
+        let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(table);
+        let res = self.mgr.update_actor_info(&req.info);
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);
@@ -152,10 +153,18 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self.mgr.collect_barrier(req.prev_epoch).await;
+        let collect_result = self
+            .mgr
+            .collect_barrier(req.prev_epoch)
+            .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
+            .await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let synced_sstables = self.mgr.sync_epoch(req.prev_epoch).await;
+        let (synced_sstables, sync_succeed) = self
+            .mgr
+            .sync_epoch(req.prev_epoch)
+            .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+            .await;
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
@@ -168,6 +177,7 @@ impl StreamService for StreamServiceImpl {
                     sst: Some(sst),
                 })
                 .collect_vec(),
+            checkpoint: sync_succeed,
             worker_id: self.env.worker_id(),
         }))
     }
@@ -217,22 +227,6 @@ impl StreamService for StreamServiceImpl {
         tracing::debug!(id = %id, "drop source");
 
         Ok(Response::new(DropSourceResponse { status: None }))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn actor_trace(
-        &self,
-        request: Request<ActorTraceRequest>,
-    ) -> Result<Response<ActorTraceResponse>, Status> {
-        let _req = request.into_inner();
-
-        let actor_traces = self.mgr.get_actor_traces();
-        let actor_traces = actor_traces
-            .into_iter()
-            .map(|(k, v)| (k, v.to_string()))
-            .collect();
-
-        Ok(Response::new(ActorTraceResponse { actor_traces }))
     }
 }
 

@@ -20,34 +20,15 @@ use std::sync::Arc;
 use itertools::{multizip, Itertools};
 use paste::paste;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk,
-    Row, Utf8Array,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Row, Utf8Array,
+    Utf8ArrayBuilder,
 };
-use risingwave_common::for_all_variants;
-use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
 
-macro_rules! array_impl_add_datum {
-    ([$arr_builder: ident, $datum: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match ($arr_builder, $datum) {
-            $(
-                (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-                    inner.append(Some(v.as_scalar_ref()))?;
-                }
-                (ArrayBuilderImpl::$variant_name(inner), None) => {
-                    inner.append(None)?;
-                }
-            )*
-            (_, _) => $crate::bail!(
-                "Do not support values in insert values executor".to_string(),
-            ),
-        }
-    };
-}
-
 macro_rules! gen_eval {
-    { $macro:ident, $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
+    { ($macro:ident, $macro_row:ident), $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
         fn eval(&self, data_chunk: &DataChunk) -> $crate::Result<ArrayRef> {
             paste! {
                 $(
@@ -56,7 +37,7 @@ macro_rules! gen_eval {
                 )*
 
                 let bitmap = data_chunk.get_visibility_ref();
-                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity());
+                let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
@@ -78,31 +59,18 @@ macro_rules! gen_eval {
             }
         }
 
-        /// Currently, `eval_row()` first calls `eval_row()` on the inner expressions and the
-        /// resulting datums are placed in their own arrays. The arrays are then handled in the same
-        /// way as in `eval()`. This could be optimized to work on the datums directly
-        /// instead of placing them in arrays.
+        /// `eval_row()` first calls `eval_row()` on the inner expressions to get the resulting datums,
+        /// then directly calls `$macro_row` to evaluate the current expression.
         fn eval_row(&self, row: &Row) -> $crate::Result<Datum> {
             paste! {
                 $(
                     let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
-
-                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1);
-                    let [<ref_ $arg:lower>] = &mut [<builder_ $arg:lower>];
-
-                    for_all_variants! {array_impl_add_datum, [<ref_ $arg:lower>], [<datum_ $arg:lower>]}
-
-                    let [<arr_ $arg:lower>] = [<builder_ $arg:lower>].finish().map(Arc::new)?;
-                    let [<arr_ $arg:lower>]: &$arg = [<arr_ $arg:lower>].as_ref().into();
+                    let [<scalar_ref_ $arg:lower>] = [<datum_ $arg:lower>].as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
                 )*
 
-                let mut output_array = <$OA as Array>::Builder::new(1);
-                for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
-                    $macro!(self, output_array, $([<v_ $arg:lower>],)*)
-                }
-                let output_arrayimpl: ArrayImpl = output_array.finish()?.into();
-
-                Ok(output_arrayimpl.to_datum())
+                let output_scalar = $macro_row!(self, $([<scalar_ref_ $arg:lower>],)*);
+                let output_datum = output_scalar.map(|s| s.to_scalar_value());
+                Ok(output_datum)
             }
         }
     }
@@ -116,6 +84,16 @@ macro_rules! eval_normal {
             $output_array.append(output)?;
         } else {
             $output_array.append(None)?;
+        }
+    }
+}
+macro_rules! eval_normal_row {
+    ($self:ident, $($arg:ident,)*) => {
+        if let ($(Some($arg), )*) = ($($arg, )*) {
+            let ret = ($self.func)($($arg, )*)?;
+            Some(ret)
+        } else {
+            None
         }
     }
 }
@@ -159,7 +137,7 @@ macro_rules! gen_expr_normal {
                     self.return_type.clone()
                 }
 
-                gen_eval! { eval_normal, $ty_name, OA, $($arg, )* }
+                gen_eval! { (eval_normal, eval_normal_row), $ty_name, OA, $($arg, )* }
             }
 
             impl<$($arg: Array, )*
@@ -192,6 +170,18 @@ macro_rules! eval_bytes {
             $output_array = guard.into_inner();
         } else {
             $output_array.append(None)?;
+        }
+    }
+}
+macro_rules! eval_bytes_row {
+    ($self:ident, $($arg:ident,)*) => {
+        if let ($(Some($arg), )*) = ($($arg, )*) {
+            let writer = Utf8ArrayBuilder::new(1).writer();
+            let guard = ($self.func)($($arg, )* writer)?;
+            let array = guard.into_inner().finish()?;
+            array.into_single_value() // take the single value from the array
+        } else {
+            None
         }
     }
 }
@@ -231,7 +221,7 @@ macro_rules! gen_expr_bytes {
                     self.return_type.clone()
                 }
 
-                gen_eval! { eval_bytes, $ty_name, Utf8Array, $($arg, )* }
+                gen_eval! { (eval_bytes, eval_bytes_row), $ty_name, Utf8Array, $($arg, )* }
             }
 
             impl<$($arg: Array, )*
@@ -260,6 +250,11 @@ macro_rules! eval_nullable {
             let ret = ($self.func)($($arg,)*)?;
             $output_array.append(option_as_scalar_ref(&ret))?;
         }
+    }
+}
+macro_rules! eval_nullable_row {
+    ($self:ident, $($arg:ident,)*) => {
+        ($self.func)($($arg,)*)?
     }
 }
 
@@ -302,7 +297,7 @@ macro_rules! gen_expr_nullable {
                     self.return_type.clone()
                 }
 
-                gen_eval! { eval_nullable, $ty_name, OA, $($arg, )* }
+                gen_eval! { (eval_nullable, eval_nullable_row), $ty_name, OA, $($arg, )* }
             }
 
             impl<$($arg: Array, )*

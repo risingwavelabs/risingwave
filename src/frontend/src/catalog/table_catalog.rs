@@ -62,11 +62,11 @@ pub struct TableCatalog {
     /// All columns in this table
     pub columns: Vec<ColumnCatalog>,
 
-    /// Key used as materialize's storage key prefix, including MV order columns and pk.
+    /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
     pub order_key: Vec<FieldOrder>,
 
-    /// Primary key columns indices.
-    pub pk: Vec<usize>,
+    /// pk_indices of the corresponding materialize operator's output.
+    pub stream_key: Vec<usize>,
 
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
@@ -82,8 +82,6 @@ pub struct TableCatalog {
     pub owner: u32,
 
     pub properties: HashMap<String, String>,
-
-    pub read_pattern_prefix_column: u32,
 }
 
 impl TableCatalog {
@@ -121,7 +119,7 @@ impl TableCatalog {
                 .iter()
                 .map(FieldOrder::to_order_pair)
                 .collect(),
-            pk: self.pk.clone(),
+            stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
@@ -140,6 +138,14 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
+    pub fn to_state_table_prost(&self) -> ProstTable {
+        use risingwave_common::catalog::{DatabaseId, SchemaId};
+        self.to_prost(
+            SchemaId::placeholder() as u32,
+            DatabaseId::placeholder() as u32,
+        )
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
             id: self.id.table_id as u32,
@@ -148,7 +154,7 @@ impl TableCatalog {
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
             order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
-            pk: self.pk.iter().map(|x| *x as _).collect(),
+            stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
@@ -163,7 +169,6 @@ impl TableCatalog {
             appendonly: self.appendonly,
             owner: self.owner,
             properties: self.properties.clone(),
-            read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
     }
 }
@@ -179,11 +184,9 @@ impl From<ProstTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
-            for col_desc in catalog.column_desc.flatten() {
-                let col_name = col_desc.name.clone();
-                if !col_names.insert(col_name.clone()) {
-                    panic!("duplicated column name {} in table {} ", col_name, tb.name)
-                }
+            let col_name = catalog.name();
+            if !col_names.insert(col_name.to_string()) {
+                panic!("duplicated column name {} in table {} ", col_name, tb.name)
             }
 
             let col_id = catalog.column_desc.column_id.get_id();
@@ -208,11 +211,10 @@ impl From<ProstTable> for TableCatalog {
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
-            pk: tb.pk.iter().map(|x| *x as _).collect(),
+            stream_key: tb.stream_key.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
             properties: tb.properties,
-            read_pattern_prefix_column: tb.read_pattern_prefix_column,
         }
     }
 }
@@ -264,12 +266,12 @@ mod tests {
                         vec![
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.address",
+                                "address",
                                 2,
                             ),
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.zipcode",
+                                "zipcode",
                                 3,
                             ),
                         ],
@@ -282,7 +284,7 @@ mod tests {
                 direct: Direction::Asc,
             }
             .to_protobuf()],
-            pk: vec![0],
+            stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
@@ -293,7 +295,6 @@ mod tests {
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
             )]),
-            read_pattern_prefix_column: 0,
         }
         .into();
 
@@ -308,23 +309,24 @@ mod tests {
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar, DataType::Varchar].into()
-                            },
+                            data_type: DataType::new_struct(
+                                vec![DataType::Varchar, DataType::Varchar],
+                                vec!["address".to_string(), "zipcode".to_string()]
+                            ),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(2),
-                                    name: "country.address".to_string(),
+                                    name: "address".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 },
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(3),
-                                    name: "country.zipcode".to_string(),
+                                    name: "zipcode".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 }
@@ -334,7 +336,7 @@ mod tests {
                         is_hidden: false
                     }
                 ],
-                pk: vec![0],
+                stream_key: vec![0],
                 order_key: vec![FieldOrder {
                     index: 0,
                     direct: Direction::Asc,
@@ -346,8 +348,8 @@ mod tests {
                     String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                     String::from("300")
                 )]),
-                read_pattern_prefix_column: 0,
             }
         );
+        assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
     }
 }

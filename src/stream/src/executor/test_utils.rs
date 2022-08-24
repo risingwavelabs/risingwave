@@ -164,7 +164,9 @@ pub mod agg_executor {
     use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::AggCall;
-    use crate::executor::{BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices};
+    use crate::executor::{
+        ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
+    };
 
     /// Create state table for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_internal_table_catalog`.
@@ -238,6 +240,7 @@ pub mod agg_executor {
     }
 
     pub fn new_boxed_simple_agg_executor(
+        ctx: ActorContextRef,
         keyspace_gen: Vec<(MemoryStateStore, TableId)>,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
@@ -262,6 +265,7 @@ pub mod agg_executor {
 
         Box::new(
             GlobalSimpleAggExecutor::new(
+                ctx,
                 input,
                 agg_calls,
                 pk_indices,
@@ -270,6 +274,34 @@ pub mod agg_executor {
                 state_table_col_mappings,
             )
             .unwrap(),
+        )
+    }
+}
+
+pub mod top_n_executor {
+    use itertools::Itertools;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
+
+    pub fn create_in_memory_state_table(
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+    ) -> RowBasedStateTable<MemoryStateStore> {
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+        RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            TableId::new(0),
+            column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
         )
     }
 }

@@ -92,7 +92,7 @@ fn get_scan_bound(
         .iter()
         .map(|v| {
             let ty = pk_types.next().unwrap();
-            let scalar = ScalarImpl::bytes_to_scalar(v, &ty.to_protobuf()).unwrap();
+            let scalar = ScalarImpl::from_proto_bytes(v, &ty.to_protobuf()).unwrap();
             Some(scalar)
         })
         .collect_vec());
@@ -102,7 +102,7 @@ fn get_scan_bound(
 
     let bound_ty = pk_types.next().unwrap();
     let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-        let scalar = ScalarImpl::bytes_to_scalar(&bound.value, &bound_ty.to_protobuf()).unwrap();
+        let scalar = ScalarImpl::from_proto_bytes(&bound.value, &bound_ty.to_protobuf()).unwrap();
 
         let datum = Some(scalar);
         if bound.inclusive {
@@ -186,7 +186,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 vnodes: Bitmap::from(vnodes).into(),
                 dist_key_indices,
             },
-            // This is possbile for dml. vnode_bitmap is not filled by scheduler.
+            // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
             None => Distribution::all_vnodes(dist_key_indices),
         };
@@ -200,7 +200,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
-            let batch_stats = source.context().stats();
+            let batch_stats = source.context().stats().unwrap();
             let table = RowBasedStorageTable::new_partial(
                 state_store.clone(),
                 table_id,
