@@ -2569,17 +2569,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libtest-mimic"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79529479c298f5af41375b0c1a77ef670d450b4c9cd7949d2b43af08121b20ec"
-dependencies = [
- "clap 3.2.17",
- "termcolor",
- "threadpool",
-]
-
-[[package]]
 name = "libz-sys"
 version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4581,7 +4570,7 @@ dependencies = [
  "console",
  "futures",
  "itertools",
- "libtest-mimic 0.4.1",
+ "libtest-mimic",
  "madsim-tokio",
  "risingwave_frontend",
  "risingwave_sqlparser",
@@ -4897,7 +4886,7 @@ dependencies = [
  "futures",
  "itertools",
  "lazy_static",
- "libtest-mimic 0.4.1",
+ "libtest-mimic",
  "madsim-tokio",
  "paste",
  "rand 0.8.5",
@@ -5534,7 +5523,7 @@ dependencies = [
  "glob",
  "humantime",
  "itertools",
- "libtest-mimic 0.5.2",
+ "libtest-mimic",
  "tempfile",
  "thiserror",
  "tracing",
