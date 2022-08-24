@@ -63,5 +63,5 @@ script = '''
 #!/bin/bash
 set -e
 
-cargo nextest run -p risingwave_frontend_test_runner "$@"
+cargo nextest run -p risingwave_frontend_test_runner --retries 0 "$@"
 '''
