@@ -13,7 +13,9 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
+#![feature(once_cell)]
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use clap::Parser;
@@ -54,14 +56,25 @@ pub struct Args {
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 
+    /// The number of clients to run simultaneously.
+    ///
+    /// If this argument is set, the runner will implicitly create a database for each test file.
     #[clap(short, long)]
     jobs: Option<usize>,
+
+    /// Randomly kill a compute node after each query.
+    ///
+    /// Only available when `-j` is not set.
+    #[clap(long)]
+    kill_node: bool,
 }
+
+static ARGS: LazyLock<Args> = LazyLock::new(Args::parse);
 
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
-    let args = Args::parse();
+    let args = &*ARGS;
 
     let handle = madsim::runtime::Handle::current();
     println!("seed = {}", handle.seed());
@@ -155,21 +168,59 @@ async fn main() {
         .unwrap();
 }
 
+#[cfg(madsim)]
 async fn kill_node() {
-    let i = rand::thread_rng().gen_range(1..=3);
-    let name = format!("compute-{}", i);
-    tracing::info!("kill {name}");
-    madsim::runtime::Handle::current().kill(&name);
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    madsim::runtime::Handle::current().restart(&name);
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    if rand::thread_rng().gen_range(0.0..1.0) < 0.0 {
+        // kill a frontend (disabled)
+        // FIXME: handle postgres connection error
+        let i = rand::thread_rng().gen_range(1..=ARGS.frontend_nodes);
+        let name = format!("frontend-{}", i);
+        tracing::info!("restart {name}");
+        madsim::runtime::Handle::current().restart(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    } else {
+        // kill a compute node
+        let i = rand::thread_rng().gen_range(1..=ARGS.compute_nodes);
+        let name = format!("compute-{}", i);
+        tracing::info!("kill {name}");
+        madsim::runtime::Handle::current().kill(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        tracing::info!("restart {name}");
+        madsim::runtime::Handle::current().restart(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    }
+}
+
+#[cfg(not(madsim))]
+async fn kill_node() {}
+
+struct HookImpl;
+
+#[async_trait::async_trait]
+impl sqllogictest::Hook for HookImpl {
+    async fn on_stmt_complete(&mut self, _sql: &str) {
+        kill_node().await;
+    }
+
+    async fn on_query_complete(&mut self, _sql: &str) {
+        kill_node().await;
+    }
 }
 
 async fn run_slt_task(glob: &str, host: &str) {
-    let mut tester =
-        sqllogictest::Runner::new(Risingwave::connect(host.to_string(), "dev".to_string()).await);
-    tester.on_stmt_complete(kill_node);
-    tester.on_query_complete(kill_node);
+    let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
+    if ARGS.kill_node {
+        risingwave
+            .client
+            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
+            .await
+            .expect("failed to set");
+    }
+    let mut tester = sqllogictest::Runner::new(risingwave);
+    if ARGS.kill_node {
+        tester.set_hook(HookImpl);
+    }
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         let file = file.unwrap();

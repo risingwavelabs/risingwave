@@ -82,3 +82,5 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
+# TODO: remove this after v0.6.3 published
+sqllogictest = { git = "https://github.com/risinglightdb/sqllogictest-rs.git", rev = "927645c" }
