@@ -54,14 +54,10 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         // Only write the RHS value if this actor is in charge of vnode 0
         let is_right_table_writer = vnodes.is_set(0)?;
 
-        let state_table_l = StateTable::from_table_catalog(
-            node.get_left_table()?,
-            store.clone(),
-            Some(vnodes),
-        );
+        let state_table_l =
+            StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));
 
-        let state_table_r =
-            StateTable::from_table_catalog(node.get_right_table()?, store, None);
+        let state_table_r = StateTable::from_table_catalog(node.get_right_table()?, store, None);
 
         Ok(Box::new(DynamicFilterExecutor::new(
             params.actor_context,
