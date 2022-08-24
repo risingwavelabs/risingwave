@@ -16,3 +16,5 @@ coverage:
 ignore:
   - "src/risedevtooltool"
   - "src/bench/s3_bench"
+  # Remove this after #4754
+  - "src/storage/src/hummock/store"
