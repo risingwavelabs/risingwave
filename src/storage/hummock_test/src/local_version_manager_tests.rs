@@ -475,7 +475,7 @@ async fn test_sst_gc_watermark() {
     let initial_version_id = pinned_version.id();
     let initial_max_commit_epoch = pinned_version.max_committed_epoch();
 
-    let epochs: Vec<u64> = vec![initial_max_commit_epoch + 1];
+    let epochs: Vec<u64> = vec![initial_max_commit_epoch + 1, initial_max_commit_epoch + 2];
     let batches: Vec<Vec<(Bytes, StorageValue)>> =
         epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
 
@@ -486,16 +486,18 @@ async fn test_sst_gc_watermark() {
         HummockSstableId::MAX
     );
 
-    local_version_manager
-        .write_shared_buffer(
-            epochs[0],
-            StaticCompactionGroupId::StateDefault.into(),
-            batches[0].clone(),
-            false,
-            Default::default(),
-        )
-        .await
-        .unwrap();
+    for i in 0..2 {
+        local_version_manager
+            .write_shared_buffer(
+                epochs[i],
+                StaticCompactionGroupId::StateDefault.into(),
+                batches[i].clone(),
+                false,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+    }
 
     assert_eq!(
         local_version_manager
@@ -504,27 +506,43 @@ async fn test_sst_gc_watermark() {
         HummockSstableId::MAX
     );
 
-    let result = local_version_manager
-        .sync_shared_buffer(epochs[0])
-        .await
-        .unwrap();
-    assert!(result.sync_succeed);
+    for i in 0..2 {
+        let result = local_version_manager
+            .sync_shared_buffer(epochs[i])
+            .await
+            .unwrap();
+        assert!(result.sync_succeed);
 
-    assert_eq!(
-        local_version_manager
-            .get_sstable_id_manager()
-            .global_watermark_sst_id(),
-        1
-    );
+        // Global watermark determined by epoch 0.
+        assert_eq!(
+            local_version_manager
+                .get_sstable_id_manager()
+                .global_watermark_sst_id(),
+            1
+        );
+    }
 
-    // Update version for epochs[0]
     let version = HummockVersion {
         id: initial_version_id + 1,
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
+    // Watermark held by epoch 0 is removed.
     local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
+    // Global watermark determined by epoch 1.
+    assert_eq!(
+        local_version_manager
+            .get_sstable_id_manager()
+            .global_watermark_sst_id(),
+        2
+    );
 
+    let version = HummockVersion {
+        id: initial_version_id + 2,
+        max_committed_epoch: epochs[1],
+        ..Default::default()
+    };
+    local_version_manager.try_update_pinned_version(None, Payload::PinnedVersion(version));
     assert_eq!(
         local_version_manager
             .get_sstable_id_manager()
