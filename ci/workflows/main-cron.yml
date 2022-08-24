@@ -33,7 +33,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test"
-    command: "ci/scripts/cron-e2e-test.sh -p ci-dev"
+    command: "ci/scripts/e2e-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -58,8 +58,8 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  - label: "unit and fuzz test"
-    command: "ci/scripts/unit-fuzz-test.sh"
+  - label: "unit test"
+    command: "ci/scripts/unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
@@ -71,8 +71,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-            - RW_RANDOM_SEED_SQLSMITH: true
-    timeout_in_minutes: 15
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
