@@ -61,7 +61,7 @@ impl TaskLocalBytesAllocated {
         self.0.unwrap_unchecked().fetch_add(val, Ordering::Relaxed);
     }
 
-    /// Substract from the counter value, and `drop` the counter while the count reaches zero.
+    /// Subtract from the counter value, and `drop` the counter while the count reaches zero.
     #[inline(always)]
     pub fn sub(&self, val: usize) {
         if let Some(bytes) = self.0 {
