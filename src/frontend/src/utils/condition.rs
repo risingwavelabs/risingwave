@@ -24,7 +24,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::scan_range::ScanRange;
 
 use crate::expr::{
-    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions, to_disjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
@@ -247,6 +247,30 @@ impl Condition {
     ) -> Result<(Vec<ScanRange>, Self)> {
         fn false_cond() -> (Vec<ScanRange>, Condition) {
             (vec![], Condition::false_cond())
+        }
+
+        // it's an OR
+        if self.conjunctions.len() == 1
+            && let ExprImpl::FunctionCall(function_call) = &self.conjunctions[0]
+            && function_call.get_expr_type() == ExprType::Or {
+            let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> =
+                to_disjunctions(self.conjunctions[0].clone())
+                .into_iter()
+                .map(|x| Condition {
+                    conjunctions: to_conjunctions(x)
+                }.split_to_scan_ranges(order_column_ids, num_cols))
+                .collect();
+
+            // if any arm or `OR` clause fail, bail out.
+            let disjunctions = disjunctions_result?;
+
+            // if all scan ranges without other conditions, merge all of them.
+            if disjunctions.iter().all(|(_, other_condition)| other_condition.always_true()) {
+                let scan_ranges = disjunctions.into_iter().flat_map(|(scan_ranges, _)| scan_ranges).collect_vec();
+                return Ok((scan_ranges, Condition::true_cond()));
+            } else {
+                return Ok((vec![], self));
+            }
         }
 
         let mut col_idx_to_pk_idx = vec![None; num_cols];
