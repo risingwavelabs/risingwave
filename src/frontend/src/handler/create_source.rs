@@ -92,27 +92,22 @@ pub async fn handle_create_source(
     let with_properties = handle_with_properties("create_source", stmt.with_properties.0)?;
 
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
-    let (columns, pk_column_ids, row_id_index) =
+    let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            todo!();
-            let mut columns = extract_protobuf_table_schema(protobuf_schema)?;
-            if let Some(row_id_index) = row_id_index {
-                columns.insert(
-                    row_id_index,
-                    ColumnCatalog::row_id_column(todo!()).to_protobuf(),
-                );
-            }
-            // TODO: why hardcoding pk_column_ids here?
+            assert_eq!(columns.len(), 1);
+            assert_eq!(pk_column_ids, vec![1.into()]);
+            assert_eq!(row_id_index, Some(0));
+            columns.extend(extract_protobuf_table_schema(protobuf_schema)?);
             StreamSourceInfo {
                 properties: with_properties.clone(),
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                row_id_index: todo!(),
+                row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
                 columns,
-                pk_column_ids: todo!(),
+                pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
             }
         }
         SourceSchema::Json => StreamSourceInfo {
