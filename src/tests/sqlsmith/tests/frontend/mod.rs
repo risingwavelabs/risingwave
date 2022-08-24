@@ -210,10 +210,9 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*SQLSMITH_ENV;
-                let data = i;
-                test_batch_query(session.clone(), tables.clone(), data, setup_sql);
+                test_batch_query(session.clone(), tables.clone(), i, setup_sql);
                 let test_stream_query =
-                    test_stream_query(session.clone(), tables.clone(), data, setup_sql);
+                    test_stream_query(session.clone(), tables.clone(), i, setup_sql);
                 build_runtime().block_on(test_stream_query);
                 Ok(())
             })
