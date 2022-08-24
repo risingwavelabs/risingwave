@@ -285,6 +285,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
+    /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
     fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Option<Expr> {
         use AggKind as A;
 
