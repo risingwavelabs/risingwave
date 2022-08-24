@@ -45,7 +45,7 @@ fn main() {
                 .to_string_lossy()
                 .contains(".apply.yaml")
         {
-            let file_name: String = path.file_name().unwrap().to_string_lossy().to_string();
+            let file_name = path.file_name().unwrap().to_string_lossy().to_string();
             let test_case_name = file_name.split('.').next().unwrap().to_string();
 
             tests.push(Trial::test(format!("{test_case_name}_test"), move || {
