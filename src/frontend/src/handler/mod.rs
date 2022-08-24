@@ -17,7 +17,7 @@ use std::sync::Arc;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ExplainType, ObjectType, Statement};
+use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
 use self::util::handle_with_properties;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -61,27 +61,9 @@ pub async fn handle(
         Statement::Explain {
             statement,
             describe_alias: _,
-            analyze: _,
+            analyze,
             options,
         } => {
-            match options.explain_type {
-                ExplainType::Logical => {
-                    return Err(ErrorCode::NotImplemented(
-                        "explain logical".to_string(),
-                        None.into(),
-                    )
-                    .into())
-                }
-                ExplainType::Physical => {}
-                ExplainType::DistSQL => {
-                    return Err(ErrorCode::NotImplemented(
-                        "explain distsql".to_string(),
-                        None.into(),
-                    )
-                    .into())
-                }
-            };
-
             match statement.as_ref() {
                 Statement::CreateTable { with_options, .. }
                 | Statement::CreateView { with_options, .. } => {
@@ -92,7 +74,7 @@ pub async fn handle(
                 _ => {}
             }
 
-            explain::handle_explain(context, *statement, options.verbose, options.trace)
+            explain::handle_explain(context, *statement, options, analyze)
         }
         Statement::CreateSource {
             is_materialized,

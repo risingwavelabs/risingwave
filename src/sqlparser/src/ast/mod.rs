@@ -796,12 +796,7 @@ impl fmt::Display for ExplainOptions {
             if self.explain_type == default.explain_type {
                 option_strs.push(self.explain_type.to_string());
             }
-            let mut iter = option_strs.iter();
-            write!(f, "{}", iter.next().unwrap())?;
-            for s in iter {
-                write!(f, ", {}", s)?;
-            }
-            Ok(())
+            write!(f, "{}", option_strs.iter().format(","))
         }
     }
 }
