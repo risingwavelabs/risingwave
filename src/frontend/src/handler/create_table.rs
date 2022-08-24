@@ -230,13 +230,10 @@ pub(crate) fn gen_materialized_source_plan(
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
-        let row_id_index = match source.info.unwrap() {
-            Info::StreamSource(StreamSourceInfo { row_id_index, .. }) => {
-                row_id_index.as_ref().map(|index| index.index as _)
-            }
-            Info::TableSource(TableSourceInfo { row_id_index, .. }) => {
-                row_id_index.as_ref().map(|index| index.index as _)
-            }
+        let row_id_index = {
+            let (Info::StreamSource(StreamSourceInfo { row_id_index, .. })
+            | Info::TableSource(TableSourceInfo { row_id_index, .. })) = source.info.unwrap();
+            row_id_index.as_ref().map(|index| index.index as _)
         };
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
