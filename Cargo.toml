@@ -80,7 +80,5 @@ opt-level = 1
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "a819877" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
-madsim = { git = "https://github.com/madsim-rs/madsim.git", rev = "874a606" }
-sqllogictest = { git = "https://github.com/risinglightdb/sqllogictest-rs.git", rev = "374f276" }
-# sqllogictest = { path = "../../../../sqllogictest-rs/sqllogictest" }
-# madsim = { path = "../madsim/madsim" }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
+postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
