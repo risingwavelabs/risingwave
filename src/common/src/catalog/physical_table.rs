@@ -15,7 +15,6 @@
 use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
 
 use super::{ColumnDesc, ColumnId, TableId};
-use crate::types::ParallelUnitId;
 use crate::util::sort_util::OrderPair;
 
 /// Includes necessary information for compute node to access data of the table.
@@ -34,14 +33,10 @@ pub struct TableDesc {
     /// as distribution key.
     pub distribution_key: Vec<usize>,
     /// Column indices for primary keys.
-    pub pk: Vec<usize>,
+    pub stream_key: Vec<usize>,
 
     /// Whether the table source is append-only
     pub appendonly: bool,
-
-    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
-    /// table.
-    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     pub retention_seconds: u32,
 }

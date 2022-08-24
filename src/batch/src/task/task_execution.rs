@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::StreamExt;
+use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -26,7 +27,6 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::sync::oneshot::{Receiver, Sender};
-use tracing_futures::Instrument;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -60,14 +60,6 @@ impl Debug for TaskOutputId {
             self.task_id.query_id, self.task_id.stage_id, self.task_id.task_id, self.output_id
         ))
     }
-}
-
-pub(crate) enum TaskState {
-    Pending,
-    Running,
-    Blocking,
-    Finished,
-    Failed,
 }
 
 impl From<&ProstTaskId> for TaskId {
@@ -176,7 +168,7 @@ pub struct BatchTaskExecution<C> {
     /// Task state.
     state: Mutex<TaskStatus>,
 
-    /// Receivers data of the task.   
+    /// Receivers data of the task.
     receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
     /// Context for task execution
@@ -224,7 +216,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// to a particular shuffling strategy. For example, in hash shuffling, the result will be
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
-    /// such, parallel consumers are able to consume the result idependently.
+    /// such, parallel consumers are able to consume the result independently.
     pub async fn async_execute(self: Arc<Self>) -> Result<()> {
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -272,12 +264,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 // close it after task error has been set.
                 if let Err(e) = self
                     .try_execute(exec, &mut sender, shutdown_rx, &mut state_tx)
-                    .instrument(tracing::trace_span!(
-                        "batch_execute",
-                        task_id = ?task_id.task_id,
-                        stage_id = ?task_id.stage_id,
-                        query_id = ?task_id.query_id,
-                    ))
+                    .in_span({
+                        let mut span = Span::enter_with_local_parent("batch_execute");
+                        span.add_property(|| ("task_id", task_id.task_id.to_string()));
+                        span.add_property(|| ("stage_id", task_id.stage_id.to_string()));
+                        span.add_property(|| ("query_id", task_id.query_id.to_string()));
+                        span
+                    })
                     .await
                 {
                     // Prints the entire backtrace of error.
@@ -385,7 +378,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn abort_task(&self) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
-            self.change_state(TaskStatus::Aborting);
+            // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
             if sender.send(0).is_err() {
                 warn!("The task has already died before this request, so the abort did no-op")

@@ -25,7 +25,7 @@ use crate::hummock::test_utils::{
     TEST_KEYS_COUNT,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, SstableIterator, SstableIteratorType};
+use crate::hummock::{CachePolicy, SstableIterator, SstableIteratorType, SstableStoreWrite};
 use crate::monitor::StoreLocalStatistic;
 
 #[tokio::test]

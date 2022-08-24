@@ -23,7 +23,6 @@ use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
@@ -332,8 +331,8 @@ impl<S: StateStore> StorageTable<S> {
             .await?
         {
             let deserialize_res =
-                deserialize(self.mapping.clone(), &serialized_pk, &value).map_err(err)?;
-            Ok(Some(deserialize_res.2))
+                deserialize(self.mapping.clone(), &value).map_err(err)?;
+            Ok(Some(deserialize_res))
         } else {
             Ok(None)
         }
@@ -611,10 +610,10 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            let (_vnode, pk, row) =
-                deserialize(self.table_descs.clone(), &key, &value).map_err(err)?;
+            let row =
+                deserialize(self.table_descs.clone(), &value).map_err(err)?;
 
-            yield (pk, row)
+            yield (key.to_vec(), row)
         }
     }
 }

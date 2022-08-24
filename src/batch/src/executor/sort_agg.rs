@@ -53,12 +53,10 @@ pub struct SortAggExecutor {
 impl BoxedExecutorBuilder for SortAggExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(
-            inputs.len() == 1,
-            "Sort aggregation executor should have only 1 child!"
-        );
+        let [child]: [_; 1] = inputs.try_into().unwrap();
+
         let sort_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
             NodeBody::SortAgg
@@ -67,7 +65,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let agg_states: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(|x| AggStateFactory::new(x)?.create_agg_state())
+            .map(|x| AggStateFactory::new(x).map(|fac| fac.create_agg_state()))
             .try_collect()?;
 
         let group_key: Vec<_> = sort_agg_node
@@ -92,7 +90,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             agg_states,
             group_key,
             sorted_groupers,
-            child: inputs.remove(0),
+            child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
             output_size_limit: DEFAULT_CHUNK_BUFFER_SIZE,
@@ -241,7 +239,7 @@ impl SortAggExecutor {
         sorted_groupers
             .iter_mut()
             .zip_eq(group_builders)
-            .try_for_each(|(grouper, builder)| grouper.output_and_reset(builder))
+            .try_for_each(|(grouper, builder)| grouper.output(builder))
     }
 
     fn output_agg_states(
@@ -251,7 +249,7 @@ impl SortAggExecutor {
         agg_states
             .iter_mut()
             .zip_eq(agg_builders)
-            .try_for_each(|(state, builder)| state.output_and_reset(builder))
+            .try_for_each(|(state, builder)| state.output(builder))
     }
 
     fn create_builders(
@@ -336,7 +334,7 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let count_star = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<BoxedExpression> = vec![];
         let sorted_groupers = vec![];
         let agg_states = vec![count_star];
@@ -430,7 +428,7 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let count_star = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
@@ -559,7 +557,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![sum_agg];
@@ -644,7 +642,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
@@ -721,7 +719,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_sum_int32_grouped_execeed_limit() -> Result<()> {
+    async fn execute_sum_int32_grouped_exceed_limit() -> Result<()> {
         // mock a child executor
         let schema = Schema {
             fields: vec![
@@ -768,7 +766,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {

@@ -139,3 +139,34 @@
       ) as t0
     );
   binder_error: 'Item not found: Invalid column: a'
+- sql: |
+    create table t1 (x int, y int);
+    create table t2 (x int, y int);
+    select count(1) from (select min(distinct 1) from t1), t2;
+  logical_plan: |
+    LogicalProject { exprs: [count(1:Int32)] }
+      LogicalAgg { aggs: [count(1:Int32)] }
+        LogicalProject { exprs: [1:Int32] }
+          LogicalJoin { type: Inner, on: true, output: all }
+            LogicalProject { exprs: [min(distinct 1:Int32)] }
+              LogicalAgg { aggs: [min(distinct 1:Int32)] }
+                LogicalProject { exprs: [1:Int32] }
+                  LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+            LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [count(1:Int32)] }
+      LogicalProject { exprs: [1:Int32] }
+        LogicalJoin { type: Inner, on: true, output: all }
+          LogicalAgg { aggs: [] }
+            LogicalScan { table: t1, columns: [] }
+          LogicalScan { table: t2, columns: [] }
+  batch_plan: |
+    BatchSimpleAgg { aggs: [count(1:Int32)] }
+      BatchProject { exprs: [1:Int32] }
+        BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+          BatchSimpleAgg { aggs: [] }
+            BatchExchange { order: [], dist: Single }
+              BatchSimpleAgg { aggs: [] }
+                BatchScan { table: t1, columns: [], distribution: SomeShard }
+          BatchExchange { order: [], dist: Single }
+            BatchScan { table: t2, columns: [], distribution: SomeShard }

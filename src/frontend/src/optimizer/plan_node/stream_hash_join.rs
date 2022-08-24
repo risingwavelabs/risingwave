@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, Field, Schema, SchemaId};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -72,6 +72,7 @@ impl StreamHashJoin {
             ctx,
             logical.schema().clone(),
             logical.base.logical_pk.to_vec(),
+            logical.functional_dependency().clone(),
             dist,
             append_only,
         );
@@ -97,14 +98,17 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        side2o_mapping: &ColIndexMapping,
+        l2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                side2o_mapping.rewrite_provided_distribution(left)
+                l2o_mapping.rewrite_provided_distribution(left)
             }
-            (_, _) => panic!(),
+            (_, _) => unreachable!(
+                "suspicious distribution: left: {:?}, right: {:?}",
+                left, right
+            ),
         }
     }
 
@@ -207,16 +211,11 @@ impl ToStreamProst for StreamHashJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             left_table: Some(
-                infer_internal_table_catalog(self.left(), left_key_indices).to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                ),
+                infer_internal_table_catalog(self.left(), left_key_indices).to_state_table_prost(),
             ),
             right_table: Some(
-                infer_internal_table_catalog(self.right(), right_key_indices).to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                ),
+                infer_internal_table_catalog(self.right(), right_key_indices)
+                    .to_state_table_prost(),
             ),
             output_indices: self
                 .logical

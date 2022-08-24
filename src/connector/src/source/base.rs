@@ -13,16 +13,19 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -158,18 +161,21 @@ pub struct Column {
     pub data_type: DataType,
 }
 
+/// Split id resides in every source message, use `Arc` to avoid copying.
+pub type SplitId = Arc<String>;
+
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
-    pub split_id: String,
+    pub split_id: SplitId,
 }
 
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
-    fn id(&self) -> String;
+    fn id(&self) -> SplitId;
     fn encode_to_bytes(&self) -> Bytes;
     fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
 }
@@ -179,6 +185,48 @@ pub trait SplitMetaData: Sized {
 /// to source executor, `ConnectorState` is [`None`] and [`DummySplitReader`] is up instead of other
 /// split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
+
+/// Used for acquiring the generated data for [`spawn_data_generation_stream`].
+pub type DataGenerationReceiver = mpsc::Receiver<Result<Vec<SourceMessage>>>;
+
+/// Spawn a **new runtime** in a new thread to run the data generator, returns a channel receiver
+/// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
+/// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
+pub fn spawn_data_generation_stream(
+    stream: impl Stream<Item = Result<Vec<SourceMessage>>> + Send + 'static,
+) -> DataGenerationReceiver {
+    const GENERATION_BUFFER: usize = 4;
+
+    let (generation_tx, generation_rx) = mpsc::channel(GENERATION_BUFFER);
+    let future = async move {
+        pin_mut!(stream);
+        while let Some(result) = stream.next().await {
+            if generation_tx.send(result).await.is_err() {
+                tracing::warn!("failed to send next event to reader, exit");
+                break;
+            }
+        }
+    };
+
+    #[cfg(not(madsim))]
+    std::thread::Builder::new()
+        .name("risingwave-data-generation".to_string())
+        .spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(future);
+        })
+        .unwrap();
+
+    // Note: madsim does not support creating multiple runtime, so we just run it in current
+    // runtime.
+    #[cfg(madsim)]
+    tokio::spawn(future);
+
+    generation_rx
+}
 
 #[cfg(test)]
 mod tests {

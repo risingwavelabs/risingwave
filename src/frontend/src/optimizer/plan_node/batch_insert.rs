@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::InsertNode;
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchInsert` implements [`LogicalInsert`]
 #[derive(Debug, Clone)]
@@ -63,7 +63,8 @@ impl_plan_tree_node_for_unary! { BatchInsert }
 
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed()?;
+        let new_input = RequiredDist::single()
+            .enforce_if_not_satisfies(self.input().to_distributed()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -72,6 +73,7 @@ impl ToBatchProst for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Insert(InsertNode {
             table_source_id: self.logical.source_id().table_id(),
+            associated_mview_id: self.logical.associated_mview_id().table_id(),
             column_ids: vec![], // unused
         })
     }
@@ -79,6 +81,8 @@ impl ToBatchProst for BatchInsert {
 
 impl ToLocalBatch for BatchInsert {
     fn to_local(&self) -> Result<PlanRef> {
-        unreachable!()
+        let new_input = RequiredDist::single()
+            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
+        Ok(self.clone_with_input(new_input).into())
     }
 }

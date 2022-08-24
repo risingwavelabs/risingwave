@@ -21,11 +21,11 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_source, create_table, drop_table,
+    create_index, create_mv, create_source, create_table, drop_table, variable,
 };
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
@@ -276,11 +276,12 @@ impl TestCase {
                     name,
                     columns,
                     with_options,
+                    constraints,
                     ..
                 } => {
                     context.with_properties =
                         handle_with_properties("handle_create_table", with_options.clone())?;
-                    create_table::handle_create_table(context, name, columns).await?;
+                    create_table::handle_create_table(context, name, columns, constraints).await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
@@ -313,6 +314,13 @@ impl TestCase {
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(context, drop_statement.object_name).await?;
+                }
+                Statement::SetVariable {
+                    local: _,
+                    variable,
+                    value,
+                } => {
+                    variable::handle_set(context, variable, value).unwrap();
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -522,21 +530,32 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     }
 }
 
-pub async fn run_test_file(file_name: &str, file_content: &str) {
+pub async fn run_test_file(file_name: &str, file_content: &str) -> Result<()> {
     println!("-- running {} --", file_name);
 
     let mut failed_num = 0;
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).unwrap();
     let cases = resolve_testcase_id(cases).expect("failed to resolve");
 
-    for c in cases {
+    for (i, c) in cases.into_iter().enumerate() {
+        println!(
+            "Running test #{i} (id: {}), SQL:\n{}",
+            c.id.clone().unwrap_or_else(|| "<none>".to_string()),
+            c.sql
+        );
         if let Err(e) = c.run(true).await {
-            println!("\nTest case failed, the input SQL:\n{}\n{}", c.sql, e);
+            eprintln!(
+                "Test #{i} (id: {}) failed, SQL:\n{}Error: {}",
+                c.id.clone().unwrap_or_else(|| "<none>".to_string()),
+                c.sql,
+                e
+            );
             failed_num += 1;
         }
     }
     if failed_num > 0 {
         println!("\n");
-        panic!("{} test cases failed", failed_num);
+        bail!(format!("{} test cases failed", failed_num));
     }
+    Ok(())
 }

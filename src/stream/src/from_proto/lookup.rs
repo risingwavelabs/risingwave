@@ -25,15 +25,14 @@ pub struct LookupExecutorBuilder;
 
 impl ExecutorBuilder for LookupExecutorBuilder {
     fn new_boxed_executor(
-        mut params: ExecutorParams,
+        params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
 
-        let arrangement = params.input.remove(1);
-        let stream = params.input.remove(0);
+        let [stream, arrangement]: [_; 2] = params.input.try_into().unwrap();
 
         let arrangement_order_rules = lookup
             .get_arrangement_table_info()?

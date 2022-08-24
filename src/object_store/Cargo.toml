@@ -16,6 +16,7 @@ aws-types = { version = "0.46", features = ["hardcoded-credentials"] }
 bytes = { version = "1", features = ["serde"] }
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 prometheus = { version = "0.13", features = ["process"] }
@@ -26,5 +27,5 @@ thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
-tracing = { version = "0.1" }
+tracing = "0.1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

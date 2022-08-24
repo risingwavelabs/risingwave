@@ -19,24 +19,45 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_common::util::compress::decompress_data;
 use risingwave_common::{bail, try_match_expand};
-use risingwave_pb::common::{ParallelUnit, WorkerNode};
+use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
-use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
+use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::record_table_vnode_mappings;
 use crate::MetaResult;
 
-struct FragmentManagerCore {
+pub struct FragmentManagerCore {
     table_fragments: HashMap<TableId, TableFragments>,
+}
+
+impl FragmentManagerCore {
+    /// List all table vnode mapping info according to the fragment vnode mapping info.
+    pub fn all_table_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
+        self.table_fragments.values().flat_map(|table_fragments| {
+            table_fragments
+                .fragments
+                .values()
+                .flat_map(|fragment| {
+                    let parallel_unit_mapping = fragment.vnode_mapping.as_ref().unwrap();
+                    fragment
+                        .state_table_ids
+                        .iter()
+                        .map(|internal_table_id| ParallelUnitMapping {
+                            table_id: *internal_table_id,
+                            original_indices: parallel_unit_mapping.original_indices.clone(),
+                            data: parallel_unit_mapping.data.clone(),
+                        })
+                        .collect_vec()
+                })
+                .collect_vec()
+        })
+    }
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
@@ -52,6 +73,14 @@ pub struct ActorInfos {
 
     /// all reachable source actors
     pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+}
+
+pub struct FragmentVNodeInfo {
+    /// actor id => parallel unit
+    pub actor_parallel_unit_maps: BTreeMap<ActorId, ParallelUnit>,
+
+    /// fragment vnode mapping info
+    pub vnode_mapping: Option<ParallelUnitMapping>,
 }
 
 #[derive(Default)]
@@ -79,13 +108,14 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
-        // Extract vnode mapping info from listed `table_fragments` to hash mapping manager.
-        Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
-
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
         })
+    }
+
+    pub async fn get_fragment_read_guard(&self) -> RwLockReadGuard<'_, FragmentManagerCore> {
+        self.core.read().await
     }
 
     pub async fn list_table_fragments(&self) -> MetaResult<Vec<TableFragments>> {
@@ -305,7 +335,7 @@ where
         &self,
         migrate_map: &HashMap<ActorId, WorkerId>,
         node_map: &HashMap<WorkerId, WorkerNode>,
-    ) -> MetaResult<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnit>)> {
+    ) -> MetaResult<Vec<TableFragments>> {
         let mut parallel_unit_migrate_map = HashMap::new();
         let mut pu_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
         // split parallel units of node into types, map them with WorkerId
@@ -351,7 +381,7 @@ where
         });
         // update fragments
         self.batch_update_table_fragments(&new_fragments).await?;
-        Ok((new_fragments, parallel_unit_migrate_map))
+        Ok(new_fragments)
     }
 
     pub async fn all_node_actors(
@@ -503,18 +533,45 @@ where
         Ok(info)
     }
 
-    pub async fn get_sink_parallel_unit_ids(
+    pub async fn get_sink_vnode_bitmap_info(
         &self,
         table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>> {
+    ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>> {
         let map = &self.core.read().await.table_fragments;
-        let mut info: HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>> = HashMap::new();
+        let mut info: HashMap<TableId, Vec<(ActorId, Option<Buffer>)>> = HashMap::new();
 
         for table_id in table_ids {
             match map.get(table_id) {
                 Some(table_fragment) => {
-                    info.insert(*table_id, table_fragment.parallel_unit_sink_actor_id());
+                    info.insert(*table_id, table_fragment.sink_vnode_bitmap_info());
                 }
+                None => {
+                    bail!("table_fragment not exist: id={}", table_id);
+                }
+            }
+        }
+        Ok(info)
+    }
+
+    pub async fn get_sink_fragment_vnode_info(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<HashMap<TableId, FragmentVNodeInfo>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut info: HashMap<TableId, FragmentVNodeInfo> = HashMap::new();
+
+        for table_id in table_ids {
+            match map.get(table_id) {
+                Some(table_fragment) => {
+                    info.insert(
+                        *table_id,
+                        FragmentVNodeInfo {
+                            actor_parallel_unit_maps: table_fragment.sink_actor_parallel_units(),
+                            vnode_mapping: table_fragment.sink_vnode_mapping(),
+                        },
+                    );
+                }
+
                 None => {
                     bail!("table_fragment not exist: id={}", table_id);
                 }
@@ -543,30 +600,5 @@ where
         }
 
         Ok(info)
-    }
-
-    fn restore_vnode_mappings(
-        hash_mapping_manager: HashMappingManagerRef,
-        table_fragments: &HashMap<TableId, TableFragments>,
-    ) -> MetaResult<()> {
-        for fragments in table_fragments.values() {
-            for (fragment_id, fragment) in &fragments.fragments {
-                let mapping = fragment.vnode_mapping.as_ref().unwrap();
-                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
-                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
-                hash_mapping_manager.set_fragment_hash_mapping(*fragment_id, vnode_mapping);
-
-                // Looking at the first actor is enough, since all actors in one fragment have
-                // identical state table id.
-                let actor = fragment.actors.first().unwrap();
-                let stream_node = actor.get_nodes()?;
-                record_table_vnode_mappings(
-                    &hash_mapping_manager,
-                    stream_node,
-                    fragment.fragment_id,
-                )?;
-            }
-        }
-        Ok(())
     }
 }

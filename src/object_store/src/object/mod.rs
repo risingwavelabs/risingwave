@@ -21,6 +21,7 @@ pub use mem::*;
 
 pub mod s3;
 use async_stack_trace::StackTrace;
+use prometheus::HistogramTimer;
 pub use s3::*;
 
 mod disk;
@@ -33,6 +34,11 @@ use object_metrics::ObjectStoreMetrics;
 use crate::object::disk::DiskObjectStore;
 
 pub const LOCAL_OBJECT_STORE_PATH_PREFIX: &str = "@local:";
+
+pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
+pub type ObjectStreamingUploader = MonitoredStreamingUploader;
+
+type BoxedStreamingUploader = Box<dyn StreamingUploader>;
 
 #[derive(Debug)]
 pub enum ObjectStorePath<'a> {
@@ -97,13 +103,22 @@ impl BlockLocation {
     }
 }
 
+#[async_trait::async_trait]
+pub trait StreamingUploader: Send {
+    fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
+
+    async fn finish(self: Box<Self>) -> ObjectResult<()>;
+}
+
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
 
-    /// If the `block_loc` is None, the whole object will be return.
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
+
+    /// If the `block_loc` is None, the whole object will be returned.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
@@ -125,9 +140,9 @@ pub trait ObjectStore: Send + Sync {
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
-}
 
-pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
+    fn store_media_type(&self) -> &'static str;
+}
 
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
@@ -195,30 +210,83 @@ macro_rules! object_store_impl_method_body {
     };
 }
 
-#[async_trait::async_trait]
-impl ObjectStore for ObjectStoreImpl {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+impl ObjectStoreImpl {
+    pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         object_store_impl_method_body!(self, upload, path, obj)
     }
 
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+        object_store_impl_method_body!(self, streaming_upload, path)
+    }
+
+    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
         object_store_impl_method_body!(self, read, path, block_loc)
     }
 
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+    pub async fn readv(
+        &self,
+        path: &str,
+        block_locs: &[BlockLocation],
+    ) -> ObjectResult<Vec<Bytes>> {
         object_store_impl_method_body!(self, readv, path, block_locs)
     }
 
-    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+    pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         object_store_impl_method_body!(self, metadata, path)
     }
 
-    async fn delete(&self, path: &str) -> ObjectResult<()> {
+    pub async fn delete(&self, path: &str) -> ObjectResult<()> {
         object_store_impl_method_body!(self, delete, path)
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         object_store_impl_method_body!(self, list, prefix)
+    }
+}
+
+pub struct MonitoredStreamingUploader {
+    inner: BoxedStreamingUploader,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+    /// Length of data uploaded with this uploader.
+    operation_size: usize,
+    /// The duration from this uploader is created until this uploader is finished.
+    _upload_duration: HistogramTimer,
+}
+
+impl MonitoredStreamingUploader {
+    pub fn new(
+        media_type: &str,
+        handle: BoxedStreamingUploader,
+        object_store_metrics: Arc<ObjectStoreMetrics>,
+    ) -> Self {
+        let timer = object_store_metrics
+            .operation_latency
+            .with_label_values(&[media_type, "streaming_upload"])
+            .start_timer();
+        Self {
+            inner: handle,
+            object_store_metrics,
+            operation_size: 0,
+            _upload_duration: timer,
+        }
+    }
+}
+
+impl MonitoredStreamingUploader {
+    pub fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        self.object_store_metrics
+            .write_bytes
+            .inc_by(data.len() as u64);
+        self.operation_size += data.len();
+        self.inner.write_bytes(data)
+    }
+
+    pub async fn finish(self) -> ObjectResult<()> {
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&["streaming_upload"])
+            .observe(self.operation_size as f64);
+        self.inner.finish().await
     }
 }
 
@@ -236,6 +304,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         }
     }
 
+    fn media_type(&self) -> &str {
+        self.inner.store_media_type()
+    }
+
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         self.object_store_metrics
             .write_bytes
@@ -243,12 +315,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["upload"])
+            .with_label_values(&[self.media_type(), "upload"])
             .start_timer();
         self.object_store_metrics
             .operation_size
             .with_label_values(&["upload"])
             .observe(obj.len() as f64);
+
         self.inner
             .upload(path, obj)
             .stack_trace("object_store_upload")
@@ -256,13 +329,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         Ok(())
     }
 
+    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+        let handle = self.inner.streaming_upload(path).await?;
+        Ok(MonitoredStreamingUploader::new(
+            self.inner.store_media_type(),
+            handle,
+            self.object_store_metrics.clone(),
+        ))
+    }
+
     pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["read"])
+            .with_label_values(&[self.media_type(), "read"])
             .start_timer();
-
         let ret = self
             .inner
             .read(path, block_loc)
@@ -292,7 +373,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["readv"])
+            .with_label_values(&[self.media_type(), "readv"])
             .start_timer();
         let ret = self
             .inner
@@ -309,7 +390,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["metadata"])
+            .with_label_values(&[self.media_type(), "metadata"])
             .start_timer();
         self.inner
             .metadata(path)
@@ -321,7 +402,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["delete"])
+            .with_label_values(&[self.media_type(), "delete"])
             .start_timer();
         self.inner
             .delete(path)
@@ -329,11 +410,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .await
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+    pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["list"])
+            .with_label_values(&[self.media_type(), "list"])
             .start_timer();
         self.inner
             .list(prefix)
@@ -348,13 +429,18 @@ pub async fn parse_remote_object_store(
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string())
+            S3ObjectStore::new(
+                s3.strip_prefix("s3://").unwrap().to_string(),
+                metrics.clone(),
+            )
+            .await
+            .monitored(metrics),
+        ),
+        minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
+            S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
                 .monitored(metrics),
         ),
-        minio if minio.starts_with("minio://") => {
-            ObjectStoreImpl::S3(S3ObjectStore::with_minio(minio).await.monitored(metrics))
-        }
         disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
             DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
         ),

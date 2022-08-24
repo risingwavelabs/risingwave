@@ -13,9 +13,13 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
+};
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 
 use super::bloom::Bloom;
@@ -90,10 +94,13 @@ pub struct SstableBuilder {
     key_count: usize,
     sstable_id: u64,
     raw_value: BytesMut,
+    filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+    last_bloom_filter_key_length: usize,
+    add_bloom_filter_key_counts: usize,
 }
 
 impl SstableBuilder {
-    pub fn new(sstable_id: u64, options: SstableBuilderOptions) -> Self {
+    pub fn new_for_test(sstable_id: u64, options: SstableBuilderOptions) -> Self {
         Self {
             buf: BytesMut::with_capacity(options.capacity + options.block_capacity),
             block_builder: BlockBuilder::new(BlockBuilderOptions {
@@ -110,6 +117,38 @@ impl SstableBuilder {
             sstable_id,
             raw_value: BytesMut::new(),
             last_full_key: vec![],
+            filter_key_extractor: Arc::new(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            )),
+            last_bloom_filter_key_length: 0,
+            add_bloom_filter_key_counts: 0,
+        }
+    }
+
+    pub fn new(
+        sstable_id: u64,
+        options: SstableBuilderOptions,
+        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+    ) -> Self {
+        Self {
+            options: options.clone(),
+            buf: BytesMut::with_capacity(options.capacity),
+            block_builder: BlockBuilder::new(BlockBuilderOptions {
+                capacity: options.block_capacity,
+                restart_interval: options.restart_interval,
+                compression_algorithm: options.compression_algorithm,
+            }),
+            block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
+            table_ids: BTreeSet::new(),
+            user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            last_table_id: 0,
+            raw_value: BytesMut::new(),
+            last_full_key: vec![],
+            key_count: 0,
+            sstable_id,
+            filter_key_extractor,
+            last_bloom_filter_key_length: 0,
+            add_bloom_filter_key_counts: 0,
         }
     }
 
@@ -126,17 +165,33 @@ impl SstableBuilder {
 
         // TODO: refine me
         value.encode(&mut self.raw_value);
+        let mut extract_key = user_key(full_key);
         if let Some(table_id) = get_table_id(full_key) {
             if self.last_table_id != table_id {
                 self.table_ids.insert(table_id);
                 self.last_table_id = table_id;
             }
         }
+
+        extract_key = self.filter_key_extractor.extract(extract_key);
+
         self.block_builder.add(full_key, self.raw_value.as_ref());
         self.raw_value.clear();
 
-        let user_key = user_key(full_key);
-        self.user_key_hashes.push(farmhash::fingerprint32(user_key));
+        // add bloom_filter check
+        // 1. not empty_key
+        // 2. extract_key key is not duplicate
+        if !extract_key.is_empty()
+            && (extract_key != &self.last_full_key[0..self.last_bloom_filter_key_length])
+        {
+            // avoid duplicate add to bloom filter
+            self.user_key_hashes
+                .push(farmhash::fingerprint32(extract_key));
+            self.last_bloom_filter_key_length = extract_key.len();
+        }
+
+        self.last_full_key.clear();
+        self.last_full_key.extend_from_slice(full_key);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block();
@@ -158,11 +213,8 @@ impl SstableBuilder {
     /// ```
     pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
-        let largest_key = if self.block_builder.is_empty() {
-            self.last_full_key.clone()
-        } else {
-            self.block_builder.get_last_key().to_vec()
-        };
+        let largest_key = self.last_full_key.clone();
+
         self.build_block();
         self.buf.put_u32_le(self.block_metas.len() as u32);
         assert!(!smallest_key.is_empty());
@@ -185,6 +237,14 @@ impl SstableBuilder {
             version: VERSION,
         };
 
+        tracing::trace!(
+            "meta_size {} bloom_filter_size {}  add_key_counts {} add_bloom_filter_counts {}",
+            meta.encoded_size(),
+            meta.bloom_filter.len(),
+            self.key_count,
+            self.add_bloom_filter_key_counts
+        );
+
         (
             self.sstable_id,
             self.buf.freeze(),
@@ -202,9 +262,7 @@ impl SstableBuilder {
         if self.block_builder.is_empty() {
             return;
         }
-        self.last_full_key.clear();
-        self.last_full_key
-            .extend_from_slice(self.block_builder.get_last_key());
+
         let mut block_meta = self.block_metas.last_mut().unwrap();
         let block = self.block_builder.build();
         self.buf.put_slice(block);
@@ -247,14 +305,14 @@ pub(super) mod tests {
             estimate_bloom_filter_capacity: 0,
         };
 
-        let b = SstableBuilder::new(0, opt);
+        let b = SstableBuilder::new_for_test(0, opt);
 
         b.finish();
     }
 
     #[test]
     fn test_smallest_key_and_largest_key() {
-        let mut b = SstableBuilder::new(0, default_builder_opt_for_test());
+        let mut b = SstableBuilder::new_for_test(0, default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));

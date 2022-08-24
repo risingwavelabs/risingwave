@@ -40,6 +40,7 @@ impl StreamSink {
             ctx,
             schema,
             pk_indices.to_vec(),
+            input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
         ))

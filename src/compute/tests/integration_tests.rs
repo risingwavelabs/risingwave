@@ -43,7 +43,7 @@ use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
-    Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+    ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -139,7 +139,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
     let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
     let stream_source = SourceExecutor::new(
-        0x3f3f3f,
+        ActorContext::create(0x3f3f3f),
         source_table_id,
         source_desc,
         vnodes,

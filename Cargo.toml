@@ -30,13 +30,13 @@ members = [
   "src/tests/regress",
   "src/tests/simulation",
   "src/tests/sqlsmith",
+  "src/tracing",
   "src/utils/async_stack_trace",
   "src/utils/memcomparable",
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/static-link",
   "src/utils/stats_alloc",
-  "src/utils/value-encoding",
   "src/workspace-hack",
 ]
 

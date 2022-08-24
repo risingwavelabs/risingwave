@@ -55,7 +55,7 @@ class StreamNode extends Node {
   }
 
   parseType(nodeProto) {
-    let types = new Set(["source", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
+    let types = new Set(["dynamicFilter", "source", "sink", "project", "projectSet", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin", "expand"]);
     for (let [type, _] of Object.entries(nodeProto)) {
       if (types.has(type)) {
         return type;
@@ -157,10 +157,10 @@ export default class StreamPlanParser {
   /**
    * Randomly select a actor to represent its
    * fragment, and append a property named `representedActorList`
-   * to store all the other actors in the same fragement.
+   * to store all the other actors in the same fragment.
    * 
    * Actors are degree of parallelism of a fragment, such that one of 
-   * the actor in a fragement can represent all the other actor in
+   * the actor in a fragment can represent all the other actor in
    * the same fragment. 
    * 
    * @returns A Set containing actors representing its fragment.
@@ -225,7 +225,7 @@ export default class StreamPlanParser {
       for (let actor of this.parsedActorMap.get(actorId).representedActorList) {
         list.add(actor.actorId);
       }
-      mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);
+      mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableId, [...list.values()]);
     }
 
     return mvTableIdToChainViewActorList;
@@ -268,7 +268,7 @@ export default class StreamPlanParser {
       for (let actor of this.parsedActorMap.get(actorId).representedActorList) {
         list.push(actor.actorId);
       }
-      mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
+      mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableId, list);
     }
 
     return mvTableIdToSingleViewActorList;

@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use risingwave_common::catalog::{DatabaseId, Schema, SchemaId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -45,6 +45,7 @@ impl StreamDynamicFilter {
             left.ctx(),
             left.schema().clone(),
             left.logical_pk().to_vec(),
+            left.functional_dependency().clone(),
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
@@ -100,16 +101,11 @@ impl ToStreamProst for StreamDynamicFilter {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             left_table: Some(
-                infer_left_internal_table_catalog(self.clone().into(), self.left_index).to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                ),
+                infer_left_internal_table_catalog(self.clone().into(), self.left_index)
+                    .to_state_table_prost(),
             ),
             right_table: Some(
-                infer_right_internal_table_catalog(self.right.clone()).to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                ),
+                infer_right_internal_table_catalog(self.right.clone()).to_state_table_prost(),
             ),
         })
     }

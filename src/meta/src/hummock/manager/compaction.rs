@@ -14,15 +14,47 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
+use function_name::named;
+use itertools::Itertools;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::CompactTaskAssignment;
 
 use crate::hummock::compaction::CompactStatus;
+use crate::hummock::manager::read_lock;
+use crate::hummock::HummockManager;
+use crate::storage::MetaStore;
 
 #[derive(Default)]
-pub(super) struct Compaction {
+pub struct Compaction {
     /// Compaction task that is already assigned to a compactor
     pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
+}
+
+impl<S> HummockManager<S>
+where
+    S: MetaStore,
+{
+    #[named]
+    pub async fn get_assigned_tasks_number(&self, context_id: HummockContextId) -> u64 {
+        read_lock!(self, compaction)
+            .await
+            .compact_task_assignment
+            .values()
+            .filter(|s| s.context_id == context_id)
+            .count() as u64
+    }
+
+    #[named]
+    pub async fn list_assigned_tasks_number(&self) -> Vec<(u32, usize)> {
+        let compaction = read_lock!(self, compaction).await;
+        compaction
+            .compact_task_assignment
+            .values()
+            .group_by(|s| s.context_id)
+            .into_iter()
+            .map(|(k, v)| (k, v.count()))
+            .collect_vec()
+    }
 }

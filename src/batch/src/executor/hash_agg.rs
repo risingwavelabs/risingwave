@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::vec;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -117,9 +116,9 @@ impl HashAggExecutorBuilder {
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "HashAggExecutor should have 1 child!");
+        let [child]: [_; 1] = inputs.try_into().unwrap();
 
         let hash_agg_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -127,12 +126,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         )?;
 
         let identity = source.plan_node().get_identity().clone();
-        Self::deserialize(
-            hash_agg_node,
-            inputs.remove(0),
-            source.task_id.clone(),
-            identity,
-        )
+        Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
     }
 }
 
@@ -191,18 +185,12 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let chunk = chunk?.compact()?;
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let mut err_flag = Ok(());
                 let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {
                     self.agg_factories
                         .iter()
                         .map(AggStateFactory::create_agg_state)
-                        .collect::<Result<Vec<_>>>()
-                        .unwrap_or_else(|x| {
-                            err_flag = Err(x);
-                            vec![]
-                        })
+                        .collect()
                 });
-                err_flag?;
 
                 // TODO: currently not a vectorized implementation
                 states
@@ -240,7 +228,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 states
                     .into_iter()
                     .zip_eq(&mut agg_builders)
-                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
+                    .try_for_each(|(mut aggregator, builder)| aggregator.output(builder))?;
             }
             if !has_next {
                 break; // exit loop

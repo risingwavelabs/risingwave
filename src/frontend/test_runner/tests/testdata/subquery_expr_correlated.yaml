@@ -276,38 +276,44 @@
     /* correlated agg column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select max(v2)) from t;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t group by v2;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated agg column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select max(v2));
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t group by v2 having min(v1) > (select v2);
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select v2);
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated agg column belongs to outer query */
     create table t (v1 int, v2 int);
@@ -316,8 +322,56 @@
       min(v1),
       (select max(v2) + v3 from t2)  -- access to v3 is ok
     from t;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+- sql: |
+    /* uncorrelated subquery in HAVING */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    create table c (c1 int, c2 int);
+    select 1 from a having exists (
+      select 1 from b where exists (
+        select b1 from c
+      )
+    );
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32] }
+      LogicalJoin { type: LeftSemi, on: true, output: all }
+        LogicalAgg { aggs: [] }
+          LogicalProject { exprs: [] }
+            LogicalScan { table: a, columns: [a._row_id, a.a1, a.a2] }
+        LogicalProject { exprs: [1:Int32] }
+          LogicalApply { type: LeftSemi, on: true, correlated_id: 2 }
+            LogicalScan { table: b, columns: [b._row_id, b.b1, b.b2] }
+            LogicalProject { exprs: [CorrelatedInputRef { index: 1, correlated_id: 2 }] }
+              LogicalScan { table: c, columns: [c._row_id, c.c1, c.c2] }
+- sql: |
+    /* correlated column with depth=2 in HAVING */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    create table c (c1 int, c2 int);
+    select 1 from a having exists (
+      select 1 from b where exists (
+        select a1 from c
+      )
+    );
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+- sql: |
+    /* correlated column with depth>1 in HAVING */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    create table c (c1 int, c2 int);
+    select 1 from a where exists (
+      select 1 from b having exists (
+        select a1 from c
+      )
+    );
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -438,16 +492,16 @@
 - sql: |
     create table a(x int, y varchar, z int);
     create table b(x varchar, y int, z int);
-    select count(*) from a where a.y = (select string_agg(x order by x) from b where b.z = a.z);
+    select count(*) from a where a.y = (select string_agg(x, ',' order by x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y = string_agg(b.x order_by(b.x ASC NULLS LAST))), output: [] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y = string_agg(b.x, ',':Varchar order_by(b.x ASC NULLS LAST))), output: [] }
         LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [a.z], aggs: [string_agg(b.x order_by(b.x ASC NULLS LAST))] }
-          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+        LogicalAgg { group_key: [a.z], aggs: [string_agg(b.x, ',':Varchar order_by(b.x ASC NULLS LAST))] }
+          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x, ',':Varchar] }
             LogicalAgg { group_key: [a.z], aggs: [] }
               LogicalScan { table: a, columns: [a.z] }
-            LogicalProject { exprs: [b.z, b.x] }
+            LogicalProject { exprs: [b.z, b.x, ',':Varchar] }
               LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
@@ -460,12 +514,13 @@
           LogicalScan { table: a, columns: [a.y, a.z] }
         LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((flag = 0:Int64))] }
           LogicalAgg { group_key: [a.z, b.x, flag], aggs: [] }
-            LogicalExpand { column_subsets: [[a.z, b.x]] }
-              LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
-                LogicalAgg { group_key: [a.z], aggs: [] }
-                  LogicalScan { table: a, columns: [a.z] }
-                LogicalProject { exprs: [b.z, b.x] }
-                  LogicalScan { table: b, columns: [b.x, b.z] }
+            LogicalProject { exprs: [a.z, b.x, flag] }
+              LogicalExpand { column_subsets: [[a.z, b.x]] }
+                LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+                  LogicalAgg { group_key: [a.z], aggs: [] }
+                    LogicalScan { table: a, columns: [a.z] }
+                  LogicalProject { exprs: [b.z, b.x] }
+                    LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);

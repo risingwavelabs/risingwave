@@ -48,7 +48,7 @@ pub mod privilege;
 pub mod query;
 mod show;
 pub mod util;
-mod variable;
+pub mod variable;
 
 pub async fn handle(
     session: Arc<SessionImpl>,
@@ -85,10 +85,11 @@ pub async fn handle(
             name,
             columns,
             with_options,
+            constraints,
             ..
         } => {
             context.with_properties = handle_with_properties("handle_create_table", with_options)?;
-            create_table::handle_create_table(context, name, columns).await
+            create_table::handle_create_table(context, name, columns, constraints).await
         }
         Statement::CreateDatabase {
             db_name,

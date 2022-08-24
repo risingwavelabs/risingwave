@@ -111,7 +111,7 @@ impl Block {
         // Find the largest restart point that equals or less than the given offset.
         self.restart_points
             .partition_point(|&position| position <= offset as u32)
-            .saturating_sub(1) // Prevent from underflowing when given is smaller than ther first.
+            .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
     }
 
     /// Searches the index of the restart point by partition point.

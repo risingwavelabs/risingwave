@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -56,6 +56,7 @@ impl StreamMaterialize {
             ctx,
             schema,
             pk_indices.to_vec(),
+            input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
         ))
@@ -171,14 +172,12 @@ impl StreamMaterialize {
             name: mv_name,
             columns,
             order_key: order_keys,
-            pk: pk_indices.clone(),
+            stream_key: pk_indices.clone(),
             is_index_on,
             distribution_key: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            vnode_mapping: None,
             properties,
-            read_pattern_prefix_column: 0,
         };
 
         Ok(Self { base, input, table })
@@ -206,7 +205,7 @@ impl fmt::Display for StreamMaterialize {
             .join(", ");
 
         let pk_column_names = table
-            .pk
+            .stream_key
             .iter()
             .map(|&pk| &table.columns[pk].column_desc.name)
             .join(", ");
@@ -258,10 +257,7 @@ impl ToStreamProst for StreamMaterialize {
                 .iter()
                 .map(FieldOrder::to_protobuf)
                 .collect(),
-            table: Some(self.table().to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            )),
+            table: Some(self.table().to_state_table_prost()),
         })
     }
 }

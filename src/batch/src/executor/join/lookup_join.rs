@@ -22,7 +22,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode,
+    DataType, Datum, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode, VnodeMapping,
 };
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_common::util::scan_range::ScanRange;
@@ -82,7 +82,7 @@ impl DummyExecutor {
 /// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
     table_desc: StorageTableDesc,
-    vnode_mapping: Vec<ParallelUnitId>,
+    vnode_mapping: VnodeMapping,
     build_side_key_types: Vec<DataType>,
     probe_side_schema: Schema,
     probe_side_column_ids: Vec<i32>,
@@ -149,7 +149,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `ProstExchangeSource` using the given `id`.
     fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
         let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
-            internal_error("No worker node found for hte given parallel unit id.")
+            internal_error("No worker node found for the given parallel unit id.")
         })?;
 
         let local_execute_plan = LocalExecutePlan {
@@ -169,7 +169,14 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
         let prost_exchange_source = ProstExchangeSource {
             task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId::default()),
+                task_id: Some(ProstTaskId {
+                    // FIXME: We should replace this random generated uuid to current query_id for
+                    // better dashboard. However, due to the lack of info of
+                    // stage_id and task_id, we can not do it now. Now just make sure it will not
+                    // conflict.
+                    query_id: Uuid::new_v4().to_string(),
+                    ..Default::default()
+                }),
                 output_id: 0,
             }),
             host: Some(worker.host.as_ref().unwrap().clone()),
@@ -205,7 +212,7 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
                     Box::new(LiteralExpression::new(build_type.clone(), datum.clone())),
                 )?;
 
-                let datum = cast_expr.eval_row(&Row(vec![]))?;
+                let datum = cast_expr.eval_row(Row::empty())?;
                 datum.unwrap()
             };
 
@@ -578,9 +585,9 @@ pub struct LookupJoinExecutorBuilder {}
 impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
-        mut inputs: Vec<BoxedExecutor>,
+        inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "LookupJoinExecutor should have 1 child!");
+        let [build_child]: [_; 1] = inputs.try_into().unwrap();
 
         let lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -599,7 +606,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&x| x as usize)
             .collect();
 
-        let build_child = inputs.remove(0);
         let build_side_data_types = build_child.schema().data_types();
 
         let table_desc = lookup_join_node.get_probe_side_table_desc()?;
@@ -698,9 +704,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BinaryHeap;
-    use std::sync::Arc;
-
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -799,16 +802,8 @@ mod tests {
 
         Box::new(OrderByExecutor::new(
             child,
-            vec![],
-            vec![],
-            vec![],
-            BinaryHeap::new(),
-            Arc::new(order_pairs),
-            vec![],
-            false,
-            false,
-            "OrderByExecutor".to_string(),
-            2048,
+            order_pairs,
+            "OrderByExecutor".into(),
         ))
     }
 

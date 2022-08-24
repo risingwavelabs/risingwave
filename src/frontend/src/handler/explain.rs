@@ -52,9 +52,12 @@ pub(super) fn handle_explain(
 
         Statement::CreateSink { stmt } => gen_sink_plan(&session, planner.ctx(), stmt)?.0,
 
-        Statement::CreateTable { name, columns, .. } => {
-            gen_create_table_plan(&session, planner.ctx(), name, columns)?.0
-        }
+        Statement::CreateTable {
+            name,
+            columns,
+            constraints,
+            ..
+        } => gen_create_table_plan(&session, planner.ctx(), name, columns, constraints)?.0,
 
         Statement::CreateIndex {
             name,

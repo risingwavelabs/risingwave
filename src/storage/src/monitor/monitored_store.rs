@@ -18,7 +18,6 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
-use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -92,12 +91,17 @@ where
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
         async move {
             let timer = self.stats.get_duration.start_timer();
             let value = self
                 .inner
-                .get(key, read_options)
+                .get(key, check_bloom_filter, read_options)
                 .stack_trace("store_get")
                 .await
                 .inspect_err(|e| error!("Failed in get: {:?}", e))?;
@@ -237,20 +241,22 @@ where
         }
     }
 
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            let size = self
+            let sync_result = self
                 .inner
                 .sync(epoch)
                 .stack_trace("store_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
-            if size != 0 {
-                self.stats.write_l0_size_per_epoch.observe(size as _);
+            if sync_result.sync_size != 0 {
+                self.stats
+                    .write_l0_size_per_epoch
+                    .observe(sync_result.sync_size as _);
             }
-            Ok(size)
+            Ok(sync_result)
         }
     }
 
@@ -270,10 +276,6 @@ where
                 .await
                 .inspect_err(|e| error!("Failed in replicate_batch: {:?}", e))
         }
-    }
-
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
-        self.inner.get_uncommitted_ssts(epoch)
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {

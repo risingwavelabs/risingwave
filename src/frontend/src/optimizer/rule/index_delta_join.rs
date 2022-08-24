@@ -19,6 +19,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
@@ -95,7 +96,7 @@ impl Rule for IndexDeltaJoinRule {
                         .to_index_scan(
                             index.index_table.name.as_str(),
                             index.index_table.table_desc().into(),
-                            &p2s_mapping,
+                            p2s_mapping,
                         )
                         .into(),
                 );
@@ -108,6 +109,18 @@ impl Rule for IndexDeltaJoinRule {
             if let Some(right) = match_indexes(&right_indices, input_right) {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
+
+                fn upstream_hash_shard_to_hash_shard(plan: PlanRef) -> PlanRef {
+                    if let Distribution::UpstreamHashShard(key) = plan.distribution() {
+                        RequiredDist::hash_shard(key)
+                            .enforce_if_not_satisfies(plan, &Order::any())
+                            .unwrap()
+                    } else {
+                        plan
+                    }
+                }
+                let left = upstream_hash_shard_to_hash_shard(left);
+                let right = upstream_hash_shard_to_hash_shard(right);
 
                 Some(
                     join.to_delta_join()

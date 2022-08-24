@@ -23,10 +23,9 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
-use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
-use crate::manager::META_NODE_ID;
+use crate::manager::MetaSrvEnv;
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
@@ -72,6 +71,7 @@ where
 {
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
+    compactor_selection_retry_interval_sec: u64,
 }
 
 impl<S> CompactionScheduler<S>
@@ -79,12 +79,14 @@ where
     S: MetaStore,
 {
     pub fn new(
+        env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {
             hummock_manager,
             compactor_manager,
+            compactor_selection_retry_interval_sec: env.opts.compactor_selection_retry_interval_sec,
         }
     }
 
@@ -142,61 +144,48 @@ where
             "Picked compaction task. {}",
             compact_task_to_string(&compact_task)
         );
-        // TODO: merge this two operation in one lock guard because the target sub-level may be
-        // removed by the other thread.
-        if CompactStatus::is_trivial_move_task(&compact_task) {
-            compact_task.task_status = true;
-            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
-            tracing::info!(
-                "trivial move task: \n{}",
-                compact_task_to_string(&compact_task)
-            );
-            return self
-                .hummock_manager
-                .report_compact_task_impl(META_NODE_ID, &compact_task, true)
-                .await
-                .is_ok();
-        }
 
         // 2. Assign the compaction task to a compactor.
         'send_task: loop {
             // 2.1 Select a compactor.
-            let compactor = match self.compactor_manager.next_compactor() {
+            let compactor = match self
+                .compactor_manager
+                .next_idle_compactor(&self.hummock_manager)
+                .await
+            {
                 None => {
-                    tracing::warn!("No compactor is available.");
-                    tokio::time::sleep(Duration::from_secs(60)).await;
-                    continue 'send_task;
+                    let current_compactor_tasks =
+                        self.hummock_manager.list_assigned_tasks_number().await;
+                    tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
+                    compact_task.task_status = false;
+                    tokio::time::sleep(Duration::from_secs(
+                        self.compactor_selection_retry_interval_sec,
+                    ))
+                    .await;
+                    match self
+                        .hummock_manager
+                        .cancel_compact_task(&compact_task)
+                        .await
+                    {
+                        Ok(_) => return false,
+                        // failed to cancel, try assign to compactor again.
+                        Err(_) => continue 'send_task,
+                    }
                 }
                 Some(compactor) => compactor,
             };
-            // TODO: skip busy compactor
 
-            // 2.2 Send the compaction task to the compactor.
-            let send_task = async {
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    compactor
-                        .send_task(Task::CompactTask(compact_task.clone()))
-                        .await
-                        .is_ok()
-                })
-                .await
-                .unwrap_or(false)
-            };
+            // 2.2 Assign the compaction task.
             match self
                 .hummock_manager
-                .assign_compaction_task(&compact_task, compactor.context_id(), send_task)
+                .assign_compaction_task(&compact_task, compactor.context_id())
                 .await
             {
                 Ok(_) => {
-                    // TODO: timeout assigned compaction task and move send_task after
-                    // assign_compaction_task
                     tracing::trace!(
                         "Assigned compaction task. {}",
                         compact_task_to_string(&compact_task)
                     );
-                    // Reschedule it in case there are more tasks from this compaction group.
-                    request_channel.try_send(compaction_group);
-                    return true;
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -214,6 +203,36 @@ where
                     continue 'send_task;
                 }
             }
+
+            // 2.3 Send the compaction task.
+            if let Err(e) = compactor
+                .send_task(Task::CompactTask(compact_task.clone()))
+                .await
+            {
+                tracing::warn!(
+                    "Failed to send task {} to {}. {:#?}",
+                    compact_task.task_id,
+                    compactor.context_id(),
+                    e
+                );
+                // Cancel the task at best effort
+                compact_task.task_status = false;
+                if let Err(e) = self
+                    .hummock_manager
+                    .report_compact_task(compactor.context_id(), &compact_task)
+                    .await
+                {
+                    tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
+                    // TODO #3677: handle cancellation via compaction heartbeat after #4496
+                    return false;
+                }
+                continue 'send_task;
+            }
+
+            // Reschedule it in case there are more tasks from this compaction group.
+            request_channel.try_send(compaction_group);
+
+            return true;
         }
     }
 }

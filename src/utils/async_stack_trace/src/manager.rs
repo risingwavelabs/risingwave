@@ -37,7 +37,7 @@ pub struct StackTraceReport {
 impl Default for StackTraceReport {
     fn default() -> Self {
         Self {
-            report: "<not reported>".to_string(),
+            report: "<initial>\n".to_string(),
             capture_time: std::time::Instant::now(),
         }
     }
@@ -97,12 +97,31 @@ impl TraceReporter {
                     };
 
                     tokio::select! {
+                        biased; // always prefer reporting
+                        _ = reporter => unreachable!(),
                         output = future => output,
-                        _ = reporter => unreachable!()
                     }
                 },
             )
             .await
+    }
+
+    /// Optionally provide a stack tracing context. Check [`TraceReporter::trace`] for more details.
+    pub async fn optional_trace<F: Future>(
+        self,
+        future: F,
+        root_span: impl Into<SpanValue>,
+        report_detached: bool,
+        interval: Duration,
+        enabled: bool,
+    ) -> F::Output {
+        if enabled {
+            self.trace(future, root_span, report_detached, interval)
+                .await
+        } else {
+            drop(self); // drop self so that the manager will find that the reporter is closed.
+            future.await
+        }
     }
 }
 
@@ -116,7 +135,7 @@ impl<K> StackTraceManager<K>
 where
     K: std::hash::Hash + Eq + std::fmt::Debug,
 {
-    /// Register with given key. Returns a sender that should be provided to [`stack_traced`].
+    /// Register with given key. Returns a sender that can be called `trace` on.
     pub fn register(&mut self, key: K) -> TraceReporter {
         let (tx, rx) = watch::channel(Default::default());
         self.rxs.try_insert(key, rx).unwrap();

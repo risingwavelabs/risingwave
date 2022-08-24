@@ -126,6 +126,7 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
+// TODO(yuchao): We may deprecate this struct to use `OrderedRow` instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DescOrderedRow {
     pub row: Row,
@@ -294,7 +295,6 @@ pub fn compare_rows_in_chunk(
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
-    use std::sync::Arc;
 
     use itertools::Itertools;
 
@@ -434,9 +434,7 @@ mod tests {
                 DataType::Date,
                 DataType::Timestamp,
                 DataType::Time,
-                DataType::Struct {
-                    fields: Arc::new([DataType::Int32, DataType::Float32]),
-                },
+                DataType::new_struct(vec![DataType::Int32, DataType::Float32], vec![]),
                 DataType::List {
                     datatype: Box::new(DataType::Int32),
                 },

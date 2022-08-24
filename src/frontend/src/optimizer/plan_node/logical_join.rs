@@ -18,7 +18,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::QueryMode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -32,7 +31,7 @@ use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
     LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -130,12 +129,13 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let pk_indices = match pk_indices {
+            Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
+                functional_dependency.minimize_key(&pk_indices)
+            }
+            _ => pk_indices.unwrap_or_default(),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalJoin {
             base,
             left,
@@ -549,7 +549,7 @@ impl LogicalJoin {
         mut predicate: EqJoinPredicate,
     ) -> Option<PlanRef> {
         if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
-            log::warn!(
+            tracing::warn!(
                 "Lookup Join only supports basic tables on the join's right side. A \
             different join will be used instead."
             );
@@ -567,7 +567,7 @@ impl LogicalJoin {
 
         let order_col_ids = table_desc.order_column_ids();
         if order_col_ids.len() != predicate.right_eq_indexes().len() {
-            log::warn!("{}", eq_col_warn_message);
+            tracing::warn!("{}", eq_col_warn_message);
             return None;
         }
 
@@ -576,7 +576,7 @@ impl LogicalJoin {
             .zip_eq(predicate.right_eq_indexes())
         {
             if order_col_id != output_column_ids[eq_idx] {
-                log::warn!("{}", eq_col_warn_message);
+                tracing::warn!("{}", eq_col_warn_message);
                 return None;
             }
         }
@@ -825,6 +825,24 @@ impl PredicatePushdown for LogicalJoin {
     }
 }
 
+impl LogicalJoin {
+    pub fn to_batch_lookup_join(&self) -> Result<PlanRef> {
+        let predicate = EqJoinPredicate::create(
+            self.left.schema().len(),
+            self.right.schema().len(),
+            self.on.clone(),
+        );
+
+        let left = self.left().to_batch()?;
+        let right = self.right().to_batch()?;
+        let logical_join = self.clone_with_left_right(left, right);
+
+        Ok(self
+            .convert_to_lookup_join(logical_join, predicate)
+            .expect("Fail to convert to lookup join"))
+    }
+}
+
 impl ToBatch for LogicalJoin {
     fn to_batch(&self) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
@@ -841,17 +859,10 @@ impl ToBatch for LogicalJoin {
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
-                if config.get_query_mode() == QueryMode::Local {
-                    if let Some(lookup_join) =
-                        self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
-                    {
-                        return Ok(lookup_join);
-                    }
-                } else {
-                    log::warn!(
-                        "Lookup Join can only be done in local mode. A different join will \
-                    be used instead."
-                    );
+                if let Some(lookup_join) =
+                    self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
+                {
+                    return Ok(lookup_join);
                 }
             }
 
@@ -898,21 +909,50 @@ impl ToStream for LogicalJoin {
         );
 
         if predicate.has_eq() {
-            let right = self
-                .right()
-                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.right().schema().len(),
-                    &predicate.right_eq_indexes(),
-                ))?;
+            let mut right =
+                self.right()
+                    .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                        self.right().schema().len(),
+                        &predicate.right_eq_indexes(),
+                    ))?;
+            let mut left = self.left();
 
-            let r2l =
-                predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
+            let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
+            let l2r = r2l.inverse();
 
-            let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
-                right.distribution().clone(),
-            ));
+            let right_dist = right.distribution();
+            match right_dist {
+                Distribution::HashShard(_) => {
+                    let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
+                        right_dist.clone(),
+                    ));
+                    left = left.to_stream_with_dist_required(&left_dist)?;
+                }
+                Distribution::UpstreamHashShard(_) => {
+                    left = left.to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                        self.left().schema().len(),
+                        &predicate.left_eq_indexes(),
+                    ))?;
+                    let left_dist = left.distribution();
+                    match left_dist {
+                        Distribution::HashShard(_) => {
+                            let right_dist = l2r.rewrite_required_distribution(
+                                &RequiredDist::PhysicalDist(left_dist.clone()),
+                            );
+                            right = right_dist.enforce_if_not_satisfies(right, &Order::any())?
+                        }
+                        Distribution::UpstreamHashShard(_) => {
+                            left = RequiredDist::hash_shard(&predicate.left_eq_indexes())
+                                .enforce_if_not_satisfies(left, &Order::any())?;
+                            right = RequiredDist::hash_shard(&predicate.right_eq_indexes())
+                                .enforce_if_not_satisfies(right, &Order::any())?;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                _ => unreachable!(),
+            }
 
-            let left = self.left().to_stream_with_dist_required(&left_dist)?;
             let logical_join = self.clone_with_left_right(left, right);
 
             // Convert to Hash Join for equal joins
