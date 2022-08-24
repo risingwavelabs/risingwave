@@ -140,9 +140,9 @@ impl SourceManager for MemSourceManager {
             .into_iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.unwrap())))
             .collect();
-        let row_id_index = info.row_id_index.and_then(|row_id_index| {
+        let row_id_index = info.row_id_index.map(|row_id_index| {
             columns[row_id_index.index as usize].skip_parse = true;
-            Some(row_id_index.index as usize)
+            row_id_index.index as usize
         });
         let pk_column_ids = info.pk_column_ids;
         assert!(
