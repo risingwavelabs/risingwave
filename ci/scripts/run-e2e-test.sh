@@ -61,17 +61,3 @@ timeout 2m sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended
 
 echo "--- Kill cluster"
 cargo make ci-kill
-
-echo "--- e2e, ci-3cn-1fe, fuzzing"
-buildkite-agent artifact download sqlsmith-"$profile" target/debug/
-mv target/debug/sqlsmith-"$profile" target/debug/sqlsmith
-chmod +x ./target/debug/sqlsmith
-
-cargo make ci-start ci-3cn-1fe
-# This avoids storing excess logs.
-# If there's errors, the failing query will be printed to stderr.
-# Use that to reproduce logs on local machine.
-timeout 20m ./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
-
-echo "--- Kill cluster"
-cargo make kill
