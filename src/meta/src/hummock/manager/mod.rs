@@ -673,7 +673,7 @@ where
                 &mut hummock_version_deltas,
                 &current_version,
                 &compact_task,
-                false,
+                true,
             );
             let mut new_version =
                 CompactStatus::apply_compact_result(&compact_task, current_version);
@@ -694,6 +694,12 @@ where
                 compaction_group_id,
             );
         };
+
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
+        }
 
         Ok(Some(compact_task))
     }
@@ -835,7 +841,7 @@ where
             apply_version_delta(
                 &mut hummock_version_deltas,
                 &old_version,
-                &compact_task,
+                compact_task,
                 false,
             );
             let new_version_id = old_version.id + 1;
