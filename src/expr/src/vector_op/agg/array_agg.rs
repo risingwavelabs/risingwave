@@ -12,32 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue};
+use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue, RowRef};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::ordered::OrderedRow;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use crate::vector_op::agg::aggregator::Aggregator;
 
 #[derive(Clone)]
-pub struct ArrayAggUnordered {
+struct ArrayAggUnordered {
     return_type: DataType,
     agg_col_idx: usize,
-    result: Vec<Datum>,
+    values: Vec<Datum>,
 }
 
 impl ArrayAggUnordered {
-    pub fn new(return_type: DataType, agg_col_idx: usize) -> Self {
+    fn new(return_type: DataType, agg_col_idx: usize) -> Self {
         debug_assert!(matches!(return_type, DataType::List { datatype: _ }));
         ArrayAggUnordered {
             return_type,
             agg_col_idx,
-            result: Vec::new(),
+            values: vec![],
         }
     }
 
+    fn push(&mut self, datum: Datum) {
+        self.values.push(datum);
+    }
+
     fn get_result_and_reset(&mut self) -> ListValue {
-        ListValue::new(std::mem::take(&mut self.result))
+        ListValue::new(std::mem::take(&mut self.values))
     }
 }
 
@@ -48,7 +53,7 @@ impl Aggregator for ArrayAggUnordered {
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         let array = input.column_at(self.agg_col_idx).array_ref();
-        self.result.push(array.datum_at(row_id));
+        self.push(array.datum_at(row_id));
         Ok(())
     }
 
@@ -58,9 +63,87 @@ impl Aggregator for ArrayAggUnordered {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        let array = input.column_at(self.agg_col_idx).array_ref();
         for row_id in start_row_id..end_row_id {
-            self.result.push(array.datum_at(row_id));
+            self.update_single(input, row_id)?;
+        }
+        Ok(())
+    }
+
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        if let ArrayBuilderImpl::List(builder) = builder {
+            builder
+                .append(Some(self.get_result_and_reset().as_scalar_ref()))
+                .map_err(Into::into)
+        } else {
+            Err(
+                ErrorCode::InternalError(format!("Builder fail to match {}.", stringify!(Utf8)))
+                    .into(),
+            )
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ArrayAggOrdered {
+    return_type: DataType,
+    agg_col_idx: usize,
+    order_col_indices: Vec<usize>,
+    order_types: Vec<OrderType>,
+    unordered_values: Vec<(OrderedRow, Datum)>,
+}
+
+impl ArrayAggOrdered {
+    fn new(return_type: DataType, agg_col_idx: usize, order_pairs: Vec<OrderPair>) -> Self {
+        debug_assert!(matches!(return_type, DataType::List { datatype: _ }));
+        let (order_col_indices, order_types) = order_pairs
+            .into_iter()
+            .map(|p| (p.column_idx, p.order_type))
+            .unzip();
+        ArrayAggOrdered {
+            return_type,
+            agg_col_idx,
+            order_col_indices,
+            order_types,
+            unordered_values: vec![],
+        }
+    }
+
+    fn push_row(&mut self, row: RowRef) {
+        let key = OrderedRow::new(
+            row.row_by_indices(&self.order_col_indices),
+            &self.order_types,
+        );
+        let datum = row.value_at(self.agg_col_idx).map(|x| x.into_scalar_impl());
+        self.unordered_values.push((key, datum));
+    }
+
+    fn get_result_and_reset(&mut self) -> ListValue {
+        let mut rows = std::mem::take(&mut self.unordered_values);
+        rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        ListValue::new(rows.into_iter().map(|(_, datum)| datum).collect())
+    }
+}
+
+impl Aggregator for ArrayAggOrdered {
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+        let (row, vis) = input.row_at(row_id)?;
+        assert!(vis);
+        self.push_row(row);
+        Ok(())
+    }
+
+    fn update_multi(
+        &mut self,
+        input: &DataChunk,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()> {
+        for row_id in start_row_id..end_row_id {
+            self.update_single(input, row_id)?;
         }
         Ok(())
     }
@@ -88,10 +171,11 @@ pub fn create_array_agg_state(
     if order_pairs.is_empty() {
         Ok(Box::new(ArrayAggUnordered::new(return_type, agg_col_idx)))
     } else {
-        Err(
-            ErrorCode::InternalError("ArrayAgg with order by clause is not supported yet".into())
-                .into(),
-        )
+        Ok(Box::new(ArrayAggOrdered::new(
+            return_type,
+            agg_col_idx,
+            order_pairs,
+        )))
     }
 }
 
