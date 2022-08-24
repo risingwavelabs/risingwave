@@ -19,7 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
@@ -64,7 +64,7 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     agg_calls: Vec<AggCall>,
 
     /// Relational state tables for each aggregation calls.
-    state_tables: Vec<RowBasedStateTable<S>>,
+    state_tables: Vec<StateTable<S>>,
 
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
@@ -95,13 +95,13 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        mut state_tables: Vec<RowBasedStateTable<S>>,
+        mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
-        // TODO: enable sanity check for globle simple agg executor <https://github.com/singularity-data/risingwave/issues/3885>
+        // // TODO: enable sanity check for globle simple agg executor <https://github.com/singularity-data/risingwave/issues/3885>
         for state_table in &mut state_tables {
             state_table.disable_sanity_check();
         }
@@ -137,7 +137,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         epoch: u64,
-        state_tables: &mut [RowBasedStateTable<S>],
+        state_tables: &mut [StateTable<S>],
         state_table_col_mappings: &[Arc<StateTableColumnMapping>],
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
@@ -190,7 +190,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         schema: &Schema,
         states: &mut Option<AggState<S>>,
         epoch: u64,
-        state_tables: &mut [RowBasedStateTable<S>],
+        state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
