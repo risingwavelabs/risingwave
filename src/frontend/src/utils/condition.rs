@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
@@ -21,10 +22,10 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
-    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions, to_disjunctions,
+    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
@@ -239,6 +240,77 @@ impl Condition {
         .unwrap()
     }
 
+    /// generate range scans from each arm of `OR` clause and merge them
+    /// Currently, only support equal type range scans.
+    /// Keep in mind that range scans can not be overlap, otherwise duplicate rows will occur.
+    fn disjunctions_to_scan_ranges(
+        order_column_ids: &[usize],
+        num_cols: usize,
+        disjunctions: Vec<ExprImpl>,
+    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
+        let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> = disjunctions
+            .into_iter()
+            .map(|x| {
+                Condition {
+                    conjunctions: to_conjunctions(x),
+                }
+                .split_to_scan_ranges(order_column_ids, num_cols)
+            })
+            .collect();
+
+        // if any arm of `OR` clause fail, bail out.
+        let disjunctions_result = disjunctions_result?;
+
+        // if all arm of `OR` clause scan ranges are simply equal condition type, merge all
+        // of them.
+        let all_equal = disjunctions_result
+            .iter()
+            .all(|(scan_ranges, other_condition)| {
+                other_condition.always_true()
+                    && scan_ranges
+                        .iter()
+                        .all(|x| !x.eq_conds.is_empty() && is_full_range(&x.range))
+            });
+
+        if all_equal {
+            // think about the case (a = 1) or (a = 1 and b = 2)
+            // we should only keep the large one range scan a = 1, because a = 1 is overlap with (a
+            // = 1 and b = 2)
+            let scan_ranges = disjunctions_result
+                .into_iter()
+                .flat_map(|(scan_ranges, _)| scan_ranges)
+                // sort, large one first
+                .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
+                .collect_vec();
+            // make sure each range is never overlap with others, that's what scan range mean
+            let mut non_overlap_scan_ranges: Vec<ScanRange> = vec![];
+            for s1 in &scan_ranges {
+                let mut overlap = false;
+                for s2 in &mut non_overlap_scan_ranges {
+                    let min_len = min(s1.eq_conds.len(), s2.eq_conds.len());
+                    overlap = s1
+                        .eq_conds
+                        .iter()
+                        .take(min_len)
+                        .zip_eq(s2.eq_conds.iter().take(min_len))
+                        .all(|(a, b)| a == b);
+                    // if overlap happens, keep the large one and large one always in
+                    // `non_overlap_scan_ranges`
+                    if overlap {
+                        break;
+                    }
+                }
+                if !overlap {
+                    non_overlap_scan_ranges.push(s1.clone());
+                }
+            }
+
+            return Ok(Some((non_overlap_scan_ranges, Condition::true_cond())));
+        } else {
+            return Ok(None);
+        }
+    }
+
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
     pub fn split_to_scan_ranges(
         self,
@@ -250,26 +322,15 @@ impl Condition {
         }
 
         // it's an OR
-        if self.conjunctions.len() == 1
-            && let ExprImpl::FunctionCall(function_call) = &self.conjunctions[0]
-            && function_call.get_expr_type() == ExprType::Or {
-            let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> =
-                to_disjunctions(self.conjunctions[0].clone())
-                .into_iter()
-                .map(|x| Condition {
-                    conjunctions: to_conjunctions(x)
-                }.split_to_scan_ranges(order_column_ids, num_cols))
-                .collect();
-
-            // if any arm or `OR` clause fail, bail out.
-            let disjunctions = disjunctions_result?;
-
-            // if all scan ranges without other conditions, merge all of them.
-            if disjunctions.iter().all(|(_, other_condition)| other_condition.always_true()) {
-                let scan_ranges = disjunctions.into_iter().flat_map(|(scan_ranges, _)| scan_ranges).collect_vec();
-                return Ok((scan_ranges, Condition::true_cond()));
-            } else {
-                return Ok((vec![], self));
+        if self.conjunctions.len() == 1 {
+            if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
+                if let Some((scan_ranges, other_condition)) =
+                    Self::disjunctions_to_scan_ranges(order_column_ids, num_cols, disjunctions)?
+                {
+                    return Ok((scan_ranges, other_condition));
+                } else {
+                    return Ok((vec![], self));
+                }
             }
         }
 
