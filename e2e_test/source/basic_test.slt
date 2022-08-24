@@ -49,6 +49,12 @@ statement ok
 select * from s7
 
 statement ok
+create materialized source s8 ( id integer , first_name varchar , last_name varchar , email varchar , PRIMARY KEY ( id ) ) with ( connector = 'kafka', topic = 'debezium_log', properties.bootstrap.server = '127.0.0.1:29092' ) row format debezium_json
+
+statement ok
+select * from s8
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -164,6 +170,15 @@ select sum_v1, count_v2 from source_mv2;
 ----
 78 12
 
+query ITTT rowsort
+select id, first_name, last_name, email from s8;
+----
+1004 Anne1 Kretchmar annek@noanswer.org
+1001 Sally Thomas sally.thomas@acme.com
+1003 Edward Walker ed@walker.com
+1002 George Bailey gbailey@foobar.com
+1005 add add2 add
+
 statement ok
 drop materialized view source_mv1
 
@@ -172,3 +187,6 @@ drop materialized view source_mv2
 
 statement ok
 drop source s6
+
+statement ok
+drop source s8
