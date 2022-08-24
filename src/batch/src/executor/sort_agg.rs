@@ -239,7 +239,7 @@ impl SortAggExecutor {
         sorted_groupers
             .iter_mut()
             .zip_eq(group_builders)
-            .try_for_each(|(grouper, builder)| grouper.output_and_reset(builder))
+            .try_for_each(|(grouper, builder)| grouper.output(builder))
     }
 
     fn output_agg_states(
@@ -249,7 +249,7 @@ impl SortAggExecutor {
         agg_states
             .iter_mut()
             .zip_eq(agg_builders)
-            .try_for_each(|(state, builder)| state.output_and_reset(builder))
+            .try_for_each(|(state, builder)| state.output(builder))
     }
 
     fn create_builders(

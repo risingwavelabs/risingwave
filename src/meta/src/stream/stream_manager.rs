@@ -798,6 +798,7 @@ where
         }
 
         // Remove internal_tables push to CN and Compactor
+        // TODO: notify compute and compactor to drop the catalog
         self.remove_processing_table(
             table_fragments
                 .internal_table_ids()
