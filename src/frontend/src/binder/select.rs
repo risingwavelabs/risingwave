@@ -72,11 +72,10 @@ impl BoundSelect {
         &mut self,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        let mut correlated_indices = vec![];
-        self.exprs_mut().for_each(|expr| {
-            correlated_indices
-                .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
-        });
+        let mut correlated_indices = self
+            .exprs_mut()
+            .flat_map(|expr| expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
+            .collect_vec();
 
         if let Some(relation) = self.from.as_mut() {
             correlated_indices

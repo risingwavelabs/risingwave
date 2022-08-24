@@ -51,12 +51,9 @@ impl BoundValues {
         &mut self,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        let mut correlated_indices = vec![];
-        self.exprs_mut().for_each(|expr| {
-            correlated_indices
-                .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
-        });
-        correlated_indices
+        self.exprs_mut()
+            .flat_map(|expr| expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
+            .collect()
     }
 }
 
