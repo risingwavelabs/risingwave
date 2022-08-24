@@ -166,7 +166,6 @@ pub fn create_array_agg_state(
     return_type: DataType,
     agg_col_idx: usize,
     order_pairs: Vec<OrderPair>,
-    _order_col_types: Vec<DataType>,
 ) -> Result<Box<dyn Aggregator>> {
     if order_pairs.is_empty() {
         Ok(Box::new(ArrayAggUnordered::new(return_type, agg_col_idx)))
@@ -181,11 +180,83 @@ pub fn create_array_agg_state(
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+    use risingwave_common::array::Array;
+    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::types::ScalarRef;
+
     use super::*;
 
     #[test]
     fn test_array_agg_basic() -> Result<()> {
-        // TODO(rc)
+        let chunk = DataChunk::from_pretty(
+            "i
+             123
+             456
+             789",
+        );
+        let return_type = DataType::List {
+            datatype: Box::new(DataType::Int32),
+        };
+        let mut agg = create_array_agg_state(return_type.clone(), 0, vec![])?;
+        let mut builder = return_type.create_array_builder(0);
+        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.output(&mut builder)?;
+        let output = builder.finish()?;
+        let actual = output.into_list();
+        let actual = actual
+            .iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec();
+        assert_eq!(
+            actual,
+            vec![Some(ListValue::new(vec![
+                Some(123.into()),
+                Some(456.into()),
+                Some(789.into())
+            ]))]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_array_agg_with_order() -> Result<()> {
+        let chunk = DataChunk::from_pretty(
+            "i    i
+             123  3
+             456  2
+             789  2
+             321  9",
+        );
+        let return_type = DataType::List {
+            datatype: Box::new(DataType::Int32),
+        };
+        let mut agg = create_array_agg_state(
+            return_type.clone(),
+            0,
+            vec![
+                OrderPair::new(1, OrderType::Ascending),
+                OrderPair::new(0, OrderType::Descending),
+            ],
+        )?;
+        let mut builder = return_type.create_array_builder(0);
+        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.output(&mut builder)?;
+        let output = builder.finish()?;
+        let actual = output.into_list();
+        let actual = actual
+            .iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec();
+        assert_eq!(
+            actual,
+            vec![Some(ListValue::new(vec![
+                Some(789.into()),
+                Some(456.into()),
+                Some(123.into()),
+                Some(321.into())
+            ]))]
+        );
         Ok(())
     }
 }
