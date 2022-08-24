@@ -107,7 +107,8 @@ impl DistinctAggRule {
         let mut shift_with_offset =
             ColIndexMapping::with_shift_offset(input_schema_len, input_schema_len as isize);
         for agg_call in agg_calls.iter_mut() {
-            agg_call.filter = mem::take(&mut agg_call.filter).rewrite_expr(&mut shift_with_offset);
+            agg_call.filter = mem::replace(&mut agg_call.filter, Condition::true_cond())
+                .rewrite_expr(&mut shift_with_offset);
         }
 
         // collect indices.
@@ -133,7 +134,8 @@ impl DistinctAggRule {
             for input in &mut agg_call.inputs {
                 input.index = mapping.map(input.index);
             }
-            agg_call.filter = mem::take(&mut agg_call.filter).rewrite_expr(&mut mapping);
+            agg_call.filter = mem::replace(&mut agg_call.filter, Condition::true_cond())
+                .rewrite_expr(&mut mapping);
         }
 
         LogicalProject::with_mapping(expand, mapping).into()
