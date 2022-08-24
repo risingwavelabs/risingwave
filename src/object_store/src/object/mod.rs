@@ -141,25 +141,7 @@ pub trait ObjectStore: Send + Sync {
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
 
-    fn store_media_type(&self) -> StoreMediaType;
-}
-
-pub enum StoreMediaType {
-    None,
-    Mem,
-    Disk,
-    S3,
-}
-
-impl StoreMediaType {
-    fn as_str(&self) -> &'static str {
-        match self {
-            StoreMediaType::None => "none",
-            StoreMediaType::Mem => "mem",
-            StoreMediaType::Disk => "disk",
-            StoreMediaType::S3 => "s3",
-        }
-    }
+    fn store_media_type(&self) -> &'static str;
 }
 
 pub enum ObjectStoreImpl {
@@ -260,11 +242,6 @@ impl ObjectStoreImpl {
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         object_store_impl_method_body!(self, list, prefix)
     }
-
-    #[allow(dead_code)]
-    fn store_media_type(&self) -> StoreMediaType {
-        StoreMediaType::None
-    }
 }
 
 pub struct MonitoredStreamingUploader {
@@ -328,7 +305,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 
     fn media_type(&self) -> &str {
-        self.inner.store_media_type().as_str()
+        self.inner.store_media_type()
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -355,7 +332,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
         let handle = self.inner.streaming_upload(path).await?;
         Ok(MonitoredStreamingUploader::new(
-            self.inner.store_media_type().as_str(),
+            self.inner.store_media_type(),
             handle,
             self.object_store_metrics.clone(),
         ))
