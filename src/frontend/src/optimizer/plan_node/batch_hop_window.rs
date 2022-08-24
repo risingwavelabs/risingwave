@@ -22,7 +22,7 @@ use super::{
     LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
 /// input rows
@@ -64,8 +64,29 @@ impl_plan_tree_node_for_unary! { BatchHopWindow }
 
 impl ToDistributedBatch for BatchHopWindow {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed()?;
-        Ok(self.clone_with_input(new_input).into())
+        self.to_distributed_with_required(&Order::any(), &RequiredDist::Any)
+    }
+
+    fn to_distributed_with_required(
+        &self,
+        required_order: &Order,
+        required_dist: &RequiredDist,
+    ) -> Result<PlanRef> {
+        // The hop operator will generate a multiplication of its input rows,
+        // so shuffling its input instead of its output will reduce the shuffling data
+        // communication.
+        // We pass the required dist to its input.
+        let input_required = self
+            .logical
+            .o2i_col_mapping()
+            .rewrite_required_distribution(required_dist);
+        let new_input = self
+            .input()
+            .to_distributed_with_required(&Order::any(), &input_required)?;
+        let new_logical = self.logical.clone_with_input(new_input);
+        let batch_plan = BatchHopWindow::new(new_logical);
+        let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into())?;
+        required_dist.enforce_if_not_satisfies(batch_plan, required_order)
     }
 }
 

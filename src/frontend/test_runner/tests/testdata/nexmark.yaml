@@ -203,8 +203,8 @@
                 BatchExchange { order: [], dist: HashShard(window_start) }
                   BatchProject { exprs: [window_start, count] }
                     BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-                      BatchExchange { order: [], dist: HashShard(bid.auction, window_start) }
-                        BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+                      BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+                        BatchExchange { order: [], dist: HashShard(bid.auction) }
                           BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [auction, window_start#1] }

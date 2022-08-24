@@ -415,8 +415,8 @@
     LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
       LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at] }
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
+    BatchHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
+      BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [window_end, t1._row_id] }
