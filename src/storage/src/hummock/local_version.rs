@@ -212,7 +212,7 @@ impl LocalVersion {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
         let mut cleaned_epoch = vec![];
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
-            for (epochs, _) in self.sync_uncommitted_data.iter() {
+            for (epochs, _) in &self.sync_uncommitted_data {
                 for epoch in epochs {
                     if *epoch <= new_pinned_version.max_committed_epoch {
                         cleaned_epoch.push(*epoch);
@@ -323,7 +323,7 @@ impl LocalVersion {
 
     pub fn clear_shared_buffer(&mut self) -> Vec<HummockEpoch> {
         let mut cleaned_epoch = self.shared_buffer.keys().cloned().collect_vec();
-        for (epochs, _) in self.sync_uncommitted_data.iter() {
+        for (epochs, _) in &self.sync_uncommitted_data {
             for epoch in epochs {
                 cleaned_epoch.push(*epoch);
             }
