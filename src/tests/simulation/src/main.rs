@@ -50,6 +50,10 @@ pub struct Args {
     #[clap(long, default_value = "3")]
     compute_nodes: usize,
 
+    /// The number of compactor nodes.
+    #[clap(long, default_value = "1")]
+    compactor_nodes: usize,
+
     /// The number of CPU cores for each compute node.
     ///
     /// This determines worker_node_parallelism.
@@ -146,6 +150,30 @@ async fn main() {
         }
         builder.build();
     }
+
+    // compactor node
+    for i in 1..=args.compactor_nodes {
+        handle
+            .create_node()
+            .name(format!("compactor-{i}"))
+            .ip([192, 168, 4, i as u8].into())
+            .init(move || async move {
+                let opts = risingwave_compactor::CompactorOpts::parse_from([
+                    "compactor-node",
+                    "--host",
+                    "0.0.0.0:6660",
+                    "--client-address",
+                    &format!("192.168.4.{i}:6660"),
+                    "--meta-address",
+                    "192.168.1.1:5690",
+                    "--state-store",
+                    "hummock+memory-shared",
+                ]);
+                risingwave_compactor::start(opts).await
+            })
+            .build();
+    }
+
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     // client
