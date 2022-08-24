@@ -19,7 +19,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::future::Future;
-use std::sync::atomic::{AtomicUsize, Ordering, fence};
+use std::sync::atomic::{fence, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::task_local;
