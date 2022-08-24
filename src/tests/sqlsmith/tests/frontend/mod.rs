@@ -158,7 +158,7 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
                 .plan(bound)
                 .unwrap_or_else(|e| panic!("Failed to generate logical plan:\nReason:\n{}", e));
             logical_plan
-                .gen_batch_query_plan()
+                .gen_batch_distributed_plan()
                 .unwrap_or_else(|e| panic!("Failed to generate batch plan:\nReason:\n{}", e));
         }
         _ => panic!("Invalid Query: {}", stmt),
