@@ -300,7 +300,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 if distinct {
                     None
                 } else {
-                    Some(Expr::Function(make_agg_func("approx_count_distinct", exprs, false)))
+                    Some(Expr::Function(make_agg_func(
+                        "approx_count_distinct",
+                        exprs,
+                        false,
+                    )))
                 }
             }
             // TODO(yuchao): `array_agg` support is still WIP, see #4657.
