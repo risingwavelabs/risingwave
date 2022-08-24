@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::{env, panic};
 
 use itertools::Itertools;
-use libtest_mimic::{Arguments, Failed, Trial};
+use libtest_mimic::{Arguments, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -199,9 +199,8 @@ pub fn run() {
 
     let num_tests = 512;
     let tests = (0..num_tests)
-        .map(|i| Trial::test(
-            format!("run_sqlsmith_on_frontend_{}", i),
-            move || {
+        .map(|i| {
+            Trial::test(format!("run_sqlsmith_on_frontend_{}", i), move || {
                 let SqlsmithEnv {
                     session,
                     tables,
@@ -217,10 +216,9 @@ pub fn run() {
                     .unwrap()
                     .block_on(test_stream_query);
                 Ok(())
-            }
-        ))
+            })
+        })
         .collect();
-
 
     libtest_mimic::run(&args, tests).exit();
 }

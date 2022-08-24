@@ -14,10 +14,10 @@
 
 use std::ffi::OsStr;
 
-use libtest_mimic::{Arguments, Failed, Trial};
+use libtest_mimic::{Arguments, Trial};
 use risingwave_frontend_test_runner::run_test_file;
-use walkdir::WalkDir;
 use tokio::runtime::Runtime;
+use walkdir::WalkDir;
 
 fn build_runtime() -> Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -48,26 +48,16 @@ fn main() {
             let file_name: String = path.file_name().unwrap().to_string_lossy().to_string();
             let test_case_name = file_name.split('.').next().unwrap().to_string();
 
-            let nocapture = run_tests_args.nocapture;
+            tests.push(Trial::test(format!("{test_case_name}_test"), move || {
+                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("testdata")
+                    .join(file_name);
 
-            tests.push(Trial::test(
-                format!("{test_case_name}_test"),
-                // kind: "".into(),
-                // is_ignored: false,
-                // is_bench: false,
-                // data: (test_case_name.to_string(), file_name.to_string()),
-                move || {
-                    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("tests")
-                        .join("testdata")
-                        .join(file_name);
-
-                    let file_content = std::fs::read_to_string(path).unwrap();
-                    build_runtime()
-                        .block_on(run_test_file(&test_case_name, &file_content));
-                    Ok(())
-                }
-            ));
+                let file_content = std::fs::read_to_string(path).unwrap();
+                build_runtime().block_on(run_test_file(&test_case_name, &file_content));
+                Ok(())
+            }));
         }
     }
 
@@ -75,19 +65,5 @@ fn main() {
         panic!("no test case found in planner test!");
     }
 
-    // run_tests(run_tests_args, tests, |test| {
-    //     let (test_case_name, file_name): (String, String) = test.clone().data;
-    //     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-    //         .join("tests")
-    //         .join("testdata")
-    //         .join(file_name);
-
-    //     let file_content = std::fs::read_to_string(path).unwrap();
-    //     build_runtime()
-    //         .block_on(run_test_file(&test_case_name, &file_content));
-    //     Outcome::Passed
-    // })
-    // .exit();
-
-    libtest_mimic::run(&run_tests_args, tests).exit();
+    libtest_mimic::run(run_tests_args, tests).exit();
 }
