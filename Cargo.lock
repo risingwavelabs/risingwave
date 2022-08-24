@@ -4514,6 +4514,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
+ "dyn-clone",
  "either",
  "itertools",
  "lazy_static",
