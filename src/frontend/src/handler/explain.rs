@@ -20,7 +20,7 @@ use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::{
-    DropStatement, ExplainOptions, ExplainType, ObjectType, Statement,
+    ExplainOptions, ExplainType, Statement,
 };
 
 use super::create_index::gen_create_index_plan;
