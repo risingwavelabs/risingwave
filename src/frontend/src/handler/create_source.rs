@@ -31,7 +31,6 @@ use super::privilege::check_privileges;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenterV2;

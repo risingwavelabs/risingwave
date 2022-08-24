@@ -147,7 +147,7 @@ impl SourceManager for MemSourceManager {
         let pk_column_ids = info.pk_column_ids;
         assert!(
             !pk_column_ids.is_empty(),
-            "soruce should have at least one pk column"
+            "source should have at least one pk column"
         );
 
         let config = ConnectorProperties::extract(info.properties)
@@ -196,7 +196,7 @@ impl SourceManager for MemSourceManager {
 
         assert!(
             !pk_column_ids.is_empty(),
-            "soruce should have at least one pk column"
+            "source should have at least one pk column"
         );
 
         let source_columns = columns.iter().map(SourceColumnDesc::from).collect();

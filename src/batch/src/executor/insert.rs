@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::once;
-
 use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
