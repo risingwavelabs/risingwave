@@ -80,7 +80,7 @@ impl Column {
             for key in subset {
                 new_columns[key] = columns[key].clone();
             }
-            new_columns.extend(columns.clone());
+            new_columns.extend(columns.iter().cloned());
             let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
                 Some(i as i64);
                 cardinality

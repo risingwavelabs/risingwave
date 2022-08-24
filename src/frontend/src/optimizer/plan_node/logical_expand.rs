@@ -144,8 +144,7 @@ impl PlanTreeNodeUnary for LogicalExpand {
         let (mut mapping, new_input_col_num) = input_col_change.into_parts();
         mapping.extend({
             mapping
-                .clone()
-                .into_iter()
+                .iter()
                 .map(|p| p.map(|i| i + new_input_col_num))
                 .collect_vec()
         });

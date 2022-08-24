@@ -618,6 +618,15 @@
     select single_value(distinct x) from t;
   binder_error: 'Invalid input syntax: single_value(distinct) is disallowed'
 - sql: |
+    create table t(v1 int, v2 int);
+    with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [count(t.v1) filter((flag = 0:Int64))] }
+      LogicalAgg { group_key: [t.v1, flag], aggs: [] }
+        LogicalProject { exprs: [t.v1, flag] }
+          LogicalExpand { column_subsets: [[t.v1]] }
+            LogicalScan { table: t, columns: [t.v1] }
+- sql: |
     /* input is sharded by group key */
     create table t(x int);
     create index i on t(x);
