@@ -325,9 +325,14 @@ impl<S: StateStore> StorageTable<S> {
     pub async fn get_row(&mut self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let read_options = self.get_read_option(epoch);
+        assert!(pk.size() <= self.pk_indices.len());
+                let key_indices = (0..pk.size())
+                    .into_iter()
+                    .map(|index| self.pk_indices[index])
+                    .collect_vec();
         if let Some(value) = self
             .keyspace
-            .get(&serialized_pk, read_options.clone())
+            .get(&serialized_pk, self.dist_key_indices == key_indices, read_options.clone())
             .await?
         {
             let deserialize_res =
