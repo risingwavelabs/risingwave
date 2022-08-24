@@ -659,11 +659,6 @@ where
             compaction_group_id,
         );
 
-        #[cfg(test)]
-        {
-            self.check_state_consistency().await;
-        }
-
         ret
     }
 
@@ -687,6 +682,11 @@ where
             .await?
         {
             if !CompactStatus::is_trivial_move_task(&task) {
+                #[cfg(test)]
+                {
+                    drop(compaction_guard);
+                    self.check_state_consistency().await;
+                }
                 return Ok(Some(task));
             }
             task.task_status = true;
