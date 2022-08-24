@@ -457,6 +457,7 @@ enum FragmentType {
   FRAGMENT_UNSPECIFIED = 0;
   OTHERS = 1;
   SOURCE = 2;
+  // TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now.
   SINK = 3;
 }
 
@@ -471,6 +472,8 @@ message StreamFragmentGraph {
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;
+    // Mark the upstream table ids of this fragment, Used for fragments with `Chain`s.
+    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {
