@@ -122,7 +122,7 @@ async fn main() {
 
     // compute node
     for i in 1..=args.compute_nodes {
-        handle
+        let mut builder = handle
             .create_node()
             .name(format!("compute-{i}"))
             .ip([192, 168, 3, i as u8].into())
@@ -140,9 +140,11 @@ async fn main() {
                     "hummock+memory-shared",
                 ]);
                 risingwave_compute::start(opts).await
-            })
-            .restart_on_panic()
-            .build();
+            });
+        if args.kill_node {
+            builder = builder.restart_on_panic();
+        }
+        builder.build();
     }
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
