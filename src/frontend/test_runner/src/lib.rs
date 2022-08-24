@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
@@ -530,7 +530,7 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     }
 }
 
-pub async fn run_test_file(file_name: &str, file_content: &str) {
+pub async fn run_test_file(file_name: &str, file_content: &str) -> Result<()> {
     println!("-- running {} --", file_name);
 
     let mut failed_num = 0;
@@ -555,6 +555,7 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
     }
     if failed_num > 0 {
         println!("\n");
-        panic!("{} test cases failed", failed_num);
+        bail!(format!("{} test cases failed", failed_num));
     }
+    Ok(())
 }

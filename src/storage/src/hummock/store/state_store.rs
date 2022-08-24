@@ -24,7 +24,7 @@ use super::{GetFutureTrait, IterFutureTrait, ReadOptions, StateStore};
 use crate::define_local_state_store_associated_type;
 use crate::error::StorageResult;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
-use crate::streaming_table::mem_table::MemTable;
+use crate::table::streaming_table::mem_table::MemTable;
 
 #[allow(unused)]
 pub struct HummockStorageCore {
