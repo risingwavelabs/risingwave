@@ -619,7 +619,7 @@ where
                 CompactStatus::apply_compact_result(&compact_task, current_version);
             new_version.id = new_version_id;
             commit_multi_var!(self, None, hummock_version_deltas)?;
-            /// this task has been finished and does not need to be schedule.
+            // this task has been finished and does not need to be schedule.
             compact_task.task_status = true;
             versioning.current_version = new_version;
             trigger_sst_stat(
