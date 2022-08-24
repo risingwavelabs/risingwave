@@ -38,7 +38,7 @@ impl BatchTaskMetricsManager {
         // We store the collector in delete_cache first and unregister it next time to make sure the
         // metrics be collected by prometheus.
         let (delete_queue_sender, mut delete_queue_receiver) =
-            tokio::sync::mpsc::channel::<Box<dyn Collector>>(1024);
+            tokio::sync::mpsc::channel::<Box<dyn Collector>>(4096);
         let deletor_registry = registry.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -46,7 +46,7 @@ impl BatchTaskMetricsManager {
             let mut connect = true;
             while connect {
                 // run every minute.
-                trace!("BatchTaskMetricsManager Deletor is running...");
+                tracing::info!("BatchTaskMetricsManager Deletor is running...");
                 let _ = interval.tick().await;
 
                 // delete all record in delete_cache .
