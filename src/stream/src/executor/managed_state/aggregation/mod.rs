@@ -24,7 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
@@ -146,7 +146,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_chunk(ops, visibility, columns),
@@ -162,7 +162,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output(),
@@ -179,7 +179,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
+    pub fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.flush(state_table),
             Self::Table(state) => state.flush(state_table),
@@ -193,7 +193,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         pk_indices: PkIndices,
         is_row_count: bool,
         group_key: Option<&Row>,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
         state_table_col_mapping: Arc<StateTableColumnMapping>,
     ) -> StreamExecutorResult<Self> {
         assert!(

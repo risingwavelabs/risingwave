@@ -25,7 +25,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::{Cache, ManagedTableState};
@@ -140,7 +140,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
 
@@ -181,7 +181,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     async fn get_output_inner(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache_synced {
             let all_data_iter =
@@ -223,7 +223,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl], // contains all upstream columns
         _epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_chunk_inner(ops, visibility, columns, state_table)
     }
@@ -231,7 +231,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         self.get_output_inner(epoch, state_table).await
     }
@@ -240,7 +240,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         false
     }
 
-    fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
+    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         Ok(())
     }
 }
@@ -255,7 +255,7 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::RowBasedStateTable;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
     use super::ManagedStringAggState;
     use crate::common::StateTableColumnMapping;
@@ -287,7 +287,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Varchar), // _delim
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![4, 0, 1]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -369,7 +369,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar), // _delim
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 0, 4, 1]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -485,7 +485,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(4), DataType::Varchar), // _delim
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![3, 2, 4, 0, 1]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
