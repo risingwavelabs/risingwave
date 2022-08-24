@@ -1221,6 +1221,21 @@ mod tests {
         compare(expected, tokens);
     }
 
+    #[test]
+    fn tokenize_select_array() {
+        let sql = String::from("SELECT '{1, 2, 3}'");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::SingleQuotedString(String::from("{1, 2, 3}")),
+        ];
+
+        compare(expected, tokens);
+    }
+
     fn compare(expected: Vec<Token>, actual: Vec<Token>) {
         // println!("------------------------------");
         // println!("tokens   = {:?}", actual);

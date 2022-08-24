@@ -385,7 +385,7 @@ mod tests {
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
-            &agg_type,
+            agg_type,
             return_type,
             ArrayBuilderImpl::List(ListArrayBuilder::with_meta(
                 0,

@@ -314,6 +314,35 @@ macro_rules! for_each_cast {
     };
 }
 
+#[inline(always)]
+pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
+    // Remove whitespace.
+    let trimmed: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // Ensure input string is correctly braced.
+    let mut chars = trimmed.chars();
+    risingwave_common::ensure!(
+        chars.next() == Some('{'),
+        "First character should be left brace '{{'"
+    );
+    risingwave_common::ensure!(
+        chars.next_back() == Some('}'),
+        "Last character should be right brace '}}'"
+    );
+
+    Ok(ListValue::new(
+        chars
+            .as_str()
+            .split(",")
+            .map(|datum_ref| {
+                Some(ScalarRefImpl::Utf8(datum_ref))
+                    .map(|scalar_ref| scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type))
+                    .transpose()
+            })
+            .try_collect()?,
+    ))
+}
+
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
