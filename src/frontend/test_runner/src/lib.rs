@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::util::handle_with_properties;
 use risingwave_frontend::handler::{
@@ -372,7 +372,7 @@ impl TestCase {
             || self.batch_plan_proto.is_some()
             || self.batch_error.is_some()
         {
-            let batch_plan = match logical_plan.gen_batch_query_plan() {
+            let batch_plan = match logical_plan.gen_batch_distributed_plan() {
                 Ok(batch_plan) => batch_plan,
                 Err(err) => {
                     ret.batch_error = Some(err.to_string());
@@ -530,7 +530,7 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     }
 }
 
-pub async fn run_test_file(file_name: &str, file_content: &str) {
+pub async fn run_test_file(file_name: &str, file_content: &str) -> Result<()> {
     println!("-- running {} --", file_name);
 
     let mut failed_num = 0;
@@ -555,6 +555,7 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
     }
     if failed_num > 0 {
         println!("\n");
-        panic!("{} test cases failed", failed_num);
+        bail!(format!("{} test cases failed", failed_num));
     }
+    Ok(())
 }

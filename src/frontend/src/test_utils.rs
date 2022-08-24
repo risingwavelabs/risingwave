@@ -122,7 +122,7 @@ impl LocalFrontend {
             Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
                 .plan(bound)
                 .unwrap()
-                .gen_batch_query_plan()
+                .gen_batch_distributed_plan()
         } else {
             unreachable!()
         }
