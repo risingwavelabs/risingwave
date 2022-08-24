@@ -77,21 +77,10 @@ impl Binder {
         self.context.clause = None;
 
         let num_columns = bound[0].len();
-        // syntax check.
-        {
-            if bound.iter().any(|row| row.len() != num_columns) {
-                return Err(ErrorCode::BindError(
-                    "VALUES lists must all be the same length".into(),
-                )
-                .into());
-            }
-            if bound.iter().flatten().any(|expr| expr.has_subquery()) {
-                return Err(ErrorCode::NotImplemented(
-                    "VALUES is disallowed to have subqueries.".into(),
-                    None.into(),
-                )
-                .into());
-            }
+        if bound.iter().any(|row| row.len() != num_columns) {
+            return Err(
+                ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
+            );
         }
 
         // Calculate column types.
@@ -122,9 +111,18 @@ impl Binder {
             rows: bound,
             schema,
         };
+        if bound_values
+            .rows
+            .iter()
+            .flatten()
+            .any(|expr| expr.has_subquery())
+        {
+            return Err(ErrorCode::NotImplemented("Subquery in VALUES".into(), None.into()).into());
+        }
         if bound_values.is_correlated() {
-            return Err(ErrorCode::InternalError(
-                "Values is disallowed to have CorrelatedInputRef.".to_string(),
+            return Err(ErrorCode::NotImplemented(
+                "CorrelatedInputRef in VALUES".into(),
+                None.into(),
             )
             .into());
         }

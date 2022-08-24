@@ -35,10 +35,12 @@ impl ExpandExecutor {
         pk_indices: PkIndices,
         column_subsets: Vec<Vec<usize>>,
     ) -> Self {
-        let mut schema = input.schema().to_owned();
-        schema
-            .fields
-            .push(Field::with_name(DataType::Int64, "flag"));
+        let schema = {
+            let mut fields = input.schema().clone().into_fields();
+            fields.extend(fields.clone());
+            fields.push(Field::with_name(DataType::Int64, "flag"));
+            Schema::new(fields)
+        };
         Self {
             input,
             schema,
@@ -143,10 +145,10 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " I I I I
-                + 1 4 . 0
-                + 6 6 . 0
-                - 7 5 . 0"
+                " I I I I I I I
+                + 1 4 . 1 4 1 0
+                + 6 6 . 6 6 3 0
+                - 7 5 . 7 5 4 0"
             )
         );
 
@@ -154,10 +156,10 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " I I I I
-                + . 4 1 1
-                + . 6 3 1
-                - . 5 4 1"
+                " I I I I I I I
+                + . 4 1 1 4 1 1
+                + . 6 3 6 6 3 1
+                - . 5 4 7 5 4 1"
             )
         );
     }
