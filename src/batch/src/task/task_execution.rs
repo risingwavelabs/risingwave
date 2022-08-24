@@ -286,7 +286,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 }
 
                 if let Some(task_metrics) = self.context.get_task_metrics() {
-                    task_metrics.clear_record().await;
+                    task_metrics.clear_record();
                 }
             });
 

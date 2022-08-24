@@ -19,17 +19,16 @@ use prometheus::{
     exponential_buckets, histogram_opts, opts, register_histogram_with_registry,
     register_int_counter_vec_with_registry, Histogram, Registry,
 };
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::task::TaskId;
 
 // When execution is done, it need to call clear_record() in BatchTaskMetrics.
 // The clear_record() will send the Collector to delete_queue, if the queue is full, the execution
 // will be blocked so that user can't get the result immediately.
-const DELETE_QUEUE_SIZE: usize = 4096;
 pub struct BatchTaskMetricsManager {
     registry: Registry,
-    sender: Sender<Box<dyn Collector>>,
+    sender: UnboundedSender<Box<dyn Collector>>,
 }
 
 impl BatchTaskMetricsManager {
@@ -42,7 +41,7 @@ impl BatchTaskMetricsManager {
         // We store the collector in delete_cache first and unregister it next time to make sure the
         // metrics be collected by prometheus.
         let (delete_queue_sender, mut delete_queue_receiver) =
-            tokio::sync::mpsc::channel::<Box<dyn Collector>>(DELETE_QUEUE_SIZE);
+            tokio::sync::mpsc::unbounded_channel::<Box<dyn Collector>>();
         let deletor_registry = registry.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60));
@@ -92,7 +91,7 @@ impl BatchTaskMetricsManager {
 
     /// Create a new `BatchTaskMetricsManager` instance used in tests or other places.
     pub fn for_test() -> Self {
-        let (delete_queue_sender, _) = tokio::sync::mpsc::channel::<Box<dyn Collector>>(1);
+        let (delete_queue_sender, _) = tokio::sync::mpsc::unbounded_channel::<Box<dyn Collector>>();
         Self {
             sender: delete_queue_sender,
             registry: prometheus::Registry::new(),
@@ -102,12 +101,16 @@ impl BatchTaskMetricsManager {
 
 #[derive(Clone)]
 pub struct BatchTaskMetrics {
-    sender: Option<Sender<Box<dyn Collector>>>,
+    sender: Option<UnboundedSender<Box<dyn Collector>>>,
     pub exchange_recv_row_number: GenericCounterVec<AtomicU64>,
 }
 
 impl BatchTaskMetrics {
-    pub fn new(registry: Registry, id: TaskId, sender: Option<Sender<Box<dyn Collector>>>) -> Self {
+    pub fn new(
+        registry: Registry,
+        id: TaskId,
+        sender: Option<UnboundedSender<Box<dyn Collector>>>,
+    ) -> Self {
         let opt = {
             let const_labels = HashMap::from([
                 ("query_id".to_string(), id.query_id),
@@ -134,11 +137,10 @@ impl BatchTaskMetrics {
 
     /// This function execute after the exucution done.
     /// Send all the record to the delete queue.
-    pub async fn clear_record(&self) {
+    pub fn clear_record(&self) {
         if let Some(sender) = self.sender.as_ref() {
             if sender
                 .send(Box::new(self.exchange_recv_row_number.clone()))
-                .await
                 .is_err()
             {
                 error!("Failed to send delete record to delete queue");
