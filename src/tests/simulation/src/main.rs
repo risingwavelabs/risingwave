@@ -92,6 +92,8 @@ async fn main() {
         .init(|| async {
             let opts = risingwave_meta::MetaNodeOpts::parse_from([
                 "meta-node",
+                "--config-path",
+                "src/config/risingwave.toml",
                 "--listen-addr",
                 "0.0.0.0:5690",
             ]);
@@ -134,6 +136,8 @@ async fn main() {
             .init(move || async move {
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                     "compute-node",
+                    "--config-path",
+                    "src/config/risingwave.toml",
                     "--host",
                     "0.0.0.0:5688",
                     "--client-address",
@@ -160,6 +164,8 @@ async fn main() {
             .init(move || async move {
                 let opts = risingwave_compactor::CompactorOpts::parse_from([
                     "compactor-node",
+                    "--config-path",
+                    "src/config/risingwave.toml",
                     "--host",
                     "0.0.0.0:6660",
                     "--client-address",
