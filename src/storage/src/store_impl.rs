@@ -16,19 +16,24 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
+use lazy_static::lazy_static;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
 use risingwave_rpc_client::HummockMetaClient;
+use spin::Mutex;
 
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
-use crate::hummock::{HummockStorage, SstableStore, TieredCache};
+use crate::hummock::{HummockStorage, SstableStore, StorageControlMsg, TieredCache};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
 use crate::StateStore;
+
+// TODO: developing the local state store
+pub type LocalStateStoreImpl = StateStoreImpl;
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -165,5 +170,24 @@ impl StateStoreImpl {
         };
 
         Ok(store)
+    }
+
+    pub fn register_new_local_state_store(
+        &self,
+        control_msg_tx: tokio::sync::mpsc::UnboundedSender<StorageControlMsg>,
+    ) -> LocalStateStoreImpl {
+        // TODO: remove this after local state store is developed.
+        // This is a temporary holder for tx to prevent rx.try_recv from failing.
+        lazy_static! {
+            static ref TX_HOLDER: Mutex<Vec<tokio::sync::mpsc::UnboundedSender<StorageControlMsg>>> =
+                Mutex::new(Vec::new());
+        }
+        TX_HOLDER.lock().push(control_msg_tx);
+        self.clone()
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn apply_control_msg(&self, msg: StorageControlMsg) {
+        match msg {}
     }
 }

@@ -26,7 +26,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_common::types::DataType;
 use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::data::Epoch as ProstEpoch;
@@ -40,6 +40,7 @@ use risingwave_pb::stream_plan::{
     UpdateMutation,
 };
 use smallvec::SmallVec;
+use tokio::sync::mpsc::error::TryRecvError;
 
 use crate::task::ActorId;
 
@@ -109,6 +110,7 @@ pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_storage::hummock::StorageControlMsg;
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use source::*;
@@ -240,6 +242,44 @@ impl Default for Epoch {
             prev: INVALID_EPOCH,
         }
     }
+}
+
+pub enum ActorControlMsg {
+    Storage(StorageControlMsg),
+}
+
+#[derive(Debug)]
+pub struct ActorControlMsgReceiver {
+    storage_control_msg_rx: tokio::sync::mpsc::UnboundedReceiver<StorageControlMsg>,
+}
+
+impl ActorControlMsgReceiver {
+    pub fn new(
+        storage_control_msg_rx: tokio::sync::mpsc::UnboundedReceiver<StorageControlMsg>,
+    ) -> Self {
+        Self {
+            storage_control_msg_rx,
+        }
+    }
+
+    pub fn try_recv(&mut self) -> Result<Option<ActorControlMsg>> {
+        match self.storage_control_msg_rx.try_recv() {
+            Ok(msg) => Ok(Some(ActorControlMsg::Storage(msg))),
+            Err(err) => match err {
+                TryRecvError::Empty => Ok(None),
+                TryRecvError::Disconnected => Err(RwError::from(ErrorCode::InternalError(
+                    "control msg channel is dropped".to_string(),
+                ))),
+            },
+        }
+    }
+}
+
+/// An actor trap acts like a operating system trap. A dispatch executor will hand over the
+/// execution flow to its upper actor when it senses an `ActorTrapItem`.
+pub enum ActorTrapItem {
+    Barrier(Barrier),
+    ControlMsg(ActorControlMsg),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -590,7 +630,7 @@ pub async fn expect_first_barrier(
 
 /// `StreamConsumer` is the last step in an actor.
 pub trait StreamConsumer: Send + 'static {
-    type BarrierStream: Stream<Item = Result<Barrier>> + Send;
+    type ActorTrapItemStream: Stream<Item = Result<ActorTrapItem>> + Send;
 
-    fn execute(self: Box<Self>) -> Self::BarrierStream;
+    fn execute(self: Box<Self>) -> Self::ActorTrapItemStream;
 }

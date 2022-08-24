@@ -38,8 +38,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
-    ActorId, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
-    LOCAL_OUTPUT_CHANNEL_SIZE,
+    ActorId, ActorLocalStreamEnvironment, FragmentId, SharedContext, StreamEnvironment,
+    UpDownActorIds, LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
 #[cfg(test)]
@@ -86,7 +86,7 @@ pub struct LocalStreamManager {
 }
 
 pub struct ExecutorParams {
-    pub env: StreamEnvironment,
+    pub env: ActorLocalStreamEnvironment,
 
     /// Indices of primary keys
     pub pk_indices: PkIndices,
@@ -437,6 +437,7 @@ impl LocalStreamManagerCore {
         input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
+        actor_control_msg_rx: ActorControlMsgReceiver,
     ) -> Result<impl StreamConsumer> {
         let dispatcher_impls = dispatchers
             .iter()
@@ -449,6 +450,7 @@ impl LocalStreamManagerCore {
             actor_id,
             self.context.clone(),
             self.streaming_metrics.clone(),
+            actor_control_msg_rx,
         ))
     }
 
@@ -459,7 +461,7 @@ impl LocalStreamManagerCore {
         fragment_id: FragmentId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
-        env: StreamEnvironment,
+        env: ActorLocalStreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
@@ -524,7 +526,7 @@ impl LocalStreamManagerCore {
         &mut self,
         fragment_id: FragmentId,
         node: &stream_plan::StreamNode,
-        env: StreamEnvironment,
+        env: ActorLocalStreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
     ) -> Result<BoxedExecutor> {
@@ -580,21 +582,28 @@ impl LocalStreamManagerCore {
                 .ok()
                 .map(|b| b.try_into())
                 .transpose()?;
+            let (local_env, actor_control_msg_rx) = env.new_actor_local_env();
             let executor = self.create_nodes(
                 actor.fragment_id,
                 actor.get_nodes()?,
-                env.clone(),
+                local_env.clone(),
                 &actor_context,
                 vnode_bitmap,
             )?;
 
-            let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
+            let dispatcher = self.create_dispatcher(
+                executor,
+                &actor.dispatcher,
+                actor_id,
+                actor_control_msg_rx,
+            )?;
             let actor = Actor::new(
                 dispatcher,
                 actor_id,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context,
+                local_env.clone(),
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();

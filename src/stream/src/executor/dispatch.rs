@@ -34,7 +34,10 @@ use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
+use crate::executor::{
+    ActorControlMsgReceiver, ActorTrapItem, Barrier, BoxedExecutor, Message, Mutation,
+    StreamConsumer,
+};
 use crate::task::{ActorId, DispatcherId, SharedContext};
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
@@ -43,6 +46,7 @@ use crate::task::{ActorId, DispatcherId, SharedContext};
 pub struct DispatchExecutor {
     input: BoxedExecutor,
     inner: DispatchExecutorInner,
+    control_msg_rx: ActorControlMsgReceiver,
 }
 
 struct DispatchExecutorInner {
@@ -236,6 +240,7 @@ impl DispatchExecutor {
         actor_id: u32,
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
+        control_msg_rx: ActorControlMsgReceiver,
     ) -> Self {
         Self {
             input,
@@ -246,14 +251,15 @@ impl DispatchExecutor {
                 context,
                 metrics,
             },
+            control_msg_rx,
         }
     }
 }
 
 impl StreamConsumer for DispatchExecutor {
-    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
+    type ActorTrapItemStream = impl Stream<Item = Result<ActorTrapItem>> + Send;
 
-    fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+    fn execute(mut self: Box<Self>) -> Self::ActorTrapItemStream {
         #[try_stream]
         async move {
             let input = self.input.execute();
@@ -271,7 +277,10 @@ impl StreamConsumer for DispatchExecutor {
                     })
                     .await?;
                 if let Some(barrier) = barrier {
-                    yield barrier;
+                    yield ActorTrapItem::Barrier(barrier);
+                }
+                while let Some(msg) = self.control_msg_rx.try_recv()? {
+                    yield ActorTrapItem::ControlMsg(msg);
                 }
             }
         }
@@ -945,12 +954,15 @@ mod tests {
         )
         .unwrap();
 
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
         let executor = Box::new(DispatchExecutor::new(
             input,
             vec![dispatcher],
             actor_id,
             ctx.clone(),
             metrics,
+            ActorControlMsgReceiver::new(rx),
         ))
         .execute();
         pin_mut!(executor);

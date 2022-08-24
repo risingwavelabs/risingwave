@@ -72,6 +72,9 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
+// TODO: add more msg type
+pub enum StorageControlMsg {}
+
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
