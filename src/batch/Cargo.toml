@@ -89,3 +89,7 @@ harness = false
 [[bench]]
 name = "top_n"
 harness = false
+
+[[bench]]
+name = "hash_agg"
+harness = false

@@ -410,7 +410,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end] }
       LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.row_id, t1.uid, t1.v, t1.created_at] }
+        LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id] }
   optimized_logical_plan: |
     LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
       LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at] }
