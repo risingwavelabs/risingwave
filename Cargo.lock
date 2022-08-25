@@ -4146,6 +4146,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tikv-jemallocator",
+ "tokio-metrics",
  "tokio-stream",
  "tracing",
  "tracing-futures",
