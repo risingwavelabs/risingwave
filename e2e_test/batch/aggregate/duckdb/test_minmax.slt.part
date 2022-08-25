@@ -1,0 +1,24 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+statement ok
+CREATE TABLE lists(l int[]);
+
+statement ok
+INSERT INTO lists VALUES ('{0, 10}'), ('{1, 11}'), ('{2, 12}'), ('{3, 13}'), ('{4, 14}'), ('{5, 15}'); 
+
+statement ok
+FLUSH;
+
+query I
+SELECT MIN(l) FROM lists WHERE l[2]>12;
+----
+{3,13}
+
+query I
+SELECT MIN(l) FROM lists WHERE l[0]>2;
+----
+NULL
+
+statement ok
+DROP TABLE lists;
