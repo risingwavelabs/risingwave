@@ -37,7 +37,13 @@ pub type SourceRef = Arc<SourceImpl>;
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     async fn create_source(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
-    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    fn create_table_source(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        row_id_index: Option<usize>,
+        pk_column_ids: Vec<i32>,
+    ) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
@@ -129,30 +135,20 @@ impl SourceManager for MemSourceManager {
             return Err(source_parser_rs.err().unwrap());
         };
 
-        let columns = info
+        let mut columns: Vec<_> = info
             .columns
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| {
-                let mut col = SourceColumnDesc::from(&ColumnDesc::from(
-                    c.column_desc.as_ref().unwrap().clone(),
-                ));
-                col.skip_parse = idx as i32 == info.row_id_index;
-                col
-            })
-            .collect::<Vec<SourceColumnDesc>>();
-
+            .into_iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.unwrap())))
+            .collect();
+        let row_id_index = info.row_id_index.map(|row_id_index| {
+            columns[row_id_index.index as usize].skip_parse = true;
+            row_id_index.index as usize
+        });
+        let pk_column_ids = info.pk_column_ids;
         assert!(
-            info.row_id_index >= 0,
-            "expected row_id_index >= 0, got {}",
-            info.row_id_index
+            !pk_column_ids.is_empty(),
+            "source should have at least one pk column"
         );
-        let row_id_index = if info.pk_column_ids != vec![0] {
-            None
-        } else {
-            Some(info.row_id_index as usize)
-        };
-        let pk_column_ids = info.pk_column_ids.clone();
 
         let config = ConnectorProperties::extract(info.properties)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
@@ -183,13 +179,24 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
+    fn create_table_source(
+        &self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+        row_id_index: Option<usize>,
+        pk_column_ids: Vec<i32>,
+    ) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
             !sources.contains_key(table_id),
             "Source id already exists: {:?}",
             table_id
+        );
+
+        assert!(
+            !pk_column_ids.is_empty(),
+            "source should have at least one pk column"
         );
 
         let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
@@ -200,8 +207,8 @@ impl SourceManager for MemSourceManager {
             source: Arc::new(source),
             columns: source_columns,
             format: SourceFormat::Invalid,
-            row_id_index: Some(0), // always use the first column as row_id
-            pk_column_ids: vec![0],
+            row_id_index,
+            pk_column_ids,
             metrics: self.metrics.clone(),
         };
 
@@ -253,7 +260,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::kinesis::config::kinesis_demo_properties;
-    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::Keyspace;
@@ -278,7 +285,7 @@ mod tests {
             properties,
             row_format: 0,
             row_schema_location: "".to_string(),
-            row_id_index: 0,
+            row_id_index: Some(ColumnIndex { index: 0 }),
             pk_column_ids: vec![0],
             columns,
         };
@@ -315,11 +322,18 @@ mod tests {
                 type_name: "".to_string(),
             })
             .collect();
+        let row_id_index = None;
+        let pk_column_ids = vec![1];
 
         let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
         let mem_source_manager = MemSourceManager::default();
-        let res = mem_source_manager.create_table_source(&table_id, table_columns);
+        let res = mem_source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        );
         assert!(res.is_ok());
 
         // get source
