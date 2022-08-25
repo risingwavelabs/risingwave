@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue, RowRef};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
 #[derive(Clone)]
 struct ArrayAggUnordered {
@@ -76,10 +77,7 @@ impl Aggregator for ArrayAggUnordered {
                 .append(Some(self.get_result_and_reset().as_scalar_ref()))
                 .map_err(Into::into)
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Builder fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Builder fail to match {}.", stringify!(Utf8))
         }
     }
 }
@@ -156,10 +154,7 @@ impl Aggregator for ArrayAggOrdered {
                 .append(Some(self.get_result_and_reset().as_scalar_ref()))
                 .map_err(Into::into)
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Builder fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Builder fail to match {}.", stringify!(Utf8))
         }
     }
 }
