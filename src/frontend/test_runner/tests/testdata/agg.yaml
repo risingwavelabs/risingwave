@@ -621,11 +621,9 @@
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(t.v1) filter((flag = 0:Int64))] }
-      LogicalAgg { group_key: [t.v1, flag], aggs: [] }
-        LogicalProject { exprs: [t.v1, flag] }
-          LogicalExpand { column_subsets: [[t.v1]] }
-            LogicalScan { table: t, columns: [t.v1] }
+    LogicalAgg { aggs: [count(t.v1)] }
+      LogicalAgg { group_key: [t.v1], aggs: [] }
+        LogicalScan { table: t, columns: [t.v1] }
 - sql: |
     /* input is sharded by group key */
     create table t(x int);
@@ -641,3 +639,21 @@
       StreamProject { exprs: [count, i.x] }
         StreamHashAgg { group_key: [i.x], aggs: [count, count] }
           StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
+- sql: |
+    create table t(x int, y int);
+    select count(x), min(distinct y), max(distinct y) from t;
+  optimized_logical_plan: |
+    LogicalProject { exprs: [Coalesce(sum(count(t.x)) filter((flag = 0:Int64)), 0:Int64), min(t.y) filter((flag = 1:Int64)), max(t.y) filter((flag = 1:Int64))] }
+      LogicalAgg { aggs: [sum(count(t.x)) filter((flag = 0:Int64)), min(t.y) filter((flag = 1:Int64)), max(t.y) filter((flag = 1:Int64))] }
+        LogicalAgg { group_key: [t.y, t.y, flag], aggs: [count(t.x)] }
+          LogicalProject { exprs: [t.x, t.y, flag] }
+            LogicalExpand { column_subsets: [[t.x], [t.y]] }
+              LogicalScan { table: t, columns: [t.x, t.y] }
+- sql: |
+    create table t(x int, y int);
+    select count(x), min(distinct x) from t;
+  optimized_logical_plan: |
+    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), min(t.x)] }
+      LogicalAgg { aggs: [sum(count(t.x)), min(t.x)] }
+        LogicalAgg { group_key: [t.x], aggs: [count(t.x)] }
+          LogicalScan { table: t, columns: [t.x] }
