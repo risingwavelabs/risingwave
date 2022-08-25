@@ -5,7 +5,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1] }
       LogicalProject { exprs: [t1.v1, t1.v2] }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
+        LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
       StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
@@ -16,9 +16,9 @@
   logical_plan: |
     LogicalProject { exprs: [t2.v3, t2.v4, t1.v1] }
       LogicalJoin { type: Inner, on: (t2.v3 = t1.v1), output: all }
-        LogicalScan { table: t2, columns: [t2._row_id, t2.v3, t2.v4] }
+        LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
         LogicalProject { exprs: [t1.v1] }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
+          LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v3, v4, v1, t2._row_id(hidden), t1._row_id(hidden)], pk_columns: [t2._row_id, t1._row_id] }
       StreamExchange { dist: HashShard(t2._row_id, t1._row_id) }
@@ -35,7 +35,7 @@
     LogicalProject { exprs: [t1.v1] }
       LogicalProject { exprs: [t1.v1] }
         LogicalProject { exprs: [t1.v1, t1.v2] }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
+          LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
       StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
@@ -48,7 +48,7 @@
         LogicalJoin { type: LeftSemi, on: true, output: all }
           LogicalAgg { group_key: [t1.x], aggs: [] }
             LogicalProject { exprs: [t1.x] }
-              LogicalScan { table: t1, columns: [t1._row_id, t1.x] }
+              LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
           LogicalProject { exprs: [0.1:Decimal] }
             LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
@@ -59,6 +59,6 @@
     LogicalProject { exprs: [t1.x, t1.y, t1.x, t1.y] }
       LogicalJoin { type: Inner, on: (t1.x = t1.x), output: all }
         LogicalProject { exprs: [t1.x, t1.y] }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t1.x, t1.y] }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
