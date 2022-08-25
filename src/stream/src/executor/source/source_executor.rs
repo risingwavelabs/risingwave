@@ -425,7 +425,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
-    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::plan_common::{
@@ -469,8 +469,15 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
+        let row_id_index = Some(0);
+        let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        )?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -593,8 +600,15 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
+        let row_id_index = Some(0);
+        let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        )?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -694,7 +708,7 @@ mod tests {
             properties,
             row_format: ProstRowFormatType::Json as i32,
             row_schema_location: "".to_string(),
-            row_id_index: 0,
+            row_id_index: Some(ProstColumnIndex { index: 0 }),
             columns,
             pk_column_ids: vec![0],
         }
