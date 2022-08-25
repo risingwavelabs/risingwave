@@ -200,7 +200,7 @@ mod tests {
     where
         S: MetaStore,
     {
-        let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
+        let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
             hummock_manager.compaction_group_manager_ref_for_test(),
             &original_tables,
