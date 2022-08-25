@@ -53,6 +53,8 @@ impl CompactorService {
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
+            .arg("--client-address")
+            .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")
             .arg("--max-concurrent-task-number")

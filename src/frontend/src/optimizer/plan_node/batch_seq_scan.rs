@@ -37,11 +37,7 @@ pub struct BatchSeqScan {
 }
 
 impl BatchSeqScan {
-    pub fn new_inner(
-        logical: LogicalScan,
-        dist: Distribution,
-        scan_ranges: Vec<ScanRange>,
-    ) -> Self {
+    fn new_inner(logical: LogicalScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
@@ -72,7 +68,7 @@ impl BatchSeqScan {
         Self::new_inner(logical, Distribution::Single, scan_ranges)
     }
 
-    pub fn clone_with_dist(&self) -> Self {
+    fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.logical.clone(),
             if self.logical.is_sys_table() {

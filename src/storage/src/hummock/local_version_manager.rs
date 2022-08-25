@@ -1006,4 +1006,8 @@ impl LocalVersionManager {
     pub fn get_shared_buffer_size(&self) -> usize {
         self.buffer_tracker.get_buffer_size()
     }
+
+    pub fn get_sstable_id_manager(&self) -> SstableIdManagerRef {
+        self.sstable_id_manager.clone()
+    }
 }
