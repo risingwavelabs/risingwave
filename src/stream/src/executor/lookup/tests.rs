@@ -20,13 +20,8 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::batch_table::storage_table::StorageTable;
 use risingwave_storage::memory::MemoryStateStore;
-<<<<<<< HEAD
-use risingwave_storage::table::Distribution;
-=======
 use risingwave_storage::table::streaming_table::state_table::StateTable;
->>>>>>> d826726bcd7dbf7646193b329220c9438973a268
 use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
@@ -213,13 +208,8 @@ fn build_state_table_helper<S: StateStore>(
     columns: Vec<ColumnDesc>,
     order_types: Vec<OrderPair>,
     pk_indices: Vec<usize>,
-<<<<<<< HEAD
-) -> StorageTable<S> {
-    StorageTable::new_partial(
-=======
 ) -> StateTable<S> {
     StateTable::new_without_distribution(
->>>>>>> d826726bcd7dbf7646193b329220c9438973a268
         s,
         table_id,
         columns,

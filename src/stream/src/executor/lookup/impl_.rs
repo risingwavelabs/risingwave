@@ -374,8 +374,6 @@ impl<S: StateStore> LookupExecutor<S> {
                 .iter_with_pk_prefix(&lookup_row, lookup_epoch)
                 .await?;
             pin_mut!(all_data_iter);
-            // let inner = all_data_iter.next().await.unwrap().unwrap();
-            // all_rows.push(inner.as_ref().clone());
             while let Some(inner) = all_data_iter.next().await {
                 // Only need value (include storage pk).
                 let row = inner.unwrap().into_owned();

@@ -371,7 +371,6 @@ impl<S: StateStore> StorageTable<S> {
         encoded_key_range: R,
         epoch: u64,
         vnode_hint: Option<VirtualNode>,
-        wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>>
     where
@@ -408,7 +407,6 @@ impl<S: StateStore> StorageTable<S> {
                     self.mapping.clone(),
                     prefix_hint,
                     raw_key_range,
-                    wait_epoch,
                     read_options,
                 )
                 .await?
@@ -440,7 +438,6 @@ impl<S: StateStore> StorageTable<S> {
         epoch: u64,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-        wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
@@ -525,7 +522,6 @@ impl<S: StateStore> StorageTable<S> {
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
-            wait_epoch,
             ordered,
         )
         .await
@@ -541,17 +537,7 @@ impl<S: StateStore> StorageTable<S> {
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true, false)
-            .await
-    }
-
-    /// Construct a [`StorageTableIter`] for `look_up` executor.
-    pub async fn iter_with_pk_prefix(
-        &self,
-        epoch: u64,
-        pk_prefix: &Row,
-    ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, .., false, true)
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false)
             .await
     }
 
@@ -577,19 +563,16 @@ impl<S: StateStore> StorageTableIterInner<S> {
         mapping: Arc<ColumnDescMapping>,
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
-        wait_epoch: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        if wait_epoch {
-            keyspace
-                .state_store()
-                .wait_epoch(read_options.epoch)
-                .await?;
-        }
+        keyspace
+            .state_store()
+            .wait_epoch(read_options.epoch)
+            .await?;
 
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
