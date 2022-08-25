@@ -528,7 +528,7 @@ mod tests {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
-        let mut payload = gen_test_payload();
+        let payload = gen_test_payload();
 
         // The number of files that will be created and uploaded to storage.
         const REAL_COUNT: usize = 2;
@@ -541,27 +541,24 @@ mod tests {
 
         for i in 0..(REAL_COUNT + FAKE_COUNT) {
             let file_name = format!("test{}.obj", i);
-            name_list.push(String::from(file_name.clone()));
+            name_list.push(file_name.clone());
 
             let mut path = PathBuf::from(test_root_path);
             path.push(file_name);
             path_list.push(path);
         }
 
-        for i in 0..REAL_COUNT {
-            // Upload data.
+        // Upload data.
+        for file_name in name_list.iter().take(REAL_COUNT) {
             store
-                .upload(name_list[i].as_str(), Bytes::from(payload.clone()))
+                .upload(file_name.as_str(), Bytes::from(payload.clone()))
                 .await
                 .unwrap();
-
-            // Verify that file exists.
-            assert!(path_list[i].exists());
         }
 
-        for i in REAL_COUNT..(REAL_COUNT + FAKE_COUNT) {
-            // Verify that file does not exists.
-            assert!(!path_list[i].exists());
+        // Verify that files do or do not exist.
+        for (i, path) in path_list.iter().enumerate() {
+            assert!((i < REAL_COUNT) == path.exists());
         }
 
         store.delete_objects(&name_list).await.unwrap();
