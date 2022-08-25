@@ -190,6 +190,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id,
         source_manager.clone(),
         insert_inner,
+        "InsertExecutor".to_string(),
     ));
 
     tokio::spawn(async move {
@@ -308,6 +309,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id,
         source_manager.clone(),
         delete_inner,
+        "DeleteExecutor".to_string(),
     ));
 
     tokio::spawn(async move {

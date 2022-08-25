@@ -697,7 +697,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             schema: actual_schema,
             output_indices,
             last_chunk: None,
-            identity: "LookupJoinExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }
