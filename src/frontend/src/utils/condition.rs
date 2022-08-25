@@ -261,7 +261,7 @@ impl Condition {
         // if any arm of `OR` clause fail, bail out.
         let disjunctions_result = disjunctions_result?;
 
-        // if all arm of `OR` clause scan ranges are simply equal condition type, merge all
+        // If all arms of `OR` clause scan ranges are simply equal condition type, merge all
         // of them.
         let all_equal = disjunctions_result
             .iter()
