@@ -282,7 +282,7 @@ impl Condition {
                 // sort, large one first
                 .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
                 .collect_vec();
-            // make sure each range is never overlap with others, that's what scan range mean
+            // Make sure each range never overlaps with others, that's what scan range mean.
             let mut non_overlap_scan_ranges: Vec<ScanRange> = vec![];
             for s1 in &scan_ranges {
                 let mut overlap = false;
