@@ -207,7 +207,7 @@ impl HummockSnapshotManagerCore {
         let ret = self.meta_client.get_epoch().await;
         match ret {
             Ok(snapshot) => {
-                self.notify_epoch_assigned_for_queries(snapshot.clone(), batches);
+                self.notify_epoch_assigned_for_queries(&snapshot, batches);
                 snapshot
             }
             Err(e) => {
@@ -239,7 +239,7 @@ impl HummockSnapshotManagerCore {
             current_epoch,
         };
 
-        self.notify_epoch_assigned_for_queries(snapshot.clone(), batches);
+        self.notify_epoch_assigned_for_queries(&snapshot, batches);
         snapshot
     }
 
@@ -247,7 +247,7 @@ impl HummockSnapshotManagerCore {
     /// epoch
     fn notify_epoch_assigned_for_queries(
         &mut self,
-        snapshot: HummockSnapshot,
+        snapshot: &HummockSnapshot,
         batches: &mut Vec<(QueryId, Callback<SchedulerResult<HummockSnapshot>>)>,
     ) {
         let committed_epoch = snapshot.committed_epoch;
