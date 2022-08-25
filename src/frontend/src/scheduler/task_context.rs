@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_batch::executor::BatchMetrics;
+use risingwave_batch::executor::{BatchMetrics, BatchTaskMetrics};
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::error::Result;
@@ -65,6 +65,10 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn stats(&self) -> Option<Arc<BatchMetrics>> {
+        None
+    }
+
+    fn get_task_metrics(&self) -> Option<BatchTaskMetrics> {
         None
     }
 }
