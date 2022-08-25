@@ -140,7 +140,7 @@ impl Task for ComputeNodeService {
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             cmd.env(
                 "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19",
+                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
             );
         }
 
