@@ -24,6 +24,7 @@ use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 
+#[derive(Clone)]
 enum StringAggState {
     WithoutOrder {
         result: Option<String>,
@@ -35,6 +36,7 @@ enum StringAggState {
     },
 }
 
+#[derive(Clone)]
 pub struct StringAgg {
     agg_col_idx: usize,
     delimiter: ExpressionRef,

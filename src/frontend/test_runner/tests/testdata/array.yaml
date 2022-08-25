@@ -16,7 +16,7 @@
     select (ARRAY[1, v1]) from t;
   logical_plan: |
     LogicalProject { exprs: [Array(1:Int32, t.v1)] }
-      LogicalScan { table: t, columns: [t._row_id, t.v1] }
+      LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Array(1:Int32, t.v1)] }

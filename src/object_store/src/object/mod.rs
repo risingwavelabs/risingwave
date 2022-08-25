@@ -140,6 +140,8 @@ pub trait ObjectStore: Send + Sync {
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
+
+    fn store_media_type(&self) -> &'static str;
 }
 
 pub enum ObjectStoreImpl {
@@ -253,12 +255,13 @@ pub struct MonitoredStreamingUploader {
 
 impl MonitoredStreamingUploader {
     pub fn new(
+        media_type: &str,
         handle: BoxedStreamingUploader,
         object_store_metrics: Arc<ObjectStoreMetrics>,
     ) -> Self {
         let timer = object_store_metrics
             .operation_latency
-            .with_label_values(&["streaming_upload"])
+            .with_label_values(&[media_type, "streaming_upload"])
             .start_timer();
         Self {
             inner: handle,
@@ -301,6 +304,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         }
     }
 
+    fn media_type(&self) -> &str {
+        self.inner.store_media_type()
+    }
+
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         self.object_store_metrics
             .write_bytes
@@ -308,12 +315,13 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["upload"])
+            .with_label_values(&[self.media_type(), "upload"])
             .start_timer();
         self.object_store_metrics
             .operation_size
             .with_label_values(&["upload"])
             .observe(obj.len() as f64);
+
         self.inner
             .upload(path, obj)
             .stack_trace("object_store_upload")
@@ -324,6 +332,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
         let handle = self.inner.streaming_upload(path).await?;
         Ok(MonitoredStreamingUploader::new(
+            self.inner.store_media_type(),
             handle,
             self.object_store_metrics.clone(),
         ))
@@ -333,9 +342,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["read"])
+            .with_label_values(&[self.media_type(), "read"])
             .start_timer();
-
         let ret = self
             .inner
             .read(path, block_loc)
@@ -365,7 +373,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["readv"])
+            .with_label_values(&[self.media_type(), "readv"])
             .start_timer();
         let ret = self
             .inner
@@ -382,7 +390,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["metadata"])
+            .with_label_values(&[self.media_type(), "metadata"])
             .start_timer();
         self.inner
             .metadata(path)
@@ -394,7 +402,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["delete"])
+            .with_label_values(&[self.media_type(), "delete"])
             .start_timer();
         self.inner
             .delete(path)
@@ -406,7 +414,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["list"])
+            .with_label_values(&[self.media_type(), "list"])
             .start_timer();
         self.inner
             .list(prefix)

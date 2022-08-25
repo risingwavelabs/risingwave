@@ -56,6 +56,9 @@ impl Column {
         self.array
     }
 
+    /// Expand the `columns` according to `column_subsets`.
+    ///
+    /// This is a helper function for Expand operator.
     #[try_stream(boxed, ok = Vec<Column>, error = ArrayError)]
     pub async fn expand_columns(
         cardinality: usize,
@@ -77,6 +80,7 @@ impl Column {
             for key in subset {
                 new_columns[key] = columns[key].clone();
             }
+            new_columns.extend(columns.iter().cloned());
             let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
                 Some(i as i64);
                 cardinality

@@ -43,6 +43,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 mod barrier;
+#[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
 pub mod hummock;
