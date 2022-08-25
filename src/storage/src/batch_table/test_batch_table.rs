@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::pin_mut;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
@@ -21,6 +22,7 @@ use crate::batch_table::storage_table::StorageTable;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
 use crate::table::streaming_table::state_table::StateTable;
+use crate::table::{Distribution, TableIter};
 
 /// There are three struct in relational layer, StateTable, MemTable and CellBasedTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
@@ -263,4 +265,151 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         .await
         .unwrap();
     assert_eq!(get_no_exist_res, None);
+}
+
+// test row-based encoding in batch mode
+#[tokio::test]
+async fn test_row_based_storage_table_point_get_in_batch_mode() {
+    let state_store = MemoryStateStore::new();
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_indices = vec![0_usize, 1_usize];
+    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let mut state = StateTable::new_without_distribution(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices.clone(),
+    );
+    let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let mut table = StorageTable::new_partial(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        column_ids_partial,
+        order_types.clone(),
+        pk_indices,
+        Distribution::fallback(),
+        TableOption::default(),
+    );
+    let epoch: u64 = 0;
+
+    state
+        .insert(Row(vec![Some(1_i32.into()), None, None]))
+        .unwrap();
+    state
+        .insert(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
+        .unwrap();
+    state
+        .insert(Row(vec![Some(3_i32.into()), None, None]))
+        .unwrap();
+
+    state
+        .delete(Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]))
+        .unwrap();
+    state.commit(epoch).await.unwrap();
+
+    let epoch = u64::MAX;
+
+    let get_row1_res = table
+        .get_row(&Row(vec![Some(1_i32.into()), None]), epoch)
+        .await
+        .unwrap();
+
+    // Here only column_ids_partial will be get
+    assert_eq!(get_row1_res, Some(Row(vec![None, None,])));
+
+    let get_row2_res = table
+        .get_row(&Row(vec![Some(2_i32.into()), None]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_row2_res, None);
+
+    let get_row3_res = table
+        .get_row(&Row(vec![Some(3_i32.into()), None]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_row3_res, Some(Row(vec![None, None])));
+
+    let get_no_exist_res = table
+        .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_no_exist_res, None);
+}
+
+#[tokio::test]
+async fn test_row_based_storage_table_scan_in_batch_mode() {
+    let state_store = MemoryStateStore::new();
+    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_indices = vec![0_usize, 1_usize];
+    let mut state = StateTable::new_without_distribution(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices.clone(),
+    );
+    let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
+    let table = StorageTable::new_partial(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        column_ids_partial,
+        order_types.clone(),
+        pk_indices,
+        Distribution::fallback(),
+        TableOption::default(),
+    );
+    let epoch: u64 = 0;
+
+    state
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
+        .unwrap();
+    state
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
+        .unwrap();
+    state
+        .delete(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
+        .unwrap();
+    state.commit(epoch).await.unwrap();
+
+    let epoch = u64::MAX;
+    let iter = table.batch_iter(epoch).await.unwrap();
+    pin_mut!(iter);
+
+    let res = iter.next_row().await.unwrap();
+    assert!(res.is_some());
+
+    // only scan two columns
+    assert_eq!(
+        Row(vec![Some(11_i32.into()), Some(111_i32.into())]),
+        res.unwrap()
+    );
+
+    let res = iter.next_row().await.unwrap();
+    assert!(res.is_none());
 }
