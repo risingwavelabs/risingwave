@@ -27,6 +27,7 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::sync::oneshot::{Receiver, Sender};
+use tokio_metrics::TaskMonitor;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -257,10 +258,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
+            let task_metrics = self.context.get_task_metrics();
 
-            let task_id_cloned = task_id.clone();
-
-            let join_handle = tokio::spawn(async move {
+            let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
                 if let Err(e) = self
@@ -284,14 +284,39 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         // It's possible to send fail. Same reason in `.try_execute`.
                     }
                 }
+            };
 
-                if let Some(task_metrics) = self.context.get_task_metrics() {
-                    task_metrics.clear_record();
+            if let Some(task_metrics) = task_metrics {
+                let monitor = TaskMonitor::new();
+                let join_handle = tokio::spawn(monitor.instrument(task(task_id.clone())));
+                if let Err(join_error) = join_handle.await && join_error.is_panic() {
+                    error!("Batch task {:?} panic!", task_id);
                 }
-            });
-
-            if let Err(join_error) = join_handle.await && join_error.is_panic() {
-                error!("Batch task {:?} panic!", task_id_cloned);
+                let cumulative = monitor.cumulative();
+                task_metrics
+                    .task_first_poll_delay
+                    .set(cumulative.total_first_poll_delay.as_secs_f64());
+                task_metrics
+                    .task_fast_poll_duration
+                    .set(cumulative.total_fast_poll_duration.as_secs_f64());
+                task_metrics
+                    .task_idle_duration
+                    .set(cumulative.total_idle_duration.as_secs_f64());
+                task_metrics
+                    .task_poll_duration
+                    .set(cumulative.total_poll_duration.as_secs_f64());
+                task_metrics
+                    .task_scheduled_duration
+                    .set(cumulative.total_scheduled_duration.as_secs_f64());
+                task_metrics
+                    .task_slow_poll_duration
+                    .set(cumulative.total_slow_poll_duration.as_secs_f64());
+                task_metrics.clear_record();
+            } else {
+                let join_handle = tokio::spawn(task(task_id.clone()));
+                if let Err(join_error) = join_handle.await && join_error.is_panic() {
+                    error!("Batch task {:?} panic!", task_id);
+                }
             }
         });
         Ok(())
