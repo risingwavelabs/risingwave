@@ -22,7 +22,8 @@ use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, ObjectError, ObjectMetadata, ObjectStoreRef, ObjectStreamingUploader,
+    get_local_path, BlockLocation, ObjectError, ObjectMetadata, ObjectStoreRef,
+    ObjectStreamingUploader,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -363,6 +364,31 @@ impl SstableStore {
         Ok(())
     }
 
+    /// Returns a [BlockHolder] of the specified block if it is stored in cache, otherwise `None`.
+    pub async fn get_from_cache(
+        &self,
+        sst: &Sstable,
+        block_index: u64,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<Option<BlockHolder>> {
+        stats.cache_data_block_total += 1;
+
+        fail_point!("disable_block_cache", |_| Ok(None));
+
+        match self.block_cache.get(sst.id, block_index) {
+            Some(block) => Ok(Some(block)),
+            None => match self
+                .tiered_cache
+                .get(&(sst.id, block_index))
+                .await
+                .map_err(HummockError::tiered_cache)?
+            {
+                Some(holder) => Ok(Some(BlockHolder::from_tiered_cache(holder.into_inner()))),
+                None => Ok(None),
+            },
+        }
+    }
+
     pub async fn get(
         &self,
         sst: &Sstable,
@@ -633,7 +659,7 @@ mod tests {
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, Sstable, BlockIterator};
+    use crate::hummock::{BlockIterator, CachePolicy, Sstable, SstableIterator, SstableMeta};
     use crate::monitor::StoreLocalStatistic;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
