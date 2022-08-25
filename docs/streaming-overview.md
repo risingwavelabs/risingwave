@@ -9,7 +9,6 @@
   - [Checkpoint, Consistency, and Fault tolerance](#checkpoint-consistency-and-fault-tolerance)
     - [Barrier based checkpoint](#barrier-based-checkpoint)
     - [Fault tolerance](#fault-tolerance)
-  - [Advanced features](#advanced-features)
 
 <!-- Created by https://github.com/ekalinin/github-markdown-toc -->
 
@@ -61,7 +60,7 @@ The underlying algorithmic framework of RisingWave streaming system is the tradi
 
 ## Checkpoint, Consistency, and Fault tolerance
 
-We use the term consistency to denote the model of the *completeness and correctness* of querying materialized view. We follow the consistency model introduced in [Materialize](https://materialize.com/blog-consistency/). More specifically, the system assures that the query result is always a consistent snapshot of a certain timestamp t before the query issue timestamp, and later queries always get consistent snapshots from later timestamp. A consistent snapshot at t requires that all messages no later than t are reflected in the snapshot exactly once while all messages after t are not reflected. 
+We use the term consistency to denote the model of the *completeness and correctness* of querying materialized view. We follow the consistency model introduced in [Materialize](https://materialize.com/blog/consistency/). More specifically, the system assures that the query result is always a consistent snapshot of a certain timestamp t before the query issue timestamp, and later queries always get consistent snapshots from later timestamp. A consistent snapshot at t requires that all messages no later than t are reflected in the snapshot exactly once while all messages after t are not reflected. 
 
 ### Barrier based checkpoint
 
