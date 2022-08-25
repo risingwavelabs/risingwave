@@ -1,9 +1,9 @@
 statement ok
 create materialized source s1 (v1 int, v2 varchar) with (
   connector = 'kafka',
-  kafka.topic = 'kafka_1_partition_topic',
-  kafka.brokers = '127.0.0.1:29092',
-  kafka.scan.startup.mode = 'earliest'
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
 ) row format json
 
 statement ok
@@ -12,9 +12,9 @@ select * from s1;
 statement ok
 create materialized source s2 (v1 int, v2 varchar) with (
   connector = 'kafka',
-  kafka.topic = 'kafka_2_partition_topic',
-  kafka.brokers = '127.0.0.1:29092',
-  kafka.scan.startup.mode = 'earliest'
+  topic = 'kafka_2_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
 ) row format json
 
 statement ok
@@ -23,9 +23,9 @@ select * from s2;
 statement ok
 create materialized source s3 (v1 int, v2 varchar) with (
   connector = 'kafka',
-  kafka.topic = 'kafka_3_partition_topic',
-  kafka.brokers = '127.0.0.1:29092',
-  kafka.scan.startup.mode = 'earliest'
+  topic = 'kafka_3_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
 ) row format json
 
 statement ok
@@ -34,9 +34,9 @@ select * from s3;
 statement ok
 create materialized source s4 (v1 int, v2 varchar) with (
   connector = 'kafka',
-  kafka.topic = 'kafka_4_partition_topic',
-  kafka.brokers = '127.0.0.1:29092',
-  kafka.scan.startup.mode = 'earliest'
+  topic = 'kafka_4_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
 ) row format json
 
 statement ok
@@ -45,9 +45,9 @@ select * from s4;
 statement ok
 create materialized source s5 (v1 int, v2 varchar) with (
   connector = 'kafka',
-  kafka.topic = 'kafka_4_partition_topic_with_100_message',
-  kafka.brokers = '127.0.0.1:29092',
-  kafka.scan.startup.mode = 'earliest'
+  topic = 'kafka_4_partition_topic_with_100_message',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
 ) row format json
 
 statement ok
@@ -56,9 +56,9 @@ select * from s5;
 statement ok
 create materialized source s6 (v1 int, v2 varchar) with (
   connector = 'kafka',
-  kafka.topic = 'kafka_1_partition_mv_topic',
-  kafka.brokers = '127.0.0.1:29092',
-  kafka.scan.startup.mode = 'earliest'
+  topic = 'kafka_1_partition_mv_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
 ) row format json
 
 statement ok
@@ -82,9 +82,9 @@ si
 statement ok
 create materialized source s7 (v1 int, v2 varchar) with (
   connector = 'kafka',
-  kafka.topic = 'sink_target',
-  kafka.brokers = '127.0.0.1:29092',
-  kafka.scan.startup.mode = 'earliest'
+  topic = 'sink_target',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
 ) row format json
 
 statement ok
