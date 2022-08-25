@@ -18,8 +18,9 @@
 //! |-----------|-----|----|----|----|----|---|
 //! |Equal      | 1   | 1  | 1  | 1  | 1  | |
 //! |In         | 10  | 8  | 5  | 5  | 5  | take the minimum value with actual in number |
-//! |Range      | 500 | 50 | 20 | 10 | 10 | |
-//! |All        |10000| 100| 30 | 20 | 10 | |
+//! |Range(Two) | 500 | 50 | 20 | 10 | 10 | `RangeTwoSideBound` like a between 1 and 2 |
+//! |Range(One) | 700 | 70 | 25 | 15 | 10 | `RangeOneSideBound` like a > 1, a >= 1, a < 1|
+//! |All        | 2000| 100| 30 | 20 | 10 | |
 //!
 //! ```text
 //! index cost = cost(match type of 0 idx)
@@ -34,10 +35,11 @@
 //! - For `a = 1 and b = 1 and c = 1`, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
 //! - For `a in (xxx) and b = 1 and c = 1`, its cost is In0 * Equal1 * Equal2 = 10
 //! - For `a = 1 and b in (xxx)`, its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
-//! - For `a between xxx and yyy`, its cost is Range0 = 500
-//! - For `a = 1 and b between xxx and yyy`, its cost is Equal0 * Range1 = 50
+//! - For `a between xxx and yyy`, its cost is Range(Two)0 = 500
+//! - For `a = 1 and b between xxx and yyy`, its cost is Equal0 * Range(Two)1 = 50
+//! - For `a = 1 and b > 1`, its cost is Equal0 * Range(One)1 = 70
 //! - For `a = 1`, its cost is 100 = Equal0 * All1 = 100
-//! - For no condition, its cost is All0 = 10000
+//! - For no condition, its cost is All0 = 2000
 //!
 //! With the assumption that the most effective part of a index is its prefix,
 //! cost decreases as `column_idx` increasing.
@@ -70,11 +72,12 @@ use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;
-const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
+const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
     [1, 1, 1, 1, 1],
     [10, 8, 5, 5, 5],
     [500, 50, 20, 10, 10],
-    [10000, 100, 30, 20, 20],
+    [700, 70, 25, 15, 10],
+    [2000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
 const MAX_COMBINATION_SIZE: usize = 3;
@@ -319,7 +322,12 @@ impl IndexSelectionRule {
                 let mut index_to_be_merged = vec![];
 
                 let disjunctions = to_disjunctions(expr.clone());
-                for (column_index, expr) in self.clustering_disjunction(disjunctions) {
+                let (map, others) = self.clustering_disjunction(disjunctions);
+                let iter = map
+                    .into_iter()
+                    .map(|(column_index, expr)| (Some(column_index), expr))
+                    .chain(others.into_iter().map(|expr| (None, expr)));
+                for (column_index, expr) in iter {
                     let mut index_paths = vec![];
                     let conjunctions = to_conjunctions(expr);
                     index_paths.extend(self.gen_index_path(column_index, &conjunctions, logical_scan).into_iter());
@@ -347,47 +355,58 @@ impl IndexSelectionRule {
         result
     }
 
-    /// Clustering disjunction or expr by column index. If expr is complex, classify them as `None`
-    /// class
+    /// Clustering disjunction or expr by column index. If expr is complex, classify them as others.
     ///
-    /// a = 1, b = 2, b = 3 -> [a, (a = 1)], [b, (b = 2 or b = 3)]
+    /// a = 1, b = 2, b = 3 -> map: [a, (a = 1)], [b, (b = 2 or b = 3)], others: []
     ///
-    /// a = 1, (b = 2 and c = 3) -> [a, (a = 1)], [None, (b = 2 and c = 3)]
+    /// a = 1, (b = 2 and c = 3) -> map: [a, (a = 1)], others:
+    ///
+    /// (a > 1 and a < 8) or (c > 1 and c < 8)
+    /// -> map: [], others: [(a > 1 and a < 8), (c > 1 and c < 8)]
     fn clustering_disjunction(
         &self,
         disjunctions: Vec<ExprImpl>,
-    ) -> HashMap<Option<usize>, ExprImpl> {
-        let mut map: HashMap<Option<usize>, ExprImpl> = HashMap::new();
+    ) -> (HashMap<usize, ExprImpl>, Vec<ExprImpl>) {
+        let mut map: HashMap<usize, ExprImpl> = HashMap::new();
+        let mut others = vec![];
         for expr in disjunctions {
-            let mut idx = None;
-            if let Some((input_ref, _const_expr)) = expr.as_eq_const() {
-                idx = Some(input_ref.index);
-            } else if let Some((input_ref, _in_const_list)) = expr.as_in_const_list() {
-                idx = Some(input_ref.index);
-            } else if let Some((input_ref, _op, _const_expr)) = expr.as_comparison_const() {
-                idx = Some(input_ref.index);
-            }
-
-            match map.entry(idx) {
-                Occupied(mut entry) => {
-                    let expr2: ExprImpl = entry.get().to_owned();
-                    let or_expr = ExprImpl::FunctionCall(
-                        FunctionCall::new_unchecked(
-                            ExprType::Or,
-                            vec![expr, expr2],
-                            DataType::Boolean,
-                        )
-                        .into(),
-                    );
-                    entry.insert(or_expr);
-                }
-                Vacant(entry) => {
-                    entry.insert(expr);
+            let idx = {
+                if let Some((input_ref, _const_expr)) = expr.as_eq_const() {
+                    Some(input_ref.index)
+                } else if let Some((input_ref, _in_const_list)) = expr.as_in_const_list() {
+                    Some(input_ref.index)
+                } else if let Some((input_ref, _op, _const_expr)) = expr.as_comparison_const() {
+                    Some(input_ref.index)
+                } else {
+                    None
                 }
             };
+
+            if let Some(idx) = idx {
+                match map.entry(idx) {
+                    Occupied(mut entry) => {
+                        let expr2: ExprImpl = entry.get().to_owned();
+                        let or_expr = ExprImpl::FunctionCall(
+                            FunctionCall::new_unchecked(
+                                ExprType::Or,
+                                vec![expr, expr2],
+                                DataType::Boolean,
+                            )
+                            .into(),
+                        );
+                        entry.insert(or_expr);
+                    }
+                    Vacant(entry) => {
+                        entry.insert(expr);
+                    }
+                };
+            } else {
+                others.push(expr);
+                continue;
+            }
         }
 
-        map
+        (map, others)
     }
 
     /// Given a conjunctions from one arm of an OR clause (basic unit to index selection), generate
@@ -669,7 +688,9 @@ impl<'a> TableScanIoEstimator<'a> {
             // seeing range, we don't need to match anymore.
             let should_break = match match_item {
                 MatchItem::Equal | MatchItem::In(_) => false,
-                MatchItem::Range | MatchItem::All => true,
+                MatchItem::RangeOneSideBound | MatchItem::RangeTwoSideBound | MatchItem::All => {
+                    true
+                }
             };
             match_item_vec.push(match_item);
             if should_break {
@@ -684,8 +705,9 @@ impl<'a> TableScanIoEstimator<'a> {
             .map(|(i, match_item)| match match_item {
                 MatchItem::Equal => INDEX_COST_MATRIX[0][i],
                 MatchItem::In(num) => min(INDEX_COST_MATRIX[1][i], *num),
-                MatchItem::Range => INDEX_COST_MATRIX[2][i],
-                MatchItem::All => INDEX_COST_MATRIX[3][i],
+                MatchItem::RangeTwoSideBound => INDEX_COST_MATRIX[2][i],
+                MatchItem::RangeOneSideBound => INDEX_COST_MATRIX[3][i],
+                MatchItem::All => INDEX_COST_MATRIX[4][i],
             })
             .reduce(|x, y| x * y)
             .unwrap();
@@ -717,22 +739,39 @@ impl<'a> TableScanIoEstimator<'a> {
         }
 
         // Range
-        for (i, expr) in conjunctions.iter().enumerate() {
-            if let Some((input_ref, _op, _const_expr)) = expr.as_comparison_const()
+        let mut left_side_bound = false;
+        let mut right_side_bound = false;
+        let mut i = 0;
+        while i < conjunctions.len() {
+            let expr = &conjunctions[i];
+            if let Some((input_ref, op, _const_expr)) = expr.as_comparison_const()
                 && input_ref.index == column_idx {
                 conjunctions.remove(i);
-                return MatchItem::Range;
+                match op {
+                    ExprType::LessThan | ExprType::LessThanOrEqual => right_side_bound = true,
+                    ExprType::GreaterThan | ExprType::GreaterThanOrEqual => left_side_bound = true,
+                    _ => unreachable!()
+                };
+            } else {
+                i += 1;
             }
         }
 
-        MatchItem::All
+        if left_side_bound && right_side_bound {
+            MatchItem::RangeTwoSideBound
+        } else if left_side_bound || right_side_bound {
+            MatchItem::RangeOneSideBound
+        } else {
+            MatchItem::All
+        }
     }
 }
 
 enum MatchItem {
     Equal,
     In(usize),
-    Range,
+    RangeTwoSideBound,
+    RangeOneSideBound,
     All,
 }
 
