@@ -6608,6 +6608,8 @@ dependencies = [
  "stable_deref_trait",
  "strum",
  "syn",
+ "tikv-jemalloc-sys",
+ "tikv-jemallocator",
  "tokio",
  "tokio-stream",
  "tokio-util",
