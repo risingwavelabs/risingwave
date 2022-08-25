@@ -20,7 +20,7 @@ use risingwave_common::util::sort_util::OrderType;
 use crate::batch_table::storage_table::StorageTable;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
-use crate::table::state_table::RowBasedStateTable;
+use crate::table::streaming_table::state_table::StateTable;
 
 /// There are three struct in relational layer, StateTable, MemTable and CellBasedTable.
 /// `StateTable` provides read/write interfaces to the upper layer streaming operator.
@@ -40,7 +40,7 @@ async fn test_storage_table_get_row() -> StorageResult<()> {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let mut state = RowBasedStateTable::new_without_distribution(
+    let mut state = StateTable::new_without_distribution(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -117,7 +117,7 @@ async fn test_storage_get_row_for_string() {
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = RowBasedStateTable::new_without_distribution(
+    let mut state = StateTable::new_without_distribution(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -201,7 +201,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = RowBasedStateTable::new_without_distribution(
+    let mut state = StateTable::new_without_distribution(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

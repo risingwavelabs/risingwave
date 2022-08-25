@@ -357,6 +357,20 @@ impl<S: StateStore> StateTable<S> {
         self.pk_serializer.serialize(pk, &mut output);
         output
     }
+
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        assert!(
+            !self.is_dirty(),
+            "vnode bitmap should only be updated when state table is clean"
+        );
+        if self.dist_key_indices.is_empty() {
+            assert_eq!(
+                new_vnodes, self.vnodes,
+                "should not update vnode bitmap for singleton table"
+            );
+        }
+        self.vnodes = new_vnodes;
+    }
 }
 
 // write

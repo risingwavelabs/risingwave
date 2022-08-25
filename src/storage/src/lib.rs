@@ -62,7 +62,6 @@ pub mod store;
 pub mod batch_table;
 pub mod error;
 pub mod store_impl;
-pub mod streaming_table;
 pub mod table;
 pub mod write_batch;
 

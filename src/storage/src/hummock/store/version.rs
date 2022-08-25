@@ -22,7 +22,7 @@ use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use super::{GetFutureTrait, IterFutureTrait, ReadOptions};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, HummockStateStoreIter};
-use crate::streaming_table::mem_table::MemTable;
+use crate::table::streaming_table::mem_table::MemTable;
 
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.

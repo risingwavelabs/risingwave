@@ -56,6 +56,15 @@ debug-assertions = false
 overflow-checks = false
 rpath = false
 
+# The profile used for CI in main branch.
+# This profile inherits from the release profile, but turns on some checks and assertions for us to
+# better catch bugs in CI.
+[profile.ci-release]
+inherits = "release"
+debug = true
+debug-assertions = true
+overflow-checks = true
+
 # The profile used for CI in pull requests.
 # External dependencies are built with optimization enabled, while crates in this workspace are built
 # with `dev` profile and full debug info. This is a trade-off between build time and e2e test time.

@@ -52,12 +52,14 @@ pub trait ToStream {
 /// `ToBatch` allows to convert a logical plan node to batch physical node
 /// with an optional required order.
 ///
-/// when implement this trait you can choose the two ways
+/// The generated plan has single distribution and doesn't have any exchange nodes inserted.
+/// Use either [`ToLocalBatch`] or [`ToDistributedBatch`] after `ToBatch` to get a distributed plan.
+///
+/// To implement this trait you can choose one of the two ways:
 /// - Implement `to_batch` and use the default implementation of `to_batch_with_order_required`
-/// - Or, if the required order is given, there will be a better plan. For example a join with
-///   join-key(a,b) and the plan is required sorted by (a,b,c), a sort merge join is better. you can
-///   implement `to_batch_with_order_required`, and implement `to_batch` with
-///   `to_batch_with_order_required(&Order::any())`. you can see [`LogicalJoin`] as an example.
+/// - Or, if a better plan can be generated when a required order is given, you can implement
+///   `to_batch_with_order_required`, and implement `to_batch` with
+///   `to_batch_with_order_required(&Order::any())`.
 pub trait ToBatch {
     /// `to_batch` is equivalent to `to_batch_with_order_required(&Order::any())`
     fn to_batch(&self) -> Result<PlanRef>;
@@ -85,16 +87,15 @@ pub trait ToLocalBatch {
 /// `ToDistributedBatch` allows to convert a batch physical plan to distributed batch plan, by
 /// insert exchange node, with an optional required order and distributed.
 ///
-/// when implement this trait you can choose the two ways
+/// To implement this trait you can choose one of the two ways:
 /// - Implement `to_distributed` and use the default implementation of
 ///   `to_distributed_with_required`
-/// - Or, if the required order and distribution is given, there will be a better plan. For example
-///   a hash join with hash-key(a,b) and the plan is required hash-distributed by (a,b,c). you can
-///   implement `to_distributed_with_required`, and implement `to_distributed` with
-///   `to_distributed_with_required(&Order::any())`.
+/// - Or, if a better plan can be generated when a required order is given, you can implement
+///   `to_distributed_with_required`, and implement `to_distributed` with
+///   `to_distributed_with_required(&Order::any(), &RequiredDist::Any)`
 pub trait ToDistributedBatch {
-    /// `to_distributed` is equivalent to `to_distributed_with_required(RequiredDist::Any,
-    /// &Order::any())`
+    /// `to_distributed` is equivalent to `to_distributed_with_required(&Order::any(),
+    /// &RequiredDist::Any)`
     fn to_distributed(&self) -> Result<PlanRef>;
     /// insert the exchange in batch physical plan to satisfy the required Distribution and Order.
     fn to_distributed_with_required(
@@ -109,7 +110,7 @@ pub trait ToDistributedBatch {
 }
 
 /// Implement [`ToBatch`] for batch and streaming node.
-macro_rules! impl_to_batch {
+macro_rules! ban_to_batch {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToBatch for [<$convention $name>] {
@@ -120,11 +121,11 @@ macro_rules! impl_to_batch {
         }
     }
 }
-for_batch_plan_nodes! { impl_to_batch }
-for_stream_plan_nodes! { impl_to_batch }
+for_batch_plan_nodes! { ban_to_batch }
+for_stream_plan_nodes! { ban_to_batch }
 
 /// Implement [`ToStream`] for batch and streaming node.
-macro_rules! impl_to_stream {
+macro_rules! ban_to_stream {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToStream for [<$convention $name>] {
@@ -138,8 +139,8 @@ macro_rules! impl_to_stream {
         }
     }
 }
-for_batch_plan_nodes! { impl_to_stream }
-for_stream_plan_nodes! { impl_to_stream }
+for_batch_plan_nodes! { ban_to_stream }
+for_stream_plan_nodes! { ban_to_stream }
 
 /// impl `ToDistributedBatch`  for logical and streaming node.
 macro_rules! ban_to_distributed {
