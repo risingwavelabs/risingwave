@@ -170,7 +170,7 @@ fn test_batch_query(
             let logical_plan = planner.plan(bound).map_err(|e| {
                 Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e))
             })?;
-            logical_plan.gen_batch_query_plan().map_err(|e| {
+            logical_plan.gen_batch_distributed_plan().map_err(|e| {
                 Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e))
             })?;
             Ok(())

@@ -15,4 +15,4 @@ tracing = "0.1"
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
-tokio-postgres = { version = "0.2", package = "madsim-tokio-postgres" }
+tokio-postgres = "0.7.7"
