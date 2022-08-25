@@ -64,8 +64,7 @@ impl_plan_tree_node_for_unary! { BatchHopWindow }
 
 impl ToDistributedBatch for BatchHopWindow {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed()?;
-        Ok(self.clone_with_input(new_input).into())
+        self.to_distributed_with_required(&Order::any(), &RequiredDist::Any)
     }
 
     fn to_distributed_with_required(
@@ -73,6 +72,10 @@ impl ToDistributedBatch for BatchHopWindow {
         required_order: &Order,
         required_dist: &RequiredDist,
     ) -> Result<PlanRef> {
+        // The hop operator will generate a multiplication of its input rows,
+        // so shuffling its input instead of its output will reduce the shuffling data
+        // communication.
+        // We pass the required dist to its input.
         let input_required = self
             .logical
             .o2i_col_mapping()
