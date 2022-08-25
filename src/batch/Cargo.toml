@@ -30,6 +30,7 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
