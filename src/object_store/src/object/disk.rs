@@ -526,34 +526,41 @@ mod tests {
         let store = DiskObjectStore::new(test_root_path);
         let mut payload = gen_test_payload();
 
-        let str_list = vec![
-            String::from("test1.obj"),
-            String::from("test2.obj"),
-            String::from("test3.obj"),
-        ];
+        // The number of files that will be created and uploaded to storage.
+        const REAL_COUNT: usize = 2;
 
-        let path_list = str_list
-            .iter()
-            .map(|str| {
-                let mut path = PathBuf::from(test_root_path);
-                path.push(str);
-                path
-            })
-            .collect_vec();
+        // The number of files that we do not create but still try to delete.
+        const FAKE_COUNT: usize = 2;
 
-        for i in 0..2 {
-            store
-                .upload(str_list[i].as_str(), Bytes::from(payload.clone()))
-                .await
-                .unwrap();
-            assert!(path_list[i].exists());
+        let mut name_list = vec![];
+        let mut path_list = vec![];
 
-            payload.reverse();
+        for i in 0..(REAL_COUNT + FAKE_COUNT) {
+            let file_name = format!("test{}.obj", i);
+            name_list.push(String::from(file_name.clone()));
+
+            let mut path = PathBuf::from(test_root_path);
+            path.push(file_name);
+            path_list.push(path);
         }
 
-        assert!(!path_list[2].exists());
+        for i in 0..REAL_COUNT {
+            // Upload data.
+            store
+                .upload(name_list[i].as_str(), Bytes::from(payload.clone()))
+                .await
+                .unwrap();
 
-        store.delete_objects(&str_list).await.unwrap();
+            // Verify that file exists.
+            assert!(path_list[i].exists());
+        }
+
+        for i in REAL_COUNT..(REAL_COUNT + FAKE_COUNT) {
+            // Verify that file does not exists.
+            assert!(!path_list[i].exists());
+        }
+
+        store.delete_objects(&name_list).await.unwrap();
 
         for path in path_list {
             assert!(!path.exists());
