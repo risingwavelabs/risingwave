@@ -396,7 +396,6 @@ impl LocalVersionManager {
         table_id: u32,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-
         let batch = SharedBufferBatch::new(
             sorted_items,
             epoch,
@@ -429,6 +428,13 @@ impl LocalVersionManager {
         is_remote_batch: bool,
     ) {
         let mut local_version_guard = self.local_version.write();
+        let max_sync_epoch = local_version_guard.get_max_sync_epoch();
+        assert!(
+            epoch > max_sync_epoch,
+            "write epoch must greater than sync epoch, write epoch{}, sync epoch{}",
+            epoch,
+            max_sync_epoch
+        );
         // Write into shared buffer
         if is_remote_batch {
             // The batch won't be synced to S3 asynchronously if it is a remote batch
