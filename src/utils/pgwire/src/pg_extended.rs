@@ -35,31 +35,18 @@ use crate::types::Row;
 /// let params = parse_params(&type_description, &raw_params);
 /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
 /// ```
-fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Vec<String> {
+fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Result<Vec<String>,()> {
     assert_eq!(type_description.len(), raw_params.len());
 
-    raw_params
-        .iter()
-        .enumerate()
-        .map(|(i, param)| {
-            let oid = type_description[i];
-            match oid {
-                TypeOid::Varchar => format!("'{}'", cstr_to_str(param).unwrap()),
-                TypeOid::Boolean => todo!(),
-                TypeOid::BigInt => todo!(),
-                TypeOid::SmallInt => todo!(),
-                TypeOid::Int => todo!(),
-                TypeOid::Float4 => todo!(),
-                TypeOid::Float8 => todo!(),
-                TypeOid::Date => todo!(),
-                TypeOid::Time => todo!(),
-                TypeOid::Timestamp => todo!(),
-                TypeOid::Timestampz => todo!(),
-                TypeOid::Interval => todo!(),
-                TypeOid::Decimal => todo!(),
-            }
-        })
-        .collect()
+    let mut params = Vec::with_capacity(raw_params.len());
+    for (type_oid, raw_param) in type_description.iter().zip(raw_params.iter()) {
+        let str = match type_oid {
+            TypeOid::Varchar => format!("'{}'", cstr_to_str(raw_param).unwrap()),
+            _ => return Err(()),
+        };
+        params.push(str)
+    }
+    Ok(params)
 }
 
 /// Replace generic params in query into real params.
@@ -168,7 +155,7 @@ impl PgStatement {
             .collect();
 
         // 2. Parse params bytes into string form according to type.
-        let params = parse_params(&self.type_description, params);
+        let params = parse_params(&self.type_description, params)?;
 
         // 3. Replace generic params in statement to real value. For example, "SELECT $3, $2, $1" ->
         // "SELECT 'A', 'B', 'C'".
@@ -273,7 +260,7 @@ mod tests {
         {
             let raw_params = vec!["A".into(), "B".into(), "C".into()];
             let type_description = vec![TypeOid::Varchar; 3];
-            let params = parse_params(&type_description, &raw_params);
+            let params = parse_params(&type_description, &raw_params).unwrap();
 
             let res = replace_params("SELECT $3,$2,$1".to_string(), &[1, 2, 3], &params);
             assert_eq!(res, "SELECT 'C','B','A'");
@@ -301,7 +288,7 @@ mod tests {
                 "K".into(),
             ];
             let type_description = vec![TypeOid::Varchar; 11];
-            let params = parse_params(&type_description, &raw_params);
+            let params = parse_params(&type_description, &raw_params).unwrap();
 
             let res = replace_params(
                 "SELECT $11,$2,$1;".to_string(),
@@ -327,7 +314,7 @@ mod tests {
                 "L".into(),
             ];
             let type_description = vec![TypeOid::Varchar; 12];
-            let params = parse_params(&type_description, &raw_params);
+            let params = parse_params(&type_description, &raw_params).unwrap();
 
             let res = replace_params(
                 "SELECT $2,$1,$11,$10 ,$11, $1,$12 , $2,  'He1ll2o',1;".to_string(),
@@ -353,7 +340,7 @@ mod tests {
         {
             let raw_params = vec!["A".into(), "B".into()];
             let type_description = vec![TypeOid::Varchar; 2];
-            let params = parse_params(&type_description, &raw_params);
+            let params = parse_params(&type_description, &raw_params).unwrap();
 
             let res = replace_params(
                 "INSERT INTO nperson (name,data) VALUES ($1,$2)".to_string(),

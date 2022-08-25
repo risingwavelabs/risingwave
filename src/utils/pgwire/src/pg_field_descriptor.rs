@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::{error, fmt};
+
 #[derive(Debug, Clone)]
 pub struct PgFieldDescriptor {
     name: String,
@@ -103,12 +105,39 @@ pub enum TypeOid {
     Interval,
 }
 
+#[derive(Clone, Debug)]
+pub struct TypeOidError(i32);
+
+impl fmt::Display for TypeOidError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "oid:{} can't be supported", self.0)
+    }
+}
+
+impl error::Error for TypeOidError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+
 impl TypeOid {
     // TODO: support more type.
-    pub fn as_type(oid: i32) -> Result<TypeOid, String> {
+    pub fn as_type(oid: i32) -> Result<TypeOid, TypeOidError> {
         match oid {
             1043 => Ok(TypeOid::Varchar),
-            _ => todo!(),
+            16 => Ok(TypeOid::Boolean),
+            20 => Ok(TypeOid::BigInt),
+            21 => Ok(TypeOid::SmallInt),
+            23 => Ok(TypeOid::Int),
+            700 => Ok(TypeOid::Float4),
+            701 => Ok(TypeOid::Float8),
+            1082 => Ok(TypeOid::Date),
+            1083 => Ok(TypeOid::Time),
+            1114 => Ok(TypeOid::Timestamp),
+            1184 => Ok(TypeOid::Timestampz),
+            1700 => Ok(TypeOid::Decimal),
+            2201 => Ok(TypeOid::Interval),
+            v => Err(TypeOidError(v)),
         }
     }
 

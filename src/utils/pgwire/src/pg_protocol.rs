@@ -21,6 +21,7 @@ use std::{str, vec};
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tracing::log::trace;
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement};
@@ -49,8 +50,8 @@ where
     session_mgr: Arc<SM>,
     session: Option<Arc<SM::Session>>,
 
-    unnamed_statement: PgStatement,
-    unnamed_portal: PgPortal,
+    unnamed_statement: Option<PgStatement>,
+    unnamed_portal: Option<PgPortal>,
     named_statements: HashMap<String, PgStatement>,
     named_portals: HashMap<String, PgPortal>,
 }
@@ -88,8 +89,8 @@ where
             state: PgProtocolState::Startup,
             session_mgr,
             session: None,
-            unnamed_statement: Default::default(),
-            unnamed_portal: Default::default(),
+            unnamed_statement: None,
+            unnamed_portal: None,
             named_statements: Default::default(),
             named_portals: Default::default(),
         }
@@ -299,10 +300,10 @@ where
         tracing::trace!("(extended query)parse query: {}", sql);
         // 1. Create the types description.
         let type_ids = msg.type_ids;
-        let types: Vec<TypeOid> = type_ids
-            .into_iter()
-            .map(|x| TypeOid::as_type(x).unwrap())
-            .collect();
+        let mut types: Vec<TypeOid> = Vec::with_capacity(type_ids.len());
+        for x in type_ids {
+            types.push(TypeOid::as_type(x).map_err(|e| PsqlError::ParseError(Box::new(e)))?);
+        }
 
         // Flag indicate whether statement is a query statement.
         let is_query_sql = {
@@ -323,25 +324,49 @@ where
                     .await
                     .map_err(PsqlError::ParseError)?
             } else {
-                sql.split(&[' ', ',', ';'])
+                let generic_params: Vec<&str> = sql
+                    .split(&[' ', ',', ';'])
                     .skip(1)
                     .into_iter()
                     .take_while(|x| !x.is_empty())
-                    .map(|x| {
-                        // NOTE: Assume all output are generic params.
-                        let str = x.strip_prefix('$').unwrap();
-                        // NOTE: Assume all generic are valid.
-                        let v: i32 = str.parse().unwrap();
-                        assert!(v.is_positive());
-                        v
-                    })
-                    .map(|x| {
-                        // NOTE Make sure the type_description include all generic parameter
-                        // description we needed.
-                        assert!(((x - 1) as usize) < types.len());
-                        PgFieldDescriptor::new(String::new(), types[(x - 1) as usize].to_owned())
-                    })
-                    .collect()
+                    .collect();
+
+                let mut idx = Vec::with_capacity(generic_params.len());
+                for x in generic_params.iter() {
+                    // NOTE: Assume all output are generic params.
+                    let str = x.strip_prefix('$').ok_or_else(|| {
+                        PsqlError::ParseError(Box::new(IoError::new(
+                            ErrorKind::InvalidInput,
+                            "Invalid generic param",
+                        )))
+                    })?;
+                    // NOTE: Assume all generic are valid.
+                    let v: i32 = str
+                        .parse()
+                        .map_err(|e| PsqlError::ParseError(Box::new(e)))?;
+                    if !v.is_positive() {
+                        return Err(PsqlError::ParseError(Box::new(IoError::new(
+                            ErrorKind::InvalidInput,
+                            "Invalid generic param",
+                        ))));
+                    }
+                    idx.push(v);
+                }
+
+                let mut res = Vec::with_capacity(idx.len());
+                for x in idx.iter() {
+                    if ((x - 1) as usize) >= types.len() {
+                        return Err(PsqlError::ParseError(Box::new(IoError::new(
+                            ErrorKind::InvalidInput,
+                            "Invalid generic param",
+                        ))));
+                    }
+                    res.push(PgFieldDescriptor::new(
+                        String::new(),
+                        types[(x - 1) as usize].to_owned(),
+                    ));
+                }
+                res
             }
         } else {
             vec![]
@@ -358,7 +383,7 @@ where
         // 4. Insert the statement.
         let name = statement.name();
         if name.is_empty() {
-            self.unnamed_statement = statement;
+            self.unnamed_statement.replace(statement);
         } else {
             self.named_statements.insert(name, statement);
         }
@@ -369,13 +394,18 @@ where
     async fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         // 1. Get statement.
+        trace!(
+            "(extended query)bind: get statement name: {}",
+            &statement_name
+        );
         let statement = if statement_name.is_empty() {
-            &self.unnamed_statement
+            self.unnamed_statement.as_ref().ok_or_else(|| {
+                PsqlError::BindError(IoError::new(ErrorKind::InvalidInput, "No statement found"))
+            })?
         } else {
-            // NOTE Error handle method may need to modified.
-            // Postgresql doc needs write ErrorResponse if name not found. We may revisit
-            // this part if needed.
-            self.named_statements.get(&statement_name).expect("statement_name managed by client_driver, hence assume statement name always valid.")
+            self.named_statements.get(&statement_name).ok_or_else(|| {
+                PsqlError::BindError(IoError::new(ErrorKind::InvalidInput, "No statement found"))
+            })?
         };
 
         // 2. Instance the statement to get the portal.
@@ -388,11 +418,16 @@ where
                 msg.result_format_code,
             )
             .await
-            .unwrap();
+            .map_err(|_| {
+                PsqlError::BindError(IoError::new(
+                    ErrorKind::InvalidInput,
+                    "Failed to instance statement",
+                ))
+            })?;
 
         // 3. Insert the Portal.
         if portal_name.is_empty() {
-            self.unnamed_portal = portal;
+            self.unnamed_portal.replace(portal);
         } else {
             self.named_portals.insert(portal_name, portal);
         }
@@ -404,12 +439,20 @@ where
         // 1. Get portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let portal = if msg.portal_name.is_empty() {
-            &mut self.unnamed_portal
+            self.unnamed_portal.as_mut().ok_or_else(|| {
+                PsqlError::ExecuteError(Box::new(IoError::new(
+                    ErrorKind::InvalidInput,
+                    "No portal found",
+                )))
+            })?
         } else {
             // NOTE Error handle need modify later.
-            self.named_portals.get_mut(&portal_name).expect(
-                "portal_name managed by client_driver, hence assume portal name always valid",
-            )
+            self.named_portals.get_mut(&portal_name).ok_or_else(|| {
+                PsqlError::ExecuteError(Box::new(IoError::new(
+                    ErrorKind::InvalidInput,
+                    "No portal found",
+                )))
+            })?
         };
 
         tracing::trace!(
@@ -449,12 +492,14 @@ where
         if msg.kind == b'S' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
             let statement = if name.is_empty() {
-                &self.unnamed_statement
+                self.unnamed_statement
+                    .as_ref()
+                    .ok_or_else(|| PsqlError::DescribeError("No statement found".to_string()))?
             } else {
                 // NOTE Error handle need modify later.
                 self.named_statements
                     .get(&name)
-                    .ok_or_else(|| PsqlError::DescribeError("statement isn't exist".to_string()))?
+                    .ok_or_else(|| PsqlError::DescribeError("No statement found".to_string()))?
             };
 
             // 1. Send parameter description.
@@ -469,12 +514,14 @@ where
         } else if msg.kind == b'P' {
             let name = cstr_to_str(&msg.name).unwrap().to_string();
             let portal = if name.is_empty() {
-                &self.unnamed_portal
+                self.unnamed_portal
+                    .as_ref()
+                    .ok_or_else(|| PsqlError::DescribeError("No portal found".to_string()))?
             } else {
                 // NOTE Error handle need modify later.
                 self.named_portals
                     .get(&name)
-                    .ok_or_else(|| PsqlError::DescribeError("portal isn't exist".to_string()))?
+                    .ok_or_else(|| PsqlError::DescribeError("No portal found".to_string()))?
             };
 
             // 3. Send row description.
