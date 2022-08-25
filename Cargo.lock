@@ -5031,7 +5031,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_sync_test"
+name = "risingwave_sync_point_test"
 version = "0.1.0"
 dependencies = [
  "bytes",

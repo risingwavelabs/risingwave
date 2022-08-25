@@ -30,7 +30,7 @@ members = [
   "src/tests/regress",
   "src/tests/simulation",
   "src/tests/sqlsmith",
-  "src/tests/sync",
+  "src/tests/sync_point",
   "src/tracing",
   "src/utils/async_stack_trace",
   "src/utils/memcomparable",

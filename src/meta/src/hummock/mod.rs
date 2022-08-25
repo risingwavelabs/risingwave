@@ -37,7 +37,7 @@ pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
-use risingwave_common::util::sync::on_sync_point;
+use risingwave_common::util::sync_point::on_sync_point;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};

@@ -54,4 +54,4 @@ risedev-compose.yml
 ft.txt
 # generated output from regress tests
 src/tests/regress/output/*
-src/tests/sync/slt/e2e_test/*
+src/tests/sync_point/slt/e2e_test

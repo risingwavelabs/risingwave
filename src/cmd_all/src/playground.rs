@@ -189,7 +189,7 @@ pub async fn playground() -> Result<()> {
         }
     }
 
-    risingwave_common::util::sync::on_sync_point("CLUSTER_READY")
+    risingwave_common::util::sync_point::on_sync_point("CLUSTER_READY")
         .await
         .unwrap();
 

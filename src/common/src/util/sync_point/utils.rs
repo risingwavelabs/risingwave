@@ -18,7 +18,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::util::sync::Error;
+use crate::util::sync_point::Error;
 
 pub type SyncPoint = String;
 pub type Signal = String;

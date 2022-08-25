@@ -18,8 +18,8 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use risingwave_cmd_all::playground;
-use risingwave_common::util::sync;
-use risingwave_common::util::sync::{Signal, WaitForSignal};
+use risingwave_common::util::sync_point;
+use risingwave_common::util::sync_point::{Signal, WaitForSignal};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreImpl};
 use risingwave_pb::common::WorkerType;
@@ -39,9 +39,11 @@ pub fn setup_env() {
 
 pub async fn start_cluster() -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     wipe_object_store().await;
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "CLUSTER_READY",
-        vec![sync::Action::EmitSignal("SIG_CLUSTER_READY".to_owned())],
+        vec![sync_point::Action::EmitSignal(
+            "SIG_CLUSTER_READY".to_owned(),
+        )],
         1,
     );
 
@@ -79,7 +81,7 @@ pub fn run_slt() -> Output {
             "dev",
             "-p",
             "4566",
-            "src/tests/sync/slt/tpch_snapshot_no_drop.slt",
+            "src/tests/sync_point/slt/tpch_snapshot_no_drop.slt",
         ])
         .spawn()
         .unwrap()
@@ -111,30 +113,30 @@ pub async fn get_meta_client() -> MetaClient {
     client
 }
 
-pub async fn wait_now(signal: Signal, timeout: Duration) -> Result<(), sync::Error> {
-    sync::activate_sync_point(
+pub async fn wait_now(signal: Signal, timeout: Duration) -> Result<(), sync_point::Error> {
+    sync_point::activate_sync_point(
         "NOW",
-        vec![sync::Action::WaitForSignal(WaitForSignal {
+        vec![sync_point::Action::WaitForSignal(WaitForSignal {
             signal,
             relay_signal: false,
             timeout,
         })],
         1,
     );
-    sync::on_sync_point("NOW").await
+    sync_point::on_sync_point("NOW").await
 }
 
 pub async fn emit_now(signal: Signal) {
-    sync::activate_sync_point("NOW", vec![sync::Action::EmitSignal(signal)], 1);
-    sync::on_sync_point("NOW").await.unwrap();
+    sync_point::activate_sync_point("NOW", vec![sync_point::Action::EmitSignal(signal)], 1);
+    sync_point::on_sync_point("NOW").await.unwrap();
 }
 
 #[tokio::test]
 #[serial]
 async fn test_wait_for_signal_timeout() {
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "TEST_SETUP_TIMEOUT",
-        vec![sync::Action::WaitForSignal(WaitForSignal {
+        vec![sync_point::Action::WaitForSignal(WaitForSignal {
             signal: "SIG_NEVER_EMIT".to_owned(),
             relay_signal: false,
             timeout: Duration::from_secs(1),
@@ -143,7 +145,9 @@ async fn test_wait_for_signal_timeout() {
     );
 
     // timeout
-    sync::on_sync_point("TEST_SETUP_TIMEOUT").await.unwrap_err();
+    sync_point::on_sync_point("TEST_SETUP_TIMEOUT")
+        .await
+        .unwrap_err();
 }
 
 #[tokio::test]

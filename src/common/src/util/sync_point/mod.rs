@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(sync_test)]
-mod sync;
-#[cfg(sync_test)]
-pub use sync::*;
+#[cfg(sync_point_test)]
+mod utils;
+#[cfg(sync_point_test)]
+pub use utils::*;
 
-#[cfg(not(sync_test))]
+#[cfg(not(sync_point_test))]
 #[inline(always)]
 #[expect(clippy::unused_async)]
 pub async fn on_sync_point(_sync_point: &str) -> Result<(), Error> {

@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::util::sync;
-use risingwave_common::util::sync::WaitForSignal;
+use risingwave_common::util::sync_point;
+use risingwave_common::util::sync_point::WaitForSignal;
 use risingwave_rpc_client::HummockMetaClient;
 use serial_test::serial;
 
@@ -41,11 +41,11 @@ async fn test_gc_watermark() {
     let meta_client = get_meta_client().await;
 
     // Activate predefined sync points with customized actions
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "BEFORE_COMPACT_REPORT",
         vec![
-            sync::Action::EmitSignal("SIG_DONE_COMPACT_UPLOAD".to_owned()),
-            sync::Action::WaitForSignal(WaitForSignal {
+            sync_point::Action::EmitSignal("SIG_DONE_COMPACT_UPLOAD".to_owned()),
+            sync_point::Action::WaitForSignal(WaitForSignal {
                 signal: "SIG_START_COMPACT_REPORT".to_owned(),
                 relay_signal: false,
                 timeout: Duration::from_secs(3600),
@@ -53,31 +53,31 @@ async fn test_gc_watermark() {
         ],
         1,
     );
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "AFTER_COMPACT_REPORT",
-        vec![sync::Action::EmitSignal(
+        vec![sync_point::Action::EmitSignal(
             "SIG_DONE_COMPACT_REPORT".to_owned(),
         )],
         1,
     );
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "AFTER_REPORT_VACUUM",
-        vec![sync::Action::EmitSignal(
+        vec![sync_point::Action::EmitSignal(
             "SIG_DONE_REPORT_VACUUM".to_owned(),
         )],
         2,
     );
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "AFTER_SCHEDULE_VACUUM",
-        vec![sync::Action::EmitSignal(
+        vec![sync_point::Action::EmitSignal(
             "SIG_DONE_SCHEDULE_VACUUM".to_owned(),
         )],
         u64::MAX,
     );
     // Block compaction scheduler so that we can control scheduling explicitly
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "BEFORE_SCHEDULE_COMPACTION_TASK",
-        vec![sync::Action::WaitForSignal(WaitForSignal {
+        vec![sync_point::Action::WaitForSignal(WaitForSignal {
             signal: "SIG_SCHEDULE_COMPACTION_TASK".to_owned(),
             relay_signal: false,
             timeout: Duration::from_secs(3600),
@@ -204,17 +204,17 @@ async fn test_gc_sst_retention_time() {
     let object_store_client = get_object_store_client().await;
     let meta_client = get_meta_client().await;
 
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "AFTER_SCHEDULE_VACUUM",
-        vec![sync::Action::EmitSignal(
+        vec![sync_point::Action::EmitSignal(
             "SIG_DONE_SCHEDULE_VACUUM".to_owned(),
         )],
         u64::MAX,
     );
     // Activate predefined sync points with customized actions
-    sync::activate_sync_point(
+    sync_point::activate_sync_point(
         "AFTER_REPORT_VACUUM",
-        vec![sync::Action::EmitSignal(
+        vec![sync_point::Action::EmitSignal(
             "SIG_DONE_REPORT_VACUUM".to_owned(),
         )],
         1,

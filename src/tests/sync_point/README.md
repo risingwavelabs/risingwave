@@ -2,7 +2,7 @@ Integration tests based on risedev playground and sync point support.
 
 # How to run
 
-bash run_sync_test.sh
+bash run_sync_point_test.sh
 
 # How to write a test
 

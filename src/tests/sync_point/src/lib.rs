@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(sync_test)]
+#[cfg(all(test, sync_point_test))]
 mod test_utils;
-#[cfg(sync_test)]
+#[cfg(all(test, sync_point_test))]
 mod tests;
