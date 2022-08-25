@@ -619,6 +619,10 @@ where
             compact_status.report_compact_task(&compact_task);
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             let mut versioning_guard = write_lock!(self, versioning).await;
+
+            // need to regain the newest version ynder the protection of a write lock, otherwise the
+            // old version may be used to overwrite the new one
+            let current_version = versioning_guard.current_version.clone();
             let new_version_id = current_version.id + 1;
             let versioning = versioning_guard.deref_mut();
             let mut hummock_version_deltas =
@@ -629,6 +633,9 @@ where
                 &compact_task,
                 true,
             );
+
+            // FIXME: refactor the implementation of `apply_compact_result` by using
+            // `hummock_version_deltas`
             let mut new_version =
                 CompactStatus::apply_compact_result(&compact_task, current_version);
             new_version.id = new_version_id;
