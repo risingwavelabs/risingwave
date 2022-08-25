@@ -33,6 +33,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_pb::catalog::Table;
+use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
@@ -68,6 +69,11 @@ pub struct StorageTable<S: StateStore> {
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
 
+    /// Indices of primary key.
+    /// Note that the index is based on the all columns of the table, instead of the output ones.
+    // FIXME: revisit constructions and usages.
+    pk_indices: Vec<usize>,
+
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
@@ -89,9 +95,6 @@ pub struct StorageTable<S: StateStore> {
 
     /// Used for catalog table_properties
     table_option: TableOption,
-
-    // TODO: check and build bloom_filter_key by read_pattern_prefix_column
-    _read_pattern_prefix_column: u32,
 }
 
 impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
@@ -129,7 +132,6 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             distribution,
             table_options,
-            0,
         )
     }
 
@@ -150,7 +152,6 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             Distribution::fallback(),
             Default::default(),
-            0,
         )
     }
 }
@@ -205,7 +206,6 @@ impl<S: StateStore> StorageTable<S> {
             pk_indices,
             distribution,
             TableOption::build_table_option(table_catalog.get_properties()),
-            table_catalog.read_pattern_prefix_column,
         )
     }
 
@@ -222,7 +222,6 @@ impl<S: StateStore> StorageTable<S> {
             vnodes,
         }: Distribution,
         table_option: TableOption,
-        read_pattern_prefix_column: u32,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
@@ -250,12 +249,12 @@ impl<S: StateStore> StorageTable<S> {
             schema,
             pk_serializer,
             mapping,
+            pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
             disable_sanity_check: false,
             table_option,
-            _read_pattern_prefix_column: read_pattern_prefix_column,
         }
     }
 
@@ -326,17 +325,20 @@ impl<S: StateStore> StorageTable<S> {
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let read_options = self.get_read_option(epoch);
         assert!(pk.size() <= self.pk_indices.len());
-                let key_indices = (0..pk.size())
-                    .into_iter()
-                    .map(|index| self.pk_indices[index])
-                    .collect_vec();
+        let key_indices = (0..pk.size())
+            .into_iter()
+            .map(|index| self.pk_indices[index])
+            .collect_vec();
         if let Some(value) = self
             .keyspace
-            .get(&serialized_pk, self.dist_key_indices == key_indices, read_options.clone())
+            .get(
+                &serialized_pk,
+                self.dist_key_indices == key_indices,
+                read_options.clone(),
+            )
             .await?
         {
-            let deserialize_res =
-                deserialize(self.mapping.clone(), &value).map_err(err)?;
+            let deserialize_res = deserialize(self.mapping.clone(), &value).map_err(err)?;
             Ok(Some(deserialize_res))
         } else {
             Ok(None)
@@ -615,8 +617,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            let row =
-                deserialize(self.table_descs.clone(), &value).map_err(err)?;
+            let row = deserialize(self.table_descs.clone(), &value).map_err(err)?;
 
             yield (key.to_vec(), row)
         }

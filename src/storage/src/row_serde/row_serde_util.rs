@@ -15,11 +15,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 use memcomparable::from_slice;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
@@ -139,7 +139,9 @@ pub fn deserialize(column_mapping: Arc<ColumnDescMapping>, value: impl AsRef<[u8
 pub fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
     // value encoding
     let mut values = Vec::with_capacity(data_types.len());
-    values.push(deserialize_datum(&mut row, ty)?);
+    for ty in data_types {
+        values.push(deserialize_datum(&mut row, ty)?);
+    }
 
     Ok(Row(values))
 }
