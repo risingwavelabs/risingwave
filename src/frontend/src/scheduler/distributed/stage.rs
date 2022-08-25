@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
@@ -37,7 +37,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
 use tracing::error;
-use uuid::Uuid;
 use StageEvent::Failed;
 
 use crate::optimizer::plan_node::PlanNodeType;
@@ -113,6 +112,8 @@ struct StageRunner {
     msg_sender: Sender<QueryMessage>,
     children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
+    // Used to generate auto-increment identity_id of each PlanNodeType.
+    identity_ids: Mutex<HashMap<PlanNodeType, u64>>,
 }
 
 impl TaskStatusHolder {
@@ -172,6 +173,7 @@ impl StageExecution {
                     children: self.children.clone(),
                     state: self.state.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
+                    identity_ids: Mutex::new(HashMap::new()),
                 };
 
                 // The channel used for shutdown signal messaging.
@@ -562,6 +564,15 @@ impl StageRunner {
         task_id: TaskId,
         partition: Option<PartitionInfo>,
     ) -> PlanNodeProst {
+        // Generate identity
+        let identity = {
+            let identity_type = execution_plan_node.plan_node_type;
+            let mut identity_ids = self.identity_ids.lock().unwrap();
+            let identity_id = *identity_ids.entry(identity_type).or_insert(0);
+            *identity_ids.get_mut(&identity_type).unwrap() = identity_id + 1;
+            format!("{}-{}", identity_type.to_string(), identity_id)
+        };
+
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 // Find the stage this exchange node should fetch from and get all exchange sources.
@@ -575,31 +586,25 @@ impl StageRunner {
                 let exchange_sources = child_stage.all_exchange_sources_for(task_id);
 
                 match &execution_plan_node.node {
-                    NodeBody::Exchange(_exchange_node) => {
-                        PlanNodeProst {
-                            children: vec![],
-                            // TODO: Generate meaningful identify
-                            identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::Exchange(ExchangeNode {
+                    NodeBody::Exchange(_exchange_node) => PlanNodeProst {
+                        children: vec![],
+                        identity,
+                        node_body: Some(NodeBody::Exchange(ExchangeNode {
+                            sources: exchange_sources,
+                            input_schema: execution_plan_node.schema.clone(),
+                        })),
+                    },
+                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => PlanNodeProst {
+                        children: vec![],
+                        identity,
+                        node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
+                            exchange: Some(ExchangeNode {
                                 sources: exchange_sources,
                                 input_schema: execution_plan_node.schema.clone(),
-                            })),
-                        }
-                    }
-                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => {
-                        PlanNodeProst {
-                            children: vec![],
-                            // TODO: Generate meaningful identify
-                            identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
-                                exchange: Some(ExchangeNode {
-                                    sources: exchange_sources,
-                                    input_schema: execution_plan_node.schema.clone(),
-                                }),
-                                column_orders: sort_merge_exchange_node.column_orders.clone(),
-                            })),
-                        }
-                    }
+                            }),
+                            column_orders: sort_merge_exchange_node.column_orders.clone(),
+                        })),
+                    },
                     _ => unreachable!(),
                 }
             }
@@ -613,8 +618,7 @@ impl StageRunner {
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {
                     children: vec![],
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
                 }
             }
@@ -640,7 +644,7 @@ impl StageRunner {
 
                 PlanNodeProst {
                     children: vec![left_child],
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 }
             }
@@ -653,8 +657,7 @@ impl StageRunner {
 
                 PlanNodeProst {
                     children,
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(execution_plan_node.node.clone()),
                 }
             }
