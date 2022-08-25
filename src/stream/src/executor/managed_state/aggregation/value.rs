@@ -17,7 +17,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -48,7 +48,7 @@ impl ManagedValueState {
         agg_call: AggCall,
         row_count: Option<usize>,
         group_key: Option<&Row>,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let data = if row_count != Some(0) {
             // TODO: use the correct epoch
@@ -113,7 +113,7 @@ impl ManagedValueState {
 
     pub fn flush<S: StateStore>(
         &mut self,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
@@ -139,7 +139,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::RowBasedStateTable;
+    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
     use super::*;
     use crate::executor::aggregation::AggArgs;
@@ -157,7 +157,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state() {
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
@@ -218,7 +218,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let pk_index = vec![];
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],

@@ -19,6 +19,7 @@ use risingwave_common::types::*;
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 
+#[derive(Clone)]
 pub struct CountStar {
     return_type: DataType,
     filter: ExpressionRef,

@@ -96,7 +96,7 @@ impl Rule for IndexDeltaJoinRule {
                         .to_index_scan(
                             index.index_table.name.as_str(),
                             index.index_table.table_desc().into(),
-                            &p2s_mapping,
+                            p2s_mapping,
                         )
                         .into(),
                 );

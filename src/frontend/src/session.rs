@@ -255,6 +255,8 @@ impl FrontendEnv {
             .unwrap_or(&opts.host)
             .parse()
             .unwrap();
+        tracing::info!("Client address is {}", frontend_address);
+
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
             .register(WorkerType::Frontend, &frontend_address, 0)

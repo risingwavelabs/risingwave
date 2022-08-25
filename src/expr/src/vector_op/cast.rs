@@ -314,6 +314,45 @@ macro_rules! for_each_cast {
     };
 }
 
+#[inline(always)]
+pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
+    // Trim input
+    let trimmed = input.trim();
+
+    // Ensure input string is correctly braced.
+    let mut chars = trimmed.chars();
+    risingwave_common::ensure!(
+        chars.next() == Some('{'),
+        "First character should be left brace '{{'"
+    );
+    risingwave_common::ensure!(
+        chars.next_back() == Some('}'),
+        "Last character should be right brace '}}'"
+    );
+
+    // Return a new ListValue.
+    // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn is
+    // cast into the target DataType. If the target DataType is of type Varchar, then no casting is
+    // needed.
+    Ok(ListValue::new(
+        chars
+            .as_str()
+            .split(',')
+            .map(|s| {
+                Some(ScalarRefImpl::Utf8(s.trim()))
+                    .map(|scalar_ref| {
+                        if target_elem_type == &DataType::Varchar {
+                            Ok(scalar_ref.into_scalar_impl())
+                        } else {
+                            scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type)
+                        }
+                    })
+                    .transpose()
+            })
+            .try_collect()?,
+    ))
+}
+
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
@@ -355,6 +394,12 @@ fn scalar_cast(
             },
         ) => list_cast(source.try_into()?, source_elem_type, target_elem_type)
             .map(Scalar::to_scalar_value),
+        (
+            DataType::Varchar,
+            DataType::List {
+                datatype: target_elem_type,
+            },
+        ) => str_to_list(source.try_into()?, target_elem_type).map(Scalar::to_scalar_value),
         (source_type, target_type) => {
             for_each_cast!(gen_cast_impl, source, source_type, target_type,)
         }

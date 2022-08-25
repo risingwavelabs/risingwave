@@ -608,7 +608,7 @@ impl LogicalAgg {
     pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
         self.agg_calls
             .iter()
-            .any(|call| matches!(call.agg_kind, AggKind::StringAgg))
+            .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 }
 
