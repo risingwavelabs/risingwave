@@ -36,7 +36,7 @@ mod type_inference;
 mod utils;
 
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
-pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
+pub use correlated_input_ref::{Depth, CorrelatedId, CorrelatedInputRef};
 pub use function_call::{FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
@@ -306,10 +306,11 @@ impl ExprImpl {
     /// assign absolute `correlated_id` for them.
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         struct Collector {
-            depth: usize,
+            depth: Depth,
             correlated_indices: Vec<usize>,
             correlated_id: CorrelatedId,
         }
@@ -342,7 +343,7 @@ impl ExprImpl {
         }
 
         let mut collector = Collector {
-            depth: 1,
+            depth: depth,
             correlated_indices: vec![],
             correlated_id,
         };
