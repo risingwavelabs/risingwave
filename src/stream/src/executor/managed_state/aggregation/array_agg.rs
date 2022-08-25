@@ -180,9 +180,7 @@ impl<S: StateStore> ManagedArrayAggState<S> {
 
         let mut values = Vec::with_capacity(self.cache.len());
         for cache_data in self.cache.iter_values() {
-            if let Some(value) = cache_data {
-                values.push(Some(value.clone()));
-            }
+            values.push(cache_data.clone());
         }
         Ok(Some(ListValue::new(values).into()))
     }
@@ -279,6 +277,7 @@ mod tests {
             + a 1 8 123
             + b 5 2 128
             - b 5 2 128
+            + . 7 6 129
             + c 1 3 130",
         );
         let (ops, columns, visibility) = chunk.into_inner();
@@ -305,9 +304,10 @@ mod tests {
                     .iter()
                     .map(|v| v.as_ref().map(ScalarImpl::as_utf8).cloned())
                     .collect_vec();
-                assert_eq!(res.len(), 2);
+                assert_eq!(res.len(), 3);
                 assert!(res.contains(&Some("a".to_string())));
                 assert!(res.contains(&Some("c".to_string())));
+                assert!(res.contains(&None));
             }
             _ => panic!("unexpected output"),
         }
