@@ -225,7 +225,6 @@ pub fn create_agg_state_unary(
         (Count, count_list, list, int64, Some(0)),
         (Sum, sum, int16, int64, None),
         (Sum, sum, int32, int64, None),
-        (Sum, sum, int64, int64, None),
         (Sum, sum, int64, decimal, None),
         (Sum, sum, float32, float32, None),
         (Sum, sum, float64, float64, None),
@@ -258,6 +257,8 @@ pub fn create_agg_state_unary(
         (Max, max_str, varchar, varchar, None),
         (Max, max_struct, struct_type, struct_type, None),
         (Max, max_list, list, list, None),
+        // Global Agg
+        (Sum, sum, int64, int64, None),
         // We remark that SingleValue does not produce a runtime error when it receives zero row.
         // Therefore, we do NOT need to change the logic in GeneralAgg::output_concrete.
         (SingleValue, SingleValue::new(), int16, int16, None),
