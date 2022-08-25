@@ -63,6 +63,7 @@ impl Aggregator for ArrayAggUnordered {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
+        self.values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
             self.update_single(input, row_id)?;
         }
@@ -142,6 +143,7 @@ impl Aggregator for ArrayAggOrdered {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
+        self.unordered_values.reserve(end_row_id - start_row_id);
         for row_id in start_row_id..end_row_id {
             self.update_single(input, row_id)?;
         }
