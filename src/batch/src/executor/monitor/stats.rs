@@ -218,7 +218,7 @@ impl BatchTaskMetrics {
                 "batch_task_slow_poll_duration",
                 "The total duration (s) of slow polls.",
             )
-            .const_labels(const_labels.clone()),
+            .const_labels(const_labels),
             registry,
         )
         .unwrap();
