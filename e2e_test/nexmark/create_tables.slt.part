@@ -7,7 +7,8 @@ CREATE TABLE person (
     "city" VARCHAR,
     "state" VARCHAR,
     "date_time" TIMESTAMP,
-    "extra" VARCHAR
+    "extra" VARCHAR,
+    PRIMARY KEY (id)
 );
 
 statement ok
@@ -21,7 +22,8 @@ CREATE TABLE auction (
     "expires" TIMESTAMP,
     "seller" BIGINT,
     "category" BIGINT,
-    "extra" VARCHAR
+    "extra" VARCHAR,
+    PRIMARY KEY (id)
 );
 
 statement ok
