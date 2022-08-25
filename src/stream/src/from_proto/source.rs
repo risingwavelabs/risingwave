@@ -28,11 +28,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
-        tracing::info!(
-            "build source node: table_id {}, state_table_id {}",
-            node.table_id,
-            node.state_table_id
-        );
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
