@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
