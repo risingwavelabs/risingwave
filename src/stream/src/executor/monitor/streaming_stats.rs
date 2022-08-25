@@ -42,10 +42,15 @@ pub struct StreamingMetrics {
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
+    pub join_cached_entries: GenericGaugeVec<AtomicI64>,
+    pub join_cached_rows: GenericGaugeVec<AtomicI64>,
+
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
     /// to flow through the graph.
@@ -251,6 +256,22 @@ impl StreamingMetrics {
             register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
                 .unwrap();
 
+        let join_cached_entries = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_entries",
+            "Number of cached entries in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_cached_rows = register_int_gauge_vec_with_registry!(
+            "stream_join_cached_rows",
+            "Number of cached rows in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -298,6 +319,8 @@ impl StreamingMetrics {
             join_total_lookup_count,
             join_actor_input_waiting_duration_ns,
             join_barrier_align_duration,
+            join_cached_entries,
+            join_cached_rows,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,
