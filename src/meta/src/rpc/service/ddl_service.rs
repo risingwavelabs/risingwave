@@ -508,7 +508,9 @@ where
         // 4. fill correct table id in fragment graph
         use risingwave_common::catalog::TableId;
         match stream_job {
-            StreamingJob::Table(_) | StreamingJob::Index(..) | StreamingJob::MaterializedSource(..) => {
+            StreamingJob::Table(_)
+            | StreamingJob::Index(..)
+            | StreamingJob::MaterializedSource(..) => {
                 // Fill in the correct mview id for stream node.
                 fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
                     let mut mview_count = 0;
