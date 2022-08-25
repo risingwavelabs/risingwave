@@ -150,3 +150,23 @@ select (arr::varchar[])[1] from (values ('{  1   b  ?, 2, 3}'), ('{  4   a , 5, 
 ----
 1   b  ?
 4   a
+
+qurey TI
+select pg_typeof((v1::integer[][])[1][1]), (v1::integer[][])[1][1] from (values ('{{1}}')) as t(v1);
+----
+integer 1
+
+# query TI
+# select pg_typeof(v1::integer), v1::integer from (values ('1')) as t(v1);
+# ----
+# integer 1
+
+# query TI
+# select pg_typeof((v1::integer[])[2]), (v1::integer[])[2] from (values ('{1, 2}')) as t(v1);
+# ----
+# integer 2
+
+# query TI
+# select pg_typeof((v1::integer[][])[2][2]), (v1::integer[][])[2][2] from (values ('{{1, 2}, {3, 4}}')) as t(v1);
+# ----
+# integer 4
