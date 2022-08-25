@@ -14,10 +14,10 @@ use std::time::Duration;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use prometheus::core::{AtomicU64, Collector, GenericCounterVec};
+use prometheus::core::{AtomicF64, AtomicU64, Collector, GenericCounterVec, GenericGauge};
 use prometheus::{
-    exponential_buckets, histogram_opts, opts, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, Histogram, Registry,
+    exponential_buckets, histogram_opts, opts, register_gauge_with_registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -99,11 +99,48 @@ impl BatchTaskMetricsManager {
     }
 }
 
-#[derive(Clone)]
-pub struct BatchTaskMetrics {
-    sender: Option<UnboundedSender<Box<dyn Collector>>>,
-    pub exchange_recv_row_number: GenericCounterVec<AtomicU64>,
+macro_rules! for_each_task_metric {
+    ($macro:ident, $($x:tt),*) => {
+        $macro! {
+            [$($x),*],
+
+            { exchange_recv_row_number, GenericCounterVec<AtomicU64> },
+            { task_first_poll_delay, GenericGauge<AtomicF64> },
+            { task_fast_poll_duration, GenericGauge<AtomicF64> },
+            { task_idle_duration, GenericGauge<AtomicF64> },
+            { task_poll_duration, GenericGauge<AtomicF64> },
+            { task_scheduled_duration, GenericGauge<AtomicF64> },
+            { task_slow_poll_duration, GenericGauge<AtomicF64> },
+        }
+    };
 }
+
+macro_rules! def_task_metrics {
+    ([$struct:ident], $( { $metric:ident, $type:ty }, )*) => {
+        #[derive(Clone)]
+        pub struct $struct {
+            sender: Option<UnboundedSender<Box<dyn Collector>>>,
+            $( pub $metric: $type, )*
+        }
+    };
+}
+
+macro_rules! delete_task_metrics {
+    ([$self:ident], $( { $metric:ident, $type:ty }, )*) => {
+        if let Some(sender) = $self.sender.as_ref() {
+            $(
+                if sender
+                    .send(Box::new($self.$metric.clone()))
+                    .is_err()
+                {
+                    error!("Failed to send delete record to delete queue");
+                }
+            )*
+        }
+    };
+}
+
+for_each_task_metric!(def_task_metrics, BatchTaskMetrics);
 
 impl BatchTaskMetrics {
     pub fn new(
@@ -111,41 +148,97 @@ impl BatchTaskMetrics {
         id: TaskId,
         sender: Option<UnboundedSender<Box<dyn Collector>>>,
     ) -> Self {
-        let opt = {
-            let const_labels = HashMap::from([
-                ("query_id".to_string(), id.query_id),
-                ("target_staget_id".to_string(), id.stage_id.to_string()),
-                ("target_task_id".to_string(), id.task_id.to_string()),
-            ]);
+        let const_labels = HashMap::from([
+            ("query_id".to_string(), id.query_id),
+            ("stage_id".to_string(), id.stage_id.to_string()),
+            ("task_id".to_string(), id.task_id.to_string()),
+        ]);
+
+        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
             opts!(
                 "batch_exchange_recv_row_number",
                 "Total number of row that have been received from upstream source",
             )
-            .const_labels(const_labels)
-        };
-        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
-            opt,
+            .const_labels(const_labels.clone()),
             &["source_stage_id", "source_task_id"],
             registry
         )
         .unwrap();
+
+        let task_first_poll_delay = register_gauge_with_registry!(
+            opts!(
+                "batch_task_first_poll_delay",
+                "The total duration (s) elapsed between the instant tasks are instrumented, and the instant they are first polled.",
+            ).const_labels(const_labels.clone()),
+            registry,
+        ).unwrap();
+
+        let task_fast_poll_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_fast_poll_duration",
+                "The total duration (s) of fast polls.",
+            )
+            .const_labels(const_labels.clone()),
+            registry,
+        )
+        .unwrap();
+
+        let task_idle_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_idle_duration",
+                "The total duration (s) that tasks idled.",
+            )
+            .const_labels(const_labels.clone()),
+            registry,
+        )
+        .unwrap();
+
+        let task_poll_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_poll_duration",
+                "The total duration (s) elapsed during polls.",
+            )
+            .const_labels(const_labels.clone()),
+            registry,
+        )
+        .unwrap();
+
+        let task_scheduled_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_scheduled_duration",
+                "The total duration (s) that tasks spent waiting to be polled after awakening.",
+            )
+            .const_labels(const_labels.clone()),
+            registry,
+        )
+        .unwrap();
+
+        let task_slow_poll_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_slow_poll_duration",
+                "The total duration (s) of slow polls.",
+            )
+            .const_labels(const_labels),
+            registry,
+        )
+        .unwrap();
+
         Self {
             sender,
             exchange_recv_row_number,
+            task_first_poll_delay,
+            task_fast_poll_duration,
+            task_idle_duration,
+            task_poll_duration,
+            task_scheduled_duration,
+            task_slow_poll_duration,
         }
     }
 
     /// This function execute after the exucution done.
     /// Send all the record to the delete queue.
     pub fn clear_record(&self) {
-        if let Some(sender) = self.sender.as_ref() {
-            if sender
-                .send(Box::new(self.exchange_recv_row_number.clone()))
-                .is_err()
-            {
-                error!("Failed to send delete record to delete queue");
-            }
-        }
+        for_each_task_metric!(delete_task_metrics, self)
     }
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
