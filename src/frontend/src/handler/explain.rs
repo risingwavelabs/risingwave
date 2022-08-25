@@ -81,7 +81,7 @@ pub(super) fn handle_explain(
             let logical = planner.plan(bound)?;
             match query_mode {
                 QueryMode::Local => logical.gen_batch_local_plan()?,
-                QueryMode::Distributed => logical.gen_batch_query_plan()?,
+                QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
             }
         }
     };

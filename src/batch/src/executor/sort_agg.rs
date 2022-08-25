@@ -65,7 +65,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
         let agg_states: Vec<_> = sort_agg_node
             .get_agg_calls()
             .iter()
-            .map(|x| AggStateFactory::new(x)?.create_agg_state())
+            .map(|x| AggStateFactory::new(x).map(|fac| fac.create_agg_state()))
             .try_collect()?;
 
         let group_key: Vec<_> = sort_agg_node
@@ -334,7 +334,7 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let count_star = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<BoxedExpression> = vec![];
         let sorted_groupers = vec![];
         let agg_states = vec![count_star];
@@ -428,7 +428,7 @@ mod tests {
             filter: None,
         };
 
-        let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let count_star = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
@@ -557,7 +557,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
 
         let group_exprs: Vec<BoxedExpression> = vec![];
         let agg_states = vec![sum_agg];
@@ -642,7 +642,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
@@ -766,7 +766,7 @@ mod tests {
             filter: None,
         };
 
-        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
+        let sum_agg = AggStateFactory::new(&prost)?.create_agg_state();
         let group_exprs: Vec<_> = (1..=2)
             .map(|idx| {
                 build_from_prost(&ExprNode {
