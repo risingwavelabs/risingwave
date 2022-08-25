@@ -321,7 +321,7 @@ impl Condition {
             (vec![], Condition::false_cond())
         }
 
-        // it's an OR
+        // It's an OR.
         if self.conjunctions.len() == 1 {
             if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
                 if let Some((scan_ranges, other_condition)) =
