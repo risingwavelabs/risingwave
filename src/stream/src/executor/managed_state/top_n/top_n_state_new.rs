@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
@@ -26,7 +26,7 @@ use crate::executor::top_n::TopNCache;
 
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
-    pub(crate) state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: StateTable<S>,
     /// The total number of rows in state table.
     total_count: usize,
     /// For deserializing `OrderedRow`.
@@ -48,7 +48,7 @@ impl TopNStateRow {
 impl<S: StateStore> ManagedTopNStateNew<S> {
     pub fn new(
         total_count: usize,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
         ordered_row_deserializer: OrderedRowDeserializer,
     ) -> Self {
         Self {

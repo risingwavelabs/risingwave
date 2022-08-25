@@ -20,16 +20,20 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchExpand, ColPrunable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchExpand, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
-use crate::expr::InputRef;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// [`LogicalExpand`] expand one row multiple times according to `column_subsets`.
+/// [`LogicalExpand`] expand one row multiple times according to `column_subsets` and also keep
+/// original columns of input. It can be used to implement distinct aggregation and group set.
 ///
-/// It can be used to implement distinct aggregation and group set.
+/// This is the schema of `LogicalExpand`:
+/// | expanded columns(i.e. some columns are set to null) | original columns of input | flag |.
+///
+/// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
+/// is used to distinguish between different `subset`s in `column_subsets`.
 #[derive(Debug, Clone)]
 pub struct LogicalExpand {
     pub base: PlanBase,
@@ -46,11 +50,16 @@ impl LogicalExpand {
             assert!(*key < input_schema_len);
         }
         // The last column should be the flag.
-        let mut pk_indices = input.logical_pk().to_vec();
-        pk_indices.push(input_schema_len);
+        let mut pk_indices = input
+            .logical_pk()
+            .iter()
+            .map(|pk| *pk + input_schema_len)
+            .collect_vec();
+        pk_indices.push(input_schema_len * 2);
 
         let schema = Self::derive_schema(input.schema());
         let ctx = input.ctx();
+        // TODO(Wenzhuo): change fd according to expand's new definition.
         let flag_index = schema.len() - 1; // assume that `flag` is the last column
         let functional_dependency = {
             let input_fd = input.functional_dependency().clone().into_dependencies();
@@ -76,6 +85,7 @@ impl LogicalExpand {
 
     fn derive_schema(input_schema: &Schema) -> Schema {
         let mut fields = input_schema.clone().into_fields();
+        fields.extend(fields.clone());
         fields.push(Field::with_name(DataType::Int64, "flag"));
         Schema::new(fields)
     }
@@ -131,10 +141,19 @@ impl PlanTreeNodeUnary for LogicalExpand {
                     .collect_vec()
             })
             .collect_vec();
-        let (mut map, new_input_col_num) = input_col_change.into_parts();
-        map.push(Some(new_input_col_num));
+        let (mut mapping, new_input_col_num) = input_col_change.into_parts();
+        mapping.extend({
+            mapping
+                .iter()
+                .map(|p| p.map(|i| i + new_input_col_num))
+                .collect_vec()
+        });
+        mapping.push(Some(2 * new_input_col_num));
 
-        (Self::new(input, column_subsets), ColIndexMapping::new(map))
+        (
+            Self::new(input, column_subsets),
+            ColIndexMapping::new(mapping),
+        )
     }
 }
 
@@ -147,29 +166,8 @@ impl fmt::Display for LogicalExpand {
 }
 
 impl ColPrunable for LogicalExpand {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let pos_of_flag = self.input.schema().len();
-        let input_required_cols = required_cols
-            .iter()
-            .copied()
-            .filter(|i| *i != pos_of_flag)
-            .collect_vec();
-        let new_input = self.input.prune_col(&input_required_cols);
-        let input_col_change = ColIndexMapping::with_remaining_columns(
-            &input_required_cols,
-            self.input.schema().len(),
-        );
-        let (new_expand, col_change) = self.rewrite_with_input(new_input, input_col_change);
-
-        let exprs = required_cols
-            .iter()
-            .map(|col| {
-                let mapped_col = col_change.map(*col);
-                let data_type = new_expand.base.schema.fields[mapped_col].data_type();
-                InputRef::new(mapped_col, data_type).into()
-            })
-            .collect_vec();
-        LogicalProject::create(new_expand.into(), exprs)
+    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+        todo!("prune_col of LogicalExpand is not implemented yet.");
     }
 }
 
@@ -212,71 +210,10 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use crate::optimizer::plan_node::{
-        LogicalExpand, LogicalProject, LogicalValues, PlanTreeNodeUnary,
-    };
+    use crate::optimizer::plan_node::{LogicalExpand, LogicalValues};
     use crate::session::OptimizerContext;
 
-    #[tokio::test]
-    /// Pruning
-    /// ```text
-    /// Expand(column_subsets: [[0, 1], [2]]
-    ///   TableScan(v1, v2, v3)
-    /// ```
-    /// with required columns [0, 2, 3, 1] will result in
-    /// ```text
-    /// Project(input_ref(0), input_ref(1), input_ref(3), input_ref(2))
-    ///   Expand(column_subsets: [[0, 2], [1]])
-    ///     TableScan(v1, v3, v2)
-    /// ```
-    async fn test_prune_expand() {
-        let ctx = OptimizerContext::mock().await;
-        let fields: Vec<Field> = vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v2"),
-            Field::with_name(DataType::Int32, "v3"),
-        ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
-
-        let column_subsets = vec![vec![0, 1], vec![2]];
-        let expand = LogicalExpand::create(values.into(), column_subsets);
-
-        // Perform the prune
-        let required_cols = vec![0, 2, 3, 1];
-        let plan = expand.prune_col(&required_cols);
-
-        // Check the result
-        let project: &LogicalProject = plan.as_logical_project().unwrap();
-        let expected_schema = vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v3"),
-            Field::with_name(DataType::Int64, "flag"),
-            Field::with_name(DataType::Int32, "v2"),
-        ];
-        assert_eq!(expected_schema, project.base.schema.fields().to_owned());
-
-        let expand = project.input();
-        let expand: &LogicalExpand = expand.as_logical_expand().unwrap();
-        let expected_schema = vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v3"),
-            Field::with_name(DataType::Int32, "v2"),
-            Field::with_name(DataType::Int64, "flag"),
-        ];
-        let expected_column_subsets = vec![vec![0, 2], vec![1]];
-        assert_eq!(expected_schema, expand.base.schema.fields().to_owned());
-        assert_eq!(expected_column_subsets, expand.column_subsets.to_owned());
-
-        let values = expand.input();
-        let values: &LogicalValues = values.as_logical_values().unwrap();
-        let expected_schema = vec![
-            Field::with_name(DataType::Int32, "v1"),
-            Field::with_name(DataType::Int32, "v3"),
-            Field::with_name(DataType::Int32, "v2"),
-        ];
-        assert_eq!(expected_schema, values.base.schema.fields().to_owned());
-    }
-
+    // TODO(Wenzhuo): change this test according to expand's new definition.
     #[tokio::test]
     async fn fd_derivation_expand() {
         // input: [v1, v2, v3]
@@ -299,7 +236,7 @@ mod tests {
         let expand = LogicalExpand::create(values.into(), column_subsets);
         let fd = expand.functional_dependency().as_dependencies();
         assert_eq!(fd.len(), 1);
-        assert_eq!(fd[0].from().ones().collect_vec(), &[0, 3]);
+        assert_eq!(fd[0].from().ones().collect_vec(), &[0, 6]);
         assert_eq!(fd[0].to().ones().collect_vec(), &[1, 2]);
     }
 }

@@ -25,7 +25,7 @@ use risingwave_common::types::*;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::Cache;
@@ -85,21 +85,21 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum>;
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()>;
+    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore> GenericExtremeState<S> {
@@ -164,7 +164,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
 
@@ -222,7 +222,7 @@ impl<S: StateStore> GenericExtremeState<S> {
     async fn get_output_inner(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         // try to get the result from cache
         if let Some(datum) = self.get_output_from_cache() {
@@ -256,7 +256,7 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
         visibility: Option<&Bitmap>,
         columns: &[&ArrayImpl],
         _epoch: u64,
-        state_table: &mut RowBasedStateTable<S>,
+        state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_chunk_inner(ops, visibility, columns, state_table)
     }
@@ -264,7 +264,7 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &RowBasedStateTable<S>,
+        state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         self.get_output_inner(epoch, state_table).await
     }
@@ -276,7 +276,7 @@ impl<S: StateStore> ManagedTableState<S> for GenericExtremeState<S> {
     }
 
     /// TODO: Remove this. #4035
-    fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
+    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         Ok(())
     }
 }
@@ -323,7 +323,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -447,7 +447,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 3]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -572,7 +572,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),   // _row_id
         ];
         let state_table_col_mapping_1 = Arc::new(StateTableColumnMapping::new(vec![0, 3]));
-        let mut state_table_1 = RowBasedStateTable::new_without_distribution(
+        let mut state_table_1 = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -588,7 +588,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping_2 = Arc::new(StateTableColumnMapping::new(vec![1, 3]));
-        let mut state_table_2 = RowBasedStateTable::new_without_distribution(
+        let mut state_table_2 = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -686,7 +686,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 1, 3]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -812,7 +812,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![0, 1]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,
@@ -947,7 +947,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64), // _row_id
         ];
         let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![0, 1]));
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,

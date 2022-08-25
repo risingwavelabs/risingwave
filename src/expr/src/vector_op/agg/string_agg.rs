@@ -16,14 +16,16 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
 use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
+#[derive(Clone)]
 enum StringAggState {
     WithoutOrder {
         result: Option<String>,
@@ -35,6 +37,7 @@ enum StringAggState {
     },
 }
 
+#[derive(Clone)]
 pub struct StringAgg {
     agg_col_idx: usize,
     delimiter: ExpressionRef,
@@ -157,10 +160,7 @@ impl Aggregator for StringAgg {
             }
             Ok(())
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Input fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Input fail to match {}.", stringify!(Utf8))
         }
     }
 
@@ -182,10 +182,7 @@ impl Aggregator for StringAgg {
             }
             Ok(())
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Input fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Input fail to match {}.", stringify!(Utf8))
         }
     }
 
@@ -196,10 +193,7 @@ impl Aggregator for StringAgg {
                 .append(res.as_ref().map(|x| x.as_scalar_ref()))
                 .map_err(Into::into)
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Builder fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Builder fail to match {}.", stringify!(Utf8))
         }
     }
 }

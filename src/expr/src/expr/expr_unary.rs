@@ -149,6 +149,17 @@ pub fn new_unary_expr(
             DataType::List {
                 datatype: target_elem_type,
             },
+            DataType::Varchar,
+        ) => Box::new(UnaryExpression::<Utf8Array, ListArray, _>::new(
+            child_expr,
+            return_type,
+            move |input| str_to_list(input, &target_elem_type),
+        )),
+        (
+            ProstType::Cast,
+            DataType::List {
+                datatype: target_elem_type,
+            },
             DataType::List {
                 datatype: source_elem_type,
             },

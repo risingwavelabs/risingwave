@@ -39,3 +39,18 @@ with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
 
 statement ok
 drop table t
+
+
+statement ok
+create table t(x int, y int)
+
+statement ok
+insert into t values(2, 1), (2, 2);
+
+query I
+select count(distinct x) filter (where y > 0), sum(distinct y) from t;
+----
+1 3
+
+statement ok
+drop table t

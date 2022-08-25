@@ -8,7 +8,6 @@ anyhow = "1"
 assert_matches = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-axum = "0.5"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -56,10 +55,13 @@ tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = { version = "0.2.1", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+axum = "0.5"
+tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 
 [dev-dependencies]
 assert_matches = "1"
