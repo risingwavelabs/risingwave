@@ -39,11 +39,6 @@ pub struct CompactorRunner {
 impl CompactorRunner {
     pub fn new(split_index: usize, context: &CompactorContext, task: CompactTask) -> Self {
         let max_target_file_size = context.context.options.sstable_size_mb as usize * (1 << 20);
-        let cache_policy = if task.target_level == 0 {
-            CachePolicy::Fill
-        } else {
-            CachePolicy::NotFill
-        };
         let mut options: SstableBuilderOptions = context.context.options.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
@@ -59,9 +54,8 @@ impl CompactorRunner {
         let compactor = Compactor::new(
             context.context.clone(),
             options,
-            context.sstable_store.clone(),
             key_range,
-            cache_policy,
+            CachePolicy::NotFill,
             task.gc_delete_keys,
             task.watermark,
         );

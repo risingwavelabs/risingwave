@@ -23,6 +23,7 @@ use zstd::zstd_safe::WriteBuf;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{CachePolicy, HummockResult, SstableBuilder, SstableStoreWrite};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::monitor::StateStoreMetrics;
 
 #[async_trait::async_trait]
@@ -51,7 +52,7 @@ pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
 
     policy: CachePolicy,
 
-    sstable_store: Arc<dyn SstableStoreWrite>,
+    sstable_store: SstableStoreRef,
 
     tracker: Option<MemoryTracker>,
 
@@ -64,7 +65,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     pub fn new(
         builder_factory: F,
         policy: CachePolicy,
-        sstable_store: Arc<dyn SstableStoreWrite>,
+        sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
         Self {
@@ -81,7 +82,7 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     pub fn new_for_test(
         builder_factory: F,
         policy: CachePolicy,
-        sstable_store: Arc<dyn SstableStoreWrite>,
+        sstable_store: SstableStoreRef,
     ) -> Self {
         Self {
             builder_factory,

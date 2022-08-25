@@ -61,9 +61,10 @@ use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
 use crate::hummock::utils::{MemoryLimiter, MemoryTracker};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, SstableStoreWrite,
+    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef,
     DEFAULT_ENTRY_SIZE,
 };
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub struct RemoteBuilderFactory {
     sstable_id_manager: SstableIdManagerRef,
@@ -99,18 +100,20 @@ impl TableBuilderFactory for RemoteBuilderFactory {
 }
 
 #[derive(Clone)]
-/// Implementation of Hummock compaction.
-pub struct Compactor {
-    /// The context of the compactor.
-    context: Arc<Context>,
-
-    options: SstableBuilderOptions,
-
-    sstable_store: Arc<dyn SstableStoreWrite>,
+pub struct TaskConfig {
     key_range: KeyRange,
     cache_policy: CachePolicy,
     gc_delete_keys: bool,
     watermark: u64,
+}
+
+#[derive(Clone)]
+/// Implementation of Hummock compaction.
+pub struct Compactor {
+    /// The context of the compactor.
+    context: Arc<Context>,
+    task_config: TaskConfig,
+    options: SstableBuilderOptions,
 }
 
 pub type CompactOutput = (usize, Vec<SstableInfo>);
@@ -439,14 +442,13 @@ impl Compactor {
 
     pub async fn compact_and_build_sst<T: TableBuilderFactory>(
         sst_builder: &mut CapacitySplitTableBuilder<T>,
-        kr: &KeyRange,
+        task_config: &TaskConfig,
+        stats: Arc<StateStoreMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
-        gc_delete_keys: bool,
-        watermark: HummockEpoch,
         mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()> {
-        if !kr.left.is_empty() {
-            iter.seek(&kr.left).await?;
+        if !task_config.key_range.left.is_empty() {
+            iter.seek(&task_config.key_range.left).await?;
         } else {
             iter.rewind().await?;
         }
@@ -463,8 +465,8 @@ impl Compactor {
             let mut drop = false;
             let epoch = get_epoch(iter_key);
             if is_new_user_key {
-                if !kr.right.is_empty()
-                    && VersionedComparator::compare_key(iter_key, &kr.right)
+                if !task_config.key_range.right.is_empty()
+                    && VersionedComparator::compare_key(iter_key, &task_config.key_range.right)
                         != std::cmp::Ordering::Less
                 {
                     break;
@@ -481,8 +483,8 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= watermark && gc_delete_keys && iter.value().is_delete())
-                || (epoch < watermark && watermark_can_see_last_key)
+            if (epoch <= task_config.watermark && task_config.gc_delete_keys && iter.value().is_delete())
+                || (epoch < task_config.watermark && watermark_can_see_last_key)
             {
                 drop = true;
             }
@@ -491,7 +493,7 @@ impl Compactor {
                 drop = true;
             }
 
-            if epoch <= watermark {
+            if epoch <= task_config.watermark {
                 watermark_can_see_last_key = true;
             }
 
@@ -507,6 +509,8 @@ impl Compactor {
 
             iter.next().await?;
         }
+        let mut local_stats = StoreLocalStatistic::default();
+        local_stats.report(stats.as_ref());
         Ok(())
     }
 }
@@ -516,7 +520,6 @@ impl Compactor {
     pub fn new(
         context: Arc<Context>,
         options: SstableBuilderOptions,
-        sstable_store: Arc<dyn SstableStoreWrite>,
         key_range: KeyRange,
         cache_policy: CachePolicy,
         gc_delete_keys: bool,
@@ -525,11 +528,12 @@ impl Compactor {
         Self {
             context,
             options,
-            sstable_store,
-            key_range,
-            cache_policy,
-            gc_delete_keys,
-            watermark,
+            task_config: TaskConfig {
+                cache_policy,
+                gc_delete_keys,
+                watermark,
+                key_range,
+            },
         }
     }
 
@@ -561,8 +565,8 @@ impl Compactor {
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = CapacitySplitTableBuilder::new(
             builder_factory,
-            self.cache_policy,
-            self.sstable_store.clone(),
+            self.task_config.cache_policy,
+            self.context.sstable_store.clone(),
             self.context.stats.clone(),
         );
 
@@ -575,10 +579,9 @@ impl Compactor {
 
         Compactor::compact_and_build_sst(
             &mut builder,
-            &self.key_range,
+            &self.task_config,
+            self.context.stats.clone(),
             iter,
-            self.gc_delete_keys,
-            self.watermark,
             compaction_filter,
         )
         .await?;
