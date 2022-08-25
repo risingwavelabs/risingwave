@@ -179,10 +179,17 @@ mod tests {
              7  8
              9 10",
         ));
+        let row_id_index = None;
+        let pk_column_ids = vec![1];
 
         // Create the table.
         let table_id = TableId::new(0);
-        source_manager.create_table_source(&table_id, table_columns.to_vec())?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns.to_vec(),
+            row_id_index,
+            pk_column_ids,
+        )?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;

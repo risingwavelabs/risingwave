@@ -356,6 +356,48 @@ mod tests {
     }
 
     #[test]
+    fn vec_min_list() -> Result<()> {
+        use risingwave_common::array;
+        let input = ListArray::from_slices(
+            &[true, true, true],
+            vec![
+                Some(array! { I32Array, [Some(0)] }.into()),
+                Some(array! { I32Array, [Some(1)] }.into()),
+                Some(array! { I32Array, [Some(2)] }.into()),
+            ],
+            DataType::Int32,
+        )?;
+        let agg_type = AggKind::Min;
+        let input_type = DataType::List {
+            datatype: Box::new(DataType::Int32),
+        };
+        let return_type = DataType::List {
+            datatype: Box::new(DataType::Int32),
+        };
+        let actual = eval_agg(
+            input_type,
+            Arc::new(input.into()),
+            agg_type,
+            return_type,
+            ArrayBuilderImpl::List(ListArrayBuilder::with_meta(
+                0,
+                ArrayMeta::List {
+                    datatype: Box::new(DataType::Int32),
+                },
+            )),
+        )?;
+        let actual = actual.as_list();
+        let actual = actual.iter().collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            vec![Some(ListRef::ValueRef {
+                val: &ListValue::new(vec![Some(ScalarImpl::Int32(0))])
+            })]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn vec_max_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_kind = AggKind::Max;
