@@ -565,6 +565,7 @@ where
 
             // stream_manager handle the materialized only (mview, table, index,
             // materialized_source) so we need to notify all_node for this case.
+            // FIXME: only need to notify frontends after source executor internal table introduced: https://github.com/singularity-data/risingwave/issues/4817
             let version = self
                 .env
                 .notification_manager()

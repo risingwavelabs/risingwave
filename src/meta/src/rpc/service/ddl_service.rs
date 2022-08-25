@@ -29,8 +29,8 @@ use tonic::{Request, Response, Status};
 
 use crate::error::meta_error_to_tonic;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, SourceId,
-    StreamingJob, TableId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv,
+    NotificationVersion, SourceId, StreamingJob, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -456,11 +456,12 @@ where
         }
     }
 
+    /// `create_stream_job` creates a stream job and returns the version of the catalog.
     async fn create_stream_job(
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<u64> {
+    ) -> MetaResult<NotificationVersion> {
         let (mut ctx, mut table_fragments) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
         match self
@@ -479,12 +480,13 @@ where
         }
     }
 
+    /// `prepare_stream_job` prepares a stream job and returns the context and table fragments.
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(CreateMaterializedViewContext, TableFragments)> {
-        // 1. id assignment
+        // 1. assign a new id to the stream job.
         let id = self
             .env
             .id_gen_manager()
@@ -492,7 +494,7 @@ where
             .await? as u32;
         stream_job.set_id(id);
 
-        // 2. Resolve the dependent relations.
+        // 2. resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
         assert!(
             !dependent_relations.is_empty(),
@@ -505,7 +507,7 @@ where
             .start_create_stream_job_procedure(stream_job)
             .await?;
 
-        // 4. fill correct table id in fragment graph
+        // 4. fill correct table id in fragment graph.
         use risingwave_common::catalog::TableId;
         match stream_job {
             StreamingJob::Table(_)
@@ -549,7 +551,7 @@ where
             ..Default::default()
         };
 
-        // Resolve fragments.
+        // 5. build fragment graph.
         let parallel_degree = self.cluster_manager.get_parallel_unit_count().await;
         ctx.dependent_table_ids = fragment_graph
             .dependent_table_ids
@@ -579,7 +581,7 @@ where
             ctx.internal_table_ids().len() as u32
         );
 
-        // 5. mark creating tables.
+        // 6. mark creating tables.
         let mut creating_tables = ctx
             .internal_table_id_map
             .iter()
@@ -612,12 +614,14 @@ where
         Ok((ctx, TableFragments::new(id.into(), graph)))
     }
 
+    /// `cancel_stream_job` cancels a stream job and clean some states.
     async fn cancel_stream_job(
         &self,
         stream_job: &StreamingJob,
         ctx: &CreateMaterializedViewContext,
     ) -> MetaResult<()> {
         let mut creating_internal_table_ids = ctx.internal_table_ids();
+        // 1. cancel create procedure.
         match stream_job {
             StreamingJob::Table(table) => {
                 self.catalog_manager
@@ -643,6 +647,7 @@ where
             }
         }
         creating_internal_table_ids.push(stream_job.id());
+        // 2. unmark creating tables.
         self.catalog_manager
             .unmark_creating_tables(&creating_internal_table_ids, true)
             .await;
@@ -650,6 +655,7 @@ where
         Ok(())
     }
 
+    /// `finish_stream_job` finishes a stream job and clean some states.
     async fn finish_stream_job(
         &self,
         stream_job: &StreamingJob,
