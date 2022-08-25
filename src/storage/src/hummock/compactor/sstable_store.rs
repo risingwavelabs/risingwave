@@ -125,7 +125,7 @@ impl CompactorSstableStore {
             end_index,
             block_size: sst.meta.block_metas[start_index..end_index]
                 .iter()
-                .map(|meta| (meta.len as usize, meta.uncompressed_size))
+                .map(|meta| (meta.len as usize, meta.uncompressed_size as usize))
                 .collect_vec(),
             _tracker: tracker,
         })

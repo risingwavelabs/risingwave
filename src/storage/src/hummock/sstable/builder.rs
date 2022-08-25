@@ -160,6 +160,7 @@ impl SstableBuilder {
                 offset: self.buf.len() as u32,
                 len: 0,
                 smallest_key: full_key.to_vec(),
+                uncompressed_size: 0,
             })
         }
 

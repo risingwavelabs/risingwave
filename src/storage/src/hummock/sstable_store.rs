@@ -96,6 +96,7 @@ pub struct SstableStreamingUploader {
     object_uploader: ObjectStreamingUploader,
     /// Compressed blocks to refill block or meta cache.
     blocks: Vec<Bytes>,
+    // TODO: do not fill cache in uploader, rewrite this logic in other place.
     policy: CachePolicy,
 }
 
@@ -211,15 +212,6 @@ impl SstableStore {
             self.delete_sst_data(sst_id).await?;
             return Err(e);
         }
-        // TODO: unify cache refill logic with `put_sst`.
-        if let CachePolicy::Fill = uploader.policy {
-            debug_assert!(!uploader.blocks.is_empty());
-            for (block_idx, compressed_block) in uploader.blocks.iter().enumerate() {
-                let block = Block::decode(compressed_block.chunk())?;
-                self.block_cache
-                    .insert(sst_id, block_idx as u64, Box::new(block));
-            }
-        }
         let sst = Sstable::new(sst_id, meta);
         let charge = sst.estimate_size();
         self.meta_cache
@@ -269,17 +261,6 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub fn add_block_cache(
-        &self,
-        sst_id: HummockSstableId,
-        block_idx: u64,
-        block_data: Bytes,
-    ) -> HummockResult<()> {
-        let block = Box::new(Block::decode(&block_data)?);
-        self.block_cache.insert(sst_id, block_idx, block);
-        Ok(())
-    }
-
     pub async fn get(
         &self,
         sst: &Sstable,
@@ -305,7 +286,7 @@ impl SstableStore {
             let store = self.store.clone();
             let sst_id = sst.id;
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
-            let uncompressed_capacity = block_meta.uncompressed_size;
+            let uncompressed_capacity = block_meta.uncompressed_size as usize;
 
             async move {
                 if use_tiered_cache && let Some(holder) = tiered_cache
@@ -494,7 +475,7 @@ impl SstableStoreWrite for SstableStore {
                 let end_offset = (block_meta.offset + block_meta.len) as usize;
                 let block = Block::decode(
                     &data[block_meta.offset as usize..end_offset],
-                    block_meta.uncompressed_size,
+                    block_meta.uncompressed_size as usize,
                 )?;
                 self.block_cache
                     .insert(sst_id, block_idx as u64, Box::new(block));

@@ -275,11 +275,13 @@ mod tests {
                     smallest_key: b"0-smallest-key".to_vec(),
                     offset: 0,
                     len: 100,
+                    uncompressed_size: 0,
                 },
                 BlockMeta {
                     smallest_key: b"5-some-key".to_vec(),
                     offset: 100,
                     len: 100,
+                    uncompressed_size: 0,
                 },
             ],
             bloom_filter: b"0123456789".to_vec(),
