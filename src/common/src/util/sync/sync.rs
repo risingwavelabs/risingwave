@@ -18,6 +18,8 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::util::sync::Error;
+
 pub type SyncPoint = String;
 pub type Signal = String;
 
@@ -45,12 +47,6 @@ lazy_static::lazy_static! {
     static ref SYNC_FACILITY: SyncFacility = {
         SyncFacility::new()
     };
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("Wait for signal {0} timeout")]
-    WaitForSignalTimeout(String),
 }
 
 /// A `SyncPoint` is activated by attaching a `SyncPointInfo` to it.
@@ -108,6 +104,9 @@ impl SyncFacility {
     }
 
     fn set_actions(&self, sync_point: &str, actions: Vec<Action>, execute_times: u64) {
+        if execute_times == 0 {
+            return;
+        }
         let mut guard = self.sync_points.lock();
         let sync_points = guard.deref_mut();
         sync_points.insert(
@@ -128,8 +127,8 @@ impl SyncFacility {
             let mut guard = self.sync_points.lock();
             match guard.entry(sync_point.to_owned()) {
                 Entry::Occupied(mut o) => {
-                    if o.get().execute_times <= 1 {
-                        // Deactivate the sync point
+                    if o.get().execute_times == 1 {
+                        // Deactivate the sync point and execute its actions for the last time.
                         guard.remove(sync_point).unwrap().actions
                     } else {
                         o.get_mut().execute_times -= 1;
@@ -164,9 +163,7 @@ pub fn deactivate_sync_point(sync_point: &str) {
     SYNC_FACILITY.reset_actions(sync_point);
 }
 
+/// The sync point is triggered
 pub async fn on_sync_point(sync_point: &str) -> Result<(), Error> {
-    if !cfg!(sync_test) {
-        return Ok(());
-    }
     SYNC_FACILITY.on_sync_point(sync_point).await
 }
