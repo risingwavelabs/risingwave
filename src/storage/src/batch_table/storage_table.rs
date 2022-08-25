@@ -86,7 +86,7 @@ pub struct StorageTable<S: StateStore> {
     /// Virtual nodes that the table is partitioned into.
     ///
     /// Only the rows whose vnode of the primary key is in this set will be visible to the
-    /// executor. For READ_WRITE instances, the table will also check whether the writed rows
+    /// executor. For READ_WRITE instances, the table will also check whether the written rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
 
