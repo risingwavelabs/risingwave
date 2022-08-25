@@ -535,6 +535,7 @@ template:
     collect-gc-watermark-spin-interval-sec: 5
 
     # Threshold used by worker node to filter out new SSTs when scanning object store, during full SST GC.
+    # 7 days by default.
     min-sst-retention-time-sec: 604800
 
   prometheus:
