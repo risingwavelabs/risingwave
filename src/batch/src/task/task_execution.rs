@@ -194,16 +194,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         context: C,
         epoch: u64,
     ) -> Result<Self> {
+        let task_id = TaskId::from(prost_tid);
         Ok(Self {
-            task_id: TaskId::from(prost_tid),
+            task_id,
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
-            context,
             failure: Arc::new(Mutex::new(None)),
             epoch,
             shutdown_tx: Mutex::new(None),
             state_rx: Mutex::new(None),
+            context,
         })
     }
 
@@ -282,6 +283,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     {
                         // It's possible to send fail. Same reason in `.try_execute`.
                     }
+                }
+
+                if let Some(task_metrics) = self.context.get_task_metrics() {
+                    task_metrics.clear_record();
                 }
             });
 
