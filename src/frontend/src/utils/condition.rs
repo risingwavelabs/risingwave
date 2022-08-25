@@ -240,9 +240,9 @@ impl Condition {
         .unwrap()
     }
 
-    /// generate range scans from each arm of `OR` clause and merge them
+    /// Generate range scans from each arm of `OR` clause and merge them.
     /// Currently, only support equal type range scans.
-    /// Keep in mind that range scans can not be overlap, otherwise duplicate rows will occur.
+    /// Keep in mind that range scans can not overlap, otherwise duplicate rows will occur.
     fn disjunctions_to_scan_ranges(
         order_column_ids: &[usize],
         num_cols: usize,
