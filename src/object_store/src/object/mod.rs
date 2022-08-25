@@ -494,7 +494,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&["delete_objects"])
+            .with_label_values(&[self.media_type(), "delete_objects"])
             .start_timer();
         self.inner
             .delete_objects(paths)
