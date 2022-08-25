@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use dyn_clone::DynClone;
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
@@ -32,6 +32,7 @@ use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + DynClone + 'static {
@@ -141,11 +142,7 @@ impl AggStateFactory {
                     filter,
                 )?
             }
-            _ => {
-                return Err(
-                    ErrorCode::InternalError(format!("Invalid agg call: {:?}", agg_kind)).into(),
-                );
-            }
+            _ => bail!("Invalid agg call: {:?}", agg_kind),
         };
 
         Ok(Self {
@@ -201,12 +198,9 @@ pub fn create_agg_state_unary(
                     },
                 )*
                 (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
-                    return Err(
-                        ErrorCode::InternalError(format!(
+                    bail!(
                         "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
                         unimpl_agg, unimpl_input, unimpl_ret, distinct
-                        ))
-                        .into(),
                     )
                 }
             }
