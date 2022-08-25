@@ -37,7 +37,7 @@ use tracing::trace;
 
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::row_serde_util::deserialize;
+use crate::row_serde::row_serde_util::batch_deserialize;
 use crate::row_serde::{serialize_pk, ColumnDescMapping};
 use crate::store::ReadOptions;
 use crate::table::{Distribution, TableIter};
@@ -89,9 +89,6 @@ pub struct StorageTable<S: StateStore> {
     /// executor. For READ_WRITE instances, the table will also check whether the writed rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
-
-    /// If true, sanity check is disabled on this table.
-    disable_sanity_check: bool,
 
     /// Used for catalog table_properties
     table_option: TableOption,
@@ -253,14 +250,8 @@ impl<S: StateStore> StorageTable<S> {
             dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
-            disable_sanity_check: false,
             table_option,
         }
-    }
-
-    /// Disable sanity check on this storage table.
-    pub fn disable_sanity_check(&mut self) {
-        self.disable_sanity_check = true;
     }
 
     pub fn schema(&self) -> &Schema {
@@ -338,7 +329,7 @@ impl<S: StateStore> StorageTable<S> {
             )
             .await?
         {
-            let deserialize_res = deserialize(self.mapping.clone(), &value).map_err(err)?;
+            let deserialize_res = batch_deserialize(self.mapping.clone(), &value).map_err(err)?;
             Ok(Some(deserialize_res))
         } else {
             Ok(None)
@@ -554,14 +545,13 @@ impl<S: StateStore> StorageTable<S> {
             .await
     }
 
-    /// Construct a [`StorageTableIter`] for streaming executors.
-    pub async fn streaming_iter_with_pk_bounds(
+    /// Construct a [`StorageTableIter`] for `look_up` executor.
+    pub async fn iter_with_pk_prefix(
         &self,
         epoch: u64,
         pk_prefix: &Row,
-        next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
+        self.iter_with_pk_bounds(epoch, pk_prefix, .., false, true)
             .await
     }
 
@@ -577,14 +567,14 @@ struct StorageTableIterInner<S: StateStore> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
-    table_descs: Arc<ColumnDescMapping>,
+    mapping: Arc<ColumnDescMapping>,
 }
 
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
-        table_descs: Arc<ColumnDescMapping>,
+        mapping: Arc<ColumnDescMapping>,
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
         wait_epoch: bool,
@@ -604,7 +594,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)
             .await?;
-        let iter = Self { iter, table_descs };
+        let iter = Self { iter, mapping };
         Ok(iter)
     }
 
@@ -617,7 +607,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .stack_trace("storage_table_iter_next")
             .await?
         {
-            let row = deserialize(self.table_descs.clone(), &value).map_err(err)?;
+            let row = batch_deserialize(self.mapping.clone(), &value).map_err(err)?;
 
             yield (key.to_vec(), row)
         }

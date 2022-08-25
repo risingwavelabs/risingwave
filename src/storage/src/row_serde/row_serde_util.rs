@@ -125,7 +125,10 @@ pub fn serialize(row: Row) -> Result<Vec<u8>> {
     Ok(res)
 }
 
-pub fn deserialize(column_mapping: Arc<ColumnDescMapping>, value: impl AsRef<[u8]>) -> Result<Row> {
+pub fn batch_deserialize(
+    column_mapping: Arc<ColumnDescMapping>,
+    value: impl AsRef<[u8]>,
+) -> Result<Row> {
     let mut origin_row = streaming_deserialize(&column_mapping.all_data_types, value.as_ref())?;
 
     let mut output_row = Vec::with_capacity(column_mapping.output_index.len());
