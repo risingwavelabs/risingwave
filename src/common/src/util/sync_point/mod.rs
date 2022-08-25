@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod aggregator;
-mod approx_count_distinct;
-mod array_agg;
-mod count_star;
-mod functions;
-mod general_agg;
-mod general_distinct_agg;
-mod general_sorted_grouper;
-mod string_agg;
+#[cfg(sync_point_test)]
+mod utils;
+#[cfg(sync_point_test)]
+pub use utils::*;
 
-pub use aggregator::{AggStateFactory, BoxedAggState};
-pub use general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
+#[cfg(not(sync_point_test))]
+#[inline(always)]
+#[expect(clippy::unused_async)]
+pub async fn on_sync_point(_sync_point: &str) -> Result<(), Error> {
+    Ok(())
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Wait for signal {0} timeout")]
+    WaitForSignalTimeout(String),
+}

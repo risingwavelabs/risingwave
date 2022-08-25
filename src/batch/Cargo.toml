@@ -51,6 +51,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2.1", package = "madsim-tonic" }
 tracing = "0.1"
@@ -88,4 +89,8 @@ harness = false
 
 [[bench]]
 name = "top_n"
+harness = false
+
+[[bench]]
+name = "hash_agg"
 harness = false
