@@ -1,41 +1,78 @@
 statement ok
-create materialized source s1 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_1_partition_topic', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest' ) row format json
+create materialized source s1 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  kafka.topic = 'kafka_1_partition_topic',
+  kafka.brokers = '127.0.0.1:29092',
+  kafka.scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 select * from s1;
 
 statement ok
-create materialized source s2 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_2_partition_topic', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
+create materialized source s2 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  kafka.topic = 'kafka_2_partition_topic',
+  kafka.brokers = '127.0.0.1:29092',
+  kafka.scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 select * from s2;
 
 statement ok
-create materialized source s3 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
+create materialized source s3 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  kafka.topic = 'kafka_3_partition_topic',
+  kafka.brokers = '127.0.0.1:29092',
+  kafka.scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 select * from s3;
 
 statement ok
-create materialized source s4 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_4_partition_topic', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
+create materialized source s4 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  kafka.topic = 'kafka_4_partition_topic',
+  kafka.brokers = '127.0.0.1:29092',
+  kafka.scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 select * from s4;
 
 statement ok
-create materialized source s5 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_4_partition_topic_with_100_message', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
+create materialized source s5 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  kafka.topic = 'kafka_4_partition_topic_with_100_message',
+  kafka.brokers = '127.0.0.1:29092',
+  kafka.scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 select * from s5;
 
 statement ok
-create materialized source s6 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_1_partition_mv_topic', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
+create materialized source s6 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  kafka.topic = 'kafka_1_partition_mv_topic',
+  kafka.brokers = '127.0.0.1:29092',
+  kafka.scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 select * from s6;
 
 statement ok
-create sink si from s5 with ( kafka.brokers = '127.0.0.1:29092', kafka.topic = 'sink_target', format = 'append_only', connector = 'kafka' )
+create sink si
+from
+  s5 with (
+    kafka.brokers = '127.0.0.1:29092',
+    kafka.topic = 'sink_target',
+    format = 'append_only',
+    connector = 'kafka'
+  )
 
 query T
 show sinks
@@ -43,13 +80,28 @@ show sinks
 si
 
 statement ok
-create materialized source s7 (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'sink_target', kafka.brokers = '127.0.0.1:29092', kafka.scan.startup.mode='earliest'  ) row format json
+create materialized source s7 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  kafka.topic = 'sink_target',
+  kafka.brokers = '127.0.0.1:29092',
+  kafka.scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 select * from s7
 
 statement ok
-create materialized source s8 ( id integer , first_name varchar , last_name varchar , email varchar , PRIMARY KEY ( id ) ) with ( connector = 'kafka', topic = 'debezium_log', properties.bootstrap.server = '127.0.0.1:29092' ) row format debezium_json
+create materialized source s8 (
+  id integer,
+  first_name varchar,
+  last_name varchar,
+  email varchar,
+  PRIMARY KEY (id)
+) with (
+  connector = 'kafka',
+  topic = 'debezium_log',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format debezium_json
 
 statement ok
 select * from s8
