@@ -25,8 +25,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
-use crate::task;
-use crate::task::{BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext};
+use crate::task::{
+    self, BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, TaskId,
+};
 
 const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
 
@@ -64,7 +65,10 @@ impl TaskService for BatchServiceImpl {
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
                 epoch,
-                ComputeNodeContext::new(self.env.clone()),
+                ComputeNodeContext::new(
+                    self.env.clone(),
+                    TaskId::from(task_id.as_ref().expect("no task id found")),
+                ),
             )
             .await;
         match res {
@@ -107,7 +111,7 @@ impl TaskService for BatchServiceImpl {
         } = req.into_inner();
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
-        let context = ComputeNodeContext::new(self.env.clone());
+        let context = ComputeNodeContext::new(self.env.clone(), TaskId::from(&task_id));
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan,
