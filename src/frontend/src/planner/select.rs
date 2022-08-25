@@ -234,7 +234,8 @@ impl Planner {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery.collect_correlated_indices_by_depth_and_assign_id(0, self.correlated_id),
+                    subquery
+                        .collect_correlated_indices_by_depth_and_assign_id(0, self.correlated_id),
                 );
                 self.subqueries.push(subquery);
                 input_ref

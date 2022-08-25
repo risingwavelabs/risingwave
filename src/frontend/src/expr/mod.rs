@@ -36,7 +36,7 @@ mod type_inference;
 mod utils;
 
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
-pub use correlated_input_ref::{Depth, CorrelatedId, CorrelatedInputRef};
+pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use function_call::{FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
@@ -343,7 +343,7 @@ impl ExprImpl {
         }
 
         let mut collector = Collector {
-            depth: depth,
+            depth,
             correlated_indices: vec![],
             correlated_id,
         };

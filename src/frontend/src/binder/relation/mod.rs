@@ -34,7 +34,7 @@ pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
-use crate::expr::{Depth, CorrelatedId};
+use crate::expr::{CorrelatedId, Depth};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
