@@ -605,8 +605,6 @@ where
             _ => {}
         }
 
-        println!("creating tables: {:?}", creating_tables);
-
         self.catalog_manager
             .mark_creating_tables(&creating_tables)
             .await;
