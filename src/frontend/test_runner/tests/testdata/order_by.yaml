@@ -156,3 +156,37 @@
     select distinct x from t order by y;
   planner_error: 'Invalid input syntax: for SELECT DISTINCT, ORDER BY expressions
     must appear in select list'
+- sql: |
+    /* no BatchSort needed, when input is already sorted */
+    create table t(v int);
+    create materialized view mv as select * from t order by v desc;
+    select * from mv order by v asc;
+  batch_plan: |
+    BatchExchange { order: [mv.v ASC], dist: Single }
+      BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+- sql: |
+    /* BatchSort needed, when input is sorted in wrong order */
+    create table t(v int);
+    create materialized view mv as select * from t order by v asc;
+    select * from mv order by v asc;
+  batch_plan: |
+    BatchExchange { order: [mv.v ASC], dist: Single }
+      BatchSort { order: [mv.v ASC] }
+        BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+- sql: |
+    /* no BatchSort needed, when input is already sorted */
+    create table t(v int);
+    create materialized view mv as select * from t order by v asc;
+    select * from mv order by v desc;
+  batch_plan: |
+    BatchExchange { order: [mv.v DESC], dist: Single }
+      BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+- sql: |
+    /* BatchSort needed, when input is sorted in wrong order */
+    create table t(v int);
+    create materialized view mv as select * from t order by v desc;
+    select * from mv order by v desc;
+  batch_plan: |
+    BatchExchange { order: [mv.v DESC], dist: Single }
+      BatchSort { order: [mv.v DESC] }
+        BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }

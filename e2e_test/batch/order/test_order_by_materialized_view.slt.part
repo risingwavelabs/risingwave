@@ -1,0 +1,79 @@
+# Copyright 2022 Singularity Data
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# description: Test ordering a materialized view with underlying ordering
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t (v INTEGER);
+
+statement ok
+INSERT INTO t VALUES (9), (13), (1), (17), (4);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM t ORDER BY v DESC;
+
+# No additional BatchSort used with materialized view sorted descending
+query I
+SELECT * FROM mv1 ORDER BY v ASC;
+----
+1
+4
+9
+13
+17
+
+# Additional BatchSort used with materialized view sorted descending
+query II
+SELECT * FROM mv1 ORDER BY v DESC;
+----
+17
+13
+9
+4
+1
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM t ORDER BY v ASC;
+
+# No additional BatchSort used with materialized view sorted ascending
+query I
+SELECT * FROM mv2 ORDER BY v DESC;
+----
+17
+13
+9
+4
+1
+
+# Additional BatchSort used with materialized view sorted ascending
+query II
+SELECT * FROM mv2 ORDER BY v ASC;
+----
+1
+4
+9
+13
+17
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop table t;
