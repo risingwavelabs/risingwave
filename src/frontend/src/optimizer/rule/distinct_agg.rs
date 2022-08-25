@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::mem;
-use std::vec::IntoIter;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -44,7 +43,7 @@ impl Rule for DistinctAggRule {
             mid_agg,
             original_group_keys_len,
             agg_calls,
-            flag_values.into_iter(),
+            flag_values,
             has_expand,
         ))
     }
@@ -56,6 +55,9 @@ impl DistinctAggRule {
     }
 
     /// Construct `Expand` for distinct aggregates.
+    /// `group_keys` and `agg_calls` will be changed in `build_project` due to column pruning.
+    /// It returns either `LogicalProject` or original input, plus `flag_values` for every distinct
+    /// aggregate and `has_expand` as a flag.
     ///
     /// To simplify, we will first deduplicate `column_subsets` and then skip building
     /// `Expand` if there is only one `subset`.
@@ -90,6 +92,7 @@ impl DistinctAggRule {
             column_subsets.push(subset);
         }
 
+        let mut num_of_subsets_for_distinct_agg = 0;
         distinct_aggs.iter().for_each(|agg_call| {
             let subset = {
                 let mut subset = FixedBitSet::from_iter(group_keys.iter().cloned());
@@ -103,10 +106,11 @@ impl DistinctAggRule {
                 flag_values.push(flag_value);
                 hash_map.insert(subset.clone(), flag_value);
                 column_subsets.push(subset);
+                num_of_subsets_for_distinct_agg += 1;
             }
         });
 
-        if column_subsets.len() == 1 {
+        if num_of_subsets_for_distinct_agg <= 1 {
             // no need to have expand if there is only one distinct aggregates.
             return Some((input, flag_values, false));
         }
@@ -197,11 +201,12 @@ impl DistinctAggRule {
         mid_agg: LogicalAgg,
         original_group_keys_len: usize,
         mut agg_calls: Vec<PlanAggCall>,
-        mut flag_values: IntoIter<usize>,
+        flag_values: Vec<usize>,
         has_expand: bool,
     ) -> PlanRef {
         // the index of `flag` in schema of the middle `LogicalAgg`, if has `Expand`.
         let pos_of_flag = mid_agg.group_key().len() - 1;
+        let mut flag_values = flag_values.into_iter();
 
         // ```ignore
         // if has `Expand`, the input(middle agg) has the following schema:

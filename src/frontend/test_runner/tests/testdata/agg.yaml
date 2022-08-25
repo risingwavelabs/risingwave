@@ -551,42 +551,34 @@
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 1:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
-      LogicalAgg { group_key: [t.a, t.b, flag], aggs: [sum(t.c)] }
-        LogicalProject { exprs: [t.a, t.b, t.c, flag] }
-          LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c))] }
+      LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c)] }
+        LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   stream_plan: |
     StreamMaterialize { columns: [a, distinct_b_num, sum_c], pk_columns: [a] }
-      StreamProject { exprs: [t.a, count(t.b) filter((flag = 1:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
-        StreamHashAgg { group_key: [t.a], aggs: [count, count(t.b) filter((flag = 1:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
+      StreamProject { exprs: [t.a, count(t.b), sum(sum(t.c))] }
+        StreamHashAgg { group_key: [t.a], aggs: [count, count(t.b), sum(sum(t.c))] }
           StreamExchange { dist: HashShard(t.a) }
-            StreamProject { exprs: [t.a, t.b, flag, sum(t.c)] }
-              StreamHashAgg { group_key: [t.a, t.b, flag], aggs: [count, sum(t.c)] }
-                StreamExchange { dist: HashShard(t.a, t.b, flag) }
-                  StreamProject { exprs: [t.a, t.b, t.c, flag, t._row_id] }
-                    StreamExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-                      StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            StreamProject { exprs: [t.a, t.b, sum(t.c)] }
+              StreamHashAgg { group_key: [t.a, t.b], aggs: [count, sum(t.c)] }
+                StreamExchange { dist: HashShard(t.a, t.b) }
+                  StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* distinct agg with filter */
     create table t(a int, b int, c int);
     select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64) AND (flag = 1:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
-      LogicalAgg { group_key: [t.a, t.b, flag], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
-        LogicalProject { exprs: [t.a, t.b, t.c, t.b, flag] }
-          LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
+      LogicalAgg { group_key: [t.a, t.b], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
+        LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* non-distinct agg with filter */
     create table t(a int, b int, c int);
     select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 1:Int64)), sum(sum(t.c) filter((t.b < 100:Int32))) filter((flag = 0:Int64))] }
-      LogicalAgg { group_key: [t.a, t.b, flag], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
-        LogicalProject { exprs: [t.a, t.b, t.c, t.b, flag] }
-          LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c) filter((t.b < 100:Int32)))] }
+      LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
+        LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* combined order by & filter clauses */
     create table t(a varchar, b int);
@@ -640,20 +632,28 @@
         StreamHashAgg { group_key: [i.x], aggs: [count, count] }
           StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], distribution: UpstreamHashShard(i.x) }
 - sql: |
+    /* distinct aggregates only have one distinct argument doesn't need expand */
     create table t(x int, y int);
     select count(x), min(distinct y), max(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.x)) filter((flag = 0:Int64)), 0:Int64), min(t.y) filter((flag = 1:Int64)), max(t.y) filter((flag = 1:Int64))] }
-      LogicalAgg { aggs: [sum(count(t.x)) filter((flag = 0:Int64)), min(t.y) filter((flag = 1:Int64)), max(t.y) filter((flag = 1:Int64))] }
-        LogicalAgg { group_key: [t.y, t.y, flag], aggs: [count(t.x)] }
-          LogicalProject { exprs: [t.x, t.y, flag] }
-            LogicalExpand { column_subsets: [[t.x], [t.y]] }
-              LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), min(t.y), max(t.y)] }
+      LogicalAgg { aggs: [sum(count(t.x)), min(t.y), max(t.y)] }
+        LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
+          LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
-    select count(x), min(distinct x) from t;
+    select count(y), min(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), min(t.x)] }
-      LogicalAgg { aggs: [sum(count(t.x)), min(t.x)] }
-        LogicalAgg { group_key: [t.x], aggs: [count(t.x)] }
-          LogicalScan { table: t, columns: [t.x] }
+    LogicalProject { exprs: [Coalesce(sum(count(t.y)), 0:Int64), min(t.y)] }
+      LogicalAgg { aggs: [sum(count(t.y)), min(t.y)] }
+        LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
+          LogicalScan { table: t, columns: [t.y] }
+- sql: |
+    create table t(x int, y int);
+    select count(distinct x), min(distinct y) from t;
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), min(t.y) filter((flag = 1:Int64))] }
+      LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
+        LogicalProject { exprs: [t.x, t.y, flag] }
+          LogicalExpand { column_subsets: [[t.x], [t.y]] }
+            LogicalScan { table: t, columns: [t.x, t.y] }
