@@ -587,8 +587,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     // Report metrics of cached join rows/entries
-                    let cached_rows_l: usize = self.side_l.ht.iter().map(|e| e.1.size()).sum();
-                    let cached_rows_r: usize = self.side_r.ht.iter().map(|e| e.1.size()).sum();
+                    let cached_rows_l: usize = self.side_l.ht.values().map(|e| e.size()).sum();
+                    let cached_rows_r: usize = self.side_r.ht.values().map(|e| e.size()).sum();
                     self.metrics
                         .join_cached_rows
                         .with_label_values(&[&actor_id_str, "left"])
