@@ -122,7 +122,9 @@
     /* should complain about nested agg call */
     create table t(v1 int, v2 int);
     select avg(sum(v1 + v2)) from t group by v1 + v2;
-  planner_error: 'Invalid input syntax: Aggregation calls should not be nested'
+  planner_error: |-
+    Feature is not yet implemented: aggregate function inside aggregation calls
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md
 - sql: |
     /* test logical_agg with complex select expression */
     create table t(v1 int, v2 int);

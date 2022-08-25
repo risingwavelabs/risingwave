@@ -636,19 +636,13 @@ impl LogicalAggBuilder {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
         let mut input_proj_builder = LogicalProjectBuilder::default();
 
-        for expr in &group_exprs {
-            if expr.has_subquery() || expr.has_agg_call() {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "GROUP BY expr should not contain subquery or aggregation function".into(),
-                )
-                .into());
-            }
-        }
-
         let group_key = group_exprs
             .into_iter()
             .map(|expr| input_proj_builder.add_expr(&expr))
-            .collect_vec();
+            .try_collect()
+            .map_err(|err| {
+                ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
+            })?;
 
         Ok(LogicalAggBuilder {
             group_key,
@@ -746,39 +740,54 @@ impl ExprRewriter for LogicalAggBuilder {
         }
 
         self.is_in_filter_clause = true;
+        // WIP: subquery/agg/table in filter
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
-        for i in &inputs {
-            if i.has_agg_call() {
-                self.error = Some(ErrorCode::InvalidInputSyntax(
-                    "Aggregation calls should not be nested".into(),
+
+        let inputs_or_err: std::result::Result<_, &'static str> = inputs
+            .iter()
+            .map(|expr| {
+                let index = self.input_proj_builder.add_expr(expr)?;
+                Ok(InputRef::new(index, expr.return_type()))
+            })
+            .try_collect();
+        let inputs: Vec<_> = match inputs_or_err {
+            Ok(inputs) => inputs,
+            Err(err) => {
+                self.error = Some(ErrorCode::NotImplemented(
+                    format!("{err} inside aggregation calls"),
+                    None.into(),
                 ));
                 return AggCall::new(agg_kind, inputs, distinct, order_by, filter)
                     .unwrap()
                     .into();
             }
-        }
+        };
 
-        let inputs = inputs
-            .iter()
-            .map(|expr| {
-                let index = self.input_proj_builder.add_expr(expr);
-                InputRef::new(index, expr.return_type())
-            })
-            .collect_vec();
-
-        let order_by_fields = order_by
+        let order_by_fields_or_err: std::result::Result<_, &'static str> = order_by
             .sort_exprs
             .iter()
             .map(|e| {
-                let index = self.input_proj_builder.add_expr(&e.expr);
-                PlanAggOrderByField {
+                let index = self.input_proj_builder.add_expr(&e.expr)?;
+                Ok(PlanAggOrderByField {
                     input: InputRef::new(index, e.expr.return_type()),
                     direction: e.direction,
                     nulls_first: e.nulls_first,
-                }
+                })
             })
-            .collect_vec();
+            .try_collect();
+        let order_by_fields: Vec<_> = match order_by_fields_or_err {
+            Ok(order_by_fields) => order_by_fields,
+            Err(err) => {
+                self.error = Some(ErrorCode::NotImplemented(
+                    format!("{err} inside aggregation calls order by"),
+                    None.into(),
+                ));
+                return AggCall::new(agg_kind, vec![], distinct, order_by, filter)
+                    .unwrap()
+                    .into();
+            }
+        };
 
         if agg_kind == AggKind::Avg {
             assert_eq!(inputs.len(), 1);
@@ -858,7 +867,11 @@ impl ExprRewriter for LogicalAggBuilder {
         if let Some(group_key) = self.try_as_group_expr(&expr) {
             InputRef::new(group_key, expr.return_type()).into()
         } else if self.is_in_filter_clause {
-            InputRef::new(self.input_proj_builder.add_expr(&expr), expr.return_type()).into()
+            InputRef::new(
+                self.input_proj_builder.add_expr(&expr).unwrap(),
+                expr.return_type(),
+            )
+            .into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"
