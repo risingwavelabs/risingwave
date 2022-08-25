@@ -14,22 +14,24 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::catalog::{Index, Sink, Table};
+use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug)]
-pub enum Relation {
+pub enum StreamingJob {
     Table(Table),
     Sink(Sink),
+    MaterializedSource(Source, Table),
     Index(Index, Table),
 }
 
-impl Relation {
+impl StreamingJob {
     pub fn set_id(&mut self, id: u32) {
         match self {
             Self::Table(table) => table.id = id,
             Self::Sink(sink) => sink.id = id,
+            Self::MaterializedSource(_, table) => table.id = id,
             Self::Index(index, index_table) => {
                 index.id = id;
                 index.index_table_id = id;
@@ -38,11 +40,21 @@ impl Relation {
         }
     }
 
+    pub fn id(&self) -> u32 {
+        match self {
+            Self::Table(table) => table.id,
+            Self::Sink(sink) => sink.id,
+            Self::MaterializedSource(_, table) => table.id,
+            Self::Index(index, _) => index.id,
+        }
+    }
+
     pub fn set_dependent_relations(&mut self, dependent_relations: Vec<u32>) {
         match self {
             Self::Table(table) => table.dependent_relations = dependent_relations,
             Self::Sink(sink) => sink.dependent_relations = dependent_relations,
             Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
+            _ => {}
         }
     }
 
@@ -50,6 +62,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.schema_id,
             Self::Sink(sink) => sink.schema_id,
+            Self::MaterializedSource(_, table) => table.schema_id,
             Self::Index(index, _) => index.schema_id,
         }
     }
@@ -58,6 +71,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.database_id,
             Self::Sink(sink) => sink.database_id,
+            Self::MaterializedSource(_, table) => table.database_id,
             Self::Index(index, _) => index.database_id,
         }
     }
@@ -66,6 +80,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.name.clone(),
             Self::Sink(sink) => sink.name.clone(),
+            Self::MaterializedSource(_, table) => table.name.clone(),
             Self::Index(index, _) => index.name.clone(),
         }
     }
@@ -74,6 +89,7 @@ impl Relation {
         match self {
             Self::Table(table) => table.properties.clone(),
             Self::Sink(sink) => sink.properties.clone(),
+            Self::MaterializedSource(_, table) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
         }
     }
