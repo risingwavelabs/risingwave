@@ -4,8 +4,8 @@
     select * from tumble(t1, created_at, interval '3' day);
   logical_plan: |
     LogicalProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days 00:00:00':Interval), (TumbleStart(t1.created_at, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
-      LogicalProject { exprs: [t1._row_id, t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days 00:00:00':Interval), (TumbleStart(t1.created_at, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
+      LogicalProject { exprs: [t1.id, t1.created_at, t1._row_id, TumbleStart(t1.created_at, '3 days 00:00:00':Interval), (TumbleStart(t1.created_at, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
+        LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days 00:00:00':Interval), (TumbleStart(t1.created_at, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
@@ -62,7 +62,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.id, t1.created_at, window_start, window_end] }
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
+        LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [id, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [window_end, t1._row_id] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_start, window_end, t1._row_id] }
@@ -73,7 +73,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.id, t1.created_at, window_start] }
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
+        LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [id, created_at, window_start, t1._row_id(hidden)], pk_columns: [window_start, t1._row_id] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_start, t1._row_id] }
@@ -84,7 +84,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.id, t1.created_at, window_end] }
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
+        LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [id, created_at, window_end, t1._row_id(hidden)], pk_columns: [window_end, t1._row_id] }
       StreamHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at, window_end, t1._row_id] }
@@ -95,7 +95,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.id, t1.created_at] }
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
+        LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   batch_plan: |
     BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at] }
       BatchExchange { order: [], dist: Single }
@@ -110,7 +110,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.id, t1.created_at] }
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.created_at] }
+        LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   batch_plan: |
     BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: [t1.id, t1.created_at] }
       BatchExchange { order: [], dist: Single }
@@ -127,7 +127,7 @@
       LogicalAgg { group_key: [t.v1, window_end], aggs: [sum(t.v3), count(t.v3)] }
         LogicalProject { exprs: [t.v1, window_end, t.v3] }
           LogicalHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: all }
-            LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2, t.v3] }
+            LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3))] }
@@ -153,7 +153,7 @@
       LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days 00:00:00':Interval), (TumbleStart(t1.created_at, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
         LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
           LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
-            LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.v1, t1.created_at] }
+            LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days 00:00:00':Interval), (TumbleStart(t1.created_at, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
@@ -173,7 +173,7 @@
       LogicalHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
         LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
           LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
-            LogicalScan { table: t1, columns: [t1._row_id, t1.id, t1.v1, t1.created_at] }
+            LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
   batch_plan: |
     BatchHopWindow { time_col: t1.created_at, slide: 1 day 00:00:00, size: 3 days 00:00:00, output: all }
       BatchExchange { order: [], dist: Single }

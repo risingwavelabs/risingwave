@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
+use super::array_agg::create_array_agg_state;
 use super::string_agg::StringAgg;
 use crate::expr::{
     build_from_prost, AggKind, Expression, ExpressionRef, InputRefExpression, LiteralExpression,
@@ -122,6 +123,10 @@ impl AggStateFactory {
                     order_pairs,
                     order_col_types,
                 ))
+            }
+            (AggKind::ArrayAgg, [arg]) => {
+                let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
+                create_array_agg_state(return_type.clone(), agg_col_idx, order_pairs)?
             }
             (agg_kind, [arg]) => {
                 // other unary agg call
