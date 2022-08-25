@@ -586,6 +586,26 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.side_r.ht.state_table.update_vnode_bitmap(vnode_bitmap);
                     }
 
+                    // Report metrics of cached join rows/entries
+                    let cached_rows_l: usize = self.side_l.ht.values().map(|e| e.size()).sum();
+                    let cached_rows_r: usize = self.side_r.ht.values().map(|e| e.size()).sum();
+                    self.metrics
+                        .join_cached_rows
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .set(cached_rows_l as i64);
+                    self.metrics
+                        .join_cached_rows
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .set(cached_rows_r as i64);
+                    self.metrics
+                        .join_cached_entries
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .set(self.side_l.ht.len() as i64);
+                    self.metrics
+                        .join_cached_entries
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .set(self.side_r.ht.len() as i64);
+
                     yield Message::Barrier(barrier);
                 }
             }

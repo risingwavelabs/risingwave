@@ -73,3 +73,80 @@ select * from lt;
 
 statement ok
 drop table lt;
+
+statement ok
+create table t(x int[]);
+
+statement ok
+insert into t values (Array[0,1]),(Array[0,2]),(Array[0,3]), (Array[0,4]),(Array[0,5]);
+
+query I rowsort
+select x[2] from t;
+----
+1
+2
+3
+4
+5
+
+statement ok
+drop table t;
+
+## Test single quote style array syntax.
+
+# Test assign cast.
+statement ok
+create table t(arr int[]);
+
+statement ok
+insert into t values ('{1, 2, 3}'), ('{4, 5, 6}');
+
+query T
+select pg_typeof(arr) from t;
+----
+integer[]
+integer[]
+
+statement ok
+drop table t;
+
+# Test explicit and implicit cast
+query T
+select pg_typeof(arr) from (values ('{1, 2, 3}'::integer[]), ('{4, 5, 6}')) as t(arr);
+----
+integer[]
+integer[]
+
+query T
+select pg_typeof(arr::integer[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t(arr);
+----
+integer[]
+integer[]
+
+# Test explicit cast to float array
+query T
+select pg_typeof(arr::float[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t(arr);
+----
+double precision[]
+double precision[]
+
+# Test explicit cast to varchar array
+query T
+select pg_typeof(arr::varchar[]) from (values ('{1, 2, 3}'), ('{4, 5, 6}')) as t(arr);
+----
+varchar[]
+varchar[]
+
+# Test explicit cast to nested varchar array
+query T
+select pg_typeof(arr::integer[][]) from (values ('{{1}, {2}, {3}}'), ('{{4}, {5}, {6}}')) as t(arr);
+----
+integer[][]
+integer[][]
+
+# Test explicit cast to varchar array. Varchar values should be trimmed
+query T
+select (arr::varchar[])[1] from (values ('{  1   b  ?, 2, 3}'), ('{  4   a , 5, 6}')) as t(arr);
+----
+1   b  ?
+4   a
