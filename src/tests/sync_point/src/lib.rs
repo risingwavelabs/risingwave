@@ -12,15 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod aggregator;
-mod approx_count_distinct;
-mod array_agg;
-mod count_star;
-mod functions;
-mod general_agg;
-mod general_distinct_agg;
-mod general_sorted_grouper;
-mod string_agg;
-
-pub use aggregator::{AggStateFactory, BoxedAggState};
-pub use general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
+#[cfg(all(test, sync_point_test))]
+mod test_utils;
+#[cfg(all(test, sync_point_test))]
+mod tests;

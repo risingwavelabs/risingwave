@@ -134,7 +134,7 @@ pub struct MetaNodeOpts {
     /// Threshold used by worker node to filter out new SSTs when scanning object store, during
     /// full SST GC.
     #[clap(long, default_value = "604800")]
-    sst_retention_time_sec: u64,
+    min_sst_retention_time_sec: u64,
 
     /// Compaction scheduler retries compactor selection with this interval.
     #[clap(long, default_value = "5")]
@@ -202,7 +202,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_idle_ms,
                 in_flight_barrier_nums,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
-                sst_retention_time_sec: opts.sst_retention_time_sec,
+                min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
             },
