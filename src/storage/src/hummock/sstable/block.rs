@@ -96,6 +96,10 @@ impl Block {
         self.data_len
     }
 
+    pub fn capacity(&self) -> usize {
+        self.data.capacity() + self.restart_points.capacity() * std::mem::size_of::<u32>()
+    }
+
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
         self.restart_points[index]
