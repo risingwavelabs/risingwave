@@ -764,7 +764,7 @@ impl fmt::Display for ExplainType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExplainOptions {
-    // Display additional information regarding the plan.
+    /// Display additional information regarding the plan.
     pub verbose: bool,
     // Trace plan transformation of the optimizer step by step
     pub trace: bool,
