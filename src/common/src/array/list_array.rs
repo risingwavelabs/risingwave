@@ -440,9 +440,9 @@ impl<'a> ListRef<'a> {
 
     pub fn value_at(&self, index: usize) -> ArrayResult<DatumRef<'a>> {
         match self {
-            ListRef::Indexed { arr, .. } => {
+            ListRef::Indexed { arr, idx } => {
                 if index <= arr.value.len() {
-                    Ok(arr.value.value_at(index - 1))
+                    Ok(arr.value.value_at(arr.offsets[*idx] + index - 1))
                 } else {
                     Ok(None)
                 }
@@ -976,5 +976,39 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
         }
+    }
+
+    #[test]
+    fn test_listref() {
+        use crate::array::*;
+        use crate::types;
+        let arr = ListArray::from_slices(
+            &[true, false, true],
+            vec![
+                Some(array! { I32Array, [Some(1), Some(2), Some(3)] }.into()),
+                None,
+                Some(array! { I32Array, [Some(4), Some(5), Some(6), Some(7)] }.into()),
+            ],
+            DataType::Int32,
+        )
+        .unwrap();
+
+        // get 3rd ListRef from ListArray
+        let list_ref = arr.value_at(2).unwrap();
+        assert_eq!(
+            list_ref,
+            ListRef::ValueRef {
+                val: &ListValue::new(vec![
+                    Some(4.to_scalar_value()),
+                    Some(5.to_scalar_value()),
+                    Some(6.to_scalar_value()),
+                    Some(7.to_scalar_value()),
+                ]),
+            }
+        );
+
+        // Get 2nd value from ListRef
+        let scalar = list_ref.value_at(2).unwrap();
+        assert_eq!(scalar, Some(types::ScalarRefImpl::Int32(5)));
     }
 }
