@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
@@ -112,8 +114,6 @@ struct StageRunner {
     msg_sender: Sender<QueryMessage>,
     children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
-    // Used to generate auto-increment identity_id of each PlanNodeType.
-    identity_ids: Mutex<HashMap<PlanNodeType, u64>>,
 }
 
 impl TaskStatusHolder {
@@ -173,7 +173,6 @@ impl StageExecution {
                     children: self.children.clone(),
                     state: self.state.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
-                    identity_ids: Mutex::new(HashMap::new()),
                 };
 
                 // The channel used for shutdown signal messaging.
@@ -549,7 +548,12 @@ impl StageRunner {
         task_id: TaskId,
         partition: Option<PartitionInfo>,
     ) -> PlanFragment {
-        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, partition);
+        // Used to maintain auto-increment identity_id of each PlanNodeType for a task.
+        let identity_ids: Rc<RefCell<HashMap<PlanNodeType, u64>>> =
+            Rc::new(RefCell::new(HashMap::new()));
+
+        let plan_node_prost =
+            self.convert_plan_node(&self.stage.root, task_id, partition, identity_ids);
         let exchange_info = self.stage.exchange_info.clone();
 
         PlanFragment {
@@ -563,13 +567,13 @@ impl StageRunner {
         execution_plan_node: &ExecutionPlanNode,
         task_id: TaskId,
         partition: Option<PartitionInfo>,
+        identity_ids: Rc<RefCell<HashMap<PlanNodeType, u64>>>,
     ) -> PlanNodeProst {
         // Generate identity
         let identity = {
             let identity_type = execution_plan_node.plan_node_type;
-            let mut identity_ids = self.identity_ids.lock().unwrap();
-            let identity_id = *identity_ids.entry(identity_type).or_insert(0);
-            *identity_ids.get_mut(&identity_type).unwrap() = identity_id + 1;
+            let identity_id = *identity_ids.borrow_mut().entry(identity_type).or_insert(0);
+            *identity_ids.borrow_mut().get_mut(&identity_type).unwrap() = identity_id + 1;
             format!("{}-{}", identity_type.to_string(), identity_id)
         };
 
@@ -639,8 +643,12 @@ impl StageRunner {
                     _ => unreachable!(),
                 }
 
-                let left_child =
-                    self.convert_plan_node(&execution_plan_node.children[0], task_id, partition);
+                let left_child = self.convert_plan_node(
+                    &execution_plan_node.children[0],
+                    task_id,
+                    partition,
+                    identity_ids,
+                );
 
                 PlanNodeProst {
                     children: vec![left_child],
@@ -652,7 +660,9 @@ impl StageRunner {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, task_id, partition.clone()))
+                    .map(|e| {
+                        self.convert_plan_node(e, task_id, partition.clone(), identity_ids.clone())
+                    })
                     .collect();
 
                 PlanNodeProst {
