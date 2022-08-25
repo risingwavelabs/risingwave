@@ -159,16 +159,17 @@ impl BatchTaskMetrics {
                 "batch_exchange_recv_row_number",
                 "Total number of row that have been received from upstream source",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             &["source_stage_id", "source_task_id"],
             registry
         )
         .unwrap();
 
         let task_first_poll_delay = register_gauge_with_registry!(
-            opts!("batch_task_first_poll_delay",
-            "The total duration (s) elapsed between the instant tasks are instrumented, and the instant they are first polled.",
-            ).const_labels(const_labels),
+            opts!(
+                "batch_task_first_poll_delay",
+                "The total duration (s) elapsed between the instant tasks are instrumented, and the instant they are first polled.",
+            ).const_labels(const_labels.clone()),
             registry,
         ).unwrap();
 
@@ -177,7 +178,7 @@ impl BatchTaskMetrics {
                 "batch_task_fast_poll_duration",
                 "The total duration (s) of fast polls.",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             registry,
         )
         .unwrap();
@@ -187,7 +188,7 @@ impl BatchTaskMetrics {
                 "batch_task_idle_duration",
                 "The total duration (s) that tasks idled.",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             registry,
         )
         .unwrap();
@@ -197,7 +198,7 @@ impl BatchTaskMetrics {
                 "batch_task_poll_duration",
                 "The total duration (s) elapsed during polls.",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             registry,
         )
         .unwrap();
@@ -207,7 +208,7 @@ impl BatchTaskMetrics {
                 "batch_task_scheduled_duration",
                 "The total duration (s) that tasks spent waiting to be polled after awakening.",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             registry,
         )
         .unwrap();
@@ -217,7 +218,7 @@ impl BatchTaskMetrics {
                 "batch_task_slow_poll_duration",
                 "The total duration (s) of slow polls.",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             registry,
         )
         .unwrap();
