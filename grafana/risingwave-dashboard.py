@@ -588,6 +588,16 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_join_actor_input_waiting_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_count("Stream Join Cached Entries", [
+                panels.target(
+                    "stream_join_cached_entries", "{{actor_id}} {{side}}"
+                ),
+            ]),
+            panels.timeseries_count("Stream Join Cached Rows", [
+                panels.target(
+                    "stream_join_cached_rows", "{{actor_id}} {{side}}"
+                ),
+            ])
         ])
     ]
 
