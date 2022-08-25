@@ -56,6 +56,7 @@ impl Block {
                 decoder
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
+                debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
                 decoded
             }
             CompressionAlgorithm::Zstd => {
@@ -65,6 +66,7 @@ impl Block {
                 decoder
                     .read_to_end(&mut decoded)
                     .map_err(HummockError::decode_error)?;
+                debug_assert_eq!(decoded.capacity(), uncompressed_capacity);
                 decoded
             }
         };
@@ -383,8 +385,9 @@ mod tests {
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
+        let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(&buf, buf.len()).unwrap());
+        let block = Box::new(Block::decode(&buf, capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
@@ -427,8 +430,9 @@ mod tests {
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
+        let capcitiy = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(&buf, buf.len()).unwrap());
+        let block = Box::new(Block::decode(&buf, capcitiy).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
