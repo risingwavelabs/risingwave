@@ -25,8 +25,8 @@ use std::time::Duration;
 use tokio::task_local;
 
 #[repr(transparent)]
-#[derive(Clone, Copy)]
-struct TaskLocalBytesAllocated(Option<&'static AtomicUsize>);
+#[derive(Clone, Copy, Debug)]
+pub struct TaskLocalBytesAllocated(Option<&'static AtomicUsize>);
 
 impl Default for TaskLocalBytesAllocated {
     fn default() -> Self {
@@ -91,7 +91,7 @@ impl TaskLocalBytesAllocated {
 }
 
 task_local! {
-    static BYTES_ALLOCATED: TaskLocalBytesAllocated;
+    pub static BYTES_ALLOCATED: TaskLocalBytesAllocated;
 }
 
 pub async fn allocation_stat<Fut, T, F>(future: Fut, interval: Duration, mut report: F) -> T
