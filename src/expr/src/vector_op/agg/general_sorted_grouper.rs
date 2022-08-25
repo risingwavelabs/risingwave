@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
+
+use crate::Result;
 
 /// `EqGroups` encodes the grouping information in the sort aggregate algorithm.
 ///
@@ -170,11 +172,7 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayImpl::$input_variant(i) = input {
                     self.detect_groups_concrete(i)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -187,11 +185,7 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayImpl::$input_variant(i) = input {
                     self.update_concrete(i, start_idx, end_idx)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -199,11 +193,7 @@ macro_rules! impl_sorted_grouper {
                 if let ArrayBuilderImpl::$input_variant(b) = builder {
                     self.output_concrete(b)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Builder fail to match {}.", stringify!($input_variant))
                 }
             }
         }

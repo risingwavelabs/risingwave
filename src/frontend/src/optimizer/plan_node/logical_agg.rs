@@ -451,7 +451,6 @@ impl LogicalAgg {
             table_catalogs.push(state_table);
             column_mappings_vec.push(column_mapping);
         }
-        // TODO: fill column mapping later (#3485).
         (table_catalogs, column_mappings_vec)
     }
 

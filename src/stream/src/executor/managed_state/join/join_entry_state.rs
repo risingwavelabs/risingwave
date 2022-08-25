@@ -27,6 +27,7 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 
 /// We manages a `BTreeMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
+///
 /// If a `JoinEntryState` exists for a join key, the all records under this
 /// join key will be presented in the cache.
 pub struct JoinEntryState {
@@ -66,6 +67,10 @@ impl JoinEntryState {
             let decoded = encoded.decode(data_types);
             (encoded, decoded)
         })
+    }
+
+    pub fn size(&self) -> usize {
+        self.cached.len()
     }
 }
 
