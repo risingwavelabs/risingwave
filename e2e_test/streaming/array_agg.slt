@@ -1,0 +1,57 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a varchar, b int, c int);
+
+statement ok
+insert into t values ('aaa', 1, 1), ('bbb', 0, 2), ('ccc', 0, 5), ('ddd', 1, 4);
+
+statement ok
+create materialized view mv1 as select array_agg(c) as res from t;
+
+statement ok
+create materialized view mv2 as select array_agg(a order by b asc, a desc) as res from t;
+
+statement ok
+flush;
+
+query T
+select u from (select unnest(res) from mv1) p(u) order by u;
+----
+1
+2
+4
+5
+
+query T
+select * from mv2;
+----
+{ccc,bbb,ddd,aaa}
+
+statement ok
+insert into t values ('x', 1, 2), ('y', 3, 6);
+
+query T
+select u from (select unnest(res) from mv1) p(u) order by u;
+----
+1
+2
+2
+4
+5
+6
+
+query T
+select * from mv2;
+----
+{ccc,bbb,x,ddd,aaa,y}
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop table t;

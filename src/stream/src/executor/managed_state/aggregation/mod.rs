@@ -30,7 +30,8 @@ pub use value::*;
 
 use crate::common::StateTableColumnMapping;
 use crate::executor::aggregation::AggCall;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::aggregation::array_agg::ManagedArrayAggState;
 use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::PkIndices;
 
@@ -38,8 +39,8 @@ use crate::executor::PkIndices;
 // TODO: estimate a good cache size instead of hard-coding
 const EXTREME_CACHE_SIZE: usize = 1024;
 
+mod array_agg;
 mod extreme;
-
 mod string_agg;
 mod value;
 
@@ -227,10 +228,13 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 state_table_col_mapping,
                 row_count.unwrap(),
             )))),
-            AggKind::ArrayAgg => Err(StreamExecutorError::not_implemented(
-                "ArrayAgg is not implemented yet",
-                4657,
-            )),
+            AggKind::ArrayAgg => Ok(Self::Table(Box::new(ManagedArrayAggState::new(
+                agg_call,
+                group_key,
+                pk_indices,
+                state_table_col_mapping,
+                row_count.unwrap(),
+            )))),
         }
     }
 }
