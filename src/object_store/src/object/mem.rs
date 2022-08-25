@@ -155,6 +155,10 @@ impl ObjectStore for InMemObjectStore {
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
             .collect_vec())
     }
+
+    fn store_media_type(&self) -> &'static str {
+        "mem"
+    }
 }
 
 impl InMemObjectStore {

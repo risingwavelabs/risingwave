@@ -493,14 +493,6 @@ impl Parser {
                     Ok(expr)
                 }
             }
-
-            Token::LBrace => {
-                self.prev_token();
-                Ok(Expr::Array(self.parse_token_wrapped_exprs(
-                    &Token::LBrace,
-                    &Token::RBrace,
-                )?))
-            }
             unexpected => self.expected("an expression:", unexpected),
         }?;
 

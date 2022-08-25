@@ -98,7 +98,7 @@
     LogicalProject { exprs: [min(t.v1), sum((t.v1 + t.v2))] }
       LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [min(t.v1), sum((t.v1 + t.v2))] }
         LogicalProject { exprs: [(t.v1 + t.v2), t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int, v3 int);
@@ -107,7 +107,7 @@
     LogicalProject { exprs: [t.v1, sum((t.v1 * t.v2))] }
       LogicalAgg { group_key: [((t.v1 + t.v2) / t.v3), t.v1], aggs: [sum((t.v1 * t.v2))] }
         LogicalProject { exprs: [((t.v1 + t.v2) / t.v3), t.v1, (t.v1 * t.v2)] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2, t.v3] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
 - sql: |
     /* test logical_agg with complex group expression */
     create table t(v1 int, v2 int);
@@ -116,7 +116,7 @@
     LogicalProject { exprs: [(t.v1 + t.v2)] }
       LogicalAgg { group_key: [(t.v1 + t.v2)], aggs: [] }
         LogicalProject { exprs: [(t.v1 + t.v2)] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* test logical_agg with complex group expression */
     /* should complain about nested agg call */
@@ -131,7 +131,7 @@
     LogicalProject { exprs: [(t.v1 + t.v2)] }
       LogicalAgg { group_key: [t.v1, t.v2], aggs: [] }
         LogicalProject { exprs: [t.v1, t.v2] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
@@ -212,7 +212,7 @@
       LogicalFilter { predicate: (t.v1 > 5:Int32) }
         LogicalAgg { group_key: [t.v1], aggs: [] }
           LogicalProject { exprs: [t.v1] }
-            LogicalScan { table: t, columns: [t._row_id, t.v1] }
+            LogicalScan { table: t, columns: [t.v1, t._row_id] }
 - sql: |
     /* having with non-group column */
     create table t (v1 real, v2 int);
@@ -226,7 +226,7 @@
   logical_plan: |
     LogicalAgg { group_key: [t.v1], aggs: [] }
       LogicalProject { exprs: [t.v1] }
-        LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
+        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* distinct with agg */
     create table t (v1 int, v2 int);
@@ -236,7 +236,7 @@
       LogicalProject { exprs: [sum(t.v1)] }
         LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
           LogicalProject { exprs: [t.v2, t.v1] }
-            LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
+            LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - sql: |
     /* arguments out-of-order */
     create table t(v1 int, v2 int, v3 int);
@@ -275,7 +275,7 @@
     LogicalProject { exprs: [t.v1] }
       LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
         LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1] }
+          LogicalScan { table: t, columns: [t.v1, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.v1] }
       LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
@@ -294,7 +294,7 @@
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
       LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
         LogicalProject { exprs: [t.v3, t.v2, t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2, t.v3] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
       LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
@@ -315,7 +315,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
       LogicalAgg { aggs: [sum(t.v1)] }
         LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1] }
+          LogicalScan { table: t, columns: [t.v1, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
       LogicalScan { table: t, columns: [t.v1] }
@@ -334,7 +334,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
       LogicalAgg { aggs: [sum(t.v1)] }
         LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
       LogicalScan { table: t, columns: [t.v1] }
@@ -353,7 +353,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
       LogicalAgg { aggs: [sum(t.v1)] }
         LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2, t.v3] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
       LogicalScan { table: t, columns: [t.v1] }
@@ -372,7 +372,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
       LogicalAgg { aggs: [sum(t.v1)] }
         LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2, t.v3] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
       LogicalScan { table: t, columns: [t.v1] }
@@ -391,7 +391,7 @@
     LogicalProject { exprs: [sum(t.v1)] }
       LogicalAgg { aggs: [sum(t.v1)] }
         LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2, t.v3] }
+          LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1)] }
       LogicalScan { table: t, columns: [t.v1] }
@@ -410,7 +410,7 @@
     LogicalProject { exprs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
       LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
         LogicalProject { exprs: [t.v1] }
-          LogicalScan { table: t, columns: [t._row_id, t.v1] }
+          LogicalScan { table: t, columns: [t.v1, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
       LogicalScan { table: t, columns: [t.v1] }
@@ -430,7 +430,7 @@
     LogicalProject { exprs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
       LogicalAgg { aggs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
         LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
-          LogicalScan { table: t, columns: [t._row_id, t.a, t.b] }
+          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum((t.a * t.b)) filter(((t.a * t.b) > 0:Int32))] }
       LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
@@ -443,7 +443,7 @@
     LogicalProject { exprs: [max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
       LogicalAgg { aggs: [max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
         LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
-          LogicalScan { table: t, columns: [t._row_id, t.a, t.b] }
+          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [max((t.a * t.b)) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
       LogicalProject { exprs: [t.a, t.b, (t.a * t.b)] }
@@ -465,7 +465,7 @@
     LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b)))] }
       LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
         LogicalProject { exprs: [t.b, t.a] }
-          LogicalScan { table: t, columns: [t._row_id, t.a, t.b] }
+          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b)))] }
       LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
@@ -486,7 +486,7 @@
     LogicalProject { exprs: [count filter((t.a > t.b))] }
       LogicalAgg { aggs: [count filter((t.a > t.b))] }
         LogicalProject { exprs: [t.a, t.b] }
-          LogicalScan { table: t, columns: [t._row_id, t.a, t.b] }
+          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [count filter((t.a > t.b))] }
       LogicalScan { table: t, columns: [t.a, t.b] }
@@ -543,8 +543,9 @@
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 0:Int64)), sum(t.c) filter((count filter((t.c < 100:Int32)) > 0:Int64) AND (flag = 1:Int64))] }
       LogicalAgg { group_key: [t.a, t.b, t.c, flag], aggs: [count filter((t.c < 100:Int32))] }
-        LogicalExpand { column_subsets: [[t.a, t.b], [t.a, t.c]] }
-          LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+        LogicalProject { exprs: [t.a, t.b, t.c, t.c, flag] }
+          LogicalExpand { column_subsets: [[t.a, t.b], [t.a, t.c]] }
+            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* distinct agg and non-disintct agg */
     create table t(a int, b int, c int);
@@ -552,8 +553,9 @@
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 1:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
       LogicalAgg { group_key: [t.a, t.b, flag], aggs: [sum(t.c)] }
-        LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-          LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+        LogicalProject { exprs: [t.a, t.b, t.c, flag] }
+          LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
+            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   stream_plan: |
     StreamMaterialize { columns: [a, distinct_b_num, sum_c], pk_columns: [a] }
       StreamProject { exprs: [t.a, count(t.b) filter((flag = 1:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
@@ -562,8 +564,9 @@
             StreamProject { exprs: [t.a, t.b, flag, sum(t.c)] }
               StreamHashAgg { group_key: [t.a, t.b, flag], aggs: [count, sum(t.c)] }
                 StreamExchange { dist: HashShard(t.a, t.b, flag) }
-                  StreamExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-                    StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+                  StreamProject { exprs: [t.a, t.b, t.c, flag, t._row_id] }
+                    StreamExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
+                      StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     /* distinct agg with filter */
     create table t(a int, b int, c int);
@@ -571,8 +574,9 @@
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64) AND (flag = 1:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
       LogicalAgg { group_key: [t.a, t.b, flag], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
-        LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-          LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+        LogicalProject { exprs: [t.a, t.b, t.c, t.b, flag] }
+          LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
+            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* non-distinct agg with filter */
     create table t(a int, b int, c int);
@@ -580,8 +584,9 @@
   optimized_logical_plan: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 1:Int64)), sum(sum(t.c) filter((t.b < 100:Int32))) filter((flag = 0:Int64))] }
       LogicalAgg { group_key: [t.a, t.b, flag], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
-        LogicalExpand { column_subsets: [[t.a, t.b, t.c], [t.a, t.b]] }
-          LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+        LogicalProject { exprs: [t.a, t.b, t.c, t.b, flag] }
+          LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
+            LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - sql: |
     /* combined order by & filter clauses */
     create table t(a varchar, b int);
@@ -590,7 +595,7 @@
     LogicalProject { exprs: [sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
       LogicalAgg { aggs: [sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
         LogicalProject { exprs: [t.b, (Length(t.a) * t.b)] }
-          LogicalScan { table: t, columns: [t._row_id, t.a, t.b] }
+          LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum((Length(t.a) * t.b)) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
       LogicalProject { exprs: [t.b, (Length(t.a) * t.b)] }
@@ -613,14 +618,14 @@
     select single_value(distinct x) from t;
   binder_error: 'Invalid input syntax: single_value(distinct) is disallowed'
 - sql: |
-    /* prune key of column_subsets */
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(t.v1) filter((flag = 1:Int64))] }
+    LogicalAgg { aggs: [count(t.v1) filter((flag = 0:Int64))] }
       LogicalAgg { group_key: [t.v1, flag], aggs: [] }
-        LogicalExpand { column_subsets: [[], [t.v1]] }
-          LogicalScan { table: t, columns: [t.v1] }
+        LogicalProject { exprs: [t.v1, flag] }
+          LogicalExpand { column_subsets: [[t.v1]] }
+            LogicalScan { table: t, columns: [t.v1] }
 - sql: |
     /* input is sharded by group key */
     create table t(x int);

@@ -52,7 +52,7 @@ pub struct LogicalScan {
 
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
-    fn new(
+    pub(crate) fn new(
         table_name: String, // explain-only
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table

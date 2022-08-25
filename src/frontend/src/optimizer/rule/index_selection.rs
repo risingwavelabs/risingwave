@@ -45,9 +45,12 @@
 //! For index order key length > 5, we just ignore the rest.
 
 use std::cmp::min;
-use std::collections::HashMap;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
@@ -55,11 +58,15 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::catalog::IndexCatalog;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
+use crate::expr::{
+    to_conjunctions, to_disjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
+    FunctionCall, InputRef,
+};
 use crate::optimizer::plan_node::{
-    LogicalJoin, LogicalScan, PlanTreeNodeBinary, PredicatePushdown,
+    LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary, PredicatePushdown,
 };
 use crate::optimizer::PlanRef;
+use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;
@@ -70,6 +77,8 @@ const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 4] = [
     [10000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
+const MAX_COMBINATION_SIZE: usize = 3;
+const MAX_CONJUNCTION_SIZE: usize = 8;
 
 pub struct IndexSelectionRule {}
 
@@ -81,8 +90,7 @@ impl Rule for IndexSelectionRule {
             return None;
         }
 
-        let mut primary_table_scan_io_estimator = TableScanIoEstimator::new(logical_scan);
-        let primary_cost = primary_table_scan_io_estimator.estimate(logical_scan.predicate());
+        let primary_cost = self.estimate_table_scan_cost(logical_scan);
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
         let mut min_cost = primary_cost.clone();
@@ -95,19 +103,18 @@ impl Rule for IndexSelectionRule {
                 let index_scan = logical_scan.to_index_scan(
                     &index.name,
                     index.index_table.table_desc().into(),
-                    &p2s_mapping,
+                    p2s_mapping,
                 );
 
-                let mut index_table_scan_io_estimator = TableScanIoEstimator::new(&index_scan);
-                let index_cost = index_table_scan_io_estimator.estimate(index_scan.predicate());
+                let index_cost = self.estimate_table_scan_cost(&index_scan);
+
                 if index_cost.le(&min_cost) {
                     min_cost = index_cost;
                     final_plan = index_scan.into();
                 }
             } else {
                 // non-covering index selection
-                let (index_lookup, lookup_cost) =
-                    self.gen_index_lookup(logical_scan, index, p2s_mapping);
+                let (index_lookup, lookup_cost) = self.gen_index_lookup(logical_scan, index);
                 if lookup_cost.le(&min_cost) {
                     min_cost = lookup_cost;
                     final_plan = index_lookup;
@@ -115,7 +122,12 @@ impl Rule for IndexSelectionRule {
             }
         }
 
-        // TODO: support merge index
+        if let Some((merge_index, merge_index_cost)) = self.index_merge_selection(logical_scan) {
+            if merge_index_cost.le(&min_cost) {
+                min_cost = merge_index_cost;
+                final_plan = merge_index;
+            }
+        }
 
         if min_cost == primary_cost {
             None
@@ -125,11 +137,11 @@ impl Rule for IndexSelectionRule {
     }
 }
 
-struct IndexPredicateRewriter {
-    p2s_mapping: HashMap<usize, usize>,
+struct IndexPredicateRewriter<'a> {
+    p2s_mapping: &'a HashMap<usize, usize>,
     offset: usize,
 }
-impl ExprRewriter for IndexPredicateRewriter {
+impl ExprRewriter for IndexPredicateRewriter<'_> {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         // transform primary predicate to index predicate if it can
         if self.p2s_mapping.contains_key(&input_ref.index) {
@@ -149,7 +161,6 @@ impl IndexSelectionRule {
         &self,
         logical_scan: &LogicalScan,
         index: &IndexCatalog,
-        p2s_mapping: HashMap<usize, usize>,
     ) -> (PlanRef, IndexCost) {
         // 1. logical_scan ->  logical_join
         //                      /        \
@@ -157,7 +168,7 @@ impl IndexSelectionRule {
         let predicate = logical_scan.predicate().clone();
         let offset = index.index_item.len();
         let mut rewriter = IndexPredicateRewriter {
-            p2s_mapping,
+            p2s_mapping: index.primary_to_secondary_mapping(),
             offset,
         };
         let new_predicate = predicate.rewrite_expr(&mut rewriter);
@@ -183,20 +194,12 @@ impl IndexSelectionRule {
             .iter()
             .zip_eq(index.primary_table.order_key.iter())
             .map(|(x, y)| {
-                ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
-                    ExprType::Equal,
-                    vec![
-                        ExprImpl::InputRef(Box::new(InputRef::new(
-                            x.index,
-                            index.index_table.columns[x.index].data_type().clone(),
-                        ))),
-                        ExprImpl::InputRef(Box::new(InputRef::new(
-                            y.index + index.index_item.len(),
-                            index.primary_table.columns[y.index].data_type().clone(),
-                        ))),
-                    ],
-                    DataType::Boolean,
-                )))
+                Self::create_equal_expr(
+                    x.index,
+                    index.index_table.columns[x.index].data_type().clone(),
+                    y.index + index.index_item.len(),
+                    index.primary_table.columns[y.index].data_type().clone(),
+                )
             })
             .chain(new_predicate.into_iter())
             .collect_vec();
@@ -219,10 +222,7 @@ impl IndexSelectionRule {
             .expect("must be a logical scan");
 
         // 3. calculate the cost
-        let mut index_table_scan_io_estimator =
-            TableScanIoEstimator::new(index_scan_with_predicate);
-        let index_cost =
-            index_table_scan_io_estimator.estimate(index_scan_with_predicate.predicate());
+        let index_cost = self.estimate_table_scan_cost(index_scan_with_predicate);
         // lookup cost = index cost * LOOKUP_COST_CONST
         let lookup_cost = index_cost.mul(&IndexCost::new(LOOKUP_COST_CONST));
 
@@ -236,6 +236,365 @@ impl IndexSelectionRule {
         );
 
         (lookup_join, lookup_cost)
+    }
+
+    /// Index Merge Selection
+    /// Deal with predicate like a = 1 or b = 1
+    /// Merge index scans from a table, currently merge is union semantic.
+    fn index_merge_selection(&self, logical_scan: &LogicalScan) -> Option<(PlanRef, IndexCost)> {
+        let predicate = logical_scan.predicate().clone();
+        // 1. choose lowest cost index merge path
+        let paths = self.gen_paths(&predicate.conjunctions, logical_scan);
+        let (index_access, index_access_cost) = self.choose_min_cost_path(&paths)?;
+
+        // 2. lookup primary table
+        // the schema of index_access is the order key of primary table .
+        let schema: &Schema = index_access.schema();
+        let index_access_len = schema.len();
+
+        let mut shift_input_ref_rewriter = ShiftInputRefRewriter {
+            offset: index_access_len,
+        };
+        let new_predicate = predicate.rewrite_expr(&mut shift_input_ref_rewriter);
+
+        let primary_table_desc = logical_scan.table_desc();
+
+        let primary_table_scan = LogicalScan::create(
+            logical_scan.table_name().to_string(),
+            false,
+            primary_table_desc.clone().into(),
+            vec![],
+            logical_scan.ctx(),
+        );
+
+        let conjunctions = primary_table_desc
+            .order_key
+            .iter()
+            .enumerate()
+            .map(|(x, y)| {
+                Self::create_equal_expr(
+                    x,
+                    schema.fields[x].data_type.clone(),
+                    y.column_idx + index_access_len,
+                    primary_table_desc.columns[y.column_idx].data_type.clone(),
+                )
+            })
+            .chain(new_predicate.into_iter())
+            .collect_vec();
+
+        let on = Condition { conjunctions };
+        let join = LogicalJoin::new(index_access, primary_table_scan.into(), JoinType::Inner, on);
+
+        // 3 push down predicate
+        let join_ref = join.predicate_pushdown(Condition::true_cond());
+
+        // 4. keep the same schema with original logical_scan
+        let scan_output_col_idx = logical_scan.output_col_idx();
+        let lookup_join = join_ref.prune_col(
+            &scan_output_col_idx
+                .iter()
+                .map(|&col_idx| col_idx + index_access_len)
+                .collect_vec(),
+        );
+
+        Some((
+            lookup_join,
+            index_access_cost.mul(&IndexCost::new(LOOKUP_COST_CONST)),
+        ))
+    }
+
+    /// Generate possible paths that can be used to access.
+    /// The schema of output is the order key of primary table, so it can be used to lookup primary
+    /// table later.
+    /// Method `gen_paths` handles the complex condition recursively which may contains nested `AND`
+    /// and `OR`. However, Method `gen_index_path` handles one arm of an OR clause which is a
+    /// basic unit for index selection.
+    fn gen_paths(&self, conjunctions: &[ExprImpl], logical_scan: &LogicalScan) -> Vec<PlanRef> {
+        let mut result = vec![];
+        for expr in conjunctions {
+            // it's OR clause!
+            if let ExprImpl::FunctionCall(function_call) = expr &&
+                function_call.get_expr_type() == ExprType::Or {
+
+                let mut index_to_be_merged = vec![];
+
+                let disjunctions = to_disjunctions(expr.clone());
+                for (column_index, expr) in self.clustering_disjunction(disjunctions) {
+                    let mut index_paths = vec![];
+                    let conjunctions = to_conjunctions(expr);
+                    index_paths.extend(self.gen_index_path(column_index, &conjunctions, logical_scan).into_iter());
+                    // complex condition, recursively gen paths
+                    if conjunctions.len() > 1 {
+                        index_paths.extend(self.gen_paths(&conjunctions, logical_scan).into_iter());
+                    }
+
+                    match self.choose_min_cost_path(&index_paths) {
+                        None => {
+                            // One arm of OR clause can't use index, bail out
+                            index_to_be_merged.clear();
+                            break;
+                        },
+                        Some((path, _)) => index_to_be_merged.push(path)
+                    }
+                }
+
+                if let Some(path) = self.merge(index_to_be_merged) {
+                    result.push(path)
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Clustering disjunction or expr by column index. If expr is complex, classify them as `None`
+    /// class
+    ///
+    /// a = 1, b = 2, b = 3 -> [a, (a = 1)], [b, (b = 2 or b = 3)]
+    ///
+    /// a = 1, (b = 2 and c = 3) -> [a, (a = 1)], [None, (b = 2 and c = 3)]
+    fn clustering_disjunction(
+        &self,
+        disjunctions: Vec<ExprImpl>,
+    ) -> HashMap<Option<usize>, ExprImpl> {
+        let mut map: HashMap<Option<usize>, ExprImpl> = HashMap::new();
+        for expr in disjunctions {
+            let mut idx = None;
+            if let Some((input_ref, _const_expr)) = expr.as_eq_const() {
+                idx = Some(input_ref.index);
+            } else if let Some((input_ref, _in_const_list)) = expr.as_in_const_list() {
+                idx = Some(input_ref.index);
+            } else if let Some((input_ref, _op, _const_expr)) = expr.as_comparison_const() {
+                idx = Some(input_ref.index);
+            }
+
+            match map.entry(idx) {
+                Occupied(mut entry) => {
+                    let expr2: ExprImpl = entry.get().to_owned();
+                    let or_expr = ExprImpl::FunctionCall(
+                        FunctionCall::new_unchecked(
+                            ExprType::Or,
+                            vec![expr, expr2],
+                            DataType::Boolean,
+                        )
+                        .into(),
+                    );
+                    entry.insert(or_expr);
+                }
+                Vacant(entry) => {
+                    entry.insert(expr);
+                }
+            };
+        }
+
+        map
+    }
+
+    /// Given a conjunctions from one arm of an OR clause (basic unit to index selection), generate
+    /// all matching index path (including primary index) for the relation.
+    /// `column_index` (refers to primary table) is a hint can be used to prune index.
+    /// Steps:
+    /// 1. Take the combination of `conjunctions` to extract the potential clauses.
+    /// 2. For each potential clauses, generate index path if it can.
+    fn gen_index_path(
+        &self,
+        column_index: Option<usize>,
+        conjunctions: &[ExprImpl],
+        logical_scan: &LogicalScan,
+    ) -> Vec<PlanRef> {
+        // Assumption: use at most `MAX_COMBINATION_SIZE` clauses, we can determine which is the
+        // best index.
+        let mut combinations = vec![];
+        for i in 1..min(conjunctions.len(), MAX_COMBINATION_SIZE) + 1 {
+            combinations.extend(
+                conjunctions
+                    .iter()
+                    .take(min(conjunctions.len(), MAX_CONJUNCTION_SIZE))
+                    .combinations(i),
+            );
+        }
+
+        let mut result = vec![];
+
+        for index in logical_scan.indexes() {
+            if column_index.is_some() {
+                assert_eq!(conjunctions.len(), 1);
+                let p2s_mapping = index.primary_to_secondary_mapping();
+                match p2s_mapping.get(column_index.as_ref().unwrap()) {
+                    None => continue, // not found, prune this index
+                    Some(&idx) => {
+                        if index.index_table.order_key()[0].index != idx {
+                            // not match, prune this index
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // try secondary index
+            for conj in &combinations {
+                let condition = Condition {
+                    conjunctions: conj.iter().map(|&x| x.to_owned()).collect(),
+                };
+                if let Some(index_access) =
+                    self.build_index_access(index.clone(), condition, logical_scan.ctx().clone())
+                {
+                    result.push(index_access);
+                }
+            }
+        }
+
+        // try primary index
+        let primary_table_desc = logical_scan.table_desc();
+        if let Some(idx) = column_index {
+            assert_eq!(conjunctions.len(), 1);
+            if primary_table_desc.order_key[0].column_idx != idx {
+                return result;
+            }
+        }
+
+        let primary_access = LogicalScan::new(
+            logical_scan.table_name().to_string(),
+            false,
+            primary_table_desc
+                .order_key
+                .iter()
+                .map(|x| x.column_idx)
+                .collect_vec(),
+            primary_table_desc.clone().into(),
+            vec![],
+            logical_scan.ctx(),
+            Condition {
+                conjunctions: conjunctions.to_vec(),
+            },
+        );
+
+        result.push(primary_access.into());
+
+        result
+    }
+
+    /// build index access if predicate (refers to primary table) is covered by index
+    fn build_index_access(
+        &self,
+        index: Rc<IndexCatalog>,
+        predicate: Condition,
+        ctx: OptimizerContextRef,
+    ) -> Option<PlanRef> {
+        // check condition is covered by index.
+        let mut input_ref_finder = ExprInputRefFinder::default();
+        predicate.visit_expr(&mut input_ref_finder);
+
+        let p2s_mapping = index.primary_to_secondary_mapping();
+        if !input_ref_finder
+            .input_ref_index_set
+            .iter()
+            .all(|x| p2s_mapping.contains_key(x))
+        {
+            return None;
+        }
+
+        let mut rewriter = IndexPredicateRewriter {
+            p2s_mapping,
+            offset: 0,
+        };
+        let new_predicate = predicate.rewrite_expr(&mut rewriter);
+
+        Some(
+            LogicalScan::new(
+                index.index_table.name.to_string(),
+                false,
+                index
+                    .primary_table_order_key_ref_to_index_table()
+                    .iter()
+                    .map(|x| x.index)
+                    .collect_vec(),
+                index.index_table.table_desc().into(),
+                vec![],
+                ctx,
+                new_predicate,
+            )
+            .into(),
+        )
+    }
+
+    fn merge(&self, paths: Vec<PlanRef>) -> Option<PlanRef> {
+        if paths.is_empty() {
+            return None;
+        }
+
+        let new_paths = paths
+            .iter()
+            .flat_map(|path| {
+                if let Some(union) = path.as_logical_union() {
+                    union.inputs().to_vec()
+                } else if let Some(_scan) = path.as_logical_scan() {
+                    vec![path.clone()]
+                } else {
+                    unreachable!();
+                }
+            })
+            .sorted_by(|a, b| {
+                // sort inputs to make plan deterministic
+                a.as_logical_scan()
+                    .expect("expect to be a logical scan")
+                    .table_name()
+                    .cmp(
+                        b.as_logical_scan()
+                            .expect("expect to be a logical scan")
+                            .table_name(),
+                    )
+            })
+            .collect_vec();
+
+        Some(LogicalUnion::create(false, new_paths))
+    }
+
+    fn choose_min_cost_path(&self, paths: &[PlanRef]) -> Option<(PlanRef, IndexCost)> {
+        paths
+            .iter()
+            .map(|path| {
+                if let Some(scan) = path.as_logical_scan() {
+                    let cost = self.estimate_table_scan_cost(scan);
+                    (scan.clone().into(), cost)
+                } else if let Some(union) = path.as_logical_union() {
+                    let cost = union
+                        .inputs()
+                        .iter()
+                        .map(|input| {
+                            self.estimate_table_scan_cost(
+                                input.as_logical_scan().expect("expect to be a scan"),
+                            )
+                        })
+                        .reduce(|a, b| a.add(&b))
+                        .unwrap();
+                    (union.clone().into(), cost)
+                } else {
+                    unreachable!()
+                }
+            })
+            .min_by(|(_, cost1), (_, cost2)| Ord::cmp(cost1, cost2))
+    }
+
+    fn estimate_table_scan_cost(&self, scan: &LogicalScan) -> IndexCost {
+        let mut table_scan_io_estimator = TableScanIoEstimator::new(scan);
+        table_scan_io_estimator.estimate(scan.predicate())
+    }
+
+    fn create_equal_expr(
+        left: usize,
+        left_data_type: DataType,
+        right: usize,
+        right_data_type: DataType,
+    ) -> ExprImpl {
+        ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+            ExprType::Equal,
+            vec![
+                ExprImpl::InputRef(Box::new(InputRef::new(left, left_data_type))),
+                ExprImpl::InputRef(Box::new(InputRef::new(right, right_data_type))),
+            ],
+            DataType::Boolean,
+        )))
     }
 }
 
@@ -377,7 +736,7 @@ enum MatchItem {
     All,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug, PartialOrd, Ord)]
 struct IndexCost(usize);
 
 impl Default for IndexCost {
@@ -431,6 +790,26 @@ impl ExprVisitor<IndexCost> for TableScanIoEstimator<'_> {
                 self.estimate_conjunctions(&single)
             }
         }
+    }
+}
+
+#[derive(Default)]
+struct ExprInputRefFinder {
+    pub input_ref_index_set: HashSet<usize>,
+}
+
+impl ExprVisitor<()> for ExprInputRefFinder {
+    fn visit_input_ref(&mut self, input_ref: &InputRef) {
+        self.input_ref_index_set.insert(input_ref.index);
+    }
+}
+
+struct ShiftInputRefRewriter {
+    offset: usize,
+}
+impl ExprRewriter for ShiftInputRefRewriter {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
     }
 }
 

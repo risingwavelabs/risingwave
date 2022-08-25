@@ -22,7 +22,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 #[cfg(any(test, feature = "test"))]
@@ -271,7 +271,7 @@ impl LocalVersionManager {
         last_pinned: Option<u64>,
         pin_resp_payload: pin_version_response::Payload,
     ) -> bool {
-        let old_version = self.local_version.upgradable_read();
+        let old_version = self.local_version.read();
         if let Some(last_pinned_id) = last_pinned {
             if old_version.pinned_version().id() != last_pinned_id {
                 return false;
@@ -308,24 +308,23 @@ impl LocalVersionManager {
             }
         }
 
+        drop(old_version);
+        let mut new_version = self.local_version.write();
+        // check again to prevent other thread changes new_version.
+        if new_version.pinned_version().id() >= new_version_id {
+            return false;
+        }
+
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
 
-        let mut new_version = old_version.clone();
         let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
-        let sstable_id_manager_clone = self.sstable_id_manager.clone();
-        tokio::spawn(async move {
-            for cleaned_epoch in cleaned_epochs {
-                sstable_id_manager_clone.remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
-            }
-        });
-        {
-            let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
-            *guard = new_version;
-            RwLockWriteGuard::unlock_fair(guard);
+        RwLockWriteGuard::unlock_fair(new_version);
+        for cleaned_epoch in cleaned_epochs {
+            self.sstable_id_manager
+                .remove_watermark_sst_id(TrackerId::Epoch(cleaned_epoch));
         }
-
         self.worker_context
             .version_update_notifier_tx
             .send(new_version_id)
@@ -397,7 +396,6 @@ impl LocalVersionManager {
         table_id: u32,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
-
         let batch = SharedBufferBatch::new(
             sorted_items,
             epoch,
@@ -430,6 +428,13 @@ impl LocalVersionManager {
         is_remote_batch: bool,
     ) {
         let mut local_version_guard = self.local_version.write();
+        let max_sync_epoch = local_version_guard.get_max_sync_epoch();
+        assert!(
+            epoch > max_sync_epoch,
+            "write epoch must greater than sync epoch, write epoch{}, sync epoch{}",
+            epoch,
+            max_sync_epoch
+        );
         // Write into shared buffer
         if is_remote_batch {
             // The batch won't be synced to S3 asynchronously if it is a remote batch
@@ -1000,5 +1005,9 @@ impl LocalVersionManager {
 
     pub fn get_shared_buffer_size(&self) -> usize {
         self.buffer_tracker.get_buffer_size()
+    }
+
+    pub fn get_sstable_id_manager(&self) -> SstableIdManagerRef {
+        self.sstable_id_manager.clone()
     }
 }

@@ -18,16 +18,16 @@ pub mod join;
 pub mod top_n;
 
 use risingwave_common::array::Row;
-use risingwave_storage::table::state_table::{RowBasedRowStream, RowBasedStateTable};
+use risingwave_storage::table::streaming_table::state_table::{RowStream, StateTable};
 use risingwave_storage::StateStore;
 
 use crate::executor::StreamExecutorResult;
 
 pub async fn iter_state_table<'a, S: StateStore>(
-    state_table: &'a RowBasedStateTable<S>,
+    state_table: &'a StateTable<S>,
     epoch: u64,
     prefix: Option<&'a Row>,
-) -> StreamExecutorResult<RowBasedRowStream<'a, S>> {
+) -> StreamExecutorResult<RowStream<'a, S>> {
     Ok(if let Some(group_key) = prefix {
         state_table.iter_with_pk_prefix(group_key, epoch).await?
     } else {

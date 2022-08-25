@@ -355,6 +355,10 @@ impl ObjectStore for DiskObjectStore {
         list_result.sort_by(|a, b| Ord::cmp(&a.key, &b.key));
         Ok(list_result)
     }
+
+    fn store_media_type(&self) -> &'static str {
+        "disk"
+    }
 }
 
 #[cfg(test)]

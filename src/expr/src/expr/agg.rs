@@ -26,6 +26,11 @@ pub enum AggKind {
     Count,
     Avg,
     StringAgg,
+    // This is an internal Agg operation.
+    // It was introduced by our legacy java frontend to handle
+    // scalar subqueries which may return more than one row.
+    // FIXME: This is currently unused by our codebase.
+    // Tracked: <https://github.com/singularity-data/risingwave/issues/4866>
     SingleValue,
     ApproxCountDistinct,
     ArrayAgg,
