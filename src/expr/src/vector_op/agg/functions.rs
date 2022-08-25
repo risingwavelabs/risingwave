@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::array::{Array, ListRef, StructRef};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
+
+use crate::Result;
 
 /// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
@@ -172,10 +174,9 @@ where
     ) -> Result<Option<<T as Array>::RefItem<'a>>> {
         self.count += 1;
         if self.count > 1 {
-            Err(ErrorCode::InternalError(
-                "SingleValue aggregation can only accept exactly one value. But there is more than one.".to_string(),
+            bail!(
+                "SingleValue aggregation can only accept exactly one value. But there is more than one.",
             )
-              .into())
         } else {
             Ok(input)
         }

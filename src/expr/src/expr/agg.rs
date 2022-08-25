@@ -14,8 +14,10 @@
 
 use std::convert::TryFrom;
 
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::bail;
 use risingwave_pb::expr::agg_call::Type;
+
+use crate::{ExprError, Result};
 
 /// Kind of aggregation function
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -53,7 +55,7 @@ impl std::fmt::Display for AggKind {
 }
 
 impl TryFrom<Type> for AggKind {
-    type Error = RwError;
+    type Error = ExprError;
 
     fn try_from(prost: Type) -> Result<Self> {
         match prost {
@@ -66,7 +68,7 @@ impl TryFrom<Type> for AggKind {
             Type::SingleValue => Ok(AggKind::SingleValue),
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
             Type::ArrayAgg => Ok(AggKind::ArrayAgg),
-            Type::Unspecified => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
+            Type::Unspecified => bail!("Unrecognized agg."),
         }
     }
 }

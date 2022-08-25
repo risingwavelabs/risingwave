@@ -16,12 +16,13 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
+use crate::Result;
 
 /// Where the actual aggregation happens.
 ///
@@ -144,11 +145,7 @@ macro_rules! impl_aggregator {
                     }
                     Ok(())
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -163,11 +160,7 @@ macro_rules! impl_aggregator {
                 {
                     self.update_multi_concrete(i, input, start_row_id, end_row_id)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -175,11 +168,7 @@ macro_rules! impl_aggregator {
                 if let ArrayBuilderImpl::$result_variant(b) = builder {
                     self.output_concrete(b)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($result_variant)
-                    ))
-                    .into())
+                    bail!("Builder fail to match {}.", stringify!($result_variant))
                 }
             }
         }

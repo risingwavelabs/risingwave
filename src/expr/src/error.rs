@@ -17,6 +17,7 @@ use regex;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
+use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -62,5 +63,14 @@ impl From<regex::Error> for ExprError {
             name: "pattern",
             reason: re.to_string(),
         }
+    }
+}
+
+impl From<ProstFieldNotFound> for ExprError {
+    fn from(err: ProstFieldNotFound) -> Self {
+        Self::Internal(anyhow::anyhow!(
+            "Failed to decode prost: field not found `{}`",
+            err.0
+        ))
     }
 }

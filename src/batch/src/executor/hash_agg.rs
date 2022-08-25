@@ -73,11 +73,11 @@ impl HashAggExecutorBuilder {
             .map(|x| *x as usize)
             .collect_vec();
 
-        let agg_factories = hash_agg_node
+        let agg_factories: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
             .map(AggStateFactory::new)
-            .collect::<Result<Vec<AggStateFactory>>>()?;
+            .try_collect()?;
 
         let child_schema = child.schema();
 

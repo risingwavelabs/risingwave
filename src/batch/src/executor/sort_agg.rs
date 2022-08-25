@@ -128,12 +128,12 @@ impl SortAggExecutor {
                 .map(|expr| expr.eval(&child_chunk))
                 .try_collect()?;
 
-            let groups = self
+            let groups: Vec<_> = self
                 .sorted_groupers
                 .iter()
                 .zip_eq(&group_columns)
                 .map(|(grouper, array)| grouper.detect_groups(array))
-                .collect::<Result<Vec<EqGroups>>>()?;
+                .try_collect()?;
 
             let groups = EqGroups::intersect(&groups);
 
@@ -219,6 +219,7 @@ impl SortAggExecutor {
             .iter_mut()
             .zip_eq(group_columns)
             .try_for_each(|(grouper, column)| grouper.update(column, start_row_idx, end_row_idx))
+            .map_err(Into::into)
     }
 
     fn update_agg_states(
@@ -230,6 +231,7 @@ impl SortAggExecutor {
         agg_states
             .iter_mut()
             .try_for_each(|state| state.update_multi(child_chunk, start_row_idx, end_row_idx))
+            .map_err(Into::into)
     }
 
     fn output_sorted_groupers(
@@ -240,6 +242,7 @@ impl SortAggExecutor {
             .iter_mut()
             .zip_eq(group_builders)
             .try_for_each(|(grouper, builder)| grouper.output(builder))
+            .map_err(Into::into)
     }
 
     fn output_agg_states(
@@ -250,6 +253,7 @@ impl SortAggExecutor {
             .iter_mut()
             .zip_eq(agg_builders)
             .try_for_each(|(state, builder)| state.output(builder))
+            .map_err(Into::into)
     }
 
     fn create_builders(
@@ -442,10 +446,10 @@ mod tests {
             })
             .try_collect()?;
 
-        let sorted_groupers = group_exprs
+        let sorted_groupers: Vec<_> = group_exprs
             .iter()
             .map(|e| create_sorted_grouper(e.return_type()))
-            .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
+            .try_collect()?;
 
         let agg_states = vec![count_star];
 
@@ -780,10 +784,10 @@ mod tests {
             })
             .try_collect()?;
 
-        let sorted_groupers = group_exprs
+        let sorted_groupers: Vec<_> = group_exprs
             .iter()
             .map(|e| create_sorted_grouper(e.return_type()))
-            .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
+            .try_collect()?;
 
         let agg_states = vec![sum_agg];
 
