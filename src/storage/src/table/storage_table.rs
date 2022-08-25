@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -39,15 +38,11 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
-use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::{
-    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
-};
-use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, WriteOptions};
+use crate::row_serde::{serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde};
+use crate::store::ReadOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 mod iter_utils;
@@ -86,7 +81,7 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde, const T: AccessType> {
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
-    row_serializer: RS::Serializer,
+    _row_serializer: RS::Serializer,
 
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
@@ -281,7 +276,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         }: Distribution,
         table_option: TableOption,
     ) -> Self {
-        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
+        let _row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
 
         assert_eq!(order_types.len(), pk_indices.len());
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
@@ -308,7 +303,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             table_columns,
             schema,
             pk_serializer,
-            row_serializer,
+            _row_serializer,
             mapping,
             pk_indices,
             dist_key_indices,
@@ -324,27 +319,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         self.disable_sanity_check = true;
     }
 
-    /// Update the vnode bitmap of this storage table, used for fragment scaling or migration.
-    pub(super) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
-        if self.dist_key_indices.is_empty() {
-            assert_eq!(
-                new_vnodes, self.vnodes,
-                "should not update vnode bitmap for singleton table"
-            );
-        }
-        self.vnodes = new_vnodes;
-    }
-
     pub fn schema(&self) -> &Schema {
         &self.schema
-    }
-
-    pub(super) fn pk_serializer(&self) -> &OrderedRowSerializer {
-        &self.pk_serializer
-    }
-
-    pub(super) fn pk_indices(&self) -> &[usize] {
-        &self.pk_indices
     }
 }
 
@@ -435,122 +411,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             table_id: Some(self.keyspace.table_id()),
             retention_seconds: self.table_option.retention_seconds,
         }
-    }
-}
-
-const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
-
-/// Write with different encoding format, depending on the specific implementation of RS.
-impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
-    /// Get vnode value with full row.
-    fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
-        // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
-        // we can directly index into the row with indices to the table columns.
-        self.compute_vnode(row, &self.dist_key_indices)
-    }
-
-    /// Write to state store.
-    pub async fn batch_write_rows(
-        &mut self,
-        buffer: BTreeMap<Vec<u8>, RowOp>,
-        epoch: u64,
-    ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
-            epoch,
-            table_id: self.keyspace.table_id(),
-        });
-        let mut local = batch.prefixify(&self.keyspace);
-
-        for (pk, row_op) in buffer {
-            match row_op {
-                RowOp::Insert(row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to insert a row, it should not exist in storage.
-                        let storage_row = self
-                            .get_row(&row.by_indices(&self.pk_indices), epoch)
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_none(),
-                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
-                            storage_row.unwrap(),
-                            row
-                        );
-                    }
-
-                    let vnode = self.compute_vnode_by_row(&row);
-                    let (key, value) = self
-                        .row_serializer
-                        .serialize(vnode, &pk, row)
-                        .map_err(err)?;
-
-                    local.put(key, StorageValue::new_default_put(value));
-                }
-                RowOp::Delete(old_row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to delete a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(storage_row.is_some(), "deleting an non-existing row");
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
-                            storage_row.as_ref().unwrap(),
-                            old_row
-                        );
-                    }
-
-                    let vnode = self.compute_vnode_by_row(&old_row);
-
-                    let key = [vnode.to_be_bytes().as_slice(), &pk].concat();
-                    local.delete(key);
-                }
-                RowOp::Update((old_row, new_row)) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to update a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_some(),
-                            "update a non-existing row: {:?}",
-                            old_row
-                        );
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "value mismatch when updating row: {:?} != {:?}",
-                            storage_row,
-                            old_row
-                        );
-                    }
-
-                    // The row to update should keep the same primary key, so distribution key as
-                    // well.
-                    let vnode = self.compute_vnode_by_row(&new_row);
-                    debug_assert_eq!(self.compute_vnode_by_row(&old_row), vnode);
-
-                    let (key, value) = self
-                        .row_serializer
-                        .serialize(vnode, &pk, new_row)
-                        .map_err(err)?;
-
-                    local.put(key, StorageValue::new_default_put(value));
-                }
-            }
-        }
-        batch.ingest().await?;
-        Ok(())
     }
 }
 

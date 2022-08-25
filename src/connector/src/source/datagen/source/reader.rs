@@ -76,8 +76,6 @@ impl SplitReader for DatagenSplitReader {
         // check columns
         assert!(columns.as_ref().is_some());
         let columns = columns.unwrap();
-        assert!(columns.len() > 1);
-        let columns = &columns[1..];
 
         // parse field connector option to build FieldGeneratorImpl
         // for example:
@@ -220,10 +218,6 @@ mod tests {
     #[tokio::test]
     async fn test_generator() -> Result<()> {
         let mock_datum = vec![
-            Column {
-                name: "_".to_string(),
-                data_type: DataType::Int64,
-            },
             Column {
                 name: "random_int".to_string(),
                 data_type: DataType::Int32,

@@ -39,8 +39,8 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::table::storage_table::RowBasedStorageTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
@@ -116,7 +116,14 @@ async fn test_table_v2_materialize() -> Result<()> {
         }
         .into(),
     ];
-    source_manager.create_table_source(&source_table_id, table_columns)?;
+    let row_id_index = Some(0);
+    let pk_column_ids = vec![0];
+    source_manager.create_table_source(
+        &source_table_id,
+        table_columns,
+        row_id_index,
+        pk_column_ids,
+    )?;
 
     // Ensure the source exists
     let source_desc = source_manager.get_source(&source_table_id)?;
@@ -222,7 +229,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        Arc::new(BatchMetrics::for_test()),
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -284,7 +291,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        Arc::new(BatchMetrics::for_test()),
     ));
 
     let mut stream = scan.execute();
@@ -355,7 +362,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        Arc::new(BatchMetrics::for_test()),
     ));
 
     let mut stream = scan.execute();
@@ -385,14 +392,20 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
-    let mut state = RowBasedStateTable::new_without_distribution(
+    let mut state = StateTable::new_without_distribution(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = state.storage_table().clone();
+    let table = RowBasedStorageTable::new_for_test(
+        memory_state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        vec![OrderType::Ascending],
+        vec![0],
+    );
 
     let epoch: u64 = 0;
 
@@ -422,7 +435,7 @@ async fn test_row_seq_scan() -> Result<()> {
         )],
         1,
         "RowSeqScanExecutor2".to_string(),
-        Arc::new(BatchMetrics::unused()),
+        Arc::new(BatchMetrics::for_test()),
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);

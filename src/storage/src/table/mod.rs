@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod mem_table;
-pub mod state_table;
 pub mod storage_table;
+pub mod streaming_table;
 
 #[cfg(test)]
 pub mod test_relational_table;
