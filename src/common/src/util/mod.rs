@@ -34,6 +34,8 @@ pub mod try_match;
 pub mod epoch;
 mod future_utils;
 pub mod scan_range;
+pub mod sync_point;
+
 pub mod value_encoding;
 pub mod worker_util;
 
