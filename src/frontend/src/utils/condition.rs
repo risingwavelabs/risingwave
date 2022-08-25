@@ -285,21 +285,16 @@ impl Condition {
             // Make sure each range never overlaps with others, that's what scan range mean.
             let mut non_overlap_scan_ranges: Vec<ScanRange> = vec![];
             for s1 in &scan_ranges {
-                let mut overlap = false;
-                for s2 in &mut non_overlap_scan_ranges {
-                    let min_len = min(s1.eq_conds.len(), s2.eq_conds.len());
-                    overlap = s1
-                        .eq_conds
+                let overlap = non_overlap_scan_ranges.iter().any(|s2| {
+                    #[allow(clippy::disallowed_methods)]
+                    s1.eq_conds
                         .iter()
-                        .take(min_len)
-                        .zip_eq(s2.eq_conds.iter().take(min_len))
-                        .all(|(a, b)| a == b);
-                    // if overlap happens, keep the large one and large one always in
-                    // `non_overlap_scan_ranges`
-                    if overlap {
-                        break;
-                    }
-                }
+                        .zip(s2.eq_conds.iter())
+                        .all(|(a, b)| a == b)
+                });
+                // If overlap happens, keep the large one and large one always in
+                // `non_overlap_scan_ranges`.
+                // Otherwise, put s1 into `non_overlap_scan_ranges`.
                 if !overlap {
                     non_overlap_scan_ranges.push(s1.clone());
                 }
