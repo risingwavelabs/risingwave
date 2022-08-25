@@ -1,8 +1,8 @@
 statement ok
 create materialized source s with (
   connector = 'kafka',
-  kafka.topic = 'kafka_1_partition_topic',
-  kafka.brokers = '127.0.0.1:29092'
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
 ) row format json;
 
 statement ok
@@ -19,8 +19,8 @@ show tables
 statement ok
 create source s with (
   connector = 'kafka',
-  kafka.topic = 'kafka_1_partition_topic',
-  kafka.brokers = '127.0.0.1:29092'
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
 ) row format json;
 
 statement ok
@@ -37,8 +37,8 @@ show tables
 statement ok
 create source s with (
   connector = 'kafka',
-  kafka.topic = 'kafka_1_partition_topic',
-  kafka.brokers = '127.0.0.1:29092'
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
 ) row format json;
 
 query T
@@ -56,8 +56,8 @@ drop source s
 statement ok
 create materialized source s with (
   connector = 'kafka',
-  kafka.topic = 'kafka_1_partition_topic',
-  kafka.brokers = '127.0.0.1:29092'
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
 ) row format json;
 
 query T
