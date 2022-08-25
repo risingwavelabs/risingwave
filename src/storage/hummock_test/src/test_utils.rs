@@ -17,7 +17,6 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{
     Channel, NotificationClient, ObserverManager, ObserverNodeImpl,
 };
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::HummockManagerRef;
 use risingwave_meta::manager::{MessageStatus, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::MetaStore;
@@ -89,13 +88,4 @@ pub async fn get_test_observer_manager<S: MetaStore>(
 ) -> ObserverManager<TestNotificationClient<S>> {
     let rx = client.subscribe(&addr, worker_type).await.unwrap();
     ObserverManager::new_with(rx, client, addr, observer_states, worker_type)
-}
-
-#[tokio::test]
-async fn test_observer_manager() {
-    let (env, hummock_manager_ref, _cluster_manager_ref, _worker_node) =
-        setup_compute_env(8080).await;
-    let _client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
-    // let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
-    // ObserverManager::new_with(rx, client, addr, observer_states, worker_type)
 }
