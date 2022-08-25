@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::executor::monitor::BatchMetrics;
+use risingwave_batch::executor::BatchTaskMetricsManager;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{ComputeNodeConfig, MAX_CONNECTION_WINDOW_SIZE};
@@ -97,6 +98,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
+    let batch_task_metrics_mgr = Arc::new(BatchTaskMetricsManager::new(registry.clone()));
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
@@ -207,6 +209,7 @@ pub async fn compute_node_serve(
         batch_config,
         worker_id,
         state_store.clone(),
+        batch_task_metrics_mgr.clone(),
         batch_metrics.clone(),
     );
 

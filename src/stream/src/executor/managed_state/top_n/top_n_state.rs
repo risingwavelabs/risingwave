@@ -23,7 +23,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::variants::*;
@@ -46,7 +46,7 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     /// Cache.
     top_n: BTreeMap<OrderedRow, Row>,
     /// Relational table.
-    state_table: RowBasedStateTable<S>,
+    state_table: StateTable<S>,
     /// The number of elements in both cache and storage.
     total_count: usize,
     /// Number of entries to retain in memory after each flush.
@@ -86,7 +86,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = RowBasedStateTable::new_without_distribution(
+        let state_table = StateTable::new_without_distribution(
             store,
             table_id,
             column_descs,

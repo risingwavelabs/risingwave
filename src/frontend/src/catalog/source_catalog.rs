@@ -19,7 +19,7 @@ use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
+use super::{ColumnId, SourceId};
 
 pub mod with_options {
     pub const APPEND_ONLY: &str = "appendonly";
@@ -51,15 +51,21 @@ impl From<&ProstSource> for SourceCatalog {
                 source.columns.clone(),
                 source
                     .pk_column_ids
-                    .iter()
-                    .map(|id| ColumnId::new(*id))
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
                     .collect(),
                 source.properties.clone(),
             ),
             Some(Info::TableSource(source)) => (
                 SourceType::Table,
                 source.columns.clone(),
-                vec![TABLE_SOURCE_PK_COLID],
+                source
+                    .pk_column_ids
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
                 source.properties.clone(),
             ),
             None => unreachable!(),
