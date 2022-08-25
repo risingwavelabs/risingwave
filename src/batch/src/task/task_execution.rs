@@ -295,51 +295,21 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 let cumulative = monitor.cumulative();
                 task_metrics
                     .task_first_poll_delay
-                    .with_label_values(&[
-                        &task_id.query_id,
-                        &task_id.stage_id.to_string(),
-                        &task_id.task_id.to_string(),
-                    ])
                     .set(cumulative.total_first_poll_delay.as_secs_f64());
                 task_metrics
                     .task_fast_poll_duration
-                    .with_label_values(&[
-                        &task_id.query_id,
-                        &task_id.stage_id.to_string(),
-                        &task_id.task_id.to_string(),
-                    ])
                     .set(cumulative.total_fast_poll_duration.as_secs_f64());
                 task_metrics
                     .task_idle_duration
-                    .with_label_values(&[
-                        &task_id.query_id,
-                        &task_id.stage_id.to_string(),
-                        &task_id.task_id.to_string(),
-                    ])
                     .set(cumulative.total_idle_duration.as_secs_f64());
                 task_metrics
                     .task_poll_duration
-                    .with_label_values(&[
-                        &task_id.query_id,
-                        &task_id.stage_id.to_string(),
-                        &task_id.task_id.to_string(),
-                    ])
                     .set(cumulative.total_poll_duration.as_secs_f64());
                 task_metrics
                     .task_scheduled_duration
-                    .with_label_values(&[
-                        &task_id.query_id,
-                        &task_id.stage_id.to_string(),
-                        &task_id.task_id.to_string(),
-                    ])
                     .set(cumulative.total_scheduled_duration.as_secs_f64());
                 task_metrics
                     .task_slow_poll_duration
-                    .with_label_values(&[
-                        &task_id.query_id,
-                        &task_id.stage_id.to_string(),
-                        &task_id.task_id.to_string(),
-                    ])
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
                 task_metrics.clear_record();
             } else {

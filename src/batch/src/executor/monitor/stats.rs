@@ -14,9 +14,9 @@ use std::time::Duration;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use prometheus::core::{AtomicF64, AtomicU64, Collector, GenericCounterVec, GenericGaugeVec};
+use prometheus::core::{AtomicF64, AtomicU64, Collector, GenericCounterVec, GenericGauge};
 use prometheus::{
-    exponential_buckets, histogram_opts, opts, register_gauge_vec_with_registry,
+    exponential_buckets, histogram_opts, opts, register_gauge_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
 };
 use tokio::sync::mpsc::UnboundedSender;
@@ -105,12 +105,12 @@ macro_rules! for_each_task_metric {
             [$($x),*],
 
             { exchange_recv_row_number, GenericCounterVec<AtomicU64> },
-            { task_first_poll_delay, GenericGaugeVec<AtomicF64> },
-            { task_fast_poll_duration, GenericGaugeVec<AtomicF64> },
-            { task_idle_duration, GenericGaugeVec<AtomicF64> },
-            { task_poll_duration, GenericGaugeVec<AtomicF64> },
-            { task_scheduled_duration, GenericGaugeVec<AtomicF64> },
-            { task_slow_poll_duration, GenericGaugeVec<AtomicF64> },
+            { task_first_poll_delay, GenericGauge<AtomicF64> },
+            { task_fast_poll_duration, GenericGauge<AtomicF64> },
+            { task_idle_duration, GenericGauge<AtomicF64> },
+            { task_poll_duration, GenericGauge<AtomicF64> },
+            { task_scheduled_duration, GenericGauge<AtomicF64> },
+            { task_slow_poll_duration, GenericGauge<AtomicF64> },
         }
     };
 }
@@ -148,68 +148,76 @@ impl BatchTaskMetrics {
         id: TaskId,
         sender: Option<UnboundedSender<Box<dyn Collector>>>,
     ) -> Self {
-        let opt = {
-            let const_labels = HashMap::from([
-                ("query_id".to_string(), id.query_id),
-                ("target_stage_id".to_string(), id.stage_id.to_string()),
-                ("target_task_id".to_string(), id.task_id.to_string()),
-            ]);
+        let const_labels = HashMap::from([
+            ("query_id".to_string(), id.query_id),
+            ("target_stage_id".to_string(), id.stage_id.to_string()),
+            ("target_task_id".to_string(), id.task_id.to_string()),
+        ]);
+
+        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
             opts!(
                 "batch_exchange_recv_row_number",
                 "Total number of row that have been received from upstream source",
             )
-            .const_labels(const_labels)
-        };
-        let exchange_recv_row_number = register_int_counter_vec_with_registry!(
-            opt,
+            .const_labels(const_labels),
             &["source_stage_id", "source_task_id"],
             registry
         )
         .unwrap();
 
-        let task_first_poll_delay = register_gauge_vec_with_registry!(
-            "batch_task_first_poll_delay",
+        let task_first_poll_delay = register_gauge_with_registry!(
+            opts!("batch_task_first_poll_delay",
             "The total duration (s) elapsed between the instant tasks are instrumented, and the instant they are first polled.",
-            &["query_id", "stage_id", "task_id"],
+            ).const_labels(const_labels),
             registry,
         ).unwrap();
 
-        let task_fast_poll_duration = register_gauge_vec_with_registry!(
-            "batch_task_fast_poll_duration",
-            "The total duration (s) of fast polls.",
-            &["query_id", "stage_id", "task_id"],
+        let task_fast_poll_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_fast_poll_duration",
+                "The total duration (s) of fast polls.",
+            )
+            .const_labels(const_labels),
             registry,
         )
         .unwrap();
 
-        let task_idle_duration = register_gauge_vec_with_registry!(
-            "batch_task_idle_duration",
-            "The total duration (s) that tasks idled.",
-            &["query_id", "stage_id", "task_id"],
+        let task_idle_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_idle_duration",
+                "The total duration (s) that tasks idled.",
+            )
+            .const_labels(const_labels),
             registry,
         )
         .unwrap();
 
-        let task_poll_duration = register_gauge_vec_with_registry!(
-            "batch_task_poll_duration",
-            "The total duration (s) elapsed during polls.",
-            &["query_id", "stage_id", "task_id"],
+        let task_poll_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_poll_duration",
+                "The total duration (s) elapsed during polls.",
+            )
+            .const_labels(const_labels),
             registry,
         )
         .unwrap();
 
-        let task_scheduled_duration = register_gauge_vec_with_registry!(
-            "batch_task_scheduled_duration",
-            "The total duration (s) that tasks spent waiting to be polled after awakening.",
-            &["query_id", "stage_id", "task_id"],
+        let task_scheduled_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_scheduled_duration",
+                "The total duration (s) that tasks spent waiting to be polled after awakening.",
+            )
+            .const_labels(const_labels),
             registry,
         )
         .unwrap();
 
-        let task_slow_poll_duration = register_gauge_vec_with_registry!(
-            "batch_task_slow_poll_duration",
-            "The total duration (s) of slow polls.",
-            &["query_id", "stage_id", "task_id"],
+        let task_slow_poll_duration = register_gauge_with_registry!(
+            opts!(
+                "batch_task_slow_poll_duration",
+                "The total duration (s) of slow polls.",
+            )
+            .const_labels(const_labels),
             registry,
         )
         .unwrap();
