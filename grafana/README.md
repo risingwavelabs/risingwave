@@ -1,19 +1,9 @@
 # RisingWave Grafana Dashboard
 
-The Grafana dashboard is generated with grafanalib. You'll need Python and
+## Save Dashboard in JSON
 
-```
-pip3 install grafanalib
-brew install jq
-```
-
-... preferably installed in a local venv.
-
-## Generate Dashboard
-
-```
-./generate.sh
-```
+Click the **Share** button on Grafana dashboard and use **Export - Save to file** to get the JSON
+ file.
 
 ## Update without Restarting Grafana
 
