@@ -134,6 +134,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
+            state_table_id: 1,
         })),
         stream_key: vec![2],
         ..Default::default()

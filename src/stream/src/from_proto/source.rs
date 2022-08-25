@@ -28,6 +28,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Source)?;
+        tracing::info!(
+            "build source node: table_id {}, state_table_id {}",
+            node.table_id,
+            node.state_table_id
+        );
         let (sender, barrier_receiver) = unbounded_channel();
         stream
             .context
@@ -52,7 +57,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
         }));
         let schema = Schema::new(fields);
-        let keyspace = Keyspace::table_root(store, &source_id);
+        let keyspace = Keyspace::table_root(store, &TableId::new(node.state_table_id));
         let vnodes = params
             .vnode_bitmap
             .expect("vnodes not set for source executor");
