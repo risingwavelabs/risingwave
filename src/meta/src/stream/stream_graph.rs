@@ -568,13 +568,11 @@ impl StreamGraphBuilder {
                         }
                     }
 
-                    NodeBody::Source(node) => update_table(
-                        &mut Table {
-                            id: node.state_table_id,
-                            ..Default::default()
-                        },
-                        "SourceNode",
-                    ),
+                    NodeBody::Source(node) => {
+                        node.state_table_id += table_id_offset;
+                        // fill internal table for source node with None catalog.
+                        check_and_fill_internal_table(node.state_table_id, None);
+                    }
 
                     NodeBody::Lookup(node) => {
                         if let Some(ArrangementTableId::TableId(table_id)) =
