@@ -305,6 +305,7 @@ impl SstableStore {
             let store = self.store.clone();
             let sst_id = sst.id;
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
+            let uncompressed_capacity = block_meta.uncompressed_size;
 
             async move {
                 if use_tiered_cache && let Some(holder) = tiered_cache
@@ -317,7 +318,7 @@ impl SstableStore {
                 }
 
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(&block_data)?;
+                let block = Block::decode(&block_data, uncompressed_capacity)?;
                 Ok(Box::new(block))
             }
         };
@@ -491,7 +492,10 @@ impl SstableStoreWrite for SstableStore {
         if let CachePolicy::Fill = policy {
             for (block_idx, block_meta) in meta.block_metas.iter().enumerate() {
                 let end_offset = (block_meta.offset + block_meta.len) as usize;
-                let block = Block::decode(&data[block_meta.offset as usize..end_offset])?;
+                let block = Block::decode(
+                    &data[block_meta.offset as usize..end_offset],
+                    block_meta.uncompressed_size,
+                )?;
                 self.block_cache
                     .insert(sst_id, block_idx as u64, Box::new(block));
             }
