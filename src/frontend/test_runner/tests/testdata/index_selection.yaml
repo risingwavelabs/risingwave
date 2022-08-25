@@ -449,24 +449,22 @@
     create table t1 (a int, b numeric, c bigint, p int);
     create index idx1 on t1(a);
     create index idx2 on t1(b, a);
-    create index idx3 on t1(c);
-    create index idx4 on t1(p);
+    create index idx3 on t1(c, a);
     /* we think primary scan is better than merging three OneSideBound range indexes */
     select * from t1 where a > 1 or c > 1 or b > 1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchLookupJoin { type: Inner, predicate: idx4.t1._row_id = t1._row_id AND (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
-        BatchScan { table: idx4, columns: [idx4.t1._row_id], distribution: SomeShard }
+      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((idx1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
+        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
   batch_local_plan: |
-    BatchLookupJoin { type: Inner, predicate: idx4.t1._row_id = t1._row_id AND (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((idx1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
       BatchExchange { order: [], dist: Single }
-        BatchScan { table: idx4, columns: [idx4.t1._row_id], distribution: SomeShard }
+        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
     create index idx1 on t1(a);
     create index idx2 on t1(b, a);
-    create index idx3 on t1(c);
-    create index idx4 on t1(p);
+    create index idx3 on t1(c, a);
     /* we think primary scan is better than merging three TwoSideBound range indexes */
     select * from t1 where a between 1 and 8 or b between 1 and 8 or c between 1 and 8;
   batch_plan: |
@@ -482,7 +480,6 @@
     create index idx1 on t1(a);
     create index idx2 on t1(b, a);
     create index idx3 on t1(c);
-    create index idx4 on t1(p);
     /* we think primary scan is better than merging two OneSideBound range indexes */
     select * from t1 where a > 1 and b > 1
   batch_plan: |
