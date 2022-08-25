@@ -18,13 +18,17 @@ use risingwave_common_service::observer_manager::{
     Channel, NotificationClient, ObserverManager, ObserverNodeImpl,
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::HummockManagerRef;
 use risingwave_meta::manager::{MessageStatus, NotificationManagerRef, WorkerKey};
+use risingwave_meta::storage::MetaStore;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::SubscribeResponse;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-pub struct TestNotificationClient {
+pub struct TestNotificationClient<S: MetaStore> {
     notification_manager: NotificationManagerRef,
+    hummock_manager: HummockManagerRef<S>,
 }
 
 pub struct TestChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
@@ -39,20 +43,37 @@ impl<T: Send> Channel<T> for TestChannel<T> {
     }
 }
 
-impl TestNotificationClient {
-    pub fn new(notification_manager: NotificationManagerRef) -> Self {
+impl<S: MetaStore> TestNotificationClient<S> {
+    pub fn new(
+        notification_manager: NotificationManagerRef,
+        hummock_manager: HummockManagerRef<S>,
+    ) -> Self {
         Self {
             notification_manager,
+            hummock_manager,
         }
     }
 }
 
 #[async_trait::async_trait]
-impl NotificationClient for TestNotificationClient {
+impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
     type Channel = TestChannel<SubscribeResponse>;
 
     async fn subscribe(&self, addr: &HostAddr, worker_type: WorkerType) -> Result<Self::Channel> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
+        let meta_snapshot = MetaSnapshot {
+            hummock_version: Some(hummock_manager_guard.current_version.clone()),
+            ..Default::default()
+        };
+        tx.send(Ok(SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as i32,
+            info: Some(Info::Snapshot(meta_snapshot)),
+            version: self.notification_manager.current_version().await,
+        }))
+        .unwrap();
         self.notification_manager
             .insert_sender(worker_type, WorkerKey(addr.to_protobuf()), tx)
             .await;
@@ -60,21 +81,21 @@ impl NotificationClient for TestNotificationClient {
     }
 }
 
-pub async fn get_test_observer_manager(
-    client: TestNotificationClient,
+pub async fn get_test_observer_manager<S: MetaStore>(
+    client: TestNotificationClient<S>,
     addr: HostAddr,
     observer_states: Box<dyn ObserverNodeImpl + Send>,
     worker_type: WorkerType,
-) -> ObserverManager<TestNotificationClient> {
+) -> ObserverManager<TestNotificationClient<S>> {
     let rx = client.subscribe(&addr, worker_type).await.unwrap();
     ObserverManager::new_with(rx, client, addr, observer_states, worker_type)
 }
 
 #[tokio::test]
 async fn test_observer_manager() {
-    let (env, _hummock_manager_ref, _cluster_manager_ref, _worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, _worker_node) =
         setup_compute_env(8080).await;
-    let _client = TestNotificationClient::new(env.notification_manager_ref());
+    let _client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
     // let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
     // ObserverManager::new_with(rx, client, addr, observer_states, worker_type)
 }

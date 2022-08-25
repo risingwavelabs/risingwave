@@ -49,7 +49,7 @@ async fn test_basic() {
     )
     .await
     .unwrap();
-    let client = TestNotificationClient::new(env.notification_manager_ref());
+    let client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
     let compute_observer_node = ComputeObserverNode::new(
         filter_key_extractor_manager,
         hummock_storage.local_version_manager().clone(),
