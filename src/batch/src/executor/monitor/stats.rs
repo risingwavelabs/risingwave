@@ -150,8 +150,8 @@ impl BatchTaskMetrics {
     ) -> Self {
         let const_labels = HashMap::from([
             ("query_id".to_string(), id.query_id),
-            ("target_stage_id".to_string(), id.stage_id.to_string()),
-            ("target_task_id".to_string(), id.task_id.to_string()),
+            ("stage_id".to_string(), id.stage_id.to_string()),
+            ("task_id".to_string(), id.task_id.to_string()),
         ]);
 
         let exchange_recv_row_number = register_int_counter_vec_with_registry!(
