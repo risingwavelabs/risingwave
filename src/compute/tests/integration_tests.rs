@@ -34,6 +34,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
@@ -221,7 +222,11 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        vec![ScanType::BatchScan(
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await?,
+        )],
         1024,
         "RowSeqExecutor2".to_string(),
         Arc::new(BatchMetrics::for_test()),
@@ -279,7 +284,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        vec![ScanType::BatchScan(
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await?,
+        )],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::for_test()),
@@ -346,7 +355,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        vec![ScanType::BatchScan(
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await?,
+        )],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::for_test()),
@@ -415,7 +428,10 @@ async fn test_row_seq_scan() -> Result<()> {
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
         vec![ScanType::BatchScan(
-            table.batch_iter(u64::MAX).await.unwrap(),
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await
+                .unwrap(),
         )],
         1,
         "RowSeqScanExecutor2".to_string(),
