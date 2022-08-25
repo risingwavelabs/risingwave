@@ -33,7 +33,6 @@ lz4 = "1.23.1"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
 minstant = "0.1"
-moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs", "mman"] }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -80,6 +79,7 @@ zstd = "0.11.2"
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_futures"] }
+moka = { version = "0.9", features = ["future"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
