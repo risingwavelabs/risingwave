@@ -215,16 +215,17 @@ pub fn create_agg_state_unary(
         (Count, count, float32, int64, Some(0)),
         (Count, count, float64, int64, Some(0)),
         (Count, count, decimal, int64, Some(0)),
-        (Count, count_str, varchar, int64, Some(0)),
         (Count, count, boolean, int64, Some(0)),
         (Count, count, interval, int64, Some(0)),
         (Count, count, date, int64, Some(0)),
         (Count, count, timestamp, int64, Some(0)),
         (Count, count, time, int64, Some(0)),
+        (Count, count_str, varchar, int64, Some(0)),
         (Count, count_struct, struct_type, int64, Some(0)),
         (Count, count_list, list, int64, Some(0)),
         (Sum, sum, int16, int64, None),
         (Sum, sum, int32, int64, None),
+        (Sum, sum, int64, int64, None),
         (Sum, sum, int64, decimal, None),
         (Sum, sum, float32, float32, None),
         (Sum, sum, float64, float64, None),
@@ -240,8 +241,8 @@ pub fn create_agg_state_unary(
         (Min, min, date, date, None),
         (Min, min, timestamp, timestamp, None),
         (Min, min, time, time, None),
-        (Min, min_struct, struct_type, struct_type, None),
         (Min, min_str, varchar, varchar, None),
+        (Min, min_struct, struct_type, struct_type, None),
         (Min, min_list, list, list, None),
         (Max, max, int16, int16, None),
         (Max, max, int32, int32, None),
@@ -254,11 +255,9 @@ pub fn create_agg_state_unary(
         (Max, max, date, date, None),
         (Max, max, timestamp, timestamp, None),
         (Max, max, time, time, None),
-        (Max, max_struct, struct_type, struct_type, None),
         (Max, max_str, varchar, varchar, None),
+        (Max, max_struct, struct_type, struct_type, None),
         (Max, max_list, list, list, None),
-        // Global Agg
-        (Sum, sum, int64, int64, None),
         // We remark that SingleValue does not produce a runtime error when it receives zero row.
         // Therefore, we do NOT need to change the logic in GeneralAgg::output_concrete.
         (SingleValue, SingleValue::new(), int16, int16, None),
@@ -268,7 +267,18 @@ pub fn create_agg_state_unary(
         (SingleValue, SingleValue::new(), float64, float64, None),
         (SingleValue, SingleValue::new(), decimal, decimal, None),
         (SingleValue, SingleValue::new(), boolean, boolean, None),
+        (SingleValue, SingleValue::new(), date, date, None),
+        (SingleValue, SingleValue::new(), timestamp, timestamp, None),
+        (SingleValue, SingleValue::new(), time, time, None),
         (SingleValue, SingleValue::new(), varchar, varchar, None),
+        (
+            SingleValue,
+            SingleValue::new(),
+            struct_type,
+            struct_type,
+            None
+        ),
+        (SingleValue, SingleValue::new(), list, list, None),
     ];
     Ok(state)
 }
