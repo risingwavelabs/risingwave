@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_compute::compute_observer::observer_manager::ComputeObserverNode;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -27,12 +28,15 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
 use risingwave_storage::StateStoreIter;
 
+use super::test_utils::{get_test_observer_manager, TestNotificationClient};
+
 #[tokio::test]
 async fn test_basic() {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
@@ -41,10 +45,24 @@ async fn test_basic() {
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager.clone(),
     )
     .await
     .unwrap();
+    let client = TestNotificationClient::new(env.notification_manager_ref());
+    let compute_observer_node = ComputeObserverNode::new(
+        filter_key_extractor_manager,
+        hummock_storage.local_version_manager().clone(),
+    );
+    let observer_manager = get_test_observer_manager(
+        client,
+        worker_node.get_host().unwrap().into(),
+        Box::new(compute_observer_node),
+        worker_node.get_type().unwrap(),
+    )
+    .await;
+    observer_manager.start().await.unwrap();
+
     let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.

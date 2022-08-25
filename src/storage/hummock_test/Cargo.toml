@@ -14,6 +14,7 @@ parking_lot = "0.12"
 rand = "0.8"
 risingwave_common = { path = "../../common" }
 risingwave_common_service = { path = "../../common/common_service" }
+risingwave_compute = { path = "../../compute" }
 risingwave_hummock_sdk = { path = "../hummock_sdk" }
 risingwave_meta = { path = "../../meta", features = ["test"] }
 risingwave_object_store = { path = "../../object_store" }

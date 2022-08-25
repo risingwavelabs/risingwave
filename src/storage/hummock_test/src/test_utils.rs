@@ -60,7 +60,7 @@ impl NotificationClient for TestNotificationClient {
     }
 }
 
-async fn get_test_observer_manager(
+pub async fn get_test_observer_manager(
     client: TestNotificationClient,
     addr: HostAddr,
     observer_states: Box<dyn ObserverNodeImpl + Send>,
@@ -72,9 +72,9 @@ async fn get_test_observer_manager(
 
 #[tokio::test]
 async fn test_observer_manager() {
-    let (env, hummock_manager_ref, _cluster_manager_ref, _worker_node) =
+    let (env, _hummock_manager_ref, _cluster_manager_ref, _worker_node) =
         setup_compute_env(8080).await;
-    let client = TestNotificationClient::new(env.notification_manager_ref());
+    let _client = TestNotificationClient::new(env.notification_manager_ref());
     // let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
     // ObserverManager::new_with(rx, client, addr, observer_states, worker_type)
 }

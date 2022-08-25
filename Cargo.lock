@@ -4618,6 +4618,7 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_common_service",
+ "risingwave_compute",
  "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_object_store",
