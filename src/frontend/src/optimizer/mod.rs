@@ -36,6 +36,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::BatchExchange;
+use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -243,14 +244,6 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        // Convert distinct aggregates.
-        plan = self.optimize_by_rules(
-            plan,
-            "Convert Distinct Aggregation".to_string(),
-            vec![DistinctAggRule::create()],
-            ApplyOrder::TopDown,
-        );
-
         // Prune Columns
         //
         // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
@@ -264,6 +257,14 @@ impl PlanRoot {
             ctx.trace("Prune Columns:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        // Convert distinct aggregates.
+        plan = self.optimize_by_rules(
+            plan,
+            "Convert Distinct Aggregation".to_string(),
+            vec![DistinctAggRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         plan = self.optimize_by_rules(
             plan,
@@ -282,20 +283,36 @@ impl PlanRoot {
         plan
     }
 
-    /// Optimize and generate a batch query plan for distributed execution.
-    pub fn gen_batch_query_plan(&self) -> Result<PlanRef> {
+    /// Optimize and generate a singleton batch physical plan without exchange nodes.
+    fn gen_batch_plan(&self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        assert!(*plan.distribution() == Distribution::Single, "{}", plan);
+
+        struct HasExchange;
+        impl PlanVisitor<bool> for HasExchange {
+            fn visit_batch_exchange(&mut self, _: &BatchExchange) -> bool {
+                true
+            }
+        }
+        assert!(!HasExchange.visit(plan.clone()), "{}", plan);
+
         let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-        if explain_trace {
+        if ctx.is_explain_trace() {
             ctx.trace("To Batch Physical Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        Ok(plan)
+    }
+
+    /// Optimize and generate a batch query plan for distributed execution.
+    pub fn gen_batch_distributed_plan(&self) -> Result<PlanRef> {
+        let mut plan = self.gen_batch_plan()?;
 
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
@@ -306,7 +323,8 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        if explain_trace {
+        let ctx = plan.ctx();
+        if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
@@ -316,20 +334,9 @@ impl PlanRoot {
 
     /// Optimize and generate a batch query plan for local execution.
     pub fn gen_batch_local_plan(&self) -> Result<PlanRef> {
-        // Logical optimization
-        let mut plan = self.gen_optimized_logical_plan();
+        let mut plan = self.gen_batch_plan()?;
 
-        // Convert to physical plan node
-        plan = plan.to_batch_with_order_required(&self.required_order)?;
-
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-        if explain_trace {
-            ctx.trace("To Batch Physical Plan:".to_string());
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // Convert to physical plan node
+        // Convert to local plan node
         plan = plan.to_local_with_order_required(&self.required_order)?;
 
         // We remark that since the `to_local_with_order_required` does not enforce single
@@ -345,7 +352,8 @@ impl PlanRoot {
                 BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
-        if explain_trace {
+        let ctx = plan.ctx();
+        if ctx.is_explain_trace() {
             ctx.trace("To Batch Local Plan:".to_string());
             ctx.trace(plan.explain_to_string().unwrap());
         }
