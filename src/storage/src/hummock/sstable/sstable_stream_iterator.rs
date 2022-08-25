@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use super::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::{BlockHolder, BlockIterator, BlockStream, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, BlockStream, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates on a table while downloading it.
@@ -107,30 +107,35 @@ impl SstableStreamIterator {
 
         // We use the block stream (i.e. download the next block) if we already started a download,
         // or if the desired block is not in memory.
-        let block = if self.block_stream.is_some() || self.cur_idx >= self.sst.value().blocks.len()
-        {
-            // Start a new block stream if needed.
-            if self.block_stream.is_none() {
-                self.block_stream = Some(
-                    self.sstable_store
-                        .get_block_stream(
-                            self.sst.value(),
-                            Some(self.cur_idx),
-                            // ToDo: What about parameters used before (CachePolicy,
-                            // &StoreLocalStatistic)?
-                        )
-                        .await?,
-                );
-            }
-
-            self.block_stream
-                .as_mut()
-                .expect("no block stream")
-                .next()
+        let block = {
+            if self.block_stream.is_none() && let Some(holder) = self
+                .sstable_store
+                .get_from_cache(self.sst.value(), self.cur_idx as u64, &mut self.stats)
                 .await?
-                .unwrap()
-        } else {
-            BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx].clone())
+            {
+                holder
+            } else {
+                // Start a new block stream if needed.
+                if self.block_stream.is_none() {
+                    self.block_stream = Some(
+                        self.sstable_store
+                            .get_block_stream(
+                                self.sst.value(),
+                                Some(self.cur_idx),
+                                // ToDo: What about parameters used before (CachePolicy,
+                                // &StoreLocalStatistic)?
+                            )
+                            .await?,
+                    );
+                }
+
+                self.block_stream
+                    .as_mut()
+                    .expect("no block stream")
+                    .next()
+                    .await?
+                    .unwrap()
+            }
         };
 
         self.block_iter = Some(BlockIterator::new(block));
@@ -304,7 +309,7 @@ mod tests {
     };
     use crate::hummock::{CachePolicy, SstableStoreWrite};
 
-    async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
+    async fn inner_test_stream_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         let mut sstable_iter = SstableStreamIterator::create(
@@ -340,7 +345,7 @@ mod tests {
 
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
-        inner_test_forward_iterator(sstable_store.clone(), handle).await;
+        inner_test_stream_iterator(sstable_store.clone(), handle).await;
     }
 
     #[tokio::test]
