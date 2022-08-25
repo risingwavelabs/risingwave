@@ -273,9 +273,9 @@ impl Condition {
             });
 
         if all_equal {
-            // think about the case (a = 1) or (a = 1 and b = 2)
-            // we should only keep the large one range scan a = 1, because a = 1 is overlap with (a
-            // = 1 and b = 2)
+            // Think about the case (a = 1) or (a = 1 and b = 2).
+            // We should only keep the large one range scan a = 1, because a = 1 overlaps with
+            // (a = 1 and b = 2).
             let scan_ranges = disjunctions_result
                 .into_iter()
                 .flat_map(|(scan_ranges, _)| scan_ranges)
