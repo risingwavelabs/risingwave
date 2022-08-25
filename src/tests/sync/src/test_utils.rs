@@ -116,7 +116,7 @@ pub async fn wait_now(signal: Signal, timeout: Duration) -> Result<(), sync::Err
         "NOW",
         vec![sync::Action::WaitForSignal(WaitForSignal {
             signal,
-            clear_signal: true,
+            relay_signal: false,
             timeout,
         })],
         1,
@@ -136,7 +136,7 @@ async fn test_wait_for_signal_timeout() {
         "TEST_SETUP_TIMEOUT",
         vec![sync::Action::WaitForSignal(WaitForSignal {
             signal: "SIG_NEVER_EMIT".to_owned(),
-            clear_signal: true,
+            relay_signal: false,
             timeout: Duration::from_secs(1),
         })],
         1,

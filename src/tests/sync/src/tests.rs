@@ -47,7 +47,7 @@ async fn test_gc_watermark() {
             sync::Action::EmitSignal("SIG_DONE_COMPACT_UPLOAD".to_owned()),
             sync::Action::WaitForSignal(WaitForSignal {
                 signal: "SIG_START_COMPACT_REPORT".to_owned(),
-                clear_signal: true,
+                relay_signal: false,
                 timeout: Duration::from_secs(3600),
             }),
         ],
@@ -79,7 +79,7 @@ async fn test_gc_watermark() {
         "BEFORE_SCHEDULE_COMPACTION_TASK",
         vec![sync::Action::WaitForSignal(WaitForSignal {
             signal: "SIG_SCHEDULE_COMPACTION_TASK".to_owned(),
-            clear_signal: true,
+            relay_signal: false,
             timeout: Duration::from_secs(3600),
         })],
         u64::MAX,

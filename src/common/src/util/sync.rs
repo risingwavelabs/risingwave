@@ -29,8 +29,15 @@ pub enum Action {
 
 #[derive(Clone)]
 pub struct WaitForSignal {
+    /// The signal being waited for.
     pub signal: Signal,
-    pub clear_signal: bool,
+    /// Whether to stop the signal from further propagation after receiving one.
+    ///
+    /// If true, the signal is relayed and another waiter is signalled right away.
+    ///
+    /// If false, other waiter needs to wait for another signal.
+    pub relay_signal: bool,
+    /// Max duration to wait for.
     pub timeout: Duration,
 }
 
@@ -46,14 +53,19 @@ pub enum Error {
     WaitForSignalTimeout(String),
 }
 
+/// A `SyncPoint` is activated by attaching a `SyncPointInfo` to it.
 #[derive(Clone)]
 struct SyncPointInfo {
+    /// `Action`s to be executed when `SyncPoint` is triggered.
     actions: Vec<Action>,
+    /// The `SyncPoint` is deactivated after triggered `execute_times`.
     execute_times: u64,
 }
 
 struct SyncFacility {
+    /// `Notify` for each `Signal`.
     signals: parking_lot::Mutex<HashMap<Signal, Arc<tokio::sync::Notify>>>,
+    /// `SyncPointInfo` for active `SyncPoint`.
     sync_points: parking_lot::Mutex<HashMap<SyncPoint, SyncPointInfo>>,
 }
 
@@ -74,7 +86,7 @@ impl SyncFacility {
             .clone();
         match tokio::time::timeout(wait_for_signal.timeout, entry.notified()).await {
             Ok(_) => {
-                if !wait_for_signal.clear_signal {
+                if wait_for_signal.relay_signal {
                     entry.notify_one();
                 }
             }
