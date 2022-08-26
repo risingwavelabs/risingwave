@@ -100,7 +100,10 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         let client_address = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
         tracing::info!("Client address is {}", client_address);
