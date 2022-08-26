@@ -142,7 +142,7 @@ INSERT INTO integers VALUES (1), (2), (3), (4), (5);
 # 4
 # 5
 
-# Subqueries that return zero rows = Same as ommiting limit clause
+# Subqueries that return zero rows = Same as omitting limit clause
 # query I
 # SELECT * FROM integers as int order by 1 LIMIT (SELECT max(integers.i) FROM integers where i > 5);
 # ----

@@ -71,25 +71,33 @@ impl_plan_tree_node_for_unary! { StreamTopN }
 impl ToStreamProst for StreamTopN {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let column_orders = self
-            .logical
-            .topn_order()
-            .field_order
-            .iter()
-            .map(FieldOrder::to_protobuf)
-            .collect();
-
-        let topn_node = TopNNode {
-            column_orders,
-            limit: self.logical.limit() as u64,
-            offset: self.logical.offset() as u64,
-            distribution_key: vec![], // TODO: seems unnecessary
-            ..Default::default()
-        };
-
         if self.input().append_only() {
-            ProstStreamNode::AppendOnlyTopN(topn_node)
+            let column_orders = self
+                .logical
+                .topn_order()
+                .field_order
+                .iter()
+                .map(FieldOrder::to_protobuf)
+                .collect();
+
+            let node = AppendOnlyTopNNode {
+                column_orders,
+                limit: self.logical.limit() as u64,
+                offset: self.logical.offset() as u64,
+                distribution_key: vec![], // TODO: seems unnecessary
+                ..Default::default()
+            };
+            ProstStreamNode::AppendOnlyTopN(node)
         } else {
+            let topn_node = TopNNode {
+                limit: self.logical.limit() as u64,
+                offset: self.logical.offset() as u64,
+                table: Some(
+                    self.logical
+                        .infer_internal_table_catalog()
+                        .to_internal_table_prost(),
+                ),
+            };
             ProstStreamNode::TopN(topn_node)
         }
     }

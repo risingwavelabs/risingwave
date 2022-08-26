@@ -16,12 +16,12 @@ use std::fmt::{Debug, Formatter};
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use log::debug;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use tracing::debug;
 
 use super::QueryExecution;
 use crate::scheduler::plan_fragmenter::Query;
@@ -70,7 +70,8 @@ impl QueryManager {
         let epoch = self
             .hummock_snapshot_manager
             .get_epoch(query_id.clone())
-            .await?;
+            .await?
+            .committed_epoch;
 
         let query_execution = QueryExecution::new(
             query,

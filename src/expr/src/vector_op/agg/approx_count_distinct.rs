@@ -16,11 +16,12 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
 const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of indices available
@@ -33,6 +34,7 @@ const BIAS_CORRECTION: f64 = 0.72125;
 /// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
 /// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
 /// is ~1/128.
+#[derive(Clone)]
 pub struct ApproxCountDistinct {
     return_type: DataType,
     input_col_idx: usize,
@@ -165,18 +167,13 @@ impl Aggregator for ApproxCountDistinct {
         Ok(())
     }
 
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         let result = self.calculate_result();
+        self.registers = [0; NUM_OF_REGISTERS];
         match builder {
             ArrayBuilderImpl::Int64(b) => b.append(Some(result)).map_err(Into::into),
-            _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
+            _ => bail!("Unexpected builder for count(*)."),
         }
-    }
-
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let res = self.output(builder);
-        self.registers = [0; NUM_OF_REGISTERS];
-        res
     }
 }
 
@@ -228,7 +225,7 @@ mod tests {
             for row_id in 0..data_chunk.cardinality() {
                 agg.update_single(&data_chunk, row_id).unwrap();
             }
-            agg.output_and_reset(&mut builder).unwrap();
+            agg.output(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();
@@ -253,7 +250,7 @@ mod tests {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
             agg.update_multi(&data_chunk, 0, data_chunk.cardinality())
                 .unwrap();
-            agg.output_and_reset(&mut builder).unwrap();
+            agg.output(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();

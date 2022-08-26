@@ -252,9 +252,14 @@ impl FrontendEnv {
         let frontend_address: HostAddr = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
+        tracing::info!("Client address is {}", frontend_address);
+
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
             .register(WorkerType::Frontend, &frontend_address, 0)
@@ -561,7 +566,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         sql: &str,
 
-        // format: indicate the query PgReponse format (Only meaningful for SELECT queries).
+        // format: indicate the query PgResponse format (Only meaningful for SELECT queries).
         // false: TEXT
         // true: BINARY
         format: bool,

@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::{debug, error};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
@@ -31,6 +30,7 @@ use risingwave_pb::stream_service::{
     UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;

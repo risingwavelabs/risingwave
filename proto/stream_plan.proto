@@ -83,7 +83,7 @@ message Barrier {
   }
   // Used for tracing.
   bytes span = 2;
-  //Whether this barrier do checkpoint
+  // Whether this barrier do checkpoint
   bool checkpoint = 9;
 }
 
@@ -107,9 +107,10 @@ message SourceNode {
     TABLE = 1;
     SOURCE = 2;
   }
-  uint32 table_id = 1;
+  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
+  uint32 state_table_id = 4; // use state_table_id as state store prefix
 }
 
 message SinkNode {
@@ -168,6 +169,12 @@ message HashAggNode {
 }
 
 message TopNNode {
+  // 0 means no limit as limit of 0 means this node should be optimized away
+  uint64 limit = 1;
+  uint64 offset = 2;
+  catalog.Table table = 3;
+}
+message AppendOnlyTopNNode {
   repeated plan_common.ColumnOrder column_orders = 1;
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
@@ -176,6 +183,14 @@ message TopNNode {
   // Used for internal table states
   uint32 table_id_l = 5;
   uint32 table_id_h = 6;
+}
+
+message GroupTopNNode {
+  // 0 means no limit as limit of 0 means this node should be optimized away
+  uint64 limit = 1;
+  uint64 offset = 2;
+  repeated uint32 group_key = 3;
+  catalog.Table table = 4;
 }
 
 message HashJoinNode {
@@ -354,7 +369,7 @@ message StreamNode {
     SimpleAggNode local_simple_agg = 104;
     SimpleAggNode global_simple_agg = 105;
     HashAggNode hash_agg = 106;
-    TopNNode append_only_top_n = 107;
+    AppendOnlyTopNNode append_only_top_n = 107;
     HashJoinNode hash_join = 108;
     TopNNode top_n = 109;
     HopWindowNode hop_window = 110;
@@ -371,6 +386,7 @@ message StreamNode {
     ExpandNode expand = 121;
     DynamicFilterNode dynamic_filter = 122;
     ProjectSetNode project_set = 123;
+    GroupTopNNode group_top_n = 124;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -446,6 +462,7 @@ enum FragmentType {
   FRAGMENT_UNSPECIFIED = 0;
   OTHERS = 1;
   SOURCE = 2;
+  // TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now.
   SINK = 3;
 }
 
@@ -460,6 +477,8 @@ message StreamFragmentGraph {
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;
+    // Mark the upstream table ids of this fragment, Used for fragments with `Chain`s.
+    repeated uint32 upstream_table_ids = 6;
   }
 
   message StreamFragmentEdge {

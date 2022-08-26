@@ -8,6 +8,7 @@ message Status {
   enum Code {
     UNSPECIFIED = 0;
     OK = 1;
+    UNKNOWN_WORKER = 2;
   }
   Code code = 1;
   string message = 2;

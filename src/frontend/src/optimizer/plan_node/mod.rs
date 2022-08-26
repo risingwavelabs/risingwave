@@ -217,6 +217,7 @@ mod batch_simple_agg;
 mod batch_sort;
 mod batch_table_function;
 mod batch_topn;
+mod batch_union;
 mod batch_update;
 mod batch_values;
 mod logical_agg;
@@ -235,6 +236,7 @@ mod logical_scan;
 mod logical_source;
 mod logical_table_function;
 mod logical_topn;
+mod logical_union;
 mod logical_update;
 mod logical_values;
 mod stream_delta_join;
@@ -277,6 +279,7 @@ pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
+pub use batch_union::BatchUnion;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::{LogicalAgg, PlanAggCall, PlanAggCallDisplay};
@@ -295,6 +298,7 @@ pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
+pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use stream_delta_join::StreamDeltaJoin;
@@ -303,6 +307,7 @@ pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
+pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
@@ -353,6 +358,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MultiJoin }
             , { Logical, Expand }
             , { Logical, ProjectSet }
+            , { Logical, Union }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -374,6 +380,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Expand }
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
+            , { Batch, Union }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -392,6 +399,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, GroupTopN }
         }
     };
 }
@@ -420,6 +428,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, MultiJoin }
             , { Logical, Expand }
             , { Logical, ProjectSet }
+            , { Logical, Union }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support that, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -452,6 +461,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Expand }
             , { Batch, LookupJoin }
             , { Batch, ProjectSet }
+            , { Batch, Union }
         }
     };
 }
@@ -480,6 +490,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
+            , { Stream, GroupTopN }
         }
     };
 }
@@ -489,7 +500,7 @@ macro_rules! enum_plan_node_type {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-            #[derive(Copy, Clone, PartialEq, Debug)]
+            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq)]
             pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }

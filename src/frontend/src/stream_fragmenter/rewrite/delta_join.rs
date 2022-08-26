@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DatabaseId, Field, SchemaId};
+use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderType;
@@ -138,10 +138,7 @@ impl StreamFragmenter {
                             .collect(),
                         exchange_a0l0.append_only,
                     )
-                    .to_prost(
-                        SchemaId::placeholder() as u32,
-                        DatabaseId::placeholder() as u32,
-                    ),
+                    .to_internal_table_prost(),
                 ),
             },
         );
@@ -184,10 +181,7 @@ impl StreamFragmenter {
                             .collect(),
                         exchange_a1l1.append_only,
                     )
-                    .to_prost(
-                        SchemaId::placeholder() as u32,
-                        DatabaseId::placeholder() as u32,
-                    ),
+                    .to_internal_table_prost(),
                 ),
             },
         );

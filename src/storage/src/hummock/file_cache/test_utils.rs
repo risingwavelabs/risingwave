@@ -190,7 +190,7 @@ mod tests {
 /// File systems like ext4 takes metadata blocks into account in `stat.st_blocks` of `fstat(2)`.
 /// So it'not accurate if you really want to know the data size of sparse file with `fstat`.
 ///
-/// `datasize` is implementated by iterates the `fiemap` of the file.
+/// `datasize` is implemented by iterates the `fiemap` of the file.
 pub fn datasize(path: impl AsRef<Path>) -> Result<usize> {
     let mut size = 0;
 

@@ -76,7 +76,7 @@ impl SplitReader for KafkaSplitReader {
             .map_err(|e| anyhow!("consumer creation failed {}", e))?;
 
         if let Some(splits) = state {
-            log::debug!("Splits for kafka found! {:?}", splits);
+            tracing::debug!("Splits for kafka found! {:?}", splits);
             let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
             for split in splits {

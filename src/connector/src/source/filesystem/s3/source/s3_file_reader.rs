@@ -23,7 +23,6 @@ use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use io::StreamReader;
 use itertools::Itertools;
-use log::{error, info};
 use mpsc::Sender;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -31,6 +30,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
+use tracing::{error, info};
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2, AwsCredentialV2};
 use crate::source::base::{SourceMessage, SplitReader};

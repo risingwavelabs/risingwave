@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::hash_join::*;
@@ -119,17 +119,14 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let kind = calc_hash_key_kind(&keys);
 
         let state_table_l =
-            RowBasedStateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
-        let degree_state_table_l = RowBasedStateTable::from_table_catalog(
-            degree_table_l,
-            store.clone(),
-            Some(vnodes.clone()),
-        );
+            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
+        let degree_state_table_l =
+            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()));
 
         let state_table_r =
-            RowBasedStateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone()));
+            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone()));
         let degree_state_table_r =
-            RowBasedStateTable::from_table_catalog(degree_table_r, store, Some(vnodes));
+            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -169,10 +166,10 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
-    state_table_l: RowBasedStateTable<S>,
-    degree_state_table_l: RowBasedStateTable<S>,
-    state_table_r: RowBasedStateTable<S>,
-    degree_state_table_r: RowBasedStateTable<S>,
+    state_table_l: StateTable<S>,
+    degree_state_table_l: StateTable<S>,
+    state_table_r: StateTable<S>,
+    degree_state_table_r: StateTable<S>,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
 }

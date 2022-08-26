@@ -28,9 +28,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_storage::streaming_table::state_table;
-use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::table::storage_table::merge_by_pk;
+use risingwave_storage::table::streaming_table::state_table;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
@@ -231,7 +231,7 @@ struct TableInner<S: StateStore> {
     order_key_indices: Vec<usize>,
     // This should be indentical to the data types in table schema.
     all_data_types: Vec<DataType>,
-    pub(crate) table: RowBasedStateTable<S>,
+    pub(crate) table: StateTable<S>,
 }
 
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
@@ -241,10 +241,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         target_cap: usize,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
         state_pk_indices: Vec<usize>,
         degree_all_data_types: Vec<DataType>,
-        degree_table: RowBasedStateTable<S>,
+        degree_table: StateTable<S>,
         degree_pk_indices: Vec<usize>,
 
         metrics: Arc<StreamingMetrics>,

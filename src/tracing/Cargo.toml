@@ -1,0 +1,20 @@
+[package]
+name = "risingwave_tracing"
+version = "0.1.11"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1"
+futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
+minitrace = "0.4"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "sync",
+    "macros",
+    "time",
+    "signal"
+] }
+tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { version = "0.1", path = "../workspace-hack" }

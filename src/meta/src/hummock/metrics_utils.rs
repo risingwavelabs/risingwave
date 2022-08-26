@@ -57,7 +57,7 @@ pub fn trigger_sst_stat(
         level_sst_size / 1024
     };
 
-    for idx in 0..current_version.num_levels() {
+    for idx in 0..current_version.num_levels(compaction_group_id) {
         let sst_num = level_sst_cnt(idx);
         let level_label = format!(
             "{}_{}",

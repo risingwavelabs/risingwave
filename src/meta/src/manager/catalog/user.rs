@@ -37,11 +37,8 @@ fn get_relation(user_info: &HashMap<UserId, UserInfo>) -> HashMap<UserId, HashSe
             for option in &grant_privilege_item.action_with_opts {
                 user_grant_relation
                     .entry(option.get_granted_by())
-                    .or_insert_with(HashSet::new);
-                let relation_item = user_grant_relation
-                    .get_mut(&option.get_granted_by())
-                    .unwrap();
-                relation_item.insert(*user_id);
+                    .or_insert_with(HashSet::new)
+                    .insert(*user_id);
             }
         }
     }
@@ -138,6 +135,7 @@ mod tests {
 
     use super::*;
     use crate::manager::CatalogManager;
+    use crate::storage::{MemStore, Transaction};
 
     fn make_test_user(id: u32, name: &str) -> UserInfo {
         UserInfo {
@@ -166,29 +164,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_user_manager() -> MetaResult<()> {
-        let user_manager = CatalogManager::new(MetaSrvEnv::for_test().await).await?;
+    async fn test_catalog_manager() -> MetaResult<()> {
+        let catalog_manager = CatalogManager::new(MetaSrvEnv::for_test().await).await?;
         let (test_user_id, test_user) = (10, "test_user");
 
         let (test_sub_user_id, test_sub_user) = (11, "test_sub_user");
-        user_manager
+        catalog_manager
             .create_user(&make_test_user(test_user_id, test_user))
             .await?;
-        user_manager
+        catalog_manager
             .create_user(&make_test_user(test_sub_user_id, test_sub_user))
             .await?;
-        assert!(user_manager
+        assert!(catalog_manager
             .create_user(&make_test_user(DEFAULT_SUPER_USER_ID, DEFAULT_SUPER_USER))
             .await
             .is_err());
 
-        let users = user_manager.list_users().await;
+        let users = catalog_manager.list_users().await;
         assert_eq!(users.len(), 4);
 
         let object = Object::TableId(0);
         let other_object = Object::TableId(1);
         // Grant when grantor does not have privilege.
-        let res = user_manager
+        let res = catalog_manager
             .grant_privilege(
                 &[test_sub_user_id],
                 &[make_privilege(
@@ -200,10 +198,10 @@ mod tests {
             )
             .await;
         assert!(res.is_err());
-        let sub_user = user_manager.get_user(test_sub_user_id).await?;
+        let sub_user = catalog_manager.get_user(test_sub_user_id).await?;
         assert_eq!(sub_user.grant_privileges.len(), 0);
         // Grant Select/Insert without grant option.
-        user_manager
+        catalog_manager
             .grant_privilege(
                 &[test_user_id],
                 &[make_privilege(
@@ -214,7 +212,7 @@ mod tests {
                 DEFAULT_SUPER_USER_ID,
             )
             .await?;
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges.len(), 1);
         assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 2);
@@ -223,7 +221,7 @@ mod tests {
             .iter()
             .all(|p| !p.with_grant_option));
         // Grant when grantor does not have privilege's grant option.
-        let res = user_manager
+        let res = catalog_manager
             .grant_privilege(
                 &[test_sub_user_id],
                 &[make_privilege(
@@ -235,10 +233,10 @@ mod tests {
             )
             .await;
         assert!(res.is_err());
-        let sub_user = user_manager.get_user(test_sub_user_id).await?;
+        let sub_user = catalog_manager.get_user(test_sub_user_id).await?;
         assert_eq!(sub_user.grant_privileges.len(), 0);
         // Grant Select/Insert with grant option.
-        user_manager
+        catalog_manager
             .grant_privilege(
                 &[test_user_id],
                 &[make_privilege(
@@ -249,7 +247,7 @@ mod tests {
                 DEFAULT_SUPER_USER_ID,
             )
             .await?;
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges.len(), 1);
         assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 2);
@@ -258,7 +256,7 @@ mod tests {
             .iter()
             .all(|p| p.with_grant_option));
         // Grant to subuser
-        let res = user_manager
+        let res = catalog_manager
             .grant_privilege(
                 &[test_sub_user_id],
                 &[make_privilege(
@@ -270,10 +268,10 @@ mod tests {
             )
             .await;
         assert!(res.is_ok());
-        let sub_user = user_manager.get_user(test_sub_user_id).await?;
+        let sub_user = catalog_manager.get_user(test_sub_user_id).await?;
         assert_eq!(sub_user.grant_privileges.len(), 1);
         // Grant Select/Update/Delete with grant option, while Select is duplicated.
-        user_manager
+        catalog_manager
             .grant_privilege(
                 &[test_user_id],
                 &[make_privilege(
@@ -284,7 +282,7 @@ mod tests {
                 DEFAULT_SUPER_USER_ID,
             )
             .await?;
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges.len(), 1);
         assert_eq!(user.grant_privileges[0].object, Some(object.clone()));
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
@@ -294,7 +292,7 @@ mod tests {
             .all(|p| p.with_grant_option));
 
         // Revoke without privilege action
-        let res = user_manager
+        let res = catalog_manager
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(object.clone(), &[Action::Connect], false)],
@@ -305,12 +303,12 @@ mod tests {
             )
             .await;
         assert!(res.is_err());
-        let sub_user = user_manager.get_user(test_sub_user_id).await?;
+        let sub_user = catalog_manager.get_user(test_sub_user_id).await?;
         assert_eq!(sub_user.grant_privileges.len(), 1);
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         // Revoke without privilege object
-        let res = user_manager
+        let res = catalog_manager
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(
@@ -325,12 +323,12 @@ mod tests {
             )
             .await;
         assert!(res.is_err());
-        let sub_user = user_manager.get_user(test_sub_user_id).await?;
+        let sub_user = catalog_manager.get_user(test_sub_user_id).await?;
         assert_eq!(sub_user.grant_privileges.len(), 1);
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         // Revoke with restrict
-        let res = user_manager
+        let res = catalog_manager
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(
@@ -350,12 +348,12 @@ mod tests {
             )
             .await;
         assert!(res.is_err());
-        let sub_user = user_manager.get_user(test_sub_user_id).await?;
+        let sub_user = catalog_manager.get_user(test_sub_user_id).await?;
         assert_eq!(sub_user.grant_privileges.len(), 1);
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         // Revoke Select/Update/Delete/Insert with grant option.
-        user_manager
+        catalog_manager
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(
@@ -374,16 +372,16 @@ mod tests {
                 true,
             )
             .await?;
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 4);
         assert!(user.grant_privileges[0]
             .action_with_opts
             .iter()
             .all(|p| !p.with_grant_option));
-        let sub_user = user_manager.get_user(test_sub_user_id).await?;
+        let sub_user = catalog_manager.get_user(test_sub_user_id).await?;
         assert_eq!(sub_user.grant_privileges.len(), 0);
         // Revoke Select/Delete/Insert.
-        user_manager
+        catalog_manager
             .revoke_privilege(
                 &[test_user_id],
                 &[make_privilege(
@@ -397,13 +395,27 @@ mod tests {
                 true,
             )
             .await?;
-        let user = user_manager.get_user(test_user_id).await?;
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert_eq!(user.grant_privileges.len(), 1);
         assert_eq!(user.grant_privileges[0].action_with_opts.len(), 1);
 
         // Release all privileges with object.
-        user_manager.release_privileges(&object).await?;
-        let user = user_manager.get_user(test_user_id).await?;
+        let mut txn = Transaction::default();
+        let users_need_update = CatalogManager::<MemStore>::release_privileges(
+            catalog_manager.list_users().await,
+            &object,
+            &mut txn,
+        )?;
+        catalog_manager.env.meta_store().txn(txn).await?;
+        for user in users_need_update {
+            catalog_manager
+                .core
+                .lock()
+                .await
+                .user
+                .insert_user_info(user.id, user);
+        }
+        let user = catalog_manager.get_user(test_user_id).await?;
         assert!(user.grant_privileges.is_empty());
 
         Ok(())

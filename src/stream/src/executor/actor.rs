@@ -48,7 +48,7 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        log::error!("Compute error: {}, executor: {identity}", err);
+        tracing::error!("Compute error: {}, executor: {identity}", err);
         self.errors
             .lock()
             .entry(identity.to_owned())

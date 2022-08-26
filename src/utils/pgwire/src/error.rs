@@ -22,37 +22,37 @@ pub type PsqlResult<T> = std::result::Result<T, PsqlError>;
 /// Error type used in pgwire crates.
 #[derive(Error, Debug)]
 pub enum PsqlError {
-    #[error("SslError: {0}.")]
+    #[error("SslError: {0}")]
     SslError(IoError),
 
-    #[error("StartupError: {0}.")]
+    #[error("StartupError: {0}")]
     StartupError(BoxedError),
 
-    #[error("PasswordError: {0}.")]
+    #[error("PasswordError: {0}")]
     PasswordError(IoError),
 
-    #[error("QueryError: {0}.")]
+    #[error("QueryError: {0}")]
     QueryError(BoxedError),
 
-    #[error("Encode error {0}.")]
+    #[error("Encode error {0}")]
     CancelMsg(String),
 
-    #[error("ParseError: {0}.")]
+    #[error("ParseError: {0}")]
     ParseError(BoxedError),
 
-    #[error("BindError: {0}.")]
+    #[error("BindError: {0}")]
     BindError(IoError),
 
-    #[error("ExecuteError: {0}.")]
+    #[error("ExecuteError: {0}")]
     ExecuteError(BoxedError),
 
-    #[error("DescribeError: {0}.")]
+    #[error("DescribeError: {0}")]
     DescribeError(String),
 
-    #[error("CloseError: {0}.")]
+    #[error("CloseError: {0}")]
     CloseError(IoError),
 
-    #[error("ReadMsgError: {0}.")]
+    #[error("ReadMsgError: {0}")]
     ReadMsgError(IoError),
 
     #[error("{0}")]

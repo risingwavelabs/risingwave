@@ -1,0 +1,4 @@
+query IIRTT rowsort
+SELECT * FROM nexmark_q15;
+----
+2015-07-15 50 18 16 16 10 5 7 4 12 8 8 6

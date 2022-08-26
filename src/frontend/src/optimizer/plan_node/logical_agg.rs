@@ -451,7 +451,6 @@ impl LogicalAgg {
             table_catalogs.push(state_table);
             column_mappings_vec.push(column_mapping);
         }
-        // TODO: fill column mapping later (#3485).
         (table_catalogs, column_mappings_vec)
     }
 
@@ -608,7 +607,7 @@ impl LogicalAgg {
     pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
         self.agg_calls
             .iter()
-            .any(|call| matches!(call.agg_kind, AggKind::StringAgg))
+            .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 }
 
@@ -1186,7 +1185,7 @@ impl PredicatePushdown for LogicalAgg {
         // SimpleAgg should be skipped because the predicate either references agg_calls
         // or is const.
         // If the filter references agg_calls, we can not push it.
-        // When it is constantly true, pushing is useless and may actually cause more evaulation
+        // When it is constantly true, pushing is useless and may actually cause more evaluation
         // cost of the predicate.
         // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
         // returns 1 row.

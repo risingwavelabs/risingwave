@@ -201,6 +201,9 @@ impl FunctionCall {
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(child: ExprImpl, target: DataType, allows: CastContext) -> Result<ExprImpl> {
+        if is_row_function(&child) {
+            return Self::cast_nested(child, target, allows);
+        }
         let source = child.return_type();
         if child.is_null() {
             Ok(Literal::new(None, target).into())
@@ -222,6 +225,40 @@ impl FunctionCall {
             ))
             .into())
         }
+    }
+
+    /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbitrary
+    /// expressions, like `ROW(1)::STRUCT<i INTEGER>` to `STRUCT<VARCHAR>`, although an integer
+    /// is castible to VARCHAR. It's to simply the casting rules.
+    fn cast_nested(expr: ExprImpl, target_type: DataType, allows: CastContext) -> Result<ExprImpl> {
+        let func = *expr.into_function_call().unwrap();
+        let (fields, field_names) = if let DataType::Struct(t) = &target_type {
+            (t.fields.clone(), t.field_names.clone())
+        } else {
+            return Err(ErrorCode::BindError(format!(
+                "column is of type '{}' but expression is of type record",
+                target_type
+            ))
+            .into());
+        };
+        let (func_type, inputs, _) = func.decompose();
+        let msg = match fields.len().cmp(&inputs.len()) {
+            std::cmp::Ordering::Equal => {
+                let inputs = inputs
+                    .into_iter()
+                    .zip_eq(fields.to_vec())
+                    .map(|(e, t)| Self::new_cast(e, t, allows))
+                    .collect::<Result<Vec<_>>>()?;
+                let return_type = DataType::new_struct(
+                    inputs.iter().map(|i| i.return_type()).collect_vec(),
+                    field_names,
+                );
+                return Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into());
+            }
+            std::cmp::Ordering::Less => "Input has too few columns.",
+            std::cmp::Ordering::Greater => "Input has too many columns.",
+        };
+        Err(ErrorCode::BindError(format!("cannot cast record to {} ({})", target_type, msg)).into())
     }
 
     /// Construct a `FunctionCall` expr directly with the provided `return_type`, bypassing type
@@ -389,4 +426,13 @@ fn explain_verbose_binary_op(
     write!(f, ")")?;
 
     Ok(())
+}
+
+fn is_row_function(expr: &ExprImpl) -> bool {
+    if let ExprImpl::FunctionCall(func) = expr {
+        if func.get_expr_type() == ExprType::Row {
+            return true;
+        }
+    }
+    false
 }

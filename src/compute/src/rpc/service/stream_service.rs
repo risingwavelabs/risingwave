@@ -82,9 +82,9 @@ impl StreamService for StreamServiceImpl {
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
     ) -> std::result::Result<Response<BroadcastActorInfoTableResponse>, Status> {
-        let table = request.into_inner();
+        let req = request.into_inner();
 
-        let res = self.mgr.update_actor_info(table);
+        let res = self.mgr.update_actor_info(&req.info);
         match res {
             Err(e) => {
                 error!("failed to update actor info table actor {}", e);
@@ -236,7 +236,7 @@ impl StreamServiceImpl {
 
         let id = TableId::new(source.id); // TODO: use SourceId instead
 
-        match &source.get_info()? {
+        match source.get_info()? {
             Info::StreamSource(info) => {
                 self.env
                     .source_manager()
@@ -251,9 +251,12 @@ impl StreamServiceImpl {
                     .map(|c| c.column_desc.unwrap().into())
                     .collect_vec();
 
-                self.env
-                    .source_manager()
-                    .create_table_source(&id, columns)?;
+                self.env.source_manager().create_table_source(
+                    &id,
+                    columns,
+                    info.row_id_index.as_ref().map(|index| index.index as _),
+                    info.pk_column_ids.clone(),
+                )?;
             }
         };
 

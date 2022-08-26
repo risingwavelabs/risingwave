@@ -18,7 +18,7 @@ import { Node } from "../lib/algo";
 import { StreamChartHelper } from "../lib/streamPlan/streamChartHelper";
 
 describe("Algo", () => {
-  it("shoule generate right dag layout", () => {
+  it("should generate right dag layout", () => {
     // fake data
     let nodes = [];
     for (let i = 0; i < 10; ++i) {

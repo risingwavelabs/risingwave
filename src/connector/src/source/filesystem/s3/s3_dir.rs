@@ -21,11 +21,11 @@ use aws_sdk_sqs::client as sqs_client;
 use aws_smithy_types::tristate::TriState;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
-use log::{debug, error, info};
 use sync::watch;
 use thiserror::Error;
 use tokio::sync;
 use tokio::sync::mpsc::Sender;
+use tracing::{debug, error, info};
 
 use crate::source::filesystem::file_common::{
     Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,

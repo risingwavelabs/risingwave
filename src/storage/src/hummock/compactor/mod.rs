@@ -21,7 +21,6 @@ mod shared_buffer_compact;
 mod sstable_store;
 
 use std::collections::HashSet;
-use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,7 +35,9 @@ pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
+use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, FullKey};
@@ -115,22 +116,6 @@ pub struct Compactor {
 pub type CompactOutput = (usize, Vec<SstableInfo>);
 
 impl Compactor {
-    /// Tries to schedule on current runtime if `compaction_executor` is None.
-    fn request_execution(
-        compaction_executor: Arc<CompactionExecutor>,
-        split_task: impl Future<Output = HummockResult<CompactOutput>> + Send + 'static,
-    ) -> HummockResult<JoinHandle<HummockResult<CompactOutput>>> {
-        let rx = compaction_executor
-            .send_request(split_task)
-            .map_err(HummockError::compaction_executor)?;
-        Ok(tokio::spawn(async move {
-            match rx.await {
-                Ok(result) => result,
-                Err(err) => Err(HummockError::compaction_executor(err)),
-            }
-        }))
-    }
-
     /// Handles a compaction task and reports its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(
@@ -151,56 +136,52 @@ impl Compactor {
         let _guard = scopeguard::guard(
             (tracker_id, sstable_id_manager_clone),
             |(tracker_id, sstable_id_manager)| {
-                tokio::spawn(async move {
-                    sstable_id_manager.remove_watermark_sst_id(tracker_id).await;
-                });
+                sstable_id_manager.remove_watermark_sst_id(tracker_id);
             },
         );
 
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
-        let compaction_read_bytes = compact_task
+        let select_table_infos = compact_task
             .input_ssts
             .iter()
             .filter(|level| level.level_idx != compact_task.target_level)
             .flat_map(|level| level.table_infos.iter())
-            .map(|t| t.file_size)
-            .sum::<u64>();
+            .collect_vec();
+        let target_table_infos = compact_task
+            .input_ssts
+            .iter()
+            .filter(|level| level.level_idx == compact_task.target_level)
+            .flat_map(|level| level.table_infos.iter())
+            .collect_vec();
         context
             .stats
             .compact_read_current_level
             .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
-            .inc_by(compaction_read_bytes);
+            .inc_by(
+                select_table_infos
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum::<u64>(),
+            );
         context
             .stats
             .compact_read_sstn_current_level
             .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
-            .inc_by(compact_task.input_ssts[0].table_infos.len() as u64);
+            .inc_by(select_table_infos.len() as u64);
+
+        let sec_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
+        let next_level_label = compact_task.target_level.to_string();
         context
             .stats
-            .compact_frequency
-            .with_label_values(&[group_label.as_str(), cur_level_label.as_str()])
-            .inc();
-
-        if compact_task.input_ssts.len() > 1 {
-            let target_input_level = compact_task.input_ssts.last().unwrap();
-            let sec_level_read_bytes: u64 = target_input_level
-                .table_infos
-                .iter()
-                .map(|t| t.file_size)
-                .sum();
-            let next_level_label = target_input_level.level_idx.to_string();
-            context
-                .stats
-                .compact_read_next_level
-                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
-                .inc_by(sec_level_read_bytes);
-            context
-                .stats
-                .compact_read_sstn_next_level
-                .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
-                .inc_by(compact_task.input_ssts[1].table_infos.len() as u64);
-        }
+            .compact_read_next_level
+            .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+            .inc_by(sec_level_read_bytes);
+        context
+            .stats
+            .compact_read_sstn_next_level
+            .with_label_values(&[group_label.as_str(), next_level_label.as_str()])
+            .inc_by(target_table_infos.len() as u64);
 
         let timer = context
             .stats
@@ -232,7 +213,6 @@ impl Compactor {
         let mut compaction_futures = vec![];
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
-            let compaction_executor = context.compaction_executor.clone();
             let filter = multi_filter.clone();
             let multi_filter_key_extractor = multi_filter_key_extractor.clone();
             let compactor_runner = CompactorRunner::new(
@@ -240,30 +220,32 @@ impl Compactor {
                 compactor_context.as_ref(),
                 compact_task.clone(),
             );
-            let rx = match Compactor::request_execution(compaction_executor, async move {
+            let handle = tokio::spawn(async move {
                 compactor_runner
                     .run(filter, multi_filter_key_extractor)
                     .await
-            }) {
-                Ok(rx) => rx,
-                Err(err) => {
-                    tracing::warn!("Failed to schedule compaction execution: {:#?}", err);
-                    return false;
-                }
-            };
-            compaction_futures.push(rx);
+            });
+            compaction_futures.push(handle);
         }
 
         let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
         while let Some(future_result) = buffered.next().await {
-            match future_result.unwrap() {
-                Ok((split_index, ssts)) => {
+            match future_result {
+                Ok(Ok((split_index, ssts))) => {
                     output_ssts.push((split_index, ssts));
+                }
+                Ok(Err(e)) => {
+                    compact_success = false;
+                    tracing::warn!(
+                        "Compaction task {} failed with error: {:#?}",
+                        compact_task.task_id,
+                        e
+                    );
                 }
                 Err(e) => {
                     compact_success = false;
                     tracing::warn!(
-                        "Compaction task {} failed with error: {:#?}",
+                        "Compaction task {} failed with join handle error: {:#?}",
                         compact_task.task_id,
                         e
                     );
@@ -274,6 +256,7 @@ impl Compactor {
         // Sort by split/key range index.
         output_ssts.sort_by_key(|(split_index, _)| *split_index);
 
+        on_sync_point("BEFORE_COMPACT_REPORT").await.unwrap();
         // After a compaction is done, mutate the compaction task.
         Self::compact_done(
             &mut compact_task,
@@ -282,6 +265,7 @@ impl Compactor {
             compact_success,
         )
         .await;
+        on_sync_point("AFTER_COMPACT_REPORT").await.unwrap();
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
             "Finished compaction task in {:?}ms: \n{}",
@@ -328,6 +312,12 @@ impl Compactor {
             .compact_write_sstn
             .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
+        let ret_label = if task_ok { "success" } else { "failed" };
+        context
+            .stats
+            .compact_frequency
+            .with_label_values(&[group_label.as_str(), ret_label])
+            .inc();
 
         if let Err(e) = context
             .hummock_meta_client
@@ -352,29 +342,6 @@ impl Compactor {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
         let join_handle = tokio::spawn(async move {
-            let process_task = |task, compactor_context, hummock_meta_client| async {
-                match task {
-                    Task::CompactTask(compact_task) => {
-                        Compactor::compact(compactor_context, compact_task).await;
-                    }
-                    Task::VacuumTask(vacuum_task) => {
-                        Vacuum::vacuum(
-                            vacuum_task,
-                            compactor_context.context.sstable_store.clone(),
-                            hummock_meta_client,
-                        )
-                        .await;
-                    }
-                    Task::FullScanTask(full_scan_task) => {
-                        Vacuum::full_scan(
-                            full_scan_task,
-                            compactor_context.context.sstable_store.clone(),
-                            hummock_meta_client,
-                        )
-                        .await;
-                    }
-                }
-            };
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             // This outer loop is to recreate stream.
             'start_stream: loop {
@@ -404,6 +371,7 @@ impl Compactor {
                         continue 'start_stream;
                     }
                 };
+                let executor = compactor_context.context.compaction_executor.clone();
 
                 // This inner loop is to consume stream.
                 'consume_stream: loop {
@@ -424,11 +392,32 @@ impl Compactor {
                                 Some(task) => task,
                                 None => continue 'consume_stream,
                             };
-                            tokio::spawn(process_task(
-                                task,
-                                compactor_context.clone(),
-                                hummock_meta_client.clone(),
-                            ));
+
+                            let context = compactor_context.clone();
+                            let meta_client = hummock_meta_client.clone();
+                            executor.execute(async move {
+                                match task {
+                                    Task::CompactTask(compact_task) => {
+                                        Compactor::compact(context, compact_task).await;
+                                    }
+                                    Task::VacuumTask(vacuum_task) => {
+                                        Vacuum::vacuum(
+                                            vacuum_task,
+                                            context.context.sstable_store.clone(),
+                                            meta_client,
+                                        )
+                                        .await;
+                                    }
+                                    Task::FullScanTask(full_scan_task) => {
+                                        Vacuum::full_scan(
+                                            full_scan_task,
+                                            context.context.sstable_store.clone(),
+                                            meta_client,
+                                        )
+                                        .await;
+                                    }
+                                }
+                            });
                         }
                         Err(e) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());

@@ -24,7 +24,6 @@ hyper = "0.14"
 iter-chunks = "0.1"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
@@ -63,12 +62,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

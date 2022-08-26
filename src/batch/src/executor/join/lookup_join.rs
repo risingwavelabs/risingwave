@@ -149,7 +149,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `ProstExchangeSource` using the given `id`.
     fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
         let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
-            internal_error("No worker node found for hte given parallel unit id.")
+            internal_error("No worker node found for the given parallel unit id.")
         })?;
 
         let local_execute_plan = LocalExecutePlan {
@@ -169,7 +169,14 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
         let prost_exchange_source = ProstExchangeSource {
             task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId::default()),
+                task_id: Some(ProstTaskId {
+                    // FIXME: We should replace this random generated uuid to current query_id for
+                    // better dashboard. However, due to the lack of info of
+                    // stage_id and task_id, we can not do it now. Now just make sure it will not
+                    // conflict.
+                    query_id: Uuid::new_v4().to_string(),
+                    ..Default::default()
+                }),
                 output_id: 0,
             }),
             host: Some(worker.host.as_ref().unwrap().clone()),
@@ -690,7 +697,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             schema: actual_schema,
             output_indices,
             last_chunk: None,
-            identity: "LookupJoinExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

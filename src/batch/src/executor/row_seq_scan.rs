@@ -25,6 +25,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
@@ -186,7 +187,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 vnodes: Bitmap::from(vnodes).into(),
                 dist_key_indices,
             },
-            // This is possbile for dml. vnode_bitmap is not filled by scheduler.
+            // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
             None => Distribution::all_vnodes(dist_key_indices),
         };
@@ -214,7 +215,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
-                let iter = table.batch_iter(source.epoch).await?;
+                let iter = table
+                    .batch_iter(HummockReadEpoch::Committed(source.epoch))
+                    .await?;
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
                     vec![ScanType::BatchScan(iter)],
@@ -239,7 +242,10 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             unreachable!()
                         } else if pk_prefix_value.size() == pk_len {
                             let row = {
-                                keyspace.state_store().wait_epoch(source.epoch).await?;
+                                keyspace
+                                    .state_store()
+                                    .wait_epoch(HummockReadEpoch::Committed(source.epoch))
+                                    .await?;
                                 table.get_row(&pk_prefix_value, source.epoch).await?
                             };
                             ScanType::PointGet(row)
@@ -247,7 +253,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             assert!(pk_prefix_value.size() < pk_len);
                             let iter = table
                                 .batch_iter_with_pk_bounds(
-                                    source.epoch,
+                                    HummockReadEpoch::Committed(source.epoch),
                                     &pk_prefix_value,
                                     next_col_bounds,
                                 )

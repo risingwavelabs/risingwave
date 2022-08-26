@@ -33,7 +33,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
-extern crate log;
+extern crate tracing;
 
 pub mod compute_observer;
 pub mod rpc;
@@ -52,10 +52,6 @@ pub struct ComputeNodeOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
-    // TODO: This is currently unused.
-    #[clap(long)]
-    pub port: Option<u16>,
-
     #[clap(long, default_value = "hummock+memory")]
     pub state_store: String,
 
@@ -72,9 +68,13 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
-    /// Enable reporting tracing information to jaeger
+    /// Enable reporting tracing information to jaeger.
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
+
+    /// Enable async stack tracing for risectl.
+    #[clap(long)]
+    pub enable_async_stack_trace: bool,
 
     /// Path to file cache data directory.
     /// Left empty to disable file cache.
@@ -100,7 +100,10 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         let client_address = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
         tracing::info!("Client address is {}", client_address);

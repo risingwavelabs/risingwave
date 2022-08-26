@@ -359,7 +359,7 @@ fn parse_drop_schema_if_exists() {
 #[test]
 fn parse_copy_example() {
     let sql = r#"COPY public.actor (actor_id, first_name, last_name, last_update, value) FROM stdin;
-1	PENELOPE	GUINESS	2006-02-15 09:34:33 0.11111
+1	PENELOPE	GUINNESS	2006-02-15 09:34:33 0.11111
 2	NICK	WAHLBERG	2006-02-15 09:34:33 0.22222
 3	ED	CHASE	2006-02-15 09:34:33 0.312323
 4	JENNIFER	DAVIS	2006-02-15 09:34:33 0.3232

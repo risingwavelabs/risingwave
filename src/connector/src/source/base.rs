@@ -210,7 +210,7 @@ pub fn spawn_data_generation_stream(
 
     #[cfg(not(madsim))]
     std::thread::Builder::new()
-        .name("data-generation".to_string())
+        .name("risingwave-data-generation".to_string())
         .spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()

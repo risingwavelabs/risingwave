@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -257,10 +257,7 @@ impl ToStreamProst for StreamMaterialize {
                 .iter()
                 .map(FieldOrder::to_protobuf)
                 .collect(),
-            table: Some(self.table().to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            )),
+            table: Some(self.table().to_internal_table_prost()),
         })
     }
 }

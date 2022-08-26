@@ -132,7 +132,12 @@ impl MetaClient {
                 .map(|info| ExtraInfo { info: Some(info) })
                 .collect(),
         };
-        self.inner.heartbeat(request).await?;
+        let resp = self.inner.heartbeat(request).await?;
+        if let Some(status) = resp.status {
+            if status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                panic!("{}", status.message);
+            }
+        }
         Ok(())
     }
 
@@ -382,9 +387,6 @@ impl MetaClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(err)) => {
                         tracing::warn!("Failed to send_heartbeat: error {:#?}", err);
-                        if err.to_string().contains("unknown worker") {
-                            panic!("Already removed by the meta node. Need to restart the worker");
-                        }
                     }
                     Err(err) => {
                         tracing::warn!("Failed to send_heartbeat: timeout {}", err);
@@ -401,10 +403,10 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<HummockEpoch> {
+    pub async fn flush(&self) -> Result<HummockSnapshot> {
         let request = FlushRequest::default();
         let resp = self.inner.flush(request).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
     pub async fn list_table_fragments(
@@ -468,18 +470,18 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
         };
         let resp = self.inner.pin_snapshot(req).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
+    async fn get_epoch(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
@@ -495,7 +497,8 @@ impl HummockMetaClient for MetaClient {
             context_id: self.worker_id(),
             // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
             min_snapshot: Some(HummockSnapshot {
-                epoch: pinned_epochs,
+                committed_epoch: pinned_epochs,
+                current_epoch: pinned_epochs,
             }),
         };
         self.inner.unpin_snapshot_before(req).await?;

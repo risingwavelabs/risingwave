@@ -112,6 +112,13 @@ impl From<u32> for TableId {
         Self::new(id)
     }
 }
+
+impl From<&u32> for TableId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
 impl From<TableId> for u32 {
     fn from(id: TableId) -> Self {
         id.table_id

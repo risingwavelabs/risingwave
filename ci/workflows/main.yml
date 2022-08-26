@@ -21,7 +21,7 @@ auto-retry: &auto-retry
 
 steps:
   - label: "build (release mode)"
-    command: "ci/scripts/build.sh -t release -p release"
+    command: "ci/scripts/build.sh -t ci-release -p ci-release"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -33,7 +33,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (release mode)"
-    command: "ci/scripts/e2e-test.sh -p release"
+    command: "ci/scripts/e2e-test.sh -p ci-release"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -51,22 +51,8 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (async stack trace) (release mode)"
-    command: "RW_ASYNC_STACK_TRACE=true ci/scripts/e2e-test.sh -p release"
-    depends_on: "build"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
-    retry: *auto-retry
-    soft_fail: true
-
   - label: "end-to-end test (parallel) (release mode)"
-    command: "ci/scripts/e2e-test-parallel.sh -p release"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -86,7 +72,7 @@ steps:
     soft_fail: true
 
   - label: "end-to-end test (deterministic simulation) (release mode)"
-    command: "ci/scripts/deterministic-e2e-test.sh"
+    command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -95,7 +81,6 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 15
     retry: *auto-retry
-    soft_fail: true
 
   - label: "release"
     command: "ci/scripts/release.sh"

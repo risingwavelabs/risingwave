@@ -185,11 +185,9 @@ impl From<ProstTable> for TableCatalog {
         let mut col_index: HashMap<i32, usize> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
-            for col_desc in catalog.column_desc.flatten() {
-                let col_name = col_desc.name.clone();
-                if !col_names.insert(col_name.clone()) {
-                    panic!("duplicated column name {} in table {} ", col_name, tb.name)
-                }
+            let col_name = catalog.name();
+            if !col_names.insert(col_name.to_string()) {
+                panic!("duplicated column name {} in table {} ", col_name, tb.name)
             }
 
             let col_id = catalog.column_desc.column_id.get_id();
@@ -258,7 +256,7 @@ mod tests {
             name: "test".to_string(),
             columns: vec![
                 ProstColumnCatalog {
-                    column_desc: Some((&row_id_column_desc()).into()),
+                    column_desc: Some((&row_id_column_desc(ColumnId::new(0))).into()),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
@@ -269,12 +267,12 @@ mod tests {
                         vec![
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.address",
+                                "address",
                                 2,
                             ),
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
-                                "country.zipcode",
+                                "zipcode",
                                 3,
                             ),
                         ],
@@ -309,26 +307,27 @@ mod tests {
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
                 columns: vec![
-                    ColumnCatalog::row_id_column(),
+                    ColumnCatalog::row_id_column(ColumnId::new(0)),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar, DataType::Varchar].into()
-                            },
+                            data_type: DataType::new_struct(
+                                vec![DataType::Varchar, DataType::Varchar],
+                                vec!["address".to_string(), "zipcode".to_string()]
+                            ),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(2),
-                                    name: "country.address".to_string(),
+                                    name: "address".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 },
                                 ColumnDesc {
                                     data_type: DataType::Varchar,
                                     column_id: ColumnId::new(3),
-                                    name: "country.zipcode".to_string(),
+                                    name: "zipcode".to_string(),
                                     field_descs: vec![],
                                     type_name: String::new(),
                                 }
@@ -352,5 +351,6 @@ mod tests {
                 )]),
             }
         );
+        assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
     }
 }

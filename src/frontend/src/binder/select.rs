@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -44,12 +44,25 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn exprs(&self) -> impl Iterator<Item = &ExprImpl> {
         self.select_items
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
             .chain(self.having.iter())
+    }
+
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
+        self.select_items
+            .iter_mut()
+            .chain(self.group_by.iter_mut())
+            .chain(self.where_clause.iter_mut())
+        // TODO: uncomment `having` below after #4850 is fixed
+        // .chain(self.having.iter_mut())
+    }
+
+    pub fn is_correlated(&self) -> bool {
+        self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth())
             || match self.from.as_ref() {
                 Some(relation) => relation.is_correlated(),
@@ -59,21 +72,20 @@ impl BoundSelect {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        let mut correlated_indices = vec![];
-        self.select_items
-            .iter_mut()
-            .chain(self.group_by.iter_mut())
-            .chain(self.where_clause.iter_mut())
-            .for_each(|expr| {
-                correlated_indices
-                    .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
-            });
+        let mut correlated_indices = self
+            .exprs_mut()
+            .flat_map(|expr| {
+                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            })
+            .collect_vec();
 
         if let Some(relation) = self.from.as_mut() {
-            correlated_indices
-                .extend(relation.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
+            correlated_indices.extend(
+                relation.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+            );
         }
 
         correlated_indices
@@ -115,7 +127,7 @@ impl Binder {
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                self.expr_to_field(s, name)
+                Ok(Field::with_name(s.return_type(), name))
             })
             .collect::<Result<Vec<Field>>>()?;
 

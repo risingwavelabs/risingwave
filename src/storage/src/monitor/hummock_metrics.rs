@@ -18,41 +18,25 @@ use prometheus::{
     register_int_counter_with_registry, Histogram, Registry,
 };
 
-/// Defines all metrics.
-#[macro_export]
-macro_rules! for_all_hummock_metrics {
-    ($macro:ident) => {
-        $macro! {
-            pin_version_counts: GenericCounter<AtomicU64>,
-            unpin_version_before_counts: GenericCounter<AtomicU64>,
-            unpin_version_counts: GenericCounter<AtomicU64>,
-            pin_snapshot_counts: GenericCounter<AtomicU64>,
-            unpin_snapshot_counts: GenericCounter<AtomicU64>,
-            get_new_sst_ids_counts: GenericCounter<AtomicU64>,
-            report_compaction_task_counts: GenericCounter<AtomicU64>,
+/// [`HummockMetrics`] stores the performance and IO metrics of hummock storage.
+#[derive(Debug)]
+pub struct HummockMetrics {
+    pub pin_version_counts: GenericCounter<AtomicU64>,
+    pub unpin_version_before_counts: GenericCounter<AtomicU64>,
+    pub unpin_version_counts: GenericCounter<AtomicU64>,
+    pub pin_snapshot_counts: GenericCounter<AtomicU64>,
+    pub unpin_snapshot_counts: GenericCounter<AtomicU64>,
+    pub get_new_sst_ids_counts: GenericCounter<AtomicU64>,
+    pub report_compaction_task_counts: GenericCounter<AtomicU64>,
 
-            pin_version_latency: Histogram,
-            unpin_version_before_latency: Histogram,
-            unpin_version_latency: Histogram,
-            pin_snapshot_latency: Histogram,
-            unpin_snapshot_latency: Histogram,
-            get_new_sst_ids_latency: Histogram,
-            report_compaction_task_latency: Histogram,
-        }
-    };
+    pub pin_version_latency: Histogram,
+    pub unpin_version_before_latency: Histogram,
+    pub unpin_version_latency: Histogram,
+    pub pin_snapshot_latency: Histogram,
+    pub unpin_snapshot_latency: Histogram,
+    pub get_new_sst_ids_latency: Histogram,
+    pub report_compaction_task_latency: Histogram,
 }
-
-macro_rules! define_hummock_metrics {
-    ($( $name:ident: $type:ty ),* ,) => {
-        /// [`HummockMetrics`] stores the performance and IO metrics of hummock storage.
-        #[derive(Debug)]
-        pub struct HummockMetrics {
-            $( pub $name: $type, )*
-        }
-    }
-
-}
-for_all_hummock_metrics! { define_hummock_metrics }
 
 impl HummockMetrics {
     pub fn new(registry: Registry) -> Self {
