@@ -196,7 +196,7 @@ impl TableFragments {
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
-                return Some(s.table_id);
+                return Some(s.source_id);
             }
         }
 
