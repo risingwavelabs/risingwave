@@ -180,7 +180,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        println!("dist_key_indices = {:?}", dist_key_indices);
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
                 vnodes: Bitmap::from(vnodes).into(),
