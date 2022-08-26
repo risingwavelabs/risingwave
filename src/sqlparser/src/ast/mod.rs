@@ -328,7 +328,7 @@ pub enum Expr {
     /// e.g. {1, 2, 3},
     Array(Vec<Expr>),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
-    ArrayIndex { obj: Box<Expr>, indices: Vec<Expr> },
+    ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
 }
 
 impl fmt::Display for Expr {
@@ -515,11 +515,8 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
-            Expr::ArrayIndex { obj, indices } => {
-                write!(f, "{}", obj)?;
-                for i in indices {
-                    write!(f, "[{}]", i)?;
-                }
+            Expr::ArrayIndex { obj, index } => {
+                write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
             Expr::Array(exprs) => write!(
@@ -1962,5 +1959,20 @@ mod tests {
             vec![Expr::Identifier(Ident::new("d"))],
         ]);
         assert_eq!("CUBE (a, (b, c), d)", format!("{}", cube));
+    }
+
+    #[test]
+    fn test_array_index_display() {
+        let array_index = Expr::ArrayIndex {
+            obj: Box::new(Expr::Identifier(Ident::new("v1"))),
+            index: Box::new(Expr::Value(Value::Number("1".into(), false))),
+        };
+        assert_eq!("v1[1]", format!("{}", array_index));
+
+        let array_index2 = Expr::ArrayIndex {
+            obj: Box::new(array_index),
+            index: Box::new(Expr::Value(Value::Number("1".into(), false))),
+        };
+        assert_eq!("v1[1][1]", format!("{}", array_index2));
     }
 }
