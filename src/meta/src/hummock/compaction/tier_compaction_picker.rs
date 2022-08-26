@@ -68,7 +68,7 @@ impl TierCompactionPicker {
             );
             let mut compaction_bytes = level.total_file_size;
             let mut max_level_size = level.total_file_size;
-            let mut compact_file_count = 0;
+            let mut compact_file_count = level.table_infos.len();
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes >= max_compaction_bytes {
@@ -95,7 +95,7 @@ impl TierCompactionPicker {
                 });
             }
 
-            if compact_file_count <= self.config.level0_tier_compact_file_number as usize {
+            if compact_file_count < self.config.level0_tier_compact_file_number as usize {
                 continue;
             }
 

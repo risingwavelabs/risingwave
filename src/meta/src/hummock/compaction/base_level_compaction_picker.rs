@@ -306,8 +306,11 @@ pub mod tests {
         );
         push_table_level0(&mut levels, generate_table(13, 1, 100, 400, 4));
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
-        assert_eq!(ret.input_levels.len(), 3);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 3);
+        assert_eq!(ret.input_levels.len(), 4);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 5);
+        assert_eq!(ret.input_levels[1].table_infos[0].id, 6);
+        assert_eq!(ret.input_levels[2].table_infos.len(), 3);
+        assert_eq!(ret.input_levels[3].table_infos.len(), 1);
     }
 
     #[test]
