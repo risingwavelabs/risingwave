@@ -248,7 +248,7 @@ impl Compactor {
                         Some(Err(e)) => {
                             compact_success = false;
                             tracing::warn!(
-                                "Compaction task {} failed with error: {:#?}",
+                                "Compaction task {} failed with join error: {:#?}",
                                 compact_task.task_id,
                                 e
                             );
@@ -256,14 +256,6 @@ impl Compactor {
                         }
                         None => break,
                     }
-                }
-                Err(e) => {
-                    compact_success = false;
-                    tracing::warn!(
-                        "Compaction task {} failed with join handle error: {:#?}",
-                        compact_task.task_id,
-                        e
-                    );
                 }
             }
         }
