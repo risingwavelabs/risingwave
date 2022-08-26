@@ -119,6 +119,17 @@ impl ScheduledBarriers {
             .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
     }
 
+    async fn rollback_front(&self, scheduled: Scheduled)  {
+        if let Command::Plain(x) = &scheduled.0 {
+            if x.is_none() {
+                return;
+            }
+        }
+        let mut buffer = self.buffer.write().await;
+        // If no command scheduled, create periodic checkpoint barrier by default.
+        buffer.push_front(scheduled);
+    }
+
     /// Wait for at least one scheduled barrier in the buffer.
     async fn wait_one(&self) {
         let buffer = self.buffer.read().await;
@@ -587,6 +598,7 @@ where
                 tracker.update(progress);
             }
             state.in_flight_prev_epoch = new_epoch;
+            // We can let process crash down because it just started.
             state
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
@@ -651,10 +663,16 @@ where
                 new_epoch,
                 prev_epoch
             );
-            state
+
+            // rollback when failed to update meta-storage.
+            if let Err(e) = state
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
-                .unwrap();
+                .unwrap() {
+                self.scheduled_barriers.rollback_front((command, notifiers));
+                state.in_flight_prev_epoch = prev_epoch;
+                continue;
+            }
 
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
