@@ -1018,60 +1018,54 @@ impl ActorGraphBuilder {
         stream_node: &StreamNode,
         fragment: &mut Fragment,
     ) -> MetaResult<()> {
-        match stream_node.get_node_body()? {
+        let mut table_ids = match stream_node.get_node_body()? {
             NodeBody::Materialize(node) => {
-                let table_id = node.get_table_id();
-                fragment.state_table_ids.push(table_id);
+                vec![node.get_table_id()]
             }
             NodeBody::Source(node) => {
-                fragment.state_table_ids.push(node.state_table_id);
+                vec![node.state_table_id]
             }
             NodeBody::Arrange(node) => {
-                let table_id = node.table.as_ref().unwrap().id;
-                fragment.state_table_ids.push(table_id);
+                vec![node.table.as_ref().unwrap().id]
             }
-            NodeBody::HashAgg(node) => {
-                for table in &node.internal_tables {
-                    fragment.state_table_ids.push(table.id);
-                }
-            }
-            NodeBody::GlobalSimpleAgg(node) => {
-                for table in &node.internal_tables {
-                    fragment.state_table_ids.push(table.id);
-                }
-            }
+            NodeBody::HashAgg(node) => node
+                .internal_tables
+                .iter()
+                .map(|table| table.id)
+                .collect_vec(),
+            NodeBody::GlobalSimpleAgg(node) => node
+                .internal_tables
+                .iter()
+                .map(|table| table.id)
+                .collect_vec(),
             NodeBody::HashJoin(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.left_table.as_ref().unwrap().id);
-                fragment
-                    .state_table_ids
-                    .push(node.right_table.as_ref().unwrap().id);
+                vec![
+                    node.left_table.as_ref().unwrap().id,
+                    node.left_degree_table.as_ref().unwrap().id,
+                    node.right_table.as_ref().unwrap().id,
+                    node.right_degree_table.as_ref().unwrap().id,
+                ]
             }
             NodeBody::DynamicFilter(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.left_table.as_ref().unwrap().id);
-                fragment
-                    .state_table_ids
-                    .push(node.right_table.as_ref().unwrap().id);
+                vec![
+                    node.left_table.as_ref().unwrap().id,
+                    node.right_table.as_ref().unwrap().id,
+                ]
             }
             NodeBody::AppendOnlyTopN(node) => {
-                fragment.state_table_ids.push(node.table_id_l);
-                fragment.state_table_ids.push(node.table_id_h);
+                vec![node.table_id_l, node.table_id_h]
             }
             NodeBody::GroupTopN(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.table.as_ref().unwrap().id);
+                vec![node.table.as_ref().unwrap().id]
             }
             NodeBody::TopN(node) => {
-                fragment
-                    .state_table_ids
-                    .push(node.table.as_ref().unwrap().id);
+                vec![node.table.as_ref().unwrap().id]
             }
-            _ => {}
-        }
+            _ => {
+                vec![]
+            }
+        };
+        fragment.state_table_ids.append(&mut table_ids);
         let input_nodes = stream_node.get_input();
         for input_node in input_nodes {
             Self::record_internal_state_tables(input_node, fragment)?;
