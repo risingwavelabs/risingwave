@@ -38,14 +38,14 @@ struct ExtraInfo {
     metrics: Arc<StreamingMetrics>,
 }
 
-/// [`WrapExecutor`] will do some sanity checks and logging for the wrapped executor.
-pub struct WrapExecutor {
+/// [`WrapperExecutor`] will do some sanity checks and logging for the wrapped executor.
+pub struct WrapperExecutor {
     input: BoxedExecutor,
 
     extra: ExtraInfo,
 }
 
-impl WrapExecutor {
+impl WrapperExecutor {
     pub fn new(
         input: BoxedExecutor,
         input_pos: usize,
@@ -122,7 +122,7 @@ impl WrapExecutor {
     }
 }
 
-impl Executor for WrapExecutor {
+impl Executor for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info());
         Self::wrap(info, self.extra, self.input.execute()).boxed()

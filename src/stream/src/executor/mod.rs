@@ -78,7 +78,7 @@ mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
 mod union;
-mod wrap;
+mod wrapper;
 
 #[cfg(test)]
 mod integration_tests;
@@ -114,7 +114,7 @@ pub use source::*;
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::UnionExecutor;
-pub use wrap::WrapExecutor;
+pub use wrapper::WrapperExecutor;
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
