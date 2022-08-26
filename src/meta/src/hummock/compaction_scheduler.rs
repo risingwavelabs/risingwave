@@ -105,12 +105,14 @@ where
                 compaction_group = request_rx.recv() => {
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
-                        // The manager has dropped the connection, it means it has either died
-                        // or started a new session.
-                        None => break,
+                        None => {
+                            tracing::warning!("Compactor Scheduler: The Hummock manager has dropped the connection,
+                                it means it has either died or started a new session. Exiting.");
+                            break;
+                        }
                     }
                 },
-                // Shutdown compactor
+                // Shutdown compactor scheduler
                 _ = &mut shutdown_rx => {
                     break;
                 }

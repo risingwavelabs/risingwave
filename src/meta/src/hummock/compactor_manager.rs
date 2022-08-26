@@ -54,9 +54,7 @@ struct TaskHeartbeat {
 impl Compactor {
     pub async fn send_task(&self, task: Task) -> MetaResult<()> {
         self.sender
-            .send(Ok(SubscribeCompactTasksResponse {
-                task: Some(task.clone()),
-            }))
+            .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(())
