@@ -509,18 +509,16 @@
     select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x) filter((flag = 0:Int64))), output: [] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x)), output: [] }
         LogicalProject { exprs: [a.z, a.y::Int64] }
           LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((flag = 0:Int64))] }
-          LogicalAgg { group_key: [a.z, b.x, flag], aggs: [] }
-            LogicalProject { exprs: [a.z, b.x, flag] }
-              LogicalExpand { column_subsets: [[a.z, b.x]] }
-                LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
-                  LogicalAgg { group_key: [a.z], aggs: [] }
-                    LogicalScan { table: a, columns: [a.z] }
-                  LogicalProject { exprs: [b.z, b.x] }
-                    LogicalScan { table: b, columns: [b.x, b.z] }
+        LogicalAgg { group_key: [a.z], aggs: [count(b.x)] }
+          LogicalAgg { group_key: [a.z, b.x], aggs: [] }
+            LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+              LogicalAgg { group_key: [a.z], aggs: [] }
+                LogicalScan { table: a, columns: [a.z] }
+              LogicalProject { exprs: [b.z, b.x] }
+                LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
