@@ -257,3 +257,42 @@
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: (mv.x < 60000:Int32) }
         BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1 or user_id = 2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) OR orders_count_by_user.user_id = Int64(2)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE (user_id = 1) or (user_id = 2 and date = 2222);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) OR orders_count_by_user.user_id = Int64(2), orders_count_by_user.date = Int32(2222)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE (user_id = 1) or (user_id = 2 and date in (1111, 2222));
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(1) OR orders_count_by_user.user_id = Int64(2), orders_count_by_user.date = Int32(1111) OR orders_count_by_user.user_id = Int64(2), orders_count_by_user.date = Int32(2222)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    /* When one arm of or clause contains other conditions, we can't convert it to scan range yet. */
+    SELECT * FROM orders_count_by_user WHERE (user_id = 1) or (user_id = 2 and date in (1111, 2222)) or (user_id != 3);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: (((orders_count_by_user.user_id = 1:Int32) OR ((orders_count_by_user.user_id = 2:Int32) AND In(orders_count_by_user.date, 1111:Int32, 2222:Int32))) OR (orders_count_by_user.user_id <> 3:Int32)) }
+        BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+- before:
+  - create_table_and_mv
+  sql: |
+    /* When any arm of or clause is not equal type, we can't convert it to scan range yet. */
+    SELECT * FROM orders_count_by_user WHERE user_id > 1 or user_id < 10
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: ((orders_count_by_user.user_id > 1:Int32) OR (orders_count_by_user.user_id < 10:Int32)) }
+        BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }

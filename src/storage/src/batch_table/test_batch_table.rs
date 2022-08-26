@@ -17,6 +17,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::batch_table::storage_table::StorageTable;
 use crate::error::StorageResult;
@@ -398,7 +399,10 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
     state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
-    let iter = table.batch_iter(epoch).await.unwrap();
+    let iter = table
+        .batch_iter(HummockReadEpoch::Committed(epoch))
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next_row().await.unwrap();

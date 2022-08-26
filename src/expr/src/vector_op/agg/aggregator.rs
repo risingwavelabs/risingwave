@@ -16,12 +16,13 @@ use std::sync::Arc;
 
 use dyn_clone::DynClone;
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
+use super::array_agg::create_array_agg_state;
 use super::string_agg::StringAgg;
 use crate::expr::{
     build_from_prost, AggKind, Expression, ExpressionRef, InputRefExpression, LiteralExpression,
@@ -31,6 +32,7 @@ use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + DynClone + 'static {
@@ -123,6 +125,10 @@ impl AggStateFactory {
                     order_col_types,
                 ))
             }
+            (AggKind::ArrayAgg, [arg]) => {
+                let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
+                create_array_agg_state(return_type.clone(), agg_col_idx, order_pairs)?
+            }
             (agg_kind, [arg]) => {
                 // other unary agg call
                 let input_type = DataType::from(arg.get_type()?);
@@ -136,11 +142,7 @@ impl AggStateFactory {
                     filter,
                 )?
             }
-            _ => {
-                return Err(
-                    ErrorCode::InternalError(format!("Invalid agg call: {:?}", agg_kind)).into(),
-                );
-            }
+            _ => bail!("Invalid agg call: {:?}", agg_kind),
         };
 
         Ok(Self {
@@ -196,12 +198,9 @@ pub fn create_agg_state_unary(
                     },
                 )*
                 (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
-                    return Err(
-                        ErrorCode::InternalError(format!(
+                    bail!(
                         "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
                         unimpl_agg, unimpl_input, unimpl_ret, distinct
-                        ))
-                        .into(),
                     )
                 }
             }
