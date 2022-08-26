@@ -34,6 +34,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
@@ -439,9 +440,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         &self,
         prefix_hint: Option<Vec<u8>>,
         encoded_key_range: R,
-        epoch: u64,
+        wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
-        wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S, RS>>
     where
@@ -470,16 +470,16 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             let prefix_hint = prefix_hint
                 .clone()
                 .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
-
+            let wait_epoch = wait_epoch.clone();
             async move {
-                let read_options = self.get_read_option(epoch);
+                let read_options = self.get_read_option(wait_epoch.get_epoch());
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     prefix_hint,
                     raw_key_range,
-                    wait_epoch,
                     read_options,
+                    wait_epoch,
                 )
                 .await?
                 .into_stream();
@@ -507,10 +507,9 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     // TODO: support multiple datums or `Row` for `next_col_bounds`.
     async fn iter_with_pk_bounds(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-        wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S, RS>> {
         fn serialize_pk_bound(
@@ -613,7 +612,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
-            wait_epoch,
             ordered,
         )
         .await
@@ -625,11 +623,11 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     // TODO: introduce ordered batch iterator.
     pub async fn batch_iter_with_pk_bounds(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true, false)
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false)
             .await
     }
 
@@ -640,12 +638,20 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
-            .await
+        self.iter_with_pk_bounds(
+            HummockReadEpoch::NoWait(epoch),
+            pk_prefix,
+            next_col_bounds,
+            true,
+        )
+        .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S, RS>> {
+    pub async fn batch_iter(
+        &self,
+        epoch: HummockReadEpoch,
+    ) -> StorageResult<StorageTableIter<S, RS>> {
         self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
@@ -655,7 +661,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
     pub async fn batch_dedup_pk_iter(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<BatchDedupPkIter<S, RS>> {
@@ -678,24 +684,22 @@ struct StorageTableIterInner<S: StateStore, RS: RowSerde> {
 }
 
 impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
-    /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
+    /// If `HummockReadEpoch` isn't `NoWait`, it will wait for the given epoch to be updated up
+    /// before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
-        wait_epoch: bool,
         read_options: ReadOptions,
+        epoch: HummockReadEpoch,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        if wait_epoch {
-            keyspace
-                .state_store()
-                .wait_epoch(read_options.epoch)
-                .await?;
+        if !matches!(epoch, HummockReadEpoch::NoWait(_)) {
+            keyspace.state_store().wait_epoch(epoch).await?;
         }
 
         let row_deserializer = RS::create_deserializer(table_descs);

@@ -28,21 +28,24 @@ mod schema_check;
 mod trace;
 mod update_check;
 
-struct DebugExtraInfo {
+struct ExtraInfo {
+    /// Index of input to this operator.
     input_pos: usize,
+
     actor_id: ActorId,
     executor_id: u64,
+
     metrics: Arc<StreamingMetrics>,
 }
 
-/// [`DebugExecutor`] will do some sanity checks and logging for the wrapped executor.
-pub struct DebugExecutor {
+/// [`WrapperExecutor`] will do some sanity checks and logging for the wrapped executor.
+pub struct WrapperExecutor {
     input: BoxedExecutor,
 
-    extra: DebugExtraInfo,
+    extra: ExtraInfo,
 }
 
-impl DebugExecutor {
+impl WrapperExecutor {
     pub fn new(
         input: BoxedExecutor,
         input_pos: usize,
@@ -52,7 +55,7 @@ impl DebugExecutor {
     ) -> Self {
         Self {
             input,
-            extra: DebugExtraInfo {
+            extra: ExtraInfo {
                 input_pos,
                 actor_id,
                 executor_id,
@@ -64,7 +67,7 @@ impl DebugExecutor {
     #[allow(clippy::let_and_return)]
     fn wrap_debug(
         info: Arc<ExecutorInfo>,
-        extra: DebugExtraInfo,
+        extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
         // Trace
@@ -92,7 +95,7 @@ impl DebugExecutor {
     #[allow(clippy::let_and_return)]
     fn wrap_release(
         info: Arc<ExecutorInfo>,
-        extra: DebugExtraInfo,
+        extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> impl MessageStream + 'static {
         // Metrics
@@ -108,7 +111,7 @@ impl DebugExecutor {
 
     fn wrap(
         info: Arc<ExecutorInfo>,
-        extra: DebugExtraInfo,
+        extra: ExtraInfo,
         stream: impl MessageStream + 'static,
     ) -> BoxedMessageStream {
         if cfg!(debug_assertions) {
@@ -119,7 +122,7 @@ impl DebugExecutor {
     }
 }
 
-impl Executor for DebugExecutor {
+impl Executor for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info());
         Self::wrap(info, self.extra, self.input.execute()).boxed()

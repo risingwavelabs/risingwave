@@ -146,17 +146,25 @@ async fn print_blocks(
             block_meta.offset, block_meta.len, checksum, compression
         );
 
-        print_kv_pairs(block_data, table_data)?;
+        print_kv_pairs(
+            block_data,
+            table_data,
+            block_meta.uncompressed_size as usize,
+        )?;
     }
 
     Ok(())
 }
 
 /// Prints the data of KV-Pairs of a given block out to the terminal.
-fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<()> {
+fn print_kv_pairs(
+    block_data: Bytes,
+    table_data: &TableData,
+    uncompressed_capacity: usize,
+) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
-    let block = Box::new(Block::decode(&block_data).unwrap());
+    let block = Box::new(Block::decode(&block_data, uncompressed_capacity).unwrap());
     let holder = BlockHolder::from_owned_block(block);
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();

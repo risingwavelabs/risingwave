@@ -121,6 +121,18 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  playground-test:
+    - use: meta-node
+      enable-dashboard-v2: false
+      unsafe-disable-recovery: true
+      max-idle-secs-to-exit: 1800
+      vacuum-interval-sec: 1
+      collect-gc-watermark-spin-interval-sec: 1
+      min-sst-retention-time-sec: 0
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+
   playground-3cn:
     - use: meta-node
       enable-dashboard-v2: false
@@ -515,6 +527,16 @@ template:
 
     # Whether to disable recovery mode
     unsafe-disable-recovery: false
+
+    # Interval of GC stale metadata and SST
+    vacuum-interval-sec: 30
+
+    # The spin interval when collecting global GC watermark in hummock
+    collect-gc-watermark-spin-interval-sec: 5
+
+    # Threshold used by worker node to filter out new SSTs when scanning object store, during full SST GC.
+    # 7 days by default.
+    min-sst-retention-time-sec: 604800
 
   prometheus:
     # Advertise address of Prometheus
