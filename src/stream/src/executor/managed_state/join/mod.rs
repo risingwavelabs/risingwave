@@ -18,16 +18,19 @@ use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-use futures::pin_mut;
+use anyhow::anyhow;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_storage::streaming_table::state_table;
 use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::storage_table::merge_by_pk;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
@@ -85,24 +88,15 @@ impl JoinRow {
             .collect_vec())
     }
 
-    /// Make degree as the last datum of row
-    pub fn into_row(mut self) -> Row {
-        self.row.0.push(Some(ScalarImpl::Int64(self.degree as i64)));
-        self.row
-    }
-
-    /// Convert [`Row`] with last datum as degree to [`JoinRow`]
-    pub fn from_row(row: Row) -> Self {
-        let mut datums = row.0;
-        let degree_datum = datums
-            .pop()
-            .expect("missing degree in JoinRow")
-            .expect("degree should not be null");
-        let degree = degree_datum.into_int64() as u64;
-        JoinRow {
-            row: Row(datums),
-            degree,
-        }
+    /// Return row and degree in `Row` format. The degree part will be inserted in degree table
+    /// later, so a pk prefix will be added.
+    ///
+    /// * `state_order_key_indices` - the order key of `row`
+    pub fn into_table_rows(self, state_order_key_indices: &[usize]) -> (Row, Row) {
+        let degree_datum = Some(ScalarImpl::Int64(self.degree as i64));
+        let pk_prefix = self.row.by_indices(state_order_key_indices);
+        let degree = state_table::append_pk_prefix(Row::new(vec![degree_datum]), pk_prefix);
+        (self.row, degree)
     }
 
     pub fn encode(&self) -> StreamExecutorResult<EncodedJoinRow> {
@@ -129,6 +123,12 @@ impl EncodedJoinRow {
         })
     }
 
+    fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<Row> {
+        let deserializer = RowDeserializer::new(data_types.to_vec());
+        let row = deserializer.deserialize(self.row.as_ref())?;
+        Ok(row)
+    }
+
     pub fn inc_degree(&mut self) -> DegreeType {
         self.degree += 1;
         self.degree
@@ -140,6 +140,24 @@ impl EncodedJoinRow {
         }
         self.degree -= 1;
         Ok(self.degree)
+    }
+
+    // TODO(yuhao): only need to decode part of the encoded row.
+    // TODO(yuhao): add kv api in state table to avoid manually append pk prefix.
+    /// Get a row with the schema in degree state table
+    ///
+    /// * `state_order_key_indices` - the order key of `row`
+    pub fn get_schemaed_degree(
+        &self,
+        row_data_types: &[DataType],
+        state_order_key_indices: &[usize],
+    ) -> StreamExecutorResult<Row> {
+        let degree_datum = Some(ScalarImpl::Int64(self.degree as i64));
+        let prefix = self
+            .decode_row(row_data_types)?
+            .by_indices(state_order_key_indices);
+        let schemaed_degree = state_table::append_pk_prefix(Row::new(vec![degree_datum]), prefix);
+        Ok(schemaed_degree)
     }
 }
 
@@ -197,16 +215,23 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     inner: JoinHashMapInner<K>,
     /// Data types of the join key columns
     join_key_data_types: Vec<DataType>,
-    /// Data types of all columns
-    col_data_types: Vec<DataType>,
-    /// Indices of the primary keys
-    pk_indices: Vec<usize>,
     /// Current epoch
     current_epoch: u64,
     /// State table
-    pub(crate) state_table: RowBasedStateTable<S>,
+    state: TableInner<S>,
+    /// Degree table
+    degree_state: TableInner<S>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
+}
+
+struct TableInner<S: StateStore> {
+    pk_indices: Vec<usize>,
+    // This should be indentical to the pk in state table.
+    order_key_indices: Vec<usize>,
+    // This should be indentical to the data types in table schema.
+    all_data_types: Vec<DataType>,
+    pub(crate) table: RowBasedStateTable<S>,
 }
 
 impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
@@ -214,20 +239,34 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         target_cap: usize,
-        pk_indices: Vec<usize>,
-        join_key_indices: Vec<usize>,
-        data_types: Vec<DataType>,
+        join_key_data_types: Vec<DataType>,
+        state_all_data_types: Vec<DataType>,
         state_table: RowBasedStateTable<S>,
+        state_pk_indices: Vec<usize>,
+        degree_all_data_types: Vec<DataType>,
+        degree_table: RowBasedStateTable<S>,
+        degree_pk_indices: Vec<usize>,
+
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
         side: &'static str,
     ) -> Self {
-        let join_key_data_types = join_key_indices
-            .iter()
-            .map(|idx| data_types[*idx].clone())
-            .collect_vec();
-
         let alloc = StatsAlloc::new(Global).shared();
+
+        let state = TableInner {
+            pk_indices: state_pk_indices,
+            order_key_indices: state_table.pk_indices().to_vec(),
+            all_data_types: state_all_data_types,
+            table: state_table,
+        };
+
+        let degree_state = TableInner {
+            pk_indices: degree_pk_indices,
+            order_key_indices: degree_table.pk_indices().to_vec(),
+            all_data_types: degree_all_data_types,
+            table: degree_table,
+        };
+
         Self {
             inner: EvictableHashMap::with_hasher_in(
                 target_cap,
@@ -235,10 +274,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 alloc.clone(),
             ),
             join_key_data_types,
-            col_data_types: data_types,
-            pk_indices,
             current_epoch: 0,
-            state_table,
+            state,
+            degree_state,
             alloc,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
@@ -253,6 +291,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn update_epoch(&mut self, epoch: u64) {
         self.current_epoch = epoch;
+    }
+
+    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
+        self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
+        self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
@@ -319,25 +362,51 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
         let table_iter = self
-            .state_table
+            .state
+            .table
             .iter_with_pk_prefix(&key, self.current_epoch)
             .await?;
-        pin_mut!(table_iter);
+
+        let degree_table_iter = self
+            .degree_state
+            .table
+            .iter_with_pk_prefix(&key, self.current_epoch)
+            .await?;
+
+        // We need this because ttl may remove some entries from table but leave the entries with
+        // the same stream key in degree table.
+        let merged_iter = merge_by_pk(
+            table_iter,
+            &self.state.pk_indices,
+            degree_table_iter,
+            &self.degree_state.pk_indices,
+        );
 
         let mut cached = BTreeMap::new();
         #[for_await]
-        for row in table_iter {
-            let row = row?.into_owned();
-            let pk = row.by_indices(&self.pk_indices);
-
-            cached.insert(pk, JoinRow::from_row(row).encode()?);
+        for row_and_degree in merged_iter {
+            let (row, degree) = row_and_degree?;
+            debug_assert_eq!(degree.size(), self.degree_state.order_key_indices.len() + 1);
+            let pk = row.by_indices(&self.state.pk_indices);
+            let degree_i64 = degree
+                .0
+                .last()
+                .cloned()
+                .ok_or_else(|| anyhow!("Empty row"))?
+                .ok_or_else(|| anyhow!("Fail to fetch a degree"))?;
+            cached.insert(
+                pk,
+                JoinRow::new(row.into_owned(), *degree_i64.as_int64() as u64).encode()?,
+            );
         }
+
         Ok(JoinEntryState::with_cached(cached))
     }
 
     pub async fn flush(&mut self) -> StreamExecutorResult<()> {
         self.metrics.flush();
-        self.state_table.commit(self.current_epoch).await?;
+        self.state.table.commit(self.current_epoch).await?;
+        self.degree_state.table.commit(self.current_epoch).await?;
         Ok(())
     }
 
@@ -348,7 +417,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
 
         // If no cache maintained, only update the flush buffer.
-        self.state_table.insert(value.into_row())?;
+        let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
+        self.state.table.insert(row)?;
+        self.degree_state.table.insert(degree)?;
         Ok(())
     }
 
@@ -359,7 +430,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
 
         // If no cache maintained, only update the flush buffer.
-        self.state_table.delete(value.into_row())?;
+        let (row, degree) = value.into_table_rows(&self.state.order_key_indices);
+        self.state.table.delete(row)?;
+        self.degree_state.table.delete(degree)?;
         Ok(())
     }
 
@@ -369,20 +442,24 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
-        let old_row = join_row.decode(&self.col_data_types)?.into_row();
+        let old_degree = join_row
+            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
         join_row.inc_degree();
-        let new_row = join_row.decode(&self.col_data_types)?.into_row();
+        let new_degree = join_row
+            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
 
-        self.state_table.update(old_row, new_row)?;
+        self.degree_state.table.update(old_degree, new_degree)?;
         Ok(())
     }
 
     pub fn dec_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
-        let old_row = join_row.decode(&self.col_data_types)?.into_row();
+        let old_degree = join_row
+            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
         join_row.dec_degree()?;
-        let new_row = join_row.decode(&self.col_data_types)?.into_row();
+        let new_degree = join_row
+            .get_schemaed_degree(&self.state.all_data_types, &self.state.order_key_indices)?;
 
-        self.state_table.update(old_row, new_row)?;
+        self.degree_state.table.update(old_degree, new_degree)?;
         Ok(())
     }
 }

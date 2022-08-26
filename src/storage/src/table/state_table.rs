@@ -15,7 +15,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::ops::Index;
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
@@ -150,11 +149,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
     pub fn insert(&mut self, value: Row) -> StorageResult<()> {
-        let mut datums = vec![];
-        for pk_index in self.pk_indices() {
-            datums.push(value.index(*pk_index).clone());
-        }
-        let pk = Row::new(datums);
+        let pk = value.by_indices(self.pk_indices());
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.insert(pk_bytes, value);
         Ok(())
@@ -163,11 +158,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
-        let mut datums = vec![];
-        for pk_index in self.pk_indices() {
-            datums.push(old_value.index(*pk_index).clone());
-        }
-        let pk = Row::new(datums);
+        let pk = old_value.by_indices(self.pk_indices());
         let pk_bytes = serialize_pk(&pk, self.pk_serializer());
         self.mem_table.delete(pk_bytes, old_value);
         Ok(())

@@ -249,6 +249,19 @@ impl Row {
         &EMPTY_ROW
     }
 
+    /// Compare two rows' stream key
+    pub fn eq_by_pk(
+        row1: impl AsRef<Self>,
+        pk_indices1: &[usize],
+        row2: impl AsRef<Self>,
+        pk_indices2: &[usize],
+    ) -> bool {
+        pk_indices1
+            .iter()
+            .zip_eq(pk_indices2.iter())
+            .all(|(idx1, idx2)| row1.as_ref()[*idx1] == row2.as_ref()[*idx2])
+    }
+
     /// Serialize the row into value encoding bytes.
     /// WARNING: If you want to serialize to a memcomparable format, use
     /// [`crate::util::ordered::OrderedRow`]
@@ -265,6 +278,10 @@ impl Row {
     /// Return number of cells in the row.
     pub fn size(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn push(&mut self, value: Datum) {
+        self.0.push(value);
     }
 
     pub fn values(&self) -> impl Iterator<Item = &Datum> {

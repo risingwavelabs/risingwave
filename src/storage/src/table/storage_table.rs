@@ -50,6 +50,7 @@ use crate::store::{ReadOptions, WriteOptions};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 mod iter_utils;
+pub use iter_utils::merge_by_pk;
 
 pub type AccessType = bool;
 /// Table with `READ_ONLY` is used for batch scan or point lookup.

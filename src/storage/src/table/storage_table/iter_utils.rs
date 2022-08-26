@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
 
-use futures::StreamExt;
+use futures::future::{select, Either};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 
 use super::PkAndRowStream;
+use crate::error::StorageResult;
 use crate::table::storage_table::StorageError;
 
 /// We use a binary heap to merge the results of the different streams in order.
@@ -78,6 +81,71 @@ where
             // This stream is exhausted, remove it from the heap.
             None => PeekMut::pop(node).peeked,
         };
+    }
+}
+
+/// Merge two streams of primary key and rows into a single stream, sorted by primary key.
+/// We should ensure that the primary key from different streams are unique.
+#[try_stream(ok = (Cow<'a, Row>, Cow<'a, Row>), error = StorageError)]
+pub async fn merge_by_pk<'a, S>(
+    stream1: S,
+    pk_indices1: &'a [usize],
+    stream2: S,
+    pk_indices2: &'a [usize],
+) where
+    S: Stream<Item = StorageResult<Cow<'a, Row>>> + 'a,
+{
+    pin_mut!(stream1);
+    pin_mut!(stream2);
+    loop {
+        let prefer_left: bool = rand::random();
+        let select_result = if prefer_left {
+            select(stream1.next(), stream2.next()).await
+        } else {
+            match select(stream2.next(), stream1.next()).await {
+                Either::Left(x) => Either::Right(x),
+                Either::Right(x) => Either::Left(x),
+            }
+        };
+
+        match select_result {
+            Either::Left((None, _)) | Either::Right((None, _)) => {
+                // Return because one side end, no more rows to match
+                break;
+            }
+            Either::Left((Some(row), _)) => {
+                let left_row = row?;
+                loop {
+                    let right_row = stream2.next().await;
+                    match right_row {
+                        Some(row) => {
+                            let right_row = row?;
+                            if Row::eq_by_pk(&left_row, pk_indices1, &right_row, pk_indices2) {
+                                yield (left_row, right_row);
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+            Either::Right((Some(row), _)) => {
+                let right_row = row?;
+                loop {
+                    let left_row = stream1.next().await;
+                    match left_row {
+                        Some(row) => {
+                            let left_row = row?;
+                            if Row::eq_by_pk(&left_row, pk_indices1, &right_row, pk_indices2) {
+                                yield (left_row, right_row);
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+        }
     }
 }
 

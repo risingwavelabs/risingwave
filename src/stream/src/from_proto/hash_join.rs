@@ -41,7 +41,11 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
         let table_l = node.get_left_table()?;
+        let degree_table_l = node.get_left_degree_table()?;
+
         let table_r = node.get_right_table()?;
+        let degree_table_r = node.get_right_degree_table()?;
+
         let params_l = JoinParams::new(
             node.get_left_key()
                 .iter()
@@ -108,7 +112,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         }
 
         let keys = params_l
-            .key_indices
+            .join_key_indices
             .iter()
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
@@ -116,7 +120,16 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
         let state_table_l =
             RowBasedStateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
-        let state_table_r = RowBasedStateTable::from_table_catalog(table_r, store, Some(vnodes));
+        let degree_state_table_l = RowBasedStateTable::from_table_catalog(
+            degree_table_l,
+            store.clone(),
+            Some(vnodes.clone()),
+        );
+
+        let state_table_r =
+            RowBasedStateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone()));
+        let degree_state_table_r =
+            RowBasedStateTable::from_table_catalog(degree_table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -130,7 +143,9 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             cond: condition,
             op_info: params.op_info,
             state_table_l,
+            degree_state_table_l,
             state_table_r,
+            degree_state_table_r,
             is_append_only,
             metrics: params.executor_stats,
         };
@@ -155,7 +170,9 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     cond: Option<BoxedExpression>,
     op_info: String,
     state_table_l: RowBasedStateTable<S>,
+    degree_state_table_l: RowBasedStateTable<S>,
     state_table_r: RowBasedStateTable<S>,
+    degree_state_table_r: RowBasedStateTable<S>,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
 }
@@ -179,7 +196,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.cond,
             args.op_info,
             args.state_table_l,
+            args.degree_state_table_l,
             args.state_table_r,
+            args.degree_state_table_r,
             args.is_append_only,
             args.metrics,
         )))
