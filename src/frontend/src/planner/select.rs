@@ -180,7 +180,7 @@ impl Planner {
         let correlated_id = self.ctx.next_correlated_id();
         let mut subquery = expr.into_subquery().unwrap();
         let correlated_indices =
-            subquery.collect_correlated_indices_by_depth_and_assign_id(correlated_id);
+            subquery.collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
         let output_column_type = subquery.query.data_types()[0].clone();
         let right_plan = self.plan_query(subquery.query)?.into_subplan();
         let on = match subquery.kind {
@@ -234,7 +234,8 @@ impl Planner {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(
-                    subquery.collect_correlated_indices_by_depth_and_assign_id(self.correlated_id),
+                    subquery
+                        .collect_correlated_indices_by_depth_and_assign_id(0, self.correlated_id),
                 );
                 self.subqueries.push(subquery);
                 input_ref
