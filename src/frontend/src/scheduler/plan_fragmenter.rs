@@ -26,6 +26,7 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
 
+use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
@@ -93,6 +94,7 @@ pub struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u32,
     worker_node_manager: WorkerNodeManagerRef,
+    catalog_reader: CatalogReader,
 }
 
 impl Default for QueryId {
@@ -104,12 +106,13 @@ impl Default for QueryId {
 }
 
 impl BatchPlanFragmenter {
-    pub fn new(worker_node_manager: WorkerNodeManagerRef) -> Self {
+    pub fn new(worker_node_manager: WorkerNodeManagerRef, catalog_reader: CatalogReader) -> Self {
         Self {
             query_id: Default::default(),
             stage_graph_builder: StageGraphBuilder::new(),
             next_stage_id: 0,
             worker_node_manager,
+            catalog_reader,
         }
     }
 }
@@ -452,11 +455,22 @@ impl BatchPlanFragmenter {
             Some({
                 let table_desc = scan_node.logical().table_desc();
                 let partitions = self
-                    .worker_node_manager
-                    .get_table_mapping(&table_desc.table_id)
-                    .map(|vnode_mapping| {
-                        derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping)
-                    });
+                    .catalog_reader
+                    .read_guard()
+                    .get_table_by_id(&table_desc.table_id)
+                    .map(|table| {
+                        self.worker_node_manager
+                            .get_fragment_mapping(&table.fragment_id)
+                            .map(|vnode_mapping| {
+                                derive_partitions(
+                                    scan_node.scan_ranges(),
+                                    table_desc,
+                                    &vnode_mapping,
+                                )
+                            })
+                    })
+                    .ok()
+                    .flatten();
                 TableScanInfo { partitions }
             })
         } else {
@@ -570,6 +584,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
+    use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
     use risingwave_common::types::DataType;
@@ -577,6 +592,8 @@ mod tests {
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
 
+    use crate::catalog::catalog_service::CatalogReader;
+    use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
@@ -728,8 +745,9 @@ mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
+        let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
         // Break the plan node into fragments.
-        let fragmenter = BatchPlanFragmenter::new(worker_node_manager);
+        let fragmenter = BatchPlanFragmenter::new(worker_node_manager, catalog_reader);
         let query = fragmenter.split(batch_exchange_node3.clone()).unwrap();
 
         assert_eq!(query.stage_graph.root_stage_id, 0);

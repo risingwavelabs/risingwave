@@ -502,6 +502,7 @@ mod tests {
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
             )]),
+            fragment_id: 0,
         }
     }
 

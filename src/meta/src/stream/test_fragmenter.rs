@@ -355,7 +355,7 @@ async fn test_fragmenter() -> MetaResult<()> {
     let graph = make_stream_graph();
 
     let actor_graph_builder =
-        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, parallel_degree, &mut ctx).await?;
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), graph, parallel_degree, &mut ctx).await?;
 
     let graph = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
