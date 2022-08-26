@@ -232,7 +232,7 @@ impl LocalVersion {
                 .all(|(epoch, _)| *epoch > new_pinned_version.max_committed_epoch));
             self.sync_uncommitted_data.retain(|(epoch, _)| {
                 epoch
-                    .first()
+                    .last()
                     .gt(&Some(&new_pinned_version.max_committed_epoch))
             });
         }
@@ -383,6 +383,10 @@ impl PinnedVersion {
 
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
+    }
+
+    pub fn max_current_epoch(&self) -> u64 {
+        self.version.max_current_epoch
     }
 
     pub fn safe_epoch(&self) -> u64 {

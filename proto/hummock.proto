@@ -62,6 +62,7 @@ message HummockVersion {
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
+  uint64 max_current_epoch = 6;
 }
 
 message HummockVersionDelta {
@@ -77,14 +78,19 @@ message HummockVersionDelta {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
+  uint64 max_current_epoch = 7;
 }
 
 message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
 }
 
+// We will have two epoch after decouple
 message HummockSnapshot {
-  uint64 epoch = 1;
+  // Epoch with checkpoint, we will read durable data with it.
+  uint64 committed_epoch = 1;
+  // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
+  uint64 current_epoch = 2;
 }
 
 message PinVersionRequest {

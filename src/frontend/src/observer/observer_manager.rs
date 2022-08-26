@@ -116,7 +116,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
                         .collect(),
                 );
                 self.hummock_snapshot_manager
-                    .update_epoch(snapshot.hummock_snapshot.unwrap().get_epoch());
+                    .update_epoch(snapshot.hummock_snapshot.unwrap());
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
@@ -276,7 +276,7 @@ impl FrontendObserverNode {
             Info::HummockSnapshot(hummock_snapshot) => match resp.operation() {
                 Operation::Update => {
                     self.hummock_snapshot_manager
-                        .update_epoch(hummock_snapshot.get_epoch());
+                        .update_epoch(hummock_snapshot.clone());
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

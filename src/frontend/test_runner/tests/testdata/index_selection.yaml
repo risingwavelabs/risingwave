@@ -12,8 +12,7 @@
     select * from t1 where a = 1 or a = 2
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: ((idx1.a = 1:Int32) OR (idx1.a = 2:Int32)) }
-        BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.a, idx1.b) }
+      BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1) OR idx1.a = Int32(2)], distribution: UpstreamHashShard(idx1.a, idx1.b) }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create index idx1 on t1(a, b) include(c);
@@ -317,9 +316,7 @@
           BatchExchange { order: [], dist: HashShard(idx1.t1._row_id) }
             BatchUnion { all: true }
               BatchExchange { order: [], dist: Single }
-                BatchProject { exprs: [idx1.t1._row_id] }
-                  BatchFilter { predicate: ((idx1.a = 5:Int32) OR (idx1.a = 1:Int32)) }
-                    BatchScan { table: idx1, columns: [idx1.t1._row_id, idx1.a], distribution: UpstreamHashShard(idx1.a) }
+                BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(5) OR idx1.a = Int32(1)], distribution: SomeShard }
               BatchExchange { order: [], dist: Single }
                 BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: SomeShard }
               BatchExchange { order: [], dist: Single }
@@ -331,9 +328,7 @@
       BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
         BatchUnion { all: true }
           BatchExchange { order: [], dist: Single }
-            BatchProject { exprs: [idx1.t1._row_id] }
-              BatchFilter { predicate: ((idx1.a = 5:Int32) OR (idx1.a = 1:Int32)) }
-                BatchScan { table: idx1, columns: [idx1.t1._row_id, idx1.a], distribution: UpstreamHashShard(idx1.a) }
+            BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a = Int32(5) OR idx1.a = Int32(1)], distribution: SomeShard }
           BatchExchange { order: [], dist: Single }
             BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(2))], distribution: SomeShard }
           BatchExchange { order: [], dist: Single }
@@ -394,3 +389,99 @@
             BatchScan { table: idx2, columns: [idx2.t1._row_id], scan_ranges: [idx2.b = Decimal(Normalized(3))], distribution: SomeShard }
           BatchExchange { order: [], dist: Single }
             BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c = Int64(3)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    /* we think merging two TwoSideBound range indexes is better than primary scan */
+    select * from t1 where (a > 1 and a < 8) or c between 8 and 9
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((t1.a > 1:Int32) AND (t1.a < 8:Int32)) OR ((t1.c >= 8:Int32) AND (t1.c <= 9:Int32))), output: [t1.a, t1.b, t1.c, t1.p] }
+        BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
+          BatchExchange { order: [], dist: HashShard(idx1.t1._row_id) }
+            BatchUnion { all: true }
+              BatchExchange { order: [], dist: Single }
+                BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1) AND idx1.a < Int32(8)], distribution: SomeShard }
+              BatchExchange { order: [], dist: Single }
+                BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c >= Int64(8) AND idx3.c <= Int64(9)], distribution: SomeShard }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((t1.a > 1:Int32) AND (t1.a < 8:Int32)) OR ((t1.c >= 8:Int32) AND (t1.c <= 9:Int32))), output: [t1.a, t1.b, t1.c, t1.p] }
+      BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
+        BatchUnion { all: true }
+          BatchExchange { order: [], dist: Single }
+            BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1) AND idx1.a < Int32(8)], distribution: SomeShard }
+          BatchExchange { order: [], dist: Single }
+            BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c >= Int64(8) AND idx3.c <= Int64(9)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    select * from t1 where (a > 1 and a < 8) or c = 8
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((t1.a > 1:Int32) AND (t1.a < 8:Int32)) OR (t1.c = 8:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
+        BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
+          BatchExchange { order: [], dist: HashShard(idx1.t1._row_id) }
+            BatchUnion { all: true }
+              BatchExchange { order: [], dist: Single }
+                BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1) AND idx1.a < Int32(8)], distribution: SomeShard }
+              BatchExchange { order: [], dist: Single }
+                BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c = Int64(8)], distribution: SomeShard }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((t1.a > 1:Int32) AND (t1.a < 8:Int32)) OR (t1.c = 8:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
+      BatchHashAgg { group_key: [idx1.t1._row_id], aggs: [] }
+        BatchUnion { all: true }
+          BatchExchange { order: [], dist: Single }
+            BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1) AND idx1.a < Int32(8)], distribution: SomeShard }
+          BatchExchange { order: [], dist: Single }
+            BatchScan { table: idx3, columns: [idx3.t1._row_id], scan_ranges: [idx3.c = Int64(8)], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c, a);
+    /* we think primary scan is better than merging three OneSideBound range indexes */
+    select * from t1 where a > 1 or c > 1 or b > 1
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((idx1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
+        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (((idx1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)), output: [t1.a, t1.b, t1.c, t1.p] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c, a);
+    /* we think primary scan is better than merging three TwoSideBound range indexes */
+    select * from t1 where a between 1 and 8 or b between 1 and 8 or c between 1 and 8;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND ((((idx1.a >= 1:Int32) AND (idx1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))), output: [t1.a, t1.b, t1.c, t1.p] }
+        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND ((((idx1.a >= 1:Int32) AND (idx1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))), output: [t1.a, t1.b, t1.c, t1.p] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: idx1, columns: [idx1.a, idx1.t1._row_id], distribution: UpstreamHashShard(idx1.a) }
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    /* we think primary scan is better than merging two OneSideBound range indexes */
+    select * from t1 where a > 1 and b > 1
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (t1.b > 1:Int32), output: [t1.a, t1.b, t1.c, t1.p] }
+        BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1)], distribution: SomeShard }
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: idx1.t1._row_id = t1._row_id AND (t1.b > 1:Int32), output: [t1.a, t1.b, t1.c, t1.p] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: idx1, columns: [idx1.t1._row_id], scan_ranges: [idx1.a > Int32(1)], distribution: SomeShard }

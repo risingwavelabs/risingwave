@@ -60,9 +60,8 @@ impl Vacuum {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<()> {
         let sst_ids = vacuum_task.sstable_ids;
-        for sst_id in &sst_ids {
-            sstable_store.delete(*sst_id).await?;
-        }
+
+        sstable_store.delete_list(&sst_ids).await?;
 
         // TODO: report progress instead of in one go.
         hummock_meta_client

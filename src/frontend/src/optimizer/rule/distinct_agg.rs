@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::mem;
 
 use fixedbitset::FixedBitSet;
@@ -34,29 +35,16 @@ impl Rule for DistinctAggRule {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (mut agg_calls, mut agg_group_keys, input) = agg.clone().decompose();
         let original_group_keys_len = agg_group_keys.len();
-        let (distinct_aggs, non_distinct_aggs): (Vec<_>, Vec<_>) = agg_calls
-            .clone()
-            .into_iter()
-            .partition(|agg_call| agg_call.distinct);
-        if distinct_aggs.is_empty() {
-            return None;
-        }
-        let flag_value_of_distinct_agg = if non_distinct_aggs.is_empty() { 0 } else { 1 };
-        let input_schema_len = input.schema().len();
 
-        let expand = Self::build_expand(input, &agg_group_keys, &distinct_aggs, &non_distinct_aggs);
-        let project = Self::build_project(
-            input_schema_len,
-            expand,
-            &mut agg_group_keys,
-            &mut agg_calls,
-        );
-        let mid_agg = Self::build_middle_agg(project, agg_group_keys, agg_calls.clone());
+        let (node, flag_values, has_expand) =
+            Self::build_expand(input, &mut agg_group_keys, &mut agg_calls)?;
+        let mid_agg = Self::build_middle_agg(node, agg_group_keys, agg_calls.clone(), has_expand);
         Some(Self::build_final_agg(
             mid_agg,
             original_group_keys_len,
             agg_calls,
-            flag_value_of_distinct_agg,
+            flag_values,
+            has_expand,
         ))
     }
 }
@@ -66,37 +54,73 @@ impl DistinctAggRule {
         Box::new(DistinctAggRule {})
     }
 
+    /// Construct `Expand` for distinct aggregates.
+    /// `group_keys` and `agg_calls` will be changed in `build_project` due to column pruning.
+    /// It returns either `LogicalProject` or original input, plus `flag_values` for every distinct
+    /// aggregate and `has_expand` as a flag.
+    ///
+    /// To simplify, we will first deduplicate `column_subsets` and then skip building
+    /// `Expand` if there is only one `subset`.
     fn build_expand(
         input: PlanRef,
-        group_keys: &[usize],
-        distinct_aggs: &[PlanAggCall],
-        non_distinct_aggs: &[PlanAggCall],
-    ) -> PlanRef {
+        group_keys: &mut Vec<usize>,
+        agg_calls: &mut Vec<PlanAggCall>,
+    ) -> Option<(PlanRef, Vec<usize>, bool)> {
+        let input_schema_len = input.schema().len();
         // each `subset` in `column_subsets` consists of `group_keys`, `agg_call`'s input indices
         // and the input indices of `agg_call`'s `filter`.
         let mut column_subsets = vec![];
+        // flag values of distinct aggregates.
+        let mut flag_values = vec![];
+        // mapping from `subset` to `flag_value`, which is used to deduplicate `column_subsets`.
+        let mut hash_map = HashMap::new();
+        let (distinct_aggs, non_distinct_aggs): (Vec<_>, Vec<_>) =
+            agg_calls.iter().partition(|agg_call| agg_call.distinct);
+        if distinct_aggs.is_empty() {
+            return None;
+        }
 
         if !non_distinct_aggs.is_empty() {
-            column_subsets.push({
-                let mut subset = FixedBitSet::from_iter(group_keys.to_owned());
+            let subset = {
+                let mut subset = FixedBitSet::from_iter(group_keys.iter().cloned());
                 non_distinct_aggs.iter().for_each(|agg_call| {
                     subset.extend(agg_call.input_indices());
                 });
                 subset.ones().collect_vec()
-            });
+            };
+            hash_map.insert(subset.clone(), 0);
+            column_subsets.push(subset);
         }
 
+        let mut num_of_subsets_for_distinct_agg = 0;
         distinct_aggs.iter().for_each(|agg_call| {
-            column_subsets.push({
-                let mut subset = FixedBitSet::from_iter(group_keys.to_owned());
+            let subset = {
+                let mut subset = FixedBitSet::from_iter(group_keys.iter().cloned());
                 subset.extend(agg_call.input_indices());
                 subset.ones().collect_vec()
-            });
+            };
+            if let Some(i) = hash_map.get(&subset) {
+                flag_values.push(*i);
+            } else {
+                let flag_value = column_subsets.len();
+                flag_values.push(flag_value);
+                hash_map.insert(subset.clone(), flag_value);
+                column_subsets.push(subset);
+                num_of_subsets_for_distinct_agg += 1;
+            }
         });
 
-        LogicalExpand::create(input, column_subsets)
+        if num_of_subsets_for_distinct_agg <= 1 {
+            // no need to have expand if there is only one distinct aggregates.
+            return Some((input, flag_values, false));
+        }
+        let expand = LogicalExpand::create(input, column_subsets);
+        // manual version of column pruning for expand.
+        let project = Self::build_project(input_schema_len, expand, group_keys, agg_calls);
+        Some((project, flag_values, true))
     }
 
+    /// Used to do column pruning for `Expand`.
     fn build_project(
         input_schema_len: usize,
         expand: PlanRef,
@@ -145,6 +169,7 @@ impl DistinctAggRule {
         project: PlanRef,
         mut group_keys: Vec<usize>,
         agg_calls: Vec<PlanAggCall>,
+        has_expand: bool,
     ) -> LogicalAgg {
         // The middle `LogicalAgg` groups by (`agg_group_keys` + arguments of distinct aggregates +
         // `flag`).
@@ -165,8 +190,10 @@ impl DistinctAggRule {
                 Some(agg_call)
             })
             .collect_vec();
-        // append `flag`.
-        group_keys.push(project.schema().len() - 1);
+        if has_expand {
+            // append `flag`.
+            group_keys.push(project.schema().len() - 1);
+        }
         LogicalAgg::new(agg_calls, group_keys, project)
     }
 
@@ -174,13 +201,15 @@ impl DistinctAggRule {
         mid_agg: LogicalAgg,
         original_group_keys_len: usize,
         mut agg_calls: Vec<PlanAggCall>,
-        mut flag_value_of_distinct_agg: i64,
+        flag_values: Vec<usize>,
+        has_expand: bool,
     ) -> PlanRef {
-        // The index of `flag` in schema of the middle `LogicalAgg`.
+        // the index of `flag` in schema of the middle `LogicalAgg`, if has `Expand`.
         let pos_of_flag = mid_agg.group_key().len() - 1;
+        let mut flag_values = flag_values.into_iter();
 
         // ```ignore
-        // the input(middle agg) has the following schema:
+        // if has `Expand`, the input(middle agg) has the following schema:
         // original group columns | distinct agg arguments | flag | count_star_with_filter or non-distinct agg
         // <-                group                              -> <-             agg calls                 ->
         // ```
@@ -191,8 +220,7 @@ impl DistinctAggRule {
         let mut index_of_middle_agg = mid_agg.group_key().len();
         let mut indices_of_count = vec![];
         agg_calls.iter_mut().enumerate().for_each(|(i, agg_call)| {
-            let flag_value;
-            if agg_call.distinct {
+            let flag_value = if agg_call.distinct {
                 agg_call.distinct = false;
 
                 agg_call.inputs.iter_mut().for_each(|input_ref| {
@@ -216,8 +244,7 @@ impl DistinctAggRule {
                     agg_call.filter.conjunctions = vec![check_count.into()];
                 }
 
-                flag_value = flag_value_of_distinct_agg;
-                flag_value_of_distinct_agg += 1;
+                flag_values.next().unwrap() as i64
             } else {
                 // non-distinct agg has its corresponding middle agg.
                 agg_call.inputs = vec![InputRef::new(
@@ -251,19 +278,20 @@ impl DistinctAggRule {
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it
                 // exists.
-                flag_value = 0;
+                0
+            };
+            if has_expand {
+                // `filter_expr` is used to pick up the rows that are really needed by aggregates.
+                let filter_expr = FunctionCall::new(
+                    ExprType::Equal,
+                    vec![
+                        InputRef::new(pos_of_flag, DataType::Int64).into(),
+                        Literal::new(Some(flag_value.into()), DataType::Int64).into(),
+                    ],
+                )
+                .unwrap();
+                agg_call.filter.conjunctions.push(filter_expr.into());
             }
-
-            // `filter_expr` is used to pick up the rows that are really needed by aggregates.
-            let filter_expr = FunctionCall::new(
-                ExprType::Equal,
-                vec![
-                    InputRef::new(pos_of_flag, DataType::Int64).into(),
-                    Literal::new(Some(flag_value.into()), DataType::Int64).into(),
-                ],
-            )
-            .unwrap();
-            agg_call.filter.conjunctions.push(filter_expr.into());
         });
 
         let mut plan: PlanRef = LogicalAgg::new(
