@@ -1096,7 +1096,7 @@ impl Parser {
         let index = Box::new(self.parse_expr()?);
         self.expect_token(&Token::RBracket)?;
 
-        // Create ArrayIndex 
+        // Create ArrayIndex
         let array_index = Expr::ArrayIndex {
             obj: Box::new(expr),
             index,
