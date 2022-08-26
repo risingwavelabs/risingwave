@@ -107,7 +107,7 @@ message SourceNode {
     TABLE = 1;
     SOURCE = 2;
   }
-  uint32 table_id = 1; // use table_id / source_id to fetch SourceDesc from local source manager
+  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
   uint32 state_table_id = 4; // use state_table_id as state store prefix
