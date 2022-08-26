@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -35,18 +34,15 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use tracing::trace;
 
-use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::{
-    serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde, RowSerialize,
-};
-use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, WriteOptions};
+use crate::row_serde::{serialize_pk, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde};
+use crate::store::ReadOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 mod iter_utils;
@@ -85,7 +81,7 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde, const T: AccessType> {
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
-    row_serializer: RS::Serializer,
+    _row_serializer: RS::Serializer,
 
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
@@ -280,7 +276,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         }: Distribution,
         table_option: TableOption,
     ) -> Self {
-        let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
+        let _row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
 
         assert_eq!(order_types.len(), pk_indices.len());
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
@@ -307,7 +303,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             table_columns,
             schema,
             pk_serializer,
-            row_serializer,
+            _row_serializer,
             mapping,
             pk_indices,
             dist_key_indices,
@@ -323,27 +319,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         self.disable_sanity_check = true;
     }
 
-    /// Update the vnode bitmap of this storage table, used for fragment scaling or migration.
-    pub(super) fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
-        if self.dist_key_indices.is_empty() {
-            assert_eq!(
-                new_vnodes, self.vnodes,
-                "should not update vnode bitmap for singleton table"
-            );
-        }
-        self.vnodes = new_vnodes;
-    }
-
     pub fn schema(&self) -> &Schema {
         &self.schema
-    }
-
-    pub(super) fn pk_serializer(&self) -> &OrderedRowSerializer {
-        &self.pk_serializer
-    }
-
-    pub(super) fn pk_indices(&self) -> &[usize] {
-        &self.pk_indices
     }
 }
 
@@ -437,122 +414,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     }
 }
 
-const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
-
-/// Write with different encoding format, depending on the specific implementation of RS.
-impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
-    /// Get vnode value with full row.
-    fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
-        // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
-        // we can directly index into the row with indices to the table columns.
-        self.compute_vnode(row, &self.dist_key_indices)
-    }
-
-    /// Write to state store.
-    pub async fn batch_write_rows(
-        &mut self,
-        buffer: BTreeMap<Vec<u8>, RowOp>,
-        epoch: u64,
-    ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
-            epoch,
-            table_id: self.keyspace.table_id(),
-        });
-        let mut local = batch.prefixify(&self.keyspace);
-
-        for (pk, row_op) in buffer {
-            match row_op {
-                RowOp::Insert(row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to insert a row, it should not exist in storage.
-                        let storage_row = self
-                            .get_row(&row.by_indices(&self.pk_indices), epoch)
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_none(),
-                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
-                            storage_row.unwrap(),
-                            row
-                        );
-                    }
-
-                    let vnode = self.compute_vnode_by_row(&row);
-                    let (key, value) = self
-                        .row_serializer
-                        .serialize(vnode, &pk, row)
-                        .map_err(err)?;
-
-                    local.put(key, StorageValue::new_default_put(value));
-                }
-                RowOp::Delete(old_row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to delete a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(storage_row.is_some(), "deleting an non-existing row");
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
-                            storage_row.as_ref().unwrap(),
-                            old_row
-                        );
-                    }
-
-                    let vnode = self.compute_vnode_by_row(&old_row);
-
-                    let key = [vnode.to_be_bytes().as_slice(), &pk].concat();
-                    local.delete(key);
-                }
-                RowOp::Update((old_row, new_row)) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
-                        // If we want to update a row, it should exist in storage, and should
-                        // have the same old_value as recorded.
-                        let storage_row = self
-                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
-                            .await?;
-
-                        // It's normal for some executors to fail this assert, you can use
-                        // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(
-                            storage_row.is_some(),
-                            "update a non-existing row: {:?}",
-                            old_row
-                        );
-                        assert!(
-                            storage_row.as_ref().unwrap() == &old_row,
-                            "value mismatch when updating row: {:?} != {:?}",
-                            storage_row,
-                            old_row
-                        );
-                    }
-
-                    // The row to update should keep the same primary key, so distribution key as
-                    // well.
-                    let vnode = self.compute_vnode_by_row(&new_row);
-                    debug_assert_eq!(self.compute_vnode_by_row(&old_row), vnode);
-
-                    let (key, value) = self
-                        .row_serializer
-                        .serialize(vnode, &pk, new_row)
-                        .map_err(err)?;
-
-                    local.put(key, StorageValue::new_default_put(value));
-                }
-            }
-        }
-        batch.ingest().await?;
-        Ok(())
-    }
-}
-
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
 /// The row iterator of the storage table.
@@ -579,9 +440,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         &self,
         prefix_hint: Option<Vec<u8>>,
         encoded_key_range: R,
-        epoch: u64,
+        wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
-        wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S, RS>>
     where
@@ -610,16 +470,16 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             let prefix_hint = prefix_hint
                 .clone()
                 .map(|prefix_hint| [&vnode.to_be_bytes(), prefix_hint.as_slice()].concat());
-
+            let wait_epoch = wait_epoch.clone();
             async move {
-                let read_options = self.get_read_option(epoch);
+                let read_options = self.get_read_option(wait_epoch.get_epoch());
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     prefix_hint,
                     raw_key_range,
-                    wait_epoch,
                     read_options,
+                    wait_epoch,
                 )
                 .await?
                 .into_stream();
@@ -647,10 +507,9 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     // TODO: support multiple datums or `Row` for `next_col_bounds`.
     async fn iter_with_pk_bounds(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-        wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S, RS>> {
         fn serialize_pk_bound(
@@ -753,7 +612,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
-            wait_epoch,
             ordered,
         )
         .await
@@ -765,11 +623,11 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     // TODO: introduce ordered batch iterator.
     pub async fn batch_iter_with_pk_bounds(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true, false)
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false)
             .await
     }
 
@@ -780,12 +638,20 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
-            .await
+        self.iter_with_pk_bounds(
+            HummockReadEpoch::NoWait(epoch),
+            pk_prefix,
+            next_col_bounds,
+            true,
+        )
+        .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S, RS>> {
+    pub async fn batch_iter(
+        &self,
+        epoch: HummockReadEpoch,
+    ) -> StorageResult<StorageTableIter<S, RS>> {
         self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
@@ -795,7 +661,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
     pub async fn batch_dedup_pk_iter(
         &self,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
     ) -> StorageResult<BatchDedupPkIter<S, RS>> {
@@ -818,24 +684,22 @@ struct StorageTableIterInner<S: StateStore, RS: RowSerde> {
 }
 
 impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
-    /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
+    /// If `HummockReadEpoch` isn't `NoWait`, it will wait for the given epoch to be updated up
+    /// before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         prefix_hint: Option<Vec<u8>>,
         raw_key_range: R,
-        wait_epoch: bool,
         read_options: ReadOptions,
+        epoch: HummockReadEpoch,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        if wait_epoch {
-            keyspace
-                .state_store()
-                .wait_epoch(read_options.epoch)
-                .await?;
+        if !matches!(epoch, HummockReadEpoch::NoWait(_)) {
+            keyspace.state_store().wait_epoch(epoch).await?;
         }
 
         let row_deserializer = RS::create_deserializer(table_descs);

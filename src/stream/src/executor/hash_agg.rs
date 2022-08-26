@@ -27,7 +27,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
@@ -86,7 +86,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     key_indices: Vec<usize>,
 
     /// Relational state tables for each aggregation calls.
-    state_tables: Vec<RowBasedStateTable<S>>,
+    state_tables: Vec<StateTable<S>>,
 
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
@@ -119,13 +119,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
-        mut state_tables: Vec<RowBasedStateTable<S>>,
+        mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
     ) -> StreamExecutorResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
-        // TODO: enable sanity check for hash agg executor <https://github.com/singularity-data/risingwave/issues/3885>
+        // // TODO: enable sanity check for hash agg executor <https://github.com/singularity-data/risingwave/issues/3885>
         for state_table in &mut state_tables {
             state_table.disable_sanity_check();
         }

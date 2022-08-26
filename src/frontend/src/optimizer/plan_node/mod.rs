@@ -500,7 +500,7 @@ macro_rules! enum_plan_node_type {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-            #[derive(Copy, Clone, PartialEq, Debug)]
+            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq)]
             pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }

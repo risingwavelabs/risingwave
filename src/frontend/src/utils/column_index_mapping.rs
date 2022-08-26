@@ -296,18 +296,26 @@ impl ColIndexMapping {
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
-        match dist {
-            Distribution::HashShard(col_idxes) | Distribution::UpstreamHashShard(col_idxes) => {
-                let mapped_dist = col_idxes
-                    .iter()
-                    .map(|col_idx| self.try_map(*col_idx))
-                    .collect::<Option<Vec<_>>>();
-                match mapped_dist {
-                    Some(col_idx) => Distribution::HashShard(col_idx),
-                    None => Distribution::SomeShard,
-                }
+        let mapped_dist_key = dist
+            .dist_column_indices()
+            .iter()
+            .map(|col_idx| self.try_map(*col_idx))
+            .collect::<Option<Vec<_>>>();
+
+        match (mapped_dist_key, dist) {
+            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_)) => {
+                Distribution::SomeShard
             }
-            _ => dist.clone(),
+            (Some(mapped_dist_key), Distribution::HashShard(_)) => {
+                Distribution::HashShard(mapped_dist_key)
+            }
+            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_)) => {
+                Distribution::UpstreamHashShard(mapped_dist_key)
+            }
+            _ => {
+                assert!(dist.dist_column_indices().is_empty());
+                dist.clone()
+            }
         }
     }
 

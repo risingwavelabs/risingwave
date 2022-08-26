@@ -128,6 +128,18 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        let mut guard = self.objects.lock().await;
+
+        for path in paths {
+            guard.remove(path);
+        }
+
+        Ok(())
+    }
+
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         Ok(self
             .objects
@@ -142,6 +154,10 @@ impl ObjectStore for InMemObjectStore {
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
             .collect_vec())
+    }
+
+    fn store_media_type(&self) -> &'static str {
+        "mem"
     }
 }
 
@@ -308,5 +324,27 @@ mod tests {
             store.delete(path).await.unwrap();
             assert_eq!(store.list("").await.unwrap().len(), paths.len() - i - 1);
         }
+    }
+
+    #[tokio::test]
+    async fn test_delete_objects() {
+        let block1 = Bytes::from("123456");
+        let block2 = Bytes::from("987654");
+
+        let store = InMemObjectStore::new();
+        store.upload("/abc", block1).await.unwrap();
+        store.upload("/klm", block2).await.unwrap();
+
+        assert_eq!(store.list("").await.unwrap().len(), 2);
+
+        let str_list = [
+            String::from("/abc"),
+            String::from("/klm"),
+            String::from("/xyz"),
+        ];
+
+        store.delete_objects(&str_list).await.unwrap();
+
+        assert_eq!(store.list("").await.unwrap().len(), 0);
     }
 }

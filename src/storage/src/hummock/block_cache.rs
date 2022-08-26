@@ -22,7 +22,7 @@ use futures::Future;
 use risingwave_common::cache::{CacheableEntry, LruCache, LruCacheEventListener};
 use risingwave_hummock_sdk::HummockSstableId;
 
-use super::{Block, HummockResult, TieredCacheEntry, TieredCacheValue};
+use super::{Block, HummockResult, TieredCacheEntry};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
@@ -140,7 +140,7 @@ impl BlockCache {
         BlockHolder::from_cached_block(self.inner.insert(
             (sst_id, block_idx),
             Self::hash(sst_id, block_idx),
-            block.len(),
+            block.capacity(),
             block,
         ))
     }
@@ -163,7 +163,7 @@ impl BlockCache {
                 let f = f();
                 async move {
                     let block = f.await?;
-                    let len = block.len();
+                    let len = block.capacity();
                     Ok((block, len))
                 }
             })

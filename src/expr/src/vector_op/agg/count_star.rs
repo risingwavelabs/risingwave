@@ -13,24 +13,26 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
+#[derive(Clone)]
 pub struct CountStar {
     return_type: DataType,
-    result: usize,
     filter: ExpressionRef,
+    result: usize,
 }
 
 impl CountStar {
-    pub fn new(return_type: DataType, result: usize, filter: ExpressionRef) -> Self {
+    pub fn new(return_type: DataType, filter: ExpressionRef) -> Self {
         Self {
             return_type,
-            result,
             filter,
+            result: 0,
         }
     }
 
@@ -52,6 +54,22 @@ impl CountStar {
 impl Aggregator for CountStar {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
+    }
+
+    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+        if let (row, true) = input.row_at(row_id)? {
+            let filter_res =
+                if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
+                    v
+                } else {
+                    false
+                };
+
+            if filter_res {
+                self.result += 1;
+            }
+        }
+        Ok(())
     }
 
     fn update_multi(
@@ -82,32 +100,11 @@ impl Aggregator for CountStar {
         Ok(())
     }
 
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        let res = std::mem::replace(&mut self.result, 0) as i64;
         match builder {
-            ArrayBuilderImpl::Int64(b) => b.append(Some(self.result as i64)).map_err(Into::into),
-            _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
+            ArrayBuilderImpl::Int64(b) => b.append(Some(res)).map_err(Into::into),
+            _ => bail!("Unexpected builder for count(*)."),
         }
-    }
-
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        if let (row, true) = input.row_at(row_id)? {
-            let filter_res =
-                if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
-                    v
-                } else {
-                    false
-                };
-
-            if filter_res {
-                self.result += 1;
-            }
-        }
-        Ok(())
-    }
-
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        let res = self.output(builder);
-        self.result = 0;
-        res
     }
 }
