@@ -639,6 +639,19 @@ where
 
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.task_status = true;
+            self.env
+                .notification_manager()
+                .notify_compute_asynchronously(
+                    Operation::Add,
+                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                        version_deltas: vec![versioning
+                            .hummock_version_deltas
+                            .last_key_value()
+                            .unwrap()
+                            .1
+                            .clone()],
+                    }),
+                );
             trigger_sst_stat(
                 &self.metrics,
                 Some(
