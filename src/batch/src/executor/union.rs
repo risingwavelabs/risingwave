@@ -72,7 +72,10 @@ impl BoxedExecutorBuilder for UnionExecutor {
         let _union_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Union)?;
 
-        Ok(Box::new(Self::new(inputs, "UnionExecutor".into())))
+        Ok(Box::new(Self::new(
+            inputs,
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }
 
