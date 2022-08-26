@@ -184,7 +184,6 @@ impl FunctionCall {
                 }
                 Ok(DataType::Int16)
             }
-            ExprType::ArrayAccess => unimplemented!(),
             _ => {
                 // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
                 // interface has been enhanced to support mutating (casting) inputs as well.
