@@ -20,10 +20,10 @@ use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
 
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{CachePolicy, HummockResult, SstableBuilder, SstableStoreWrite};
-use crate::hummock::sstable_store::SstableStoreRef;
 use crate::monitor::StateStoreMetrics;
 
 #[async_trait::async_trait]

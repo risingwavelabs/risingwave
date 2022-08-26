@@ -95,21 +95,19 @@ impl CompactorRunner {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
                 table_iters.push(ConcatSstableIterator::new(
                     level.table_infos.clone(),
-                    self.compactor.key_range.clone(),
+                    self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                 ));
             } else {
                 for table_info in &level.table_infos {
                     table_iters.push(ConcatSstableIterator::new(
                         vec![table_info.clone()],
-                        self.compactor.key_range.clone(),
+                        self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                     ));
                 }
             }
         }
-        Ok(UnorderedMergeIteratorInner::for_compactor(
-            table_iters,
-        ))
+        Ok(UnorderedMergeIteratorInner::for_compactor(table_iters))
     }
 }

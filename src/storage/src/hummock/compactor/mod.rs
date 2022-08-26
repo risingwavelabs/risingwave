@@ -42,7 +42,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
@@ -61,8 +61,7 @@ use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
 use crate::hummock::utils::{MemoryLimiter, MemoryTracker};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef,
-    DEFAULT_ENTRY_SIZE,
+    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, DEFAULT_ENTRY_SIZE,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -101,10 +100,10 @@ impl TableBuilderFactory for RemoteBuilderFactory {
 
 #[derive(Clone)]
 pub struct TaskConfig {
-    key_range: KeyRange,
-    cache_policy: CachePolicy,
-    gc_delete_keys: bool,
-    watermark: u64,
+    pub key_range: KeyRange,
+    pub cache_policy: CachePolicy,
+    pub gc_delete_keys: bool,
+    pub watermark: u64,
 }
 
 #[derive(Clone)]
@@ -483,7 +482,9 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= task_config.watermark && task_config.gc_delete_keys && iter.value().is_delete())
+            if (epoch <= task_config.watermark
+                && task_config.gc_delete_keys
+                && iter.value().is_delete())
                 || (epoch < task_config.watermark && watermark_can_see_last_key)
             {
                 drop = true;
@@ -510,6 +511,7 @@ impl Compactor {
             iter.next().await?;
         }
         let mut local_stats = StoreLocalStatistic::default();
+        iter.collect_local_statistic(&mut local_stats);
         local_stats.report(stats.as_ref());
         Ok(())
     }
@@ -529,10 +531,10 @@ impl Compactor {
             context,
             options,
             task_config: TaskConfig {
+                key_range,
                 cache_policy,
                 gc_delete_keys,
                 watermark,
-                key_range,
             },
         }
     }
