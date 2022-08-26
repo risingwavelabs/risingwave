@@ -39,13 +39,17 @@ impl TierCompactionPicker {
     }
 }
 impl TierCompactionPicker {
-    fn pick_overlapping_level(
+    fn pick_sharding_level(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
     ) -> Option<CompactionInput> {
+        // do not pick the first sub-level because we do not want to block the level compaction.
+        let non_overlapping_type = LevelType::Nonoverlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type == LevelType::Nonoverlapping as i32 {
+            if level.level_type == non_overlapping_type
+                && level.total_file_size > self.config.sub_level_max_compaction_bytes
+            {
                 continue;
             }
 
@@ -53,82 +57,6 @@ impl TierCompactionPicker {
                 continue;
             }
 
-            let mut compaction_bytes = level.total_file_size;
-            let mut select_level_inputs = vec![InputLevel {
-                table_infos: level.table_infos.clone(),
-                level_idx: 0,
-                level_type: level.level_type,
-            }];
-            let max_compaction_bytes = std::cmp::min(
-                self.config.max_compaction_bytes,
-                self.config.sub_level_max_compaction_bytes,
-            );
-
-            for other in &l0.sub_levels[idx + 1..] {
-                if compaction_bytes >= max_compaction_bytes {
-                    break;
-                }
-
-                if level.level_type == LevelType::Nonoverlapping as i32 {
-                    break;
-                }
-
-                if other
-                    .table_infos
-                    .iter()
-                    .any(|table| level_handler.is_pending_compact(&table.id))
-                {
-                    break;
-                }
-
-                compaction_bytes += other.total_file_size;
-                select_level_inputs.push(InputLevel {
-                    table_infos: other.table_infos.clone(),
-                    level_idx: 0,
-                    level_type: other.level_type,
-                });
-            }
-
-            if select_level_inputs
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>()
-                < self.config.level0_tier_compact_file_number as usize
-            {
-                continue;
-            }
-
-            return Some(CompactionInput {
-                input_levels: select_level_inputs,
-                target_level: 0,
-                target_sub_level_id: level.sub_level_id,
-            });
-        }
-        None
-    }
-
-    fn pick_sharding_level(
-        &self,
-        l0: &OverlappingLevel,
-        level_handler: &LevelHandler,
-    ) -> Option<CompactionInput> {
-        // do not pick the first sub-level because we do not want to block the level compaction.
-        for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type == LevelType::Overlapping as i32
-                || level.total_file_size > self.config.sub_level_max_compaction_bytes
-            {
-                continue;
-            }
-
-            if level
-                .table_infos
-                .iter()
-                .any(|table| level_handler.is_pending_compact(&table.id))
-            {
-                continue;
-            }
-
-            let mut compaction_bytes = level.total_file_size;
             let mut select_level_inputs = vec![InputLevel {
                 level_idx: 0,
                 level_type: level.level_type,
@@ -138,25 +66,28 @@ impl TierCompactionPicker {
                 self.config.max_compaction_bytes,
                 self.config.max_bytes_for_level_base,
             );
+            let mut compaction_bytes = level.total_file_size;
+            let mut max_level_size = level.total_file_size;
+            let mut compact_file_count = 0;
 
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes >= max_compaction_bytes {
                     break;
                 }
 
-                if level.total_file_size > self.config.sub_level_max_compaction_bytes {
-                    break;
-                }
-
-                if other
-                    .table_infos
-                    .iter()
-                    .any(|table| level_handler.is_pending_compact(&table.id))
+                if level.level_type == non_overlapping_type
+                    && level.total_file_size > self.config.sub_level_max_compaction_bytes
                 {
                     break;
                 }
 
+                if level_handler.is_level_pending_compact(other) {
+                    break;
+                }
+
                 compaction_bytes += other.total_file_size;
+                compact_file_count += other.table_infos.len();
+                max_level_size = std::cmp::max(max_level_size, other.total_file_size);
                 select_level_inputs.push(InputLevel {
                     level_idx: 0,
                     level_type: other.level_type,
@@ -164,16 +95,14 @@ impl TierCompactionPicker {
                 });
             }
 
-            if select_level_inputs
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>()
-                < self.config.level0_tier_compact_file_number as usize
-            {
+            if compact_file_count <= self.config.level0_tier_compact_file_number as usize {
                 continue;
             }
 
-            if select_level_inputs.len() <= self.config.level0_tier_compact_file_number as usize / 2
+            // do not pick a compact task with large write amplification.
+            if level.level_type == non_overlapping_type
+                && max_level_size * self.config.level0_tier_compact_file_number / 2
+                    > compaction_bytes
             {
                 continue;
             }
@@ -252,12 +181,8 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        if let Some(input) = self.pick_trivial_move_file(l0, level_handlers) {
-            return Some(input);
-        }
-
-        if let Some(input) = self.pick_overlapping_level(l0, &level_handlers[0]) {
-            return Some(input);
+        if let Some(ret) = self.pick_trivial_move_file(l0, level_handlers) {
+            return Some(ret);
         }
 
         self.pick_sharding_level(l0, &level_handlers[0])
