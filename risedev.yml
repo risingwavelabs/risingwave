@@ -20,6 +20,7 @@ risedev:
       enable-dashboard-v2: false
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-in-memory-kv-state-backend: true
     - use: frontend
 
     # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
@@ -496,6 +497,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    # Whether to enable in-memory pure KV state backend
+    enable-in-memory-kv-state-backend: false
 
   meta-node:
     # Meta-node advertise address
