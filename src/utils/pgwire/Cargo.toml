@@ -8,6 +8,7 @@ edition = "2021"
 async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
+itertools = "0.10"
 regex = "1.5"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }

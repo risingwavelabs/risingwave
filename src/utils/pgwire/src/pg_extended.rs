@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::vec::IntoIter;
 
 use bytes::Bytes;
+use itertools::zip_eq;
 use regex::Regex;
 
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
@@ -35,11 +36,11 @@ use crate::types::Row;
 /// let params = parse_params(&type_description, &raw_params);
 /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
 /// ```
-fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Result<Vec<String>,()> {
+fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Result<Vec<String>, ()> {
     assert_eq!(type_description.len(), raw_params.len());
 
     let mut params = Vec::with_capacity(raw_params.len());
-    for (type_oid, raw_param) in type_description.iter().zip(raw_params.iter()) {
+    for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
         let str = match type_oid {
             TypeOid::Varchar => format!("'{}'", cstr_to_str(raw_param).unwrap()),
             _ => return Err(()),

@@ -3392,6 +3392,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
+ "itertools",
  "madsim-tokio",
  "regex",
  "thiserror",
