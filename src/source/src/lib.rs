@@ -54,9 +54,6 @@ pub mod monitor;
 pub mod row_id;
 mod table_v2;
 
-extern crate core;
-extern crate maplit;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
     Invalid,

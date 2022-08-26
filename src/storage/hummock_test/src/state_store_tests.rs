@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -285,9 +285,12 @@ async fn test_basic() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
-    let (_, ssts) = hummock_storage.sync(epoch1).await.unwrap();
+    let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
-    hummock_storage.wait_epoch(epoch1).await.unwrap();
+    hummock_storage
+        .wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .await
+        .unwrap();
     let value = hummock_storage
         .get(
             &Bytes::from("bb"),
@@ -863,12 +866,11 @@ async fn test_write_anytime() {
     // Assert epoch 2 correctness
     assert_old_value(epoch2).await;
 
-    println!("aaaa");
-    let (_, ssts1) = hummock_storage.sync(epoch1).await.unwrap();
+    let ssts1 = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
-    let (_, ssts2) = hummock_storage.sync(epoch2).await.unwrap();
+    let ssts2 = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
     assert_new_value(epoch1).await;
     assert_old_value(epoch2).await;
 
@@ -915,7 +917,7 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let (_, ssts) = hummock_storage.sync(epoch1).await.unwrap();
+    let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
     let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
@@ -929,9 +931,12 @@ async fn test_delete_get() {
         )
         .await
         .unwrap();
-    let (_, ssts) = hummock_storage.sync(epoch2).await.unwrap();
+    let ssts = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch2, ssts).await.unwrap();
-    hummock_storage.wait_epoch(epoch2).await.unwrap();
+    hummock_storage
+        .wait_epoch(HummockReadEpoch::Committed(epoch2))
+        .await
+        .unwrap();
     assert!(hummock_storage
         .get(
             "bb".as_bytes(),
@@ -945,4 +950,138 @@ async fn test_delete_get() {
         .await
         .unwrap()
         .is_none());
+}
+#[tokio::test]
+async fn test_multiple_epoch_sync() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        meta_client.clone(),
+        Arc::new(FilterKeyExtractorManager::default()),
+    )
+    .await
+    .unwrap();
+
+    let initial_epoch = hummock_storage
+        .local_version_manager()
+        .get_pinned_version()
+        .max_committed_epoch();
+    let epoch1 = initial_epoch + 1;
+    let batch1 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("111")),
+        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+    ];
+    hummock_storage
+        .ingest_batch(
+            batch1,
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let epoch2 = initial_epoch + 2;
+    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
+    hummock_storage
+        .ingest_batch(
+            batch2,
+            WriteOptions {
+                epoch: epoch2,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let epoch3 = initial_epoch + 3;
+    let batch3 = vec![
+        (Bytes::from("aa"), StorageValue::new_default_put("444")),
+        (Bytes::from("bb"), StorageValue::new_default_put("555")),
+    ];
+    hummock_storage
+        .ingest_batch(
+            batch3,
+            WriteOptions {
+                epoch: epoch3,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+    let test_get = || {
+        let hummock_storage_clone = hummock_storage.clone();
+        async move {
+            assert_eq!(
+                hummock_storage_clone
+                    .get(
+                        "bb".as_bytes(),
+                        true,
+                        ReadOptions {
+                            epoch: epoch1,
+                            table_id: Default::default(),
+                            retention_seconds: None,
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "222".as_bytes()
+            );
+            assert!(hummock_storage_clone
+                .get(
+                    "bb".as_bytes(),
+                    true,
+                    ReadOptions {
+                        epoch: epoch2,
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                    }
+                )
+                .await
+                .unwrap()
+                .is_none());
+            assert_eq!(
+                hummock_storage_clone
+                    .get(
+                        "bb".as_bytes(),
+                        true,
+                        ReadOptions {
+                            epoch: epoch3,
+                            table_id: Default::default(),
+                            retention_seconds: None,
+                        }
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "555".as_bytes()
+            );
+        }
+    };
+    test_get().await;
+    let sync_result3 = hummock_storage.sync(epoch3).await.unwrap();
+    let sync_result2 = hummock_storage.sync(epoch2).await.unwrap();
+    assert!(!sync_result2.sync_succeed);
+    assert!(sync_result3.sync_succeed);
+    test_get().await;
+    meta_client
+        .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
+        .await
+        .unwrap();
+    hummock_storage
+        .wait_epoch(HummockReadEpoch::Committed(epoch3))
+        .await
+        .unwrap();
+    test_get().await;
 }

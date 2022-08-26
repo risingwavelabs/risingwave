@@ -518,9 +518,10 @@ mod tests {
     async fn test_encoding_for_struct_list() {
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataType::Struct {
-                    fields: Arc::new([DataType::Varchar, DataType::Float32]),
-                }),
+                Field::unnamed(DataType::new_struct(
+                    vec![DataType::Varchar, DataType::Float32],
+                    vec![],
+                )),
                 Field::unnamed(DataType::List {
                     datatype: Box::new(DataType::Int64),
                 }),

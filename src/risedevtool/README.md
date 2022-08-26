@@ -26,8 +26,9 @@ In root directory, simply run:
 The default scene contains a MinIO, compute-node, meta-node and a frontend. RiseDev will automatically download and configure those services for you.
 
 RiseDev also provides several other modes:
-- ci-3cn-1fe: 3 compute node + meta node + frontend + MinIO
-- ci-1cn-1fe: 1 compute node + meta node + frontend + MinIO
+- ci-3cn-1fe: 3 compute node + meta node + 1 frontend + MinIO
+- ci-3cn-3fe: 3 compute node + meta node + 3 frontend + MinIO
+- ci-1cn-1fe: 1 compute node + meta node + 1 frontend + MinIO
 - dev-compute-node: 1 compute-node (user managed) + MinIO + prometheus + meta + frontend
 
 #### Debug compute node

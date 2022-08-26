@@ -3,8 +3,9 @@
     create table t (v1 int, v2 int);
     update t set v1 = 0;
   batch_plan: |
-    BatchUpdate { table: t, exprs: [$0, 0:Int32, $2] }
-      BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: UpstreamHashShard(t._row_id) }
+    BatchUpdate { table: t, exprs: [0:Int32, $1, $2] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = true;
@@ -13,25 +14,29 @@
     create table t (v1 int, v2 int);
     update t set v1 = v2 + 1;
   batch_plan: |
-    BatchUpdate { table: t, exprs: [$0, ($2 + 1:Int32), $2] }
-      BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: UpstreamHashShard(t._row_id) }
+    BatchUpdate { table: t, exprs: [($1 + 1:Int32), $1, $2] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 real);
     update t set v1 = v2;
   batch_plan: |
-    BatchUpdate { table: t, exprs: [$0, $2::Int32, $2] }
-      BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: UpstreamHashShard(t._row_id) }
+    BatchUpdate { table: t, exprs: [$1::Int32, $1, $2] }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = v2 + 1 where v2 > 0;
   batch_plan: |
-    BatchUpdate { table: t, exprs: [$0, ($2 + 1:Int32), $2] }
-      BatchFilter { predicate: (t.v2 > 0:Int32) }
-        BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: UpstreamHashShard(t._row_id) }
+    BatchUpdate { table: t, exprs: [($1 + 1:Int32), $1, $2] }
+      BatchExchange { order: [], dist: Single }
+        BatchFilter { predicate: (t.v2 > 0:Int32) }
+          BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2;
   batch_plan: |
-    BatchUpdate { table: t, exprs: [$0, ($2 + 1:Int32), ($1 - 1:Int32)] }
-      BatchFilter { predicate: (t.v1 <> t.v2) }
-        BatchScan { table: t, columns: [t._row_id, t.v1, t.v2], distribution: UpstreamHashShard(t._row_id) }
+    BatchUpdate { table: t, exprs: [($1 + 1:Int32), ($0 - 1:Int32), $2] }
+      BatchExchange { order: [], dist: Single }
+        BatchFilter { predicate: (t.v1 <> t.v2) }
+          BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }

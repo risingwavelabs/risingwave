@@ -19,16 +19,16 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use futures::Future;
-use risingwave_common::cache::{CachableEntry, LruCache, LruCacheEventListener};
+use risingwave_common::cache::{CacheableEntry, LruCache, LruCacheEventListener};
 use risingwave_hummock_sdk::HummockSstableId;
 
-use super::{Block, HummockResult, TieredCacheEntry, TieredCacheValue};
+use super::{Block, HummockResult, TieredCacheEntry};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 
 enum BlockEntry {
-    Cache(CachableEntry<(HummockSstableId, u64), Box<Block>>),
+    Cache(CacheableEntry<(HummockSstableId, u64), Box<Block>>),
     Owned(Box<Block>),
     RefEntry(Arc<Block>),
 }
@@ -55,7 +55,7 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_cached_block(entry: CachableEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
+    pub fn from_cached_block(entry: CacheableEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
         let ptr = entry.value().as_ref() as *const _;
         Self {
             _handle: BlockEntry::Cache(entry),
@@ -140,7 +140,7 @@ impl BlockCache {
         BlockHolder::from_cached_block(self.inner.insert(
             (sst_id, block_idx),
             Self::hash(sst_id, block_idx),
-            block.len(),
+            block.capacity(),
             block,
         ))
     }
@@ -163,7 +163,7 @@ impl BlockCache {
                 let f = f();
                 async move {
                     let block = f.await?;
-                    let len = block.len();
+                    let len = block.capacity();
                     Ok((block, len))
                 }
             })

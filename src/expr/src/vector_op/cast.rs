@@ -17,9 +17,10 @@ use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use num_traits::ToPrimitive;
+use risingwave_common::array::{Array, ListRef, ListValue};
 use risingwave_common::types::{
-    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
-    OrderedF64,
+    DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl,
 };
 
 use crate::{ExprError, Result};
@@ -216,6 +217,193 @@ pub fn general_to_string<T: std::fmt::Display>(elem: T) -> Result<String> {
 /// uses different variants of bool-to-string in different situations.
 pub fn bool_out(input: bool) -> Result<String> {
     Ok(if input { "t".into() } else { "f".into() })
+}
+
+/// This macro helps to cast individual scalars.
+macro_rules! gen_cast_impl {
+    ([$source:expr, $source_ty:expr, $target_ty:expr], $( { $input:ident, $cast:ident, $func:expr } ),* $(,)?) => {
+        match ($source_ty, $target_ty) {
+            $(
+                ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
+                    let source: <$input! { type_array } as Array>::RefItem<'_> = $source.try_into()?;
+                    let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
+                    target.map(Scalar::to_scalar_value)
+                }
+            )*
+            _ => {
+                return Err(ExprError::Cast2($source_ty.clone(), $target_ty.clone()));
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! for_each_cast {
+    ($macro:ident, $($x:tt, )* ) => {
+        $macro! {
+            [$($x),*],
+
+            { varchar, date, str_to_date },
+            { varchar, time, str_to_time },
+            { varchar, interval, str_parse },
+            { varchar, timestamp, str_to_timestamp },
+            { varchar, timestampz, str_to_timestampz },
+            { varchar, int16, str_parse },
+            { varchar, int32, str_parse },
+            { varchar, int64, str_parse },
+            { varchar, float32, str_parse },
+            { varchar, float64, str_parse },
+            { varchar, decimal, str_parse },
+            { varchar, boolean, str_to_bool },
+
+            { boolean, varchar, general_to_string },
+            { int16, varchar, general_to_string },
+            { int32, varchar, general_to_string },
+            { int64, varchar, general_to_string },
+            { float32, varchar, general_to_string },
+            { float64, varchar, general_to_string },
+            { decimal, varchar, general_to_string },
+            { time, varchar, general_to_string },
+            { interval, varchar, general_to_string },
+            { date, varchar, general_to_string },
+            { timestamp, varchar, general_to_string },
+            { timestampz, varchar, timestampz_to_utc_string },
+
+            { boolean, int32, general_cast },
+            { int32, boolean, int32_to_bool },
+
+            { int16, int32, general_cast },
+            { int16, int64, general_cast },
+            { int16, float32, general_cast },
+            { int16, float64, general_cast },
+            { int16, decimal, general_cast },
+            { int32, int16, general_cast },
+            { int32, int64, general_cast },
+            { int32, float32, to_f32 }, // lossy
+            { int32, float64, general_cast },
+            { int32, decimal, general_cast },
+            { int64, int16, general_cast },
+            { int64, int32, general_cast },
+            { int64, float32, to_f32 }, // lossy
+            { int64, float64, to_f64 }, // lossy
+            { int64, decimal, general_cast },
+
+            { float32, float64, general_cast },
+            { float32, decimal, general_cast },
+            { float32, int16, to_i16 },
+            { float32, int32, to_i32 },
+            { float32, int64, to_i64 },
+            { float64, decimal, general_cast },
+            { float64, int16, to_i16 },
+            { float64, int32, to_i32 },
+            { float64, int64, to_i64 },
+            { float64, float32, to_f32 }, // lossy
+
+            { decimal, int16, dec_to_i16 },
+            { decimal, int32, dec_to_i32 },
+            { decimal, int64, dec_to_i64 },
+            { decimal, float32, to_f32 },
+            { decimal, float64, to_f64 },
+
+            { date, timestamp, general_cast },
+            { time, interval, general_cast },
+            { timestamp, date, timestamp_to_date },
+            { timestamp, time, timestamp_to_time },
+            { interval, time, interval_to_time },
+        }
+    };
+}
+
+#[inline(always)]
+pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
+    // Trim input
+    let trimmed = input.trim();
+
+    // Ensure input string is correctly braced.
+    let mut chars = trimmed.chars();
+    risingwave_common::ensure!(
+        chars.next() == Some('{'),
+        "First character should be left brace '{{'"
+    );
+    risingwave_common::ensure!(
+        chars.next_back() == Some('}'),
+        "Last character should be right brace '}}'"
+    );
+
+    // Return a new ListValue.
+    // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn is
+    // cast into the target DataType. If the target DataType is of type Varchar, then no casting is
+    // needed.
+    Ok(ListValue::new(
+        chars
+            .as_str()
+            .split(',')
+            .map(|s| {
+                Some(ScalarRefImpl::Utf8(s.trim()))
+                    .map(|scalar_ref| {
+                        if target_elem_type == &DataType::Varchar {
+                            Ok(scalar_ref.into_scalar_impl())
+                        } else {
+                            scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type)
+                        }
+                    })
+                    .transpose()
+            })
+            .try_collect()?,
+    ))
+}
+
+/// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
+///
+/// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
+pub fn list_cast(
+    input: ListRef,
+    source_elem_type: &DataType,
+    target_elem_type: &DataType,
+) -> Result<ListValue> {
+    Ok(ListValue::new(
+        input
+            .values_ref()
+            .into_iter()
+            .map(|datum_ref| {
+                datum_ref
+                    .map(|scalar_ref| scalar_cast(scalar_ref, source_elem_type, target_elem_type))
+                    .transpose()
+            })
+            .try_collect()?,
+    ))
+}
+
+/// Cast scalar ref with `source_type` into owned scalar with `target_type`. This function forms a
+/// mutual recursion with `list_cast` so that we can cast nested lists (e.g., varchar[][] to
+/// int[][]).
+fn scalar_cast(
+    source: ScalarRefImpl,
+    source_type: &DataType,
+    target_type: &DataType,
+) -> Result<ScalarImpl> {
+    use crate::expr::data_types::*;
+
+    match (source_type, target_type) {
+        (
+            DataType::List {
+                datatype: source_elem_type,
+            },
+            DataType::List {
+                datatype: target_elem_type,
+            },
+        ) => list_cast(source.try_into()?, source_elem_type, target_elem_type)
+            .map(Scalar::to_scalar_value),
+        (
+            DataType::Varchar,
+            DataType::List {
+                datatype: target_elem_type,
+            },
+        ) => str_to_list(source.try_into()?, target_elem_type).map(Scalar::to_scalar_value),
+        (source_type, target_type) => {
+            for_each_cast!(gen_cast_impl, source, source_type, target_type,)
+        }
+    }
 }
 
 #[cfg(test)]

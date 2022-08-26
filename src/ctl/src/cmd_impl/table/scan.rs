@@ -18,7 +18,7 @@ use risingwave_frontend::TableCatalog;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -48,8 +48,8 @@ pub fn print_table_catalog(table: &TableCatalog) {
     println!("{:#?}", table);
 }
 
-pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> RowBasedStateTable<S> {
-    RowBasedStateTable::new_with_distribution(
+pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
+    StateTable::new_with_distribution(
         hummock,
         table.id,
         table
@@ -62,7 +62,7 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> RowB
             .iter()
             .map(|x| x.direct.to_order())
             .collect(),
-        table.pk.clone(), // FIXME: should use order keys
+        table.stream_key.clone(), // FIXME: should use order keys
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
     )
 }

@@ -104,7 +104,7 @@ pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
     heap: BinaryHeap<Node<I, NE>>,
 
     /// Statistics.
-    stats: Arc<StateStoreMetrics>,
+    stats: Option<Arc<StateStoreMetrics>>,
 }
 
 /// An order aware merge iterator.
@@ -112,7 +112,21 @@ pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
 pub type OrderedMergeIteratorInner<I: HummockIterator> = MergeIteratorInner<I, OrderedNodeExtra>;
 
 impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
-    pub fn new(iterators: impl IntoIterator<Item = I>, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(iterators: impl IntoIterator<Item = I>) -> Self {
+        Self::create(iterators, None)
+    }
+
+    pub fn for_compactor(
+        iterators: impl IntoIterator<Item = I>,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Self {
+        Self::create(iterators, Some(stats))
+    }
+
+    fn create(
+        iterators: impl IntoIterator<Item = I>,
+        stats: Option<Arc<StateStoreMetrics>>,
+    ) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -144,7 +158,21 @@ pub type UnorderedMergeIteratorInner<I: HummockIterator> =
     MergeIteratorInner<I, UnorderedNodeExtra>;
 
 impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
-    pub fn new(iterators: impl IntoIterator<Item = I>, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(iterators: impl IntoIterator<Item = I>) -> Self {
+        Self::create(iterators, None)
+    }
+
+    pub fn for_compactor(
+        iterators: impl IntoIterator<Item = I>,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Self {
+        Self::create(iterators, Some(stats))
+    }
+
+    fn create(
+        iterators: impl IntoIterator<Item = I>,
+        stats: Option<Arc<StateStoreMetrics>>,
+    ) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -327,8 +355,10 @@ where
 
 impl<I: HummockIterator, NE: NodeExtraOrderInfo> Drop for MergeIteratorInner<I, NE> {
     fn drop(&mut self) {
-        let mut stats = StoreLocalStatistic::default();
-        self.collect_local_statistic_impl(&mut stats);
-        stats.report(self.stats.as_ref());
+        if let Some(stats) = &self.stats {
+            let mut local_stats = StoreLocalStatistic::default();
+            self.collect_local_statistic_impl(&mut local_stats);
+            local_stats.report(stats);
+        }
     }
 }

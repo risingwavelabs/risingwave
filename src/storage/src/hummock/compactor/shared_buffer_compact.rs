@@ -32,13 +32,14 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::{CachePolicy, HummockResult};
+use crate::hummock::{CachePolicy, HummockError, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
     context: Arc<Context>,
     payload: UploadTaskPayload,
+    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<(CompactionGroupId, SstableInfo)>> {
     let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
     for uncommitted_list in payload {
@@ -63,12 +64,14 @@ pub async fn compact(
     for (id, group_payload) in grouped_payload {
         let id_copy = id;
         futures.push(
-            compact_shared_buffer(context.clone(), group_payload).map_ok(move |results| {
-                results
-                    .into_iter()
-                    .map(move |result| (id_copy, result))
-                    .collect_vec()
-            }),
+            compact_shared_buffer(context.clone(), group_payload, sst_watermark_epoch).map_ok(
+                move |results| {
+                    results
+                        .into_iter()
+                        .map(move |result| (id_copy, result))
+                        .collect_vec()
+                },
+            ),
         );
     }
     // Note that the output is reordered compared with input `payload`.
@@ -84,6 +87,7 @@ pub async fn compact(
 async fn compact_shared_buffer(
     context: Arc<Context>,
     payload: UploadTaskPayload,
+    sst_watermark_epoch: HummockEpoch,
 ) -> HummockResult<Vec<SstableInfo>> {
     let mut start_user_keys = payload
         .iter()
@@ -147,7 +151,12 @@ async fn compact_shared_buffer(
 
     let mut local_stats = StoreLocalStatistic::default();
     for (split_index, key_range) in splits.into_iter().enumerate() {
-        let compactor = SharedBufferCompactRunner::new(split_index, key_range, context.clone());
+        let compactor = SharedBufferCompactRunner::new(
+            split_index,
+            key_range,
+            context.clone(),
+            sst_watermark_epoch,
+        );
         let iter = build_ordered_merge_iter::<ForwardIter>(
             &payload,
             sstable_store.clone(),
@@ -158,24 +167,33 @@ async fn compact_shared_buffer(
         .await?;
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();
-
-        let split_task = async move { compactor.run(iter, multi_filter_key_extractor).await };
-        let rx = Compactor::request_execution(compaction_executor, split_task)?;
-        compaction_futures.push(rx);
+        let handle = compaction_executor
+            .execute(async move { compactor.run(iter, multi_filter_key_extractor).await });
+        compaction_futures.push(handle);
     }
     local_stats.report(stats.as_ref());
 
     let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
     let mut err = None;
     while let Some(future_result) = buffered.next().await {
-        match future_result.unwrap() {
-            Ok((split_index, ssts)) => {
+        match future_result {
+            Ok(Ok((split_index, ssts))) => {
                 output_ssts.push((split_index, ssts));
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 compact_success = false;
                 tracing::warn!("Shared Buffer Compaction failed with error: {:#?}", e);
                 err = Some(e);
+            }
+            Err(e) => {
+                compact_success = false;
+                tracing::warn!(
+                    "Shared Buffer Compaction failed with future error: {:#?}",
+                    e
+                );
+                err = Some(HummockError::compaction_executor(
+                    "failed while execute in tokio",
+                ));
             }
         }
     }
@@ -208,7 +226,12 @@ pub struct SharedBufferCompactRunner {
 }
 
 impl SharedBufferCompactRunner {
-    pub fn new(split_index: usize, key_range: KeyRange, context: Arc<Context>) -> Self {
+    pub fn new(
+        split_index: usize,
+        key_range: KeyRange,
+        context: Arc<Context>,
+        sst_watermark_epoch: HummockEpoch,
+    ) -> Self {
         let sstable_store = context.sstable_store.clone();
         let options = context.options.as_ref().into();
         let compactor = Compactor::new(
@@ -218,7 +241,7 @@ impl SharedBufferCompactRunner {
             key_range,
             CachePolicy::Fill,
             false,
-            u64::MAX,
+            sst_watermark_epoch,
         );
         Self {
             compactor,

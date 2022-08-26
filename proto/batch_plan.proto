@@ -66,15 +66,21 @@ message FilterNode {
 message InsertNode {
   uint32 table_source_id = 1;
   repeated int32 column_ids = 2;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 3;
 }
 
 message DeleteNode {
   uint32 table_source_id = 1;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 2;
 }
 
 message UpdateNode {
   uint32 table_source_id = 1;
   repeated expr.ExprNode exprs = 2;
+  // Id of the materialized view which is used to determine which compute node to execute the dml fragment.
+  uint32 associated_mview_id = 3;
 }
 
 message ValuesNode {
@@ -204,6 +210,8 @@ message LookupJoinNode {
   repeated common.WorkerNode worker_nodes = 8;
 }
 
+message UnionNode {}
+
 message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
@@ -230,6 +238,7 @@ message PlanNode {
     ExpandNode expand = 28;
     LookupJoinNode lookup_join = 29;
     ProjectSetNode project_set = 30;
+    UnionNode union = 31;
   }
   string identity = 24;
 }

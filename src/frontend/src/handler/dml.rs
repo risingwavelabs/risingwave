@@ -17,11 +17,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::Binder;
 use crate::handler::privilege::{check_privileges, resolve_privileges};
-use crate::handler::util::{to_pg_field, to_pg_rows};
-use crate::planner::Planner;
-use crate::scheduler::{ExecutionContext, ExecutionContextRef};
+use crate::handler::util::to_pg_rows;
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
@@ -36,37 +34,13 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
     let check_items = resolve_privileges(&bound);
     check_privileges(&session, &check_items)?;
 
-    let associated_mview_id = match &bound {
-        BoundStatement::Insert(insert) => insert.table_source.associated_mview_id,
-        BoundStatement::Update(update) => update.table_source.associated_mview_id,
-        BoundStatement::Delete(delete) => delete.table_source.associated_mview_id,
-        BoundStatement::Query(_) => unreachable!(),
-    };
-
-    let vnodes = context
-        .session_ctx
-        .env()
-        .worker_node_manager()
-        .get_table_mapping(&associated_mview_id);
-
-    let (plan, pg_descs) = {
-        // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-        let root = Planner::new(context.into()).plan(bound)?;
-        let pg_descs = root.schema().fields().iter().map(to_pg_field).collect();
-        let plan = root.gen_batch_query_plan()?;
-
-        (plan.to_batch_prost(), pg_descs)
-    };
-
-    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
-    let query_manager = execution_context.session().env().query_manager().clone();
+    // TODO: support dml in local mode
+    // Currently dml always runs in distributed mode.
+    let (data_stream, pg_descs) = crate::handler::query::distribute_execute(context, bound).await?;
 
     let mut rows = vec![];
     #[for_await]
-    for chunk in query_manager
-        .schedule_single(execution_context, plan, vnodes)
-        .await?
-    {
+    for chunk in data_stream {
         rows.extend(to_pg_rows(chunk?, false));
     }
 
@@ -98,11 +72,11 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            let max_committed_epoch = client.flush().await?;
+            let snapshot = client.flush().await?;
             session
                 .env()
                 .hummock_snapshot_manager()
-                .update_epoch(max_committed_epoch);
+                .update_epoch(snapshot);
         }
         _ => {}
     }

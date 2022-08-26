@@ -53,7 +53,7 @@ For example, an executor performs `insert(a, b, c)` and `delete(d, e, f)` throug
 
 ![write example](../images/relational-table-layer/relational-table-03.svg)
 ### Read Path
-Executors should be able to read the just written data, which means uncommited data is visible. The data in Mem Table (memory) is fresher than that in shared storage (state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Storage Table. 
+Executors should be able to read the just written data, which means uncommitted data is visible. The data in Mem Table (memory) is fresher than that in shared storage (state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Storage Table. 
 #### Get
 For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
 ```

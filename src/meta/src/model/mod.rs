@@ -35,7 +35,7 @@ pub use user::*;
 
 use crate::storage::{MetaStore, MetaStoreError, Transaction};
 
-/// A global, unique indentifier of an actor
+/// A global, unique identifier of an actor
 pub type ActorId = u32;
 
 /// Should be used together with `ActorId` to uniquely identify a dispatcher

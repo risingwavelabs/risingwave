@@ -106,7 +106,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
             .iter_mut()
             .map(|expr| {
                 Column::new(expr.eval_infallible(&data_chunk, |err| {
-                    self.ctx.lock().on_compute_error(err, &self.info.identity)
+                    self.ctx.on_compute_error(err, &self.info.identity)
                 }))
             })
             .collect();
@@ -174,7 +174,7 @@ mod tests {
         );
 
         let project = Box::new(ProjectExecutor::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source),
             vec![],
             vec![test_expr],

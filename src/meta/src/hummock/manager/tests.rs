@@ -91,7 +91,7 @@ async fn test_hummock_pin_unpin() {
         .is_empty());
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
-        assert_eq!(pin_result.epoch, epoch);
+        assert_eq!(pin_result.committed_epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_snapshots_epoch(&pinned_snapshots), vec![epoch]);
         assert_eq!(pinned_snapshots[0].context_id, context_id);
@@ -112,19 +112,25 @@ async fn test_unpin_snapshot_before() {
 
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
-        assert_eq!(pin_result.epoch, epoch);
+        assert_eq!(pin_result.committed_epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
         assert_eq!(pinned_snapshots[0].context_id, context_id);
         assert_eq!(
             pinned_snapshots[0].minimal_pinned_snapshot,
-            pin_result.epoch
+            pin_result.committed_epoch
         );
     }
 
     // unpin nonexistent target will not return error
     for _ in 0..3 {
         hummock_manager
-            .unpin_snapshot_before(context_id, HummockSnapshot { epoch })
+            .unpin_snapshot_before(
+                context_id,
+                HummockSnapshot {
+                    committed_epoch: epoch,
+                    current_epoch: epoch,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -136,7 +142,13 @@ async fn test_unpin_snapshot_before() {
     // unpin nonexistent target will not return error
     for _ in 0..3 {
         hummock_manager
-            .unpin_snapshot_before(context_id, HummockSnapshot { epoch: epoch + 1 })
+            .unpin_snapshot_before(
+                context_id,
+                HummockSnapshot {
+                    committed_epoch: epoch + 1,
+                    current_epoch: epoch + 1,
+                },
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -707,12 +719,8 @@ async fn test_pin_snapshot_response_lost() {
 
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
-    let mut epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    let mut epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -733,21 +741,13 @@ async fn test_pin_snapshot_response_lost() {
 
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -768,12 +768,8 @@ async fn test_pin_snapshot_response_lost() {
 
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 
     let test_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
@@ -794,12 +790,8 @@ async fn test_pin_snapshot_response_lost() {
 
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
-    epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id)
-        .await
-        .unwrap()
-        .epoch;
-    assert_eq!(epoch_recorded_in_frontend, epoch - 1);
+    epoch_recorded_in_frontend = hummock_manager.pin_snapshot(context_id).await.unwrap();
+    assert_eq!(epoch_recorded_in_frontend.committed_epoch, epoch - 1);
 }
 
 #[tokio::test]
@@ -886,7 +878,7 @@ async fn test_trigger_manual_compaction() {
             .await;
 
         assert_eq!(
-            "internal error: trigger_manual_compaction No compactor is available. compaction_group 2",
+            "trigger_manual_compaction No compactor is available. compaction_group 2",
             result.err().unwrap().to_string()
         );
     }
@@ -899,7 +891,10 @@ async fn test_trigger_manual_compaction() {
         let result = hummock_manager
             .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
-        assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
+        assert_eq!(
+            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
+            result.err().unwrap().to_string()
+        );
     }
 
     let _ = add_test_tables(&hummock_manager, context_id).await;

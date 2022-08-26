@@ -20,7 +20,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use minitrace::future::FutureExt;
+use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
@@ -41,7 +44,7 @@ use crate::hummock::shared_buffer::{
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -91,24 +94,31 @@ impl HummockStorage {
         let epoch = read_options.epoch;
         let compaction_group_id = match read_options.table_id.as_ref() {
             None => None,
-            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+            Some(table_id) => Some(
+                self.get_compaction_group_id(*table_id)
+                    .in_span(Span::enter_with_local_parent("get_compaction_group_id"))
+                    .await?,
+            ),
         };
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
 
         let ReadVersion {
-            shared_buffer_datas,
+            replicated_batches,
+            shared_buffer_data,
             pinned_version,
-            sync_uncommitted_datas,
+            sync_uncommitted_data,
         } = self.read_filter(&read_options, &key_range)?;
 
         let mut local_stats = StoreLocalStatistic::default();
 
-        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
-            for batch in replicated_batches {
+        for epoch_replicated_batches in replicated_batches {
+            for batch in epoch_replicated_batches {
                 overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
             }
+        }
+        for uncommitted_data in shared_buffer_data {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
@@ -117,10 +127,13 @@ impl HummockStorage {
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
+                .in_span(Span::enter_with_local_parent(
+                    "build_ordered_merge_iter_shared_buffer",
+                ))
                 .await?,
             ));
         }
-        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
             overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
@@ -129,6 +142,9 @@ impl HummockStorage {
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
+                .in_span(Span::enter_with_local_parent(
+                    "build_ordered_merge_iter_uncommitted",
+                ))
                 .await?,
             ))
         }
@@ -179,6 +195,7 @@ impl HummockStorage {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info.id, &mut local_stats)
+                            .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
                         if Self::hit_sstable_bloom_filter(
@@ -205,6 +222,7 @@ impl HummockStorage {
                     let sstable = self
                         .sstable_store
                         .sstable(table_info.id, &mut local_stats)
+                        .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
                     if let Some(bloom_filter_key) = prefix_hint.as_ref() {
                         if !Self::hit_sstable_bloom_filter(
@@ -248,9 +266,15 @@ impl HummockStorage {
             Some(pinned_version),
         );
 
-        user_iterator.rewind().await?;
+        user_iterator
+            .rewind()
+            .in_span(Span::enter_with_local_parent("rewind"))
+            .await?;
         local_stats.report(self.stats.as_ref());
-        Ok(HummockStateStoreIter::new(user_iterator))
+        Ok(HummockStateStoreIter::new(
+            user_iterator,
+            self.stats.clone(),
+        ))
     }
 
     /// Gets the value of a specified `key`.
@@ -273,21 +297,26 @@ impl HummockStorage {
         };
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
-            shared_buffer_datas,
+            replicated_batches,
+            shared_buffer_data,
             pinned_version,
-            sync_uncommitted_datas,
+            sync_uncommitted_data,
         } = self.read_filter(&read_options, &(key..=key))?;
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
 
-        // Query shared buffer. Return the value without iterating SSTs if found
-        for (replicated_batches, uncommitted_data) in shared_buffer_datas {
-            for batch in replicated_batches {
+        // Query replicated batches. Return the value without iterating SSTs if found
+        for epoch_replicated_batches in replicated_batches {
+            for batch in epoch_replicated_batches {
                 if let Some(v) = self.get_from_batch(&batch, key) {
                     return Ok(v);
                 }
             }
+        }
+
+        // Query shared buffer. Return the value without iterating SSTs if found
+        for uncommitted_data in shared_buffer_data {
             // iterate over uncommitted data in order index in descending order
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
@@ -303,7 +332,7 @@ impl HummockStorage {
             }
             table_counts += table_count;
         }
-        for sync_uncommitted_data in sync_uncommitted_datas.into_iter().rev() {
+        for sync_uncommitted_data in sync_uncommitted_data.into_iter().rev() {
             let (value, table_count) = self
                 .get_from_order_sorted_uncommitted_data(
                     sync_uncommitted_data,
@@ -633,7 +662,10 @@ impl StateStore for HummockStorage {
             // not check
         }
 
+        let span = self.tracing.new_tracer("hummock_iter");
+
         self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options)
+            .in_span(span)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -654,17 +686,17 @@ impl StateStore for HummockStorage {
         self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
-            let (size, ssts) = self
+            let sync_result = self
                 .local_version_manager()
                 .sync_shared_buffer(epoch)
                 .await?;
-            Ok((size, ssts))
+            Ok(sync_result)
         }
     }
 
@@ -678,11 +710,12 @@ impl StateStore for HummockStorage {
 
 pub struct HummockStateStoreIter {
     inner: DirectedUserIterator,
+    metrics: Arc<StateStoreMetrics>,
 }
 
 impl HummockStateStoreIter {
-    fn new(inner: DirectedUserIterator) -> Self {
-        Self { inner }
+    fn new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
+        Self { inner, metrics }
     }
 
     async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
@@ -696,6 +729,10 @@ impl HummockStateStoreIter {
         }
 
         Ok(kvs)
+    }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        self.inner.collect_local_statistic(stats);
     }
 }
 
@@ -721,5 +758,13 @@ impl StateStoreIter for HummockStateStoreIter {
                 Ok(None)
             }
         }
+    }
+}
+
+impl Drop for HummockStateStoreIter {
+    fn drop(&mut self) {
+        let mut stats = StoreLocalStatistic::default();
+        self.collect_local_statistic(&mut stats);
+        stats.report(&self.metrics);
     }
 }

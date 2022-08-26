@@ -26,7 +26,7 @@ use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
 /// `Utf8Array` is a collection of Rust Utf8 `String`s.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Utf8Array {
     offset: Vec<usize>,
     bitmap: Bitmap,
@@ -144,6 +144,16 @@ impl Utf8Array {
             builder.append(*i)?;
         }
         builder.finish()
+    }
+
+    /// Retrieve the ownership of the single string value. Panics if there're multiple or no values.
+    pub fn into_single_value(self) -> Option<String> {
+        assert_eq!(self.len(), 1);
+        if !self.is_null(0) {
+            Some(unsafe { String::from_utf8_unchecked(self.data) })
+        } else {
+            None
+        }
     }
 }
 

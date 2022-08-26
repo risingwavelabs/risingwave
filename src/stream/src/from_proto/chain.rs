@@ -36,7 +36,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // For reporting the progress.
         let progress = stream
             .context
-            .register_create_mview_progress(params.actor_id);
+            .register_create_mview_progress(params.actor_context.id);
 
         // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
         // its schema.

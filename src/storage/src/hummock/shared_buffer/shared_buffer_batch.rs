@@ -303,6 +303,8 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             Ok(())
         }
     }
+
+    fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
 }
 
 #[cfg(test)]

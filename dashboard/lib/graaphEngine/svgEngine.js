@@ -144,7 +144,7 @@ export class Path extends DrawElement {
   }
 }
 
-const orginalZoom = new d3.ZoomTransform(0.5, 0, 0);
+const originalZoom = new d3.ZoomTransform(0.5, 0, 0);
 
 export class SvgEngine {
   /**
@@ -171,7 +171,7 @@ export class SvgEngine {
     });
 
     this.svg.call(this.zoom)
-      .call(this.zoom.transform, orginalZoom)
+      .call(this.zoom.transform, originalZoom)
     this.svg.on("pointermove", event => {
       this.transform.invert(d3.pointer(event))
     });
@@ -191,7 +191,7 @@ export class SvgEngine {
   }
 
   resetCamera() {
-    this.svg.call(this.zoom.transform, orginalZoom);
+    this.svg.call(this.zoom.transform, originalZoom);
   }
 
   cleanGraph() {

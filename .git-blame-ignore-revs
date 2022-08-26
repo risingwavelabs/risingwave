@@ -18,3 +18,6 @@ f2c5758789ddd22ba6edbfeb6d7f5279ac919f9c
 
 # chore: rename rust -> src #1551
 0f2d391c420276bf8ae36f7c619ba32a64be5bb6
+
+# chore: fix typos & add typo checker to ci #4767
+0019e5914beec085fb1d36350d10e85f4b528929

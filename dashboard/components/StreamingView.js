@@ -100,7 +100,7 @@ export default function StreamingView(props) {
 
 
   const canvasRef = useRef(null);
-  const canvasOutterBox = useRef(null);
+  const canvasOuterBox = useRef(null);
   const engineRef = useRef(null);
   const viewRef = useRef(null);
 
@@ -201,8 +201,8 @@ export default function StreamingView(props) {
   }
 
   const resizeCanvas = () => {
-    if (canvasOutterBox.current) {
-      getEngine() && getEngine().resize(canvasOutterBox.current.clientWidth, canvasOutterBox.current.clientHeight);
+    if (canvasOuterBox.current) {
+      getEngine() && getEngine().resize(canvasOuterBox.current.clientWidth, canvasOuterBox.current.clientHeight);
     }
   }
 
@@ -260,7 +260,7 @@ export default function StreamingView(props) {
       <SvgBoxCover style={{ right: "10px", top: "10px", width: "500px" }}>
         <PopupBox style={{
           display: showInfoPane ? "block" : "none",
-          height: canvasOutterBox && canvasOutterBox.current ? canvasOutterBox.current.clientHeight - 100 : 500
+          height: canvasOuterBox && canvasOuterBox.current ? canvasOuterBox.current.clientHeight - 100 : 500
         }}>
           <PopupBoxHeader>
             <IconButton onClick={() => setShowInfoPane(false)}>
@@ -426,7 +426,7 @@ export default function StreamingView(props) {
 
 
       </SvgBoxCover>
-      <div ref={canvasOutterBox} style={{ zIndex: 5, width: "100%", height: "100%", overflow: "auto" }} className="noselect">
+      <div ref={canvasOuterBox} style={{ zIndex: 5, width: "100%", height: "100%", overflow: "auto" }} className="noselect">
         <canvas ref={canvasRef} id="c" width={1000} height={1000} style={{ cursor: "pointer" }} />
       </div>
     </SvgBox >

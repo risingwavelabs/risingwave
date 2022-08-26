@@ -61,6 +61,7 @@ impl Binder {
             "string_agg" => Some(AggKind::StringAgg),
             "single_value" => Some(AggKind::SingleValue),
             "approx_count_distinct" => Some(AggKind::ApproxCountDistinct),
+            "array_agg" => Some(AggKind::ArrayAgg),
             _ => None,
         };
         if let Some(kind) = agg_kind {

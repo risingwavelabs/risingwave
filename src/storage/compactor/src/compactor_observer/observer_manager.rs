@@ -51,6 +51,8 @@ impl ObserverNodeImpl for CompactorObserverNode {
                 self.handle_source_notification(resp.operation(), source_catalog);
             }
 
+            Info::HummockVersionDeltas(_) => {}
+
             _ => {
                 panic!("error type notification");
             }

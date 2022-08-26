@@ -13,7 +13,9 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
+#![feature(once_cell)]
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use clap::Parser;
@@ -25,7 +27,7 @@ fn main() {
     println!("This binary is only available in simulation.");
 }
 
-/// Determinisitic simulation end-to-end test runner.
+/// Deterministic simulation end-to-end test runner.
 ///
 /// ENVS:
 ///
@@ -41,7 +43,7 @@ pub struct Args {
     files: String,
 
     /// The number of frontend nodes.
-    #[clap(long, default_value = "1")]
+    #[clap(long, default_value = "2")]
     frontend_nodes: usize,
 
     /// The number of compute nodes.
@@ -54,14 +56,25 @@ pub struct Args {
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 
-    #[clap(short, long, default_value = "1")]
-    jobs: usize,
+    /// The number of clients to run simultaneously.
+    ///
+    /// If this argument is set, the runner will implicitly create a database for each test file.
+    #[clap(short, long)]
+    jobs: Option<usize>,
+
+    /// Randomly kill a compute node after each query.
+    ///
+    /// Only available when `-j` is not set.
+    #[clap(long)]
+    kill_node: bool,
 }
+
+static ARGS: LazyLock<Args> = LazyLock::new(Args::parse);
 
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
-    let args = Args::parse();
+    let args = &*ARGS;
 
     let handle = madsim::runtime::Handle::current();
     println!("seed = {}", handle.seed());
@@ -128,6 +141,7 @@ async fn main() {
                 ]);
                 risingwave_compute::start(opts).await
             })
+            .restart_on_panic()
             .build();
     }
     // wait for the service to be ready
@@ -141,8 +155,8 @@ async fn main() {
     client_node
         .spawn(async move {
             let glob = &args.files;
-            if args.jobs > 1 {
-                run_parallel_slt_task(glob, &frontend_ip, args.jobs)
+            if let Some(jobs) = args.jobs {
+                run_parallel_slt_task(glob, &frontend_ip, jobs)
                     .await
                     .unwrap();
             } else {
@@ -154,9 +168,59 @@ async fn main() {
         .unwrap();
 }
 
+#[cfg(madsim)]
+async fn kill_node() {
+    if rand::thread_rng().gen_range(0.0..1.0) < 0.0 {
+        // kill a frontend (disabled)
+        // FIXME: handle postgres connection error
+        let i = rand::thread_rng().gen_range(1..=ARGS.frontend_nodes);
+        let name = format!("frontend-{}", i);
+        tracing::info!("restart {name}");
+        madsim::runtime::Handle::current().restart(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    } else {
+        // kill a compute node
+        let i = rand::thread_rng().gen_range(1..=ARGS.compute_nodes);
+        let name = format!("compute-{}", i);
+        tracing::info!("kill {name}");
+        madsim::runtime::Handle::current().kill(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        tracing::info!("restart {name}");
+        madsim::runtime::Handle::current().restart(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    }
+}
+
+#[cfg(not(madsim))]
+async fn kill_node() {}
+
+struct HookImpl;
+
+#[async_trait::async_trait]
+impl sqllogictest::Hook for HookImpl {
+    async fn on_stmt_complete(&mut self, _sql: &str) {
+        kill_node().await;
+    }
+
+    async fn on_query_complete(&mut self, _sql: &str) {
+        kill_node().await;
+    }
+}
+
 async fn run_slt_task(glob: &str, host: &str) {
-    let mut tester =
-        sqllogictest::Runner::new(Postgres::connect(host.to_string(), "dev".to_string()).await);
+    let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
+    if ARGS.kill_node {
+        risingwave
+            .client
+            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
+            .await
+            .expect("failed to set");
+    }
+    let mut tester = sqllogictest::Runner::new(risingwave);
+    if ARGS.kill_node {
+        tester.set_hook(HookImpl);
+    }
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         let file = file.unwrap();
@@ -172,19 +236,19 @@ async fn run_parallel_slt_task(
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
     let i = rand::thread_rng().gen_range(0..hosts.len());
-    let db = Postgres::connect(hosts[i].clone(), "dev".to_string()).await;
+    let db = Risingwave::connect(hosts[i].clone(), "dev".to_string()).await;
     let mut tester = sqllogictest::Runner::new(db);
     tester
-        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, jobs)
+        .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
 }
 
-struct Postgres {
+struct Risingwave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl Postgres {
+impl Risingwave {
     async fn connect(host: String, dbname: String) -> Self {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
@@ -198,18 +262,18 @@ impl Postgres {
         let task = tokio::spawn(async move {
             connection.await.expect("Postgres connection error");
         });
-        Postgres { client, task }
+        Risingwave { client, task }
     }
 }
 
-impl Drop for Postgres {
+impl Drop for Risingwave {
     fn drop(&mut self) {
         self.task.abort();
     }
 }
 
 #[async_trait::async_trait]
-impl sqllogictest::AsyncDB for Postgres {
+impl sqllogictest::AsyncDB for Risingwave {
     type Error = tokio_postgres::error::Error;
 
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {

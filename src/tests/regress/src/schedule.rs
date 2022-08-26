@@ -20,9 +20,9 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context};
-use log::{debug, error, info};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tracing::{debug, error, info};
 
 use crate::schedule::TestResult::{Different, Same};
 use crate::{init_env, DatabaseMode, FileManager, Opts, Psql};

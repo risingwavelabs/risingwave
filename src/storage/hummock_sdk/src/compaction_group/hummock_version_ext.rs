@@ -47,7 +47,7 @@ pub trait HummockVersionExt {
         level_idex: usize,
         f: F,
     );
-    fn num_levels(&self) -> usize;
+    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
     fn get_sst_ids(&self) -> Vec<u64>;
@@ -152,9 +152,12 @@ impl HummockVersionExt for HummockVersion {
         }
     }
 
-    fn num_levels(&self) -> usize {
+    fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize {
         // l0 is currently separated from all levels
-        self.levels.len() + 1
+        self.levels
+            .get(&compaction_group_id)
+            .map(|group| group.levels.len() + 1)
+            .unwrap_or(0)
     }
 
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
@@ -187,6 +190,7 @@ impl HummockVersionExt for HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.max_current_epoch = version_delta.max_current_epoch;
         self.safe_epoch = version_delta.safe_epoch;
     }
 
@@ -310,6 +314,7 @@ impl HummockLevelsExt for Levels {
 pub trait HummockVersionDeltaExt {
     fn get_removed_sst_ids(&self) -> Vec<HummockSstableId>;
     fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId>;
+    fn get_sstableinfo_cnt(&self) -> usize;
 }
 
 impl HummockVersionDeltaExt for HummockVersionDelta {
@@ -335,6 +340,14 @@ impl HummockVersionDeltaExt for HummockVersionDelta {
             }
         }
         ret
+    }
+
+    fn get_sstableinfo_cnt(&self) -> usize {
+        self.level_deltas
+            .values()
+            .flat_map(|item| item.level_deltas.iter())
+            .map(|level_delta| level_delta.inserted_table_infos.len())
+            .sum()
     }
 }
 
@@ -362,6 +375,7 @@ mod tests {
                 },
             )]),
             max_committed_epoch: 0,
+            max_current_epoch: 0,
             safe_epoch: 0,
         };
         assert_eq!(version.get_sst_ids().len(), 0);

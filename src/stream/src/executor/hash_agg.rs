@@ -27,7 +27,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
@@ -38,7 +38,9 @@ use crate::executor::aggregation::{
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
-use crate::task::ActorId;
+
+/// Limit number of cached entries (one per group key)
+const HASH_AGG_CACHE_SIZE: usize = 1 << 16;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -59,9 +61,6 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
 }
 
 struct HashAggExecutorExtra<S: StateStore> {
-    /// The id of the actor that this executor belongs to.
-    actor_id: ActorId,
-
     ctx: ActorContextRef,
 
     /// See [`Executor::schema`].
@@ -87,7 +86,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     key_indices: Vec<usize>,
 
     /// Relational state tables for each aggregation calls.
-    state_tables: Vec<RowBasedStateTable<S>>,
+    state_tables: Vec<StateTable<S>>,
 
     /// State table column mappings for each aggregation calls,
     state_table_col_mappings: Vec<Arc<StateTableColumnMapping>>,
@@ -118,16 +117,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
-        actor_id: ActorId,
         executor_id: u64,
         key_indices: Vec<usize>,
-        mut state_tables: Vec<RowBasedStateTable<S>>,
+        mut state_tables: Vec<StateTable<S>>,
         state_table_col_mappings: Vec<Vec<usize>>,
     ) -> StreamExecutorResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
-        // TODO: enable sanity check for hash agg executor <https://github.com/singularity-data/risingwave/issues/3885>
+        // // TODO: enable sanity check for hash agg executor <https://github.com/singularity-data/risingwave/issues/3885>
         for state_table in &mut state_tables {
             state_table.disable_sanity_check();
         }
@@ -135,7 +133,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(Self {
             input,
             extra: HashAggExecutorExtra {
-                actor_id,
                 ctx,
                 schema,
                 pk_indices,
@@ -208,7 +205,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
     async fn apply_chunk(
         HashAggExecutorExtra::<S> {
-            actor_id: _,
             ref ctx,
             ref identity,
             ref key_indices,
@@ -416,7 +412,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached states. `HashKey -> (prev_value, value)`.
-        let mut state_map = EvictableHashMap::new(1 << 16);
+        let mut state_map = EvictableHashMap::new(HASH_AGG_CACHE_SIZE);
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
@@ -440,7 +436,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     }
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.actor_id) {
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(extra.ctx.id) {
                         for state_table in &mut extra.state_tables {
                             state_table.update_vnode_bitmap(vnode_bitmap.clone());
                         }
@@ -472,7 +468,6 @@ mod tests {
     use crate::executor::test_utils::agg_executor::create_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
-    use crate::task::ActorId;
 
     fn new_boxed_hash_agg_executor(
         input: Box<dyn Executor>,
@@ -498,11 +493,10 @@ mod tests {
             .unzip();
 
         HashAggExecutor::<SerializedKey, MemoryStateStore>::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             input,
             agg_calls,
             pk_indices,
-            ActorId::default(),
             executor_id,
             key_indices,
             state_tables,

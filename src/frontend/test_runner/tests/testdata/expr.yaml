@@ -13,8 +13,9 @@
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     values(must_be_unimplemented_func(1));
-  binder_error: 'Feature is not yet implemented: unsupported function: "must_be_unimplemented_func",
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: |-
+    Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
 - sql: |
     values(cast(1 as bigint));
   batch_plan: |
@@ -124,7 +125,9 @@
     BatchValues { rows: [[RoundDigit(42:Int32::Decimal, 2:Int32)]] }
 - sql: |
     values(round(true));
-  binder_error: 'Feature is not yet implemented: Round[Boolean], Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: |-
+    Feature is not yet implemented: Round[Boolean]
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
 - sql: |
     -- Single quoted literal can be treated as number without error.
     values(round('123'));
@@ -142,8 +145,9 @@
     BatchValues { rows: [[Not(Like('Postgres':Varchar, 'Post%':Varchar))]] }
 - sql: |
     values(1 not like 1.23);
-  binder_error: 'Feature is not yet implemented: Like[Int32, Decimal], Tracking issue:
-    https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: |-
+    Feature is not yet implemented: Like[Int32, Decimal]
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |
@@ -192,8 +196,9 @@
     /* case misaligned value types */
     create table t (v1 int);
     select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
-  binder_error: 'Feature is not yet implemented: Equal[Int32, Boolean], Tracking issue:
-    https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: |-
+    Feature is not yet implemented: Equal[Int32, Boolean]
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
 - sql: |
     create table t (v1 int);
     select nullif(v1, 1) as expr from t;
@@ -212,8 +217,9 @@
 - sql: |
     create table t (v1 int);
     select nullif(v1, true) from t;
-  binder_error: 'Feature is not yet implemented: Equal[Int32, Boolean], Tracking issue:
-    https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: |-
+    Feature is not yet implemented: Equal[Int32, Boolean]
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1) as expr from t;

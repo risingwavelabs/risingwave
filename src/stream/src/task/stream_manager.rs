@@ -19,13 +19,13 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
+use futures::Future;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::ENABLE_ASYNC_STACK_TRACE;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -50,6 +50,10 @@ lazy_static::lazy_static! {
 pub type ActorHandle = JoinHandle<()>;
 
 pub struct LocalStreamManagerCore {
+    /// Runtime for the streaming actors.
+    #[cfg(not(madsim))]
+    runtime: &'static tokio::runtime::Runtime,
+
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
@@ -60,8 +64,8 @@ pub struct LocalStreamManagerCore {
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
 
-    /// Stores all actor tokio runtime montioring tasks.
-    actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
+    /// Stores all actor tokio runtime monitoring tasks.
+    actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
 
     /// The state store implement
     state_store: StateStoreImpl,
@@ -73,7 +77,7 @@ pub struct LocalStreamManagerCore {
     pub(crate) config: StreamingConfig,
 
     /// Manages the stack traces of all actors.
-    stack_trace_manager: StackTraceManager<ActorId>,
+    stack_trace_manager: Option<StackTraceManager<ActorId>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -99,9 +103,6 @@ pub struct ExecutorParams {
     /// The input executor.
     pub input: Vec<BoxedExecutor>,
 
-    /// Id of the actor.
-    pub actor_id: ActorId,
-
     /// FragmentId of the actor
     pub fragment_id: FragmentId,
 
@@ -123,7 +124,7 @@ impl Debug for ExecutorParams {
             .field("operator_id", &self.operator_id)
             .field("op_info", &self.op_info)
             .field("input", &self.input.len())
-            .field("actor_id", &self.actor_id)
+            .field("actor_id", &self.actor_context.id)
             .finish_non_exhaustive()
     }
 }
@@ -140,12 +141,14 @@ impl LocalStreamManager {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
+        enable_async_stack_trace: bool,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
             state_store,
             streaming_metrics,
             config,
+            enable_async_stack_trace,
         ))
     }
 
@@ -161,7 +164,12 @@ impl LocalStreamManager {
                 tokio::time::sleep(std::time::Duration::from_millis(5000)).await;
                 let mut core = self.core.lock();
 
-                for (k, trace) in core.stack_trace_manager.get_all() {
+                for (k, trace) in core
+                    .stack_trace_manager
+                    .as_mut()
+                    .expect("async stack trace not enabled")
+                    .get_all()
+                {
                     println!(">> Actor {}\n\n{}", k, &*trace);
                 }
             }
@@ -171,10 +179,10 @@ impl LocalStreamManager {
     /// Get stack trace reports for all actors.
     pub fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
         let mut core = self.core.lock();
-        core.stack_trace_manager
-            .get_all()
-            .map(|(k, v)| (*k, v.clone()))
-            .collect()
+        match &mut core.stack_trace_manager {
+            Some(mgr) => mgr.get_all().map(|(k, v)| (*k, v.clone())).collect(),
+            None => Default::default(),
+        }
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
@@ -220,16 +228,16 @@ impl LocalStreamManager {
         result
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> Vec<LocalSstableInfo> {
+    pub async fn sync_epoch(&self, epoch: u64) -> (Vec<LocalSstableInfo>, bool) {
         let timer = self
             .core
             .lock()
             .streaming_metrics
             .barrier_sync_latency
             .start_timer();
-        let local_sst_info = dispatch_state_store!(self.state_store(), store, {
+        let (local_sst_info, sync_succeed) = dispatch_state_store!(self.state_store(), store, {
             match store.sync(epoch).await {
-                Ok((_, ssts)) => ssts,
+                Ok(sync_result) => (sync_result.uncommitted_ssts, sync_result.sync_succeed),
                 // TODO: Handle sync failure by propagating it back to global barrier manager
                 Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
@@ -238,7 +246,7 @@ impl LocalStreamManager {
             }
         });
         timer.observe_duration();
-        local_sst_info
+        (local_sst_info, sync_succeed)
     }
 
     pub async fn clear_storage_buffer(&self) {
@@ -288,6 +296,7 @@ impl LocalStreamManager {
         let barrier = &Barrier {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
+            checkpoint: true,
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
@@ -326,12 +335,9 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn update_actor_info(
-        &self,
-        req: stream_service::BroadcastActorInfoTableRequest,
-    ) -> Result<()> {
+    pub fn update_actor_info(&self, actor_infos: &[ActorInfo]) -> Result<()> {
         let mut core = self.core.lock();
-        core.update_actor_info(req)
+        core.update_actor_info(actor_infos)
     }
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
@@ -361,9 +367,16 @@ impl LocalStreamManagerCore {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
+        enable_async_stack_trace: bool,
     ) -> Self {
         let context = SharedContext::new(addr);
-        Self::new_inner(state_store, context, streaming_metrics, config)
+        Self::new_inner(
+            state_store,
+            context,
+            streaming_metrics,
+            config,
+            enable_async_stack_trace,
+        )
     }
 
     fn new_inner(
@@ -371,8 +384,27 @@ impl LocalStreamManagerCore {
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
+        enable_async_stack_trace: bool,
     ) -> Self {
+        #[cfg(not(madsim))]
+        let runtime = {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
+                builder.worker_threads(worker_threads_num);
+            }
+            builder
+                .thread_name("risingwave-streaming-actor")
+                .enable_all()
+                .build()
+                .unwrap()
+        };
+
         Self {
+            // Leak the runtime to avoid runtime shutting-down in the main async context.
+            // TODO: may manually shutdown the runtime after we implement graceful shutdown for
+            // stream manager.
+            #[cfg(not(madsim))]
+            runtime: Box::leak(Box::new(runtime)),
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
@@ -380,7 +412,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
-            stack_trace_manager: Default::default(),
+            stack_trace_manager: enable_async_stack_trace.then(Default::default),
         }
     }
 
@@ -395,6 +427,7 @@ impl LocalStreamManagerCore {
             SharedContext::for_test(),
             streaming_metrics,
             StreamingConfig::default(),
+            false,
         )
     }
 
@@ -424,7 +457,6 @@ impl LocalStreamManagerCore {
     fn create_nodes_inner(
         &mut self,
         fragment_id: FragmentId,
-        actor_id: ActorId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
         env: StreamEnvironment,
@@ -442,7 +474,6 @@ impl LocalStreamManagerCore {
             .map(|(input_pos, input)| {
                 self.create_nodes_inner(
                     fragment_id,
-                    actor_id,
                     input,
                     input_pos,
                     env.clone(),
@@ -454,14 +485,14 @@ impl LocalStreamManagerCore {
             .try_collect()?;
 
         let pk_indices = node
-            .get_pk_indices()
+            .get_stream_key()
             .iter()
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
-        let executor_id = unique_executor_id(actor_id, node.operator_id);
+        let executor_id = unique_executor_id(actor_context.id, node.operator_id);
         let operator_id = unique_operator_id(fragment_id, node.operator_id);
 
         let executor_params = ExecutorParams {
@@ -471,7 +502,6 @@ impl LocalStreamManagerCore {
             operator_id,
             op_info,
             input,
-            actor_id,
             fragment_id,
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
@@ -481,7 +511,7 @@ impl LocalStreamManagerCore {
         let executor = create_executor(executor_params, self, node, store)?;
         let executor = Self::wrap_executor_for_debug(
             executor,
-            actor_id,
+            actor_context.id,
             executor_id,
             input_pos,
             self.streaming_metrics.clone(),
@@ -493,7 +523,6 @@ impl LocalStreamManagerCore {
     fn create_nodes(
         &mut self,
         fragment_id: FragmentId,
-        actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
         actor_context: &ActorContextRef,
@@ -502,7 +531,6 @@ impl LocalStreamManagerCore {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(
                 fragment_id,
-                actor_id,
                 node,
                 0,
                 env,
@@ -530,10 +558,23 @@ impl LocalStreamManagerCore {
         .boxed()
     }
 
+    /// Spawn a task using the actor runtime. Fallback to the main runtime if `madsim` is enabled.
+    #[inline(always)]
+    fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        #[cfg(not(madsim))]
+        return self.runtime.spawn(future);
+        #[cfg(madsim)]
+        return tokio::spawn(future);
+    }
+
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
-            let actor_context = Arc::new(Mutex::new(ActorContext::default()));
+            let actor_context = ActorContext::create(actor_id);
             let vnode_bitmap = actor
                 .get_vnode_bitmap()
                 .ok()
@@ -541,7 +582,6 @@ impl LocalStreamManagerCore {
                 .transpose()?;
             let executor = self.create_nodes(
                 actor.fragment_id,
-                actor_id,
                 actor.get_nodes()?,
                 env.clone(),
                 &actor_context,
@@ -558,29 +598,35 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_reporter = self.stack_trace_manager.register(actor_id);
+            let trace_reporter = self
+                .stack_trace_manager
+                .as_mut()
+                .map(|m| m.register(actor_id));
 
             let handle = {
                 let actor = async move {
                     // unwrap the actor result to panic on error
                     actor.run().await.expect("actor failed");
                 };
-                let traced = trace_reporter.optional_trace(
-                    actor,
-                    format!("Actor {actor_id}"),
-                    true,
-                    Duration::from_millis(1000),
-                    *ENABLE_ASYNC_STACK_TRACE,
-                );
+                #[auto_enums::auto_enum(Future)]
+                let traced = match trace_reporter {
+                    Some(trace_reporter) => trace_reporter.trace(
+                        actor,
+                        format!("Actor {actor_id}"),
+                        true,
+                        Duration::from_millis(1000),
+                    ),
+                    None => actor,
+                };
                 let instrumented = monitor.instrument(traced);
-                tokio::spawn(instrumented)
+                self.spawn(instrumented)
             };
             self.handles.insert(actor_id, handle);
 
             let actor_id_str = actor_id.to_string();
 
             let metrics = self.streaming_metrics.clone();
-            let task = tokio::spawn(async move {
+            let actor_monitor_task = self.spawn(async move {
                 loop {
                     metrics
                         .actor_execution_time
@@ -629,7 +675,8 @@ impl LocalStreamManagerCore {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });
-            self.actor_monitor_tasks.insert(actor_id, task);
+            self.actor_monitor_tasks
+                .insert(actor_id, actor_monitor_task);
         }
 
         Ok(())
@@ -653,12 +700,9 @@ impl LocalStreamManagerCore {
             .collect::<Result<Vec<_>>>()
     }
 
-    fn update_actor_info(
-        &mut self,
-        req: stream_service::BroadcastActorInfoTableRequest,
-    ) -> Result<()> {
+    fn update_actor_info(&mut self, new_actor_infos: &[ActorInfo]) -> Result<()> {
         let mut actor_infos = self.context.actor_infos.write();
-        for actor in req.get_info() {
+        for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
             if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(

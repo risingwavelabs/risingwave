@@ -152,7 +152,7 @@ impl StreamTableScan {
                 .collect(),
         };
 
-        let pk_indices = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -166,7 +166,7 @@ impl StreamTableScan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
-                    pk_indices: pk_indices.clone(),
+                    stream_key: stream_key.clone(),
                     input: vec![],
                     fields: vec![], // TODO: fill this later
                     append_only: true,
@@ -196,7 +196,7 @@ impl StreamTableScan {
                     .collect(),
                 is_singleton: *self.distribution() == Distribution::Single,
             })),
-            pk_indices,
+            stream_key,
             operator_id: self.base.id.0 as u64,
             identity: format!("{}", self),
             append_only: self.append_only(),

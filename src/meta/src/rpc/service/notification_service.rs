@@ -91,8 +91,6 @@ where
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
-        let hummock_version = Some(self.hummock_manager.get_current_version().await);
-
         let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
 
         let table_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.id));
@@ -102,6 +100,8 @@ where
             .filter(|mapping| table_ids.contains(&mapping.table_id))
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
+
+        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         // Send the snapshot on subscription. After that we will send only updates.
         let meta_snapshot = match worker_type {
@@ -133,7 +133,7 @@ where
 
                 MetaSnapshot {
                     tables,
-                    hummock_version,
+                    hummock_version: Some(hummock_manager_guard.current_version.clone()),
                     ..Default::default()
                 }
             }

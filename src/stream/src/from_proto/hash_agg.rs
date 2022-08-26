@@ -17,13 +17,12 @@
 use std::marker::PhantomData;
 
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::agg_call::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
-use crate::task::ActorId;
 
 pub struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
@@ -33,9 +32,8 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
     pk_indices: PkIndices,
-    actor_id: ActorId,
     executor_id: u64,
-    state_tables: Vec<RowBasedStateTable<S>>,
+    state_tables: Vec<StateTable<S>>,
     state_table_col_mappings: Vec<Vec<usize>>,
 }
 
@@ -49,7 +47,6 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.input,
             args.agg_calls,
             args.pk_indices,
-            args.actor_id,
             args.executor_id,
             args.key_indices,
             args.state_tables,
@@ -101,7 +98,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             agg_calls,
             key_indices,
             pk_indices: params.pk_indices,
-            actor_id: params.actor_id,
             executor_id: params.executor_id,
             state_tables,
             state_table_col_mappings,

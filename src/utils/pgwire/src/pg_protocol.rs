@@ -575,7 +575,7 @@ where
     }
 
     // The following functions are used to response something error to client.
-    // The write() interface of this kind of message must be send sucesssfully or "unwrap" when it
+    // The write() interface of this kind of message must be send successfully or "unwrap" when it
     // failed. Hence we can dirtyly unwrap write_message_no_flush, it must return Ok(),
     // otherwise system will panic and it never return.
     fn write_for_error(&mut self, message: &BeMessage<'_>) {

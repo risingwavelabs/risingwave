@@ -94,7 +94,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
         let (data_chunk, ops) = chunk.into_parts();
 
         let pred_output = self.expr.eval_infallible(&data_chunk, |err| {
-            self.ctx.lock().on_compute_error(err, self.identity())
+            self.ctx.on_compute_error(err, self.identity())
         });
 
         let (columns, vis) = data_chunk.into_parts();
@@ -234,7 +234,7 @@ mod tests {
             Box::new(right_expr),
         );
         let filter = Box::new(FilterExecutor::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source),
             test_expr,
             1,

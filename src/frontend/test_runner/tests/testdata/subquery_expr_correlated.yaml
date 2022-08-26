@@ -7,12 +7,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > (1.5:Decimal * min(t2.x))) }
         LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [(1.5:Decimal * min(t2.x))] }
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
-                  LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+                LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
+                  LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -31,14 +31,14 @@
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > min(t2.x)) }
         LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [min(t2.x)] }
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
-                LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 2, correlated_id: 1 }) }
+                LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
                   LogicalJoin { type: LeftOuter, on: true, output: all }
-                    LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
-                    LogicalProject { exprs: [CorrelatedInputRef { index: 2, correlated_id: 1 }] }
+                    LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+                    LogicalProject { exprs: [CorrelatedInputRef { index: 1, correlated_id: 1 }] }
                       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
@@ -49,19 +49,19 @@
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > min(t2.x)) }
         LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [min(t2.x)] }
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = max(t3.x)) }
+                LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) AND (CorrelatedInputRef { index: 0, correlated_id: 1 } = max(t3.x)) }
                   LogicalJoin { type: LeftOuter, on: true, output: all }
-                    LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+                    LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
                     LogicalProject { exprs: [max(t3.x)] }
                       LogicalAgg { aggs: [max(t3.x)] }
                         LogicalProject { exprs: [t3.x] }
-                          LogicalFilter { predicate: (t3.y = CorrelatedInputRef { index: 2, correlated_id: 1 }) }
+                          LogicalFilter { predicate: (t3.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
                             LogicalJoin { type: Inner, on: true, output: all }
-                              LogicalScan { table: t3, columns: [t3._row_id, t3.x, t3.y] }
+                              LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
                               LogicalProject { exprs: [1:Int32] }
                                 LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
@@ -71,10 +71,10 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.x, t2.y] }
-          LogicalFilter { predicate: (t2.y = 100:Int32) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.x) AND (t2.x = 1000:Int32) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
-            LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+          LogicalFilter { predicate: (t2.y = 100:Int32) AND (CorrelatedInputRef { index: 0, correlated_id: 1 } = t2.x) AND (t2.x = 1000:Int32) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
+            LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.x = t2.x) AND (t1.y = t2.y), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -87,12 +87,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > (1.5:Decimal * min(t2.x))) }
         LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [(1.5:Decimal * min(t2.x))] }
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
-                  LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+                LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
+                  LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > (1.5:Decimal * min(t2.x))), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -111,12 +111,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > count) }
         LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [count] }
             LogicalAgg { aggs: [count] }
               LogicalProject { exprs: [] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
-                  LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+                LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
+                  LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > count(1:Int32)), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -134,12 +134,12 @@
     LogicalProject { exprs: [t1.x, t1.y] }
       LogicalFilter { predicate: (t1.x > (count + count)) }
         LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+          LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           LogicalProject { exprs: [(count + count)] }
             LogicalAgg { aggs: [count, count] }
               LogicalProject { exprs: [] }
-                LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
-                  LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+                LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
+                  LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.y = t1.y) AND (t1.x > (count(1:Int32) + count(1:Int32))), output: [t1.x, t1.y] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -157,10 +157,10 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
       LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.y] }
-          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.x) }
-            LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+          LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } = t2.x) }
+            LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x = t2.x), output: [t1.x] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -177,10 +177,10 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
       LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.y] }
-          LogicalFilter { predicate: ((CorrelatedInputRef { index: 1, correlated_id: 1 } + t2.x) = 100:Int32) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = 1000:Int32) }
-            LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+          LogicalFilter { predicate: ((CorrelatedInputRef { index: 0, correlated_id: 1 } + t2.x) = 100:Int32) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = 1000:Int32) }
+            LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND ((t1.x + t2.x) = 100:Int32), output: [t1.x] }
       LogicalScan { table: t1, output_columns: [t1.x, t1.y], required_columns: [x, y], predicate: (t1.y = 1000:Int32) }
@@ -193,10 +193,10 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
       LogicalApply { type: LeftSemi, on: (t1.y = t2.y), correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.y] }
-          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } > (t2.x + 1000:Int32)) }
-            LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+          LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } > (t2.x + 1000:Int32)) }
+            LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x > (t2.x + 1000:Int32)), output: [t1.x] }
       LogicalProject { exprs: [t1.x, t1.y, t1.x] }
@@ -217,15 +217,15 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
       LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.x] }
-          LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 2, correlated_id: 1 }) AND (t2.x > min(t3.x)) }
+          LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) AND (t2.x > min(t3.x)) }
             LogicalJoin { type: LeftOuter, on: true, output: all }
-              LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+              LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
               LogicalProject { exprs: [min(t3.x)] }
                 LogicalAgg { aggs: [min(t3.x)] }
                   LogicalProject { exprs: [t3.x] }
-                    LogicalScan { table: t3, columns: [t3._row_id, t3.x, t3.y] }
+                    LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.x) AND (t2.y = t1.y), output: [t1.x] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -242,13 +242,13 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
       LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.x] }
           LogicalJoin { type: LeftSemi, on: (t2.y = t3.y), output: all }
-            LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+            LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
             LogicalProject { exprs: [t3.y] }
-              LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t3.y) }
-                LogicalScan { table: t3, columns: [t3._row_id, t3.x, t3.y] }
+              LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t3.y) }
+                LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
 - sql: |
     /* uncorrelated outer subquery with a correlated inner subquery */
     create table t1(x int, y int);
@@ -258,13 +258,13 @@
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
       LogicalJoin { type: LeftSemi, on: (t1.y = t2.x), output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+        LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         LogicalProject { exprs: [t2.x] }
           LogicalApply { type: LeftSemi, on: (t2.y = t3.y), correlated_id: 2 }
-            LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+            LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
             LogicalProject { exprs: [t3.y] }
-              LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 2 } = t3.y) }
-                LogicalScan { table: t3, columns: [t3._row_id, t3.x, t3.y] }
+              LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 2 } = t3.y) }
+                LogicalScan { table: t3, columns: [t3.x, t3.y, t3._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.x), output: [t1.x] }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
@@ -276,38 +276,44 @@
     /* correlated agg column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select max(v2)) from t;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t group by v2;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated agg column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select max(v2));
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t group by v2 having min(v1) > (select v2);
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select v2);
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated agg column belongs to outer query */
     create table t (v1 int, v2 int);
@@ -316,8 +322,9 @@
       min(v1),
       (select max(v2) + v3 from t2)  -- access to v3 is ok
     from t;
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* uncorrelated subquery in HAVING */
     create table a (a1 int, a2 int);
@@ -333,12 +340,12 @@
       LogicalJoin { type: LeftSemi, on: true, output: all }
         LogicalAgg { aggs: [] }
           LogicalProject { exprs: [] }
-            LogicalScan { table: a, columns: [a._row_id, a.a1, a.a2] }
+            LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
         LogicalProject { exprs: [1:Int32] }
           LogicalApply { type: LeftSemi, on: true, correlated_id: 2 }
-            LogicalScan { table: b, columns: [b._row_id, b.b1, b.b2] }
-            LogicalProject { exprs: [CorrelatedInputRef { index: 1, correlated_id: 2 }] }
-              LogicalScan { table: c, columns: [c._row_id, c.c1, c.c2] }
+            LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+            LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 2 }] }
+              LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
 - sql: |
     /* correlated column with depth=2 in HAVING */
     create table a (a1 int, a2 int);
@@ -349,8 +356,9 @@
         select a1 from c
       )
     );
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     /* correlated column with depth>1 in HAVING */
     create table a (a1 int, a2 int);
@@ -361,8 +369,9 @@
         select a1 from c
       )
     );
-  planner_error: 'Feature is not yet implemented: correlated subquery in HAVING or
-    SELECT with agg, Tracking issue: https://github.com/singularity-data/risingwave/issues/2275'
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -373,10 +382,10 @@
         LogicalProject { exprs: [t2.x, t1.x, t2.x] }
           LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
             LogicalFilter { predicate: (t2.x > 100:Int32) }
-              LogicalScan { table: t2, columns: [t2._row_id, t2.x, t2.y] }
+              LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
             LogicalProject { exprs: [t1.x] }
-              LogicalFilter { predicate: (t1.y = CorrelatedInputRef { index: 2, correlated_id: 1 }) }
-                LogicalScan { table: t1, columns: [t1._row_id, t1.x, t1.y] }
+              LogicalFilter { predicate: (t1.y = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
+                LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
   optimized_logical_plan: |
     LogicalTopN { order: "[t2.x ASC]", limit: 100, offset: 0 }
       LogicalJoin { type: LeftOuter, on: (t1.y = t2.y), output: [t2.x, t1.x, t2.x] }
@@ -483,16 +492,16 @@
 - sql: |
     create table a(x int, y varchar, z int);
     create table b(x varchar, y int, z int);
-    select count(*) from a where a.y = (select string_agg(x order by x) from b where b.z = a.z);
+    select count(*) from a where a.y = (select string_agg(x, ',' order by x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y = string_agg(b.x order_by(b.x ASC NULLS LAST))), output: [] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y = string_agg(b.x, ',':Varchar order_by(b.x ASC NULLS LAST))), output: [] }
         LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [a.z], aggs: [string_agg(b.x order_by(b.x ASC NULLS LAST))] }
-          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+        LogicalAgg { group_key: [a.z], aggs: [string_agg(b.x, ',':Varchar order_by(b.x ASC NULLS LAST))] }
+          LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x, ',':Varchar] }
             LogicalAgg { group_key: [a.z], aggs: [] }
               LogicalScan { table: a, columns: [a.z] }
-            LogicalProject { exprs: [b.z, b.x] }
+            LogicalProject { exprs: [b.z, b.x, ',':Varchar] }
               LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
@@ -500,17 +509,16 @@
     select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x) filter((flag = 0:Int64))), output: [] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x)), output: [] }
         LogicalProject { exprs: [a.z, a.y::Int64] }
           LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((flag = 0:Int64))] }
-          LogicalAgg { group_key: [a.z, b.x, flag], aggs: [] }
-            LogicalExpand { column_subsets: [[a.z, b.x]] }
-              LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
-                LogicalAgg { group_key: [a.z], aggs: [] }
-                  LogicalScan { table: a, columns: [a.z] }
-                LogicalProject { exprs: [b.z, b.x] }
-                  LogicalScan { table: b, columns: [b.x, b.z] }
+        LogicalAgg { group_key: [a.z], aggs: [count(b.x)] }
+          LogicalAgg { group_key: [a.z, b.x], aggs: [] }
+            LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+              LogicalAgg { group_key: [a.z], aggs: [] }
+                LogicalScan { table: a, columns: [a.z] }
+              LogicalProject { exprs: [b.z, b.x] }
+                LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);

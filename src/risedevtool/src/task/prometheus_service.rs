@@ -39,7 +39,7 @@ impl PrometheusService {
         Ok(Command::new(self.prometheus_path()?))
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &PrometheusConfig) -> Result<()> {
         cmd.arg(format!(
             "--web.listen-address={}:{}",

@@ -87,7 +87,8 @@ impl LocalQueryExecution {
             .front_env
             .hummock_snapshot_manager()
             .get_epoch(query_id)
-            .await?;
+            .await?
+            .committed_epoch;
         self.epoch = Some(epoch);
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();

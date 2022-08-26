@@ -1,5 +1,5 @@
 query ITIIT
-SELECT oid,classname,owneroid,classkind FROM pg_catalog.pg_class ORDER BY oid limit 6;
+SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 6;
 ----
 1 pg_type 1 system table
 2 pg_namespace 1 system table

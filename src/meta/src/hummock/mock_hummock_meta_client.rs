@@ -86,19 +86,15 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.hummock_manager
             .pin_snapshot(self.context_id)
             .await
-            .map(|e| e.epoch)
             .map_err(mock_err)
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
-        self.hummock_manager
-            .get_last_epoch()
-            .map(|e| e.epoch)
-            .map_err(mock_err)
+    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+        self.hummock_manager.get_last_epoch().map_err(mock_err)
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
@@ -113,7 +109,8 @@ impl HummockMetaClient for MockHummockMetaClient {
             .unpin_snapshot_before(
                 self.context_id,
                 HummockSnapshot {
-                    epoch: pinned_epochs,
+                    committed_epoch: pinned_epochs,
+                    current_epoch: pinned_epochs,
                 },
             )
             .await
@@ -174,11 +171,8 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
-        self.hummock_manager
-            .extend_ssts_to_delete_from_scan(&sst_ids)
-            .await;
-        Ok(())
+    async fn report_full_scan_task(&self, _sst_ids: Vec<HummockSstableId>) -> Result<()> {
+        unimplemented!()
     }
 
     async fn trigger_full_gc(&self, _sst_retention_time_sec: u64) -> Result<()> {

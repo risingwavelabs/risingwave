@@ -469,7 +469,7 @@ impl BatchPlanFragmenter {
 }
 
 // TODO: let frontend store owner_mapping directly?
-fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Buffer> {
+fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Bitmap> {
     let mut m: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
     let num_vnodes = vnode_mapping.len();
     for (i, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
@@ -478,9 +478,7 @@ fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<Parall
             .or_insert_with(|| BitmapBuilder::zeroed(num_vnodes));
         bitmap.set(i, true);
     }
-    m.into_iter()
-        .map(|(k, v)| (k, v.finish().to_protobuf()))
-        .collect()
+    m.into_iter().map(|(k, v)| (k, v.finish())).collect()
 }
 
 fn bitmap_with_single_vnode(vnode: usize, num_vnodes: usize) -> Bitmap {
@@ -504,7 +502,7 @@ fn derive_partitions(
                 (
                     k,
                     PartitionInfo {
-                        vnode_bitmap,
+                        vnode_bitmap: vnode_bitmap.to_protobuf(),
                         scan_ranges: scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
                     },
                 )
@@ -525,9 +523,20 @@ fn derive_partitions(
             &table_desc.order_column_indices(),
         );
         match vnode {
-            // scan all partitions, all partitions scan all ranges
             None => {
-                return all_partitions();
+                // put this scan_range to all partitions
+                vnode_mapping_to_owner_mapping(vnode_mapping.clone())
+                    .into_iter()
+                    .for_each(|(parallel_unit_id, vnode_bitmap)| {
+                        let (bitmap, scan_ranges) = partitions
+                            .entry(parallel_unit_id)
+                            .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
+                        vnode_bitmap
+                            .iter()
+                            .enumerate()
+                            .for_each(|(vnode, b)| bitmap.set(vnode, b));
+                        scan_ranges.push(scan_range.to_protobuf());
+                    });
             }
             // scan a single partition
             Some(vnode) => {
@@ -597,7 +606,7 @@ mod tests {
             false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pk: vec![],
+                stream_key: vec![],
                 order_key: vec![],
                 columns: vec![
                     ColumnDesc {

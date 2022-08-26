@@ -14,6 +14,7 @@
 
 use bytes::{BufMut, Bytes, BytesMut};
 
+use super::BlockMeta;
 use crate::hummock::{HummockResult, SstableBuilderOptions};
 
 /// A consumer of SST data.
@@ -21,7 +22,7 @@ pub trait SstableWriter: Send {
     type Output;
 
     /// Write an SST block to the writer.
-    fn write_block(&mut self, block: &[u8]) -> HummockResult<()>;
+    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()>;
 
     /// Finish writing the SST.
     fn finish(self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output>;
@@ -52,7 +53,7 @@ impl From<&SstableBuilderOptions> for InMemWriter {
 impl SstableWriter for InMemWriter {
     type Output = Bytes;
 
-    fn write_block(&mut self, block: &[u8]) -> HummockResult<()> {
+    fn write_block(&mut self, block: &[u8], _meta: &BlockMeta) -> HummockResult<()> {
         self.buf.put_slice(block);
         Ok(())
     }
@@ -71,6 +72,7 @@ impl SstableWriter for InMemWriter {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use itertools::Itertools;
     use rand::{Rng, SeedableRng};
 
     use crate::hummock::sstable::VERSION;
@@ -90,6 +92,7 @@ mod tests {
                 smallest_key: Vec::new(),
                 len: 1000,
                 offset: i * 1000,
+                uncompressed_size: 0, // dummy value
             });
             blocks.push(data.slice((i * 1000) as usize..((i + 1) * 1000) as usize));
         }
@@ -108,11 +111,14 @@ mod tests {
 
     #[test]
     fn test_in_mem_writer() {
-        let (data, blocks, _) = get_sst();
+        let (data, blocks, meta) = get_sst();
         let mut writer = Box::new(InMemWriter::new(0));
-        blocks.iter().for_each(|b| {
-            writer.write_block(&b[..]).unwrap();
-        });
+        blocks
+            .iter()
+            .zip_eq(meta.block_metas.iter())
+            .for_each(|(block, meta)| {
+                writer.write_block(&block[..], meta).unwrap();
+            });
         let output_data = writer.finish(blocks.len() as u32).unwrap();
         assert_eq!(output_data, data);
     }

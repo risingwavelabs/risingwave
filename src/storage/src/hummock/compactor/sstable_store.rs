@@ -35,7 +35,7 @@ pub struct SstableBlocks {
     offset_index: usize,
     start_index: usize,
     end_index: usize,
-    block_size: Vec<usize>,
+    block_size: Vec<(usize, usize)>,
     _tracker: MemoryTracker,
 }
 
@@ -45,8 +45,9 @@ impl SstableBlocks {
             return None;
         }
         let idx = self.offset_index;
-        let next_offset = self.offset + self.block_size[idx - self.start_index];
-        let block = match Block::decode(&self.block_data[self.offset..next_offset]) {
+        let next_offset = self.offset + self.block_size[idx - self.start_index].0;
+        let capacity = self.block_size[idx - self.start_index].1;
+        let block = match Block::decode(&self.block_data[self.offset..next_offset], capacity) {
             Ok(block) => Box::new(block),
             Err(_) => return None,
         };
@@ -124,7 +125,7 @@ impl CompactorSstableStore {
             end_index,
             block_size: sst.meta.block_metas[start_index..end_index]
                 .iter()
-                .map(|meta| meta.len as usize)
+                .map(|meta| (meta.len as usize, meta.uncompressed_size as usize))
                 .collect_vec(),
             _tracker: tracker,
         })

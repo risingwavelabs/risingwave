@@ -126,7 +126,7 @@ impl ArrayBuilder for StructArrayBuilder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructArray {
     bitmap: Bitmap,
     children: Vec<ArrayRef>,
@@ -680,22 +680,19 @@ mod tests {
         let fields = [
             DataType::Float32,
             DataType::Varchar,
-            DataType::Struct {
-                fields: Arc::new([
+            DataType::new_struct(
+                vec![
                     DataType::Float64,
                     DataType::Varchar,
                     DataType::Varchar,
-                    DataType::Struct {
-                        fields: Arc::new([]),
-                    },
-                ]),
-            },
+                    DataType::new_struct(vec![], vec![]),
+                ],
+                vec![],
+            ),
             DataType::Int64,
             DataType::Varchar,
             DataType::Int16,
-            DataType::Struct {
-                fields: Arc::new([]),
-            },
+            DataType::new_struct(vec![], vec![]),
             DataType::Int32,
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
@@ -771,9 +768,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::Struct {
-                        fields: Arc::new([DataType::Varchar]),
-                    },
+                    DataType::new_struct(vec![DataType::Varchar], vec![]),
                 ],
                 Ordering::Greater,
             ),
@@ -794,9 +789,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::Struct {
-                        fields: Arc::new([DataType::Varchar]),
-                    },
+                    DataType::new_struct(vec![DataType::Varchar], vec![]),
                 ],
                 Ordering::Equal,
             ),

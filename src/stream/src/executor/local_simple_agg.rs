@@ -208,7 +208,7 @@ mod tests {
         }];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source),
             agg_calls,
             vec![],
@@ -282,7 +282,7 @@ mod tests {
         ];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source),
             agg_calls,
             vec![],

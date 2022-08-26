@@ -328,7 +328,7 @@ pub enum Expr {
     /// e.g. {1, 2, 3},
     Array(Vec<Expr>),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
-    ArrayIndex { obj: Box<Expr>, indexs: Vec<Expr> },
+    ArrayIndex { obj: Box<Expr>, indices: Vec<Expr> },
 }
 
 impl fmt::Display for Expr {
@@ -515,9 +515,9 @@ impl fmt::Display for Expr {
                     .as_slice()
                     .join(", ")
             ),
-            Expr::ArrayIndex { obj, indexs } => {
+            Expr::ArrayIndex { obj, indices } => {
                 write!(f, "{}", obj)?;
-                for i in indexs {
+                for i in indices {
                     write!(f, "[{}]", i)?;
                 }
                 Ok(())
@@ -743,6 +743,64 @@ impl fmt::Display for CommentObject {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ExplainType {
+    Logical,
+    Physical,
+    DistSQL,
+}
+
+impl fmt::Display for ExplainType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ExplainType::Logical => f.write_str("Logical"),
+            ExplainType::Physical => f.write_str("Physical"),
+            ExplainType::DistSQL => f.write_str("DistSQL"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ExplainOptions {
+    /// Display additional information regarding the plan.
+    pub verbose: bool,
+    // Trace plan transformation of the optimizer step by step
+    pub trace: bool,
+    // explain's plan type
+    pub explain_type: ExplainType,
+}
+impl Default for ExplainOptions {
+    fn default() -> Self {
+        Self {
+            verbose: false,
+            trace: false,
+            explain_type: ExplainType::Physical,
+        }
+    }
+}
+impl fmt::Display for ExplainOptions {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let default = Self::default();
+        if *self == default {
+            Ok(())
+        } else {
+            let mut option_strs = vec![];
+            if self.verbose {
+                option_strs.push("VERBOSE".to_string());
+            }
+            if self.trace {
+                option_strs.push("TRACE".to_string());
+            }
+            if self.explain_type == default.explain_type {
+                option_strs.push(self.explain_type.to_string());
+            }
+            write!(f, "{}", option_strs.iter().format(","))
+        }
+    }
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -847,7 +905,7 @@ pub enum Statement {
     /// SET <variable>
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
-    /// least MySQL and PostgreSQL. Not all MySQL-specific syntatic forms are
+    /// least MySQL and PostgreSQL. Not all MySQL-specific syntactic forms are
     /// supported yet.
     SetVariable {
         local: bool,
@@ -931,12 +989,10 @@ pub enum Statement {
         describe_alias: bool,
         /// Carry out the command and show actual run times and other statistics.
         analyze: bool,
-        // Display additional information regarding the plan.
-        verbose: bool,
-        // Trace plan transformation of the optimizer step by step
-        trace: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
+        /// options of the explain statement
+        options: ExplainOptions,
     },
     /// CREATE USER
     CreateUser(CreateUserStatement),
@@ -956,10 +1012,9 @@ impl fmt::Display for Statement {
         match self {
             Statement::Explain {
                 describe_alias,
-                verbose,
                 analyze,
-                trace,
                 statement,
+                options,
             } => {
                 if *describe_alias {
                     write!(f, "DESCRIBE ")?;
@@ -970,14 +1025,7 @@ impl fmt::Display for Statement {
                 if *analyze {
                     write!(f, "ANALYZE ")?;
                 }
-
-                if *verbose {
-                    write!(f, "VERBOSE ")?;
-                }
-
-                if *trace {
-                    write!(f, "TRACE ")?;
-                }
+                options.fmt(f)?;
 
                 write!(f, "{}", statement)
             }

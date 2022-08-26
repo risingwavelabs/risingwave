@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::zip_eq;
+use itertools::{zip_eq, Itertools};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -64,7 +64,7 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Array(exprs) => self.bind_array(exprs),
-            Expr::ArrayIndex { obj, indexs } => self.bind_array_index(*obj, indexs),
+            Expr::ArrayIndex { obj, indices } => self.bind_array_index(*obj, indices),
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
@@ -435,23 +435,23 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             )
             .into())
         }
-        AstDataType::Struct(types) => DataType::Struct {
-            fields: types
+        AstDataType::Struct(types) => DataType::new_struct(
+            types
                 .iter()
                 .map(|f| bind_data_type(&f.data_type))
-                .collect::<Result<Vec<_>>>()?
-                .into(),
-        },
+                .collect::<Result<Vec<_>>>()?,
+            types.iter().map(|f| f.name.real_value()).collect_vec(),
+        ),
         AstDataType::Text => {
             return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:?}", data_type),
+                format!("unsupported data type: {:}", data_type),
                 2535.into(),
             )
             .into())
         }
         _ => {
             return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:?}", data_type),
+                format!("unsupported data type: {:}", data_type),
                 None.into(),
             )
             .into())

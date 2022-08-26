@@ -18,9 +18,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
+use crate::hummock::local_version_manager::SyncResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -30,8 +31,7 @@ pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, 
 pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
     Future<Output = StorageResult<I>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
-pub trait SyncFutureTrait<'a> =
-    Future<Output = StorageResult<(usize, Vec<LocalSstableInfo>)>> + Send;
+pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<SyncResult>> + Send;
 pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 
 #[macro_export]
@@ -194,7 +194,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 
     /// Waits until the epoch is committed and its data is ready to read.
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_>;
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.
     /// If the epoch is None, all buffered data will be synced.

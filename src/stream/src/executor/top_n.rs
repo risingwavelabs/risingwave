@@ -16,10 +16,11 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, Row, StreamChunk};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
@@ -38,11 +39,10 @@ impl<S: StateStore> TopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
-        store: S,
-        table_id: TableId,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
@@ -55,11 +55,10 @@ impl<S: StateStore> TopNExecutor<S> {
                 order_pairs,
                 offset_and_limit,
                 pk_indices,
-                store,
-                table_id,
                 total_count,
                 executor_id,
                 key_indices,
+                state_table,
             )?,
         })
     }
@@ -311,11 +310,10 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
-        store: S,
-        table_id: TableId,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_internal_key(&order_pairs, &pk_indices, &schema);
@@ -323,22 +321,10 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
 
-        let row_data_types = schema
-            .fields
-            .iter()
-            .map(|field| field.data_type.clone())
-            .collect::<Vec<_>>();
-
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state = ManagedTopNStateNew::<S>::new(
-            total_count,
-            store,
-            table_id,
-            row_data_types,
-            ordered_row_deserializer,
-            internal_key_indices.clone(),
-        );
+        let managed_state =
+            ManagedTopNStateNew::<S>::new(total_count, state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {
@@ -434,9 +420,9 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Message};
 
@@ -453,10 +439,10 @@ mod tests {
         let chunk2 = StreamChunk::from_pretty(
             "  I I
             +  7 6
-            -  3 2
-            -  1 0
+            - 3 2
+            - 1 0
             +  5 7
-            -  2 1
+            - 2 1
             + 11 8",
         );
         let chunk3 = StreamChunk::from_pretty(
@@ -468,8 +454,8 @@ mod tests {
         );
         let chunk4 = StreamChunk::from_pretty(
             "  I  I
-            -  5  7
-            -  6  9
+            - 5  7
+            - 6  9
             - 11  8",
         );
         vec![chunk1, chunk2, chunk3, chunk4]
@@ -617,22 +603,25 @@ mod tests {
             ],
         ))
     }
-
     #[tokio::test]
     async fn test_top_n_executor_with_offset() {
         let order_types = create_order_pairs();
         let source = create_source();
+        let state_table = create_in_memory_state_table(
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 1],
+        );
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (3, Some(1000)),
                 vec![0, 1],
-                MemoryStateStore::new(),
-                TableId::from(0x2333),
                 0,
                 1,
                 vec![],
+                state_table,
             )
             .unwrap(),
         );
@@ -661,10 +650,10 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I I
                 +  7 6
-                -  7 6
-                -  8 5
+                - 7 6
+                - 8 5
                 +  8 5
-                -  8 5
+                - 8 5
                 + 11 8"
             )
         );
@@ -699,8 +688,8 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  8 5
-                -  9 4
+                - 8 5
+                - 9 4
                 - 11 8"
             )
         );
@@ -715,17 +704,21 @@ mod tests {
     async fn test_top_n_executor_with_limit() {
         let order_types = create_order_pairs();
         let source = create_source();
+        let state_table = create_in_memory_state_table(
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 1],
+        );
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (0, Some(4)),
                 vec![0, 1],
-                MemoryStateStore::new(),
-                TableId::from(0x2333),
                 0,
                 1,
                 vec![],
+                state_table,
             )
             .unwrap(),
         );
@@ -744,7 +737,7 @@ mod tests {
                 + 10 3
                 - 10 3
                 +  9 4
-                -  9 4
+                - 9 4
                 +  8 5"
             )
         );
@@ -760,15 +753,15 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  8 5
+                - 8 5
                 +  7 6
-                -  3 2
+                - 3 2
                 +  8 5
-                -  1 0
+                - 1 0
                 +  9 4
-                -  9 4
+                - 9 4
                 +  5 7
-                -  2 1
+                - 2 1
                 +  9 4"
             )
         );
@@ -785,7 +778,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  9 4
+                - 9 4
                 +  6 9"
             )
         );
@@ -801,9 +794,9 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  5 7
+                - 5 7
                 +  9 4
-                -  6 9
+                - 6 9
                 + 10 3"
             )
         );
@@ -819,17 +812,21 @@ mod tests {
     async fn test_top_n_executor_with_offset_and_limit() {
         let order_types = create_order_pairs();
         let source = create_source();
+        let state_table = create_in_memory_state_table(
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 1],
+        );
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (3, Some(4)),
                 vec![0, 1],
-                MemoryStateStore::new(),
-                TableId::from(0x2333),
                 0,
                 1,
                 vec![],
+                state_table,
             )
             .unwrap(),
         );
@@ -858,10 +855,10 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I I
                 +  7 6
-                -  7 6
-                -  8 5
+                - 7 6
+                - 8 5
                 +  8 5
-                -  8 5
+                - 8 5
                 + 11 8"
             )
         );
@@ -889,9 +886,9 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I  I
-                -  8  5
+                - 8  5
                 + 12 10
-                -  9  4
+                - 9  4
                 + 13 11
                 - 11  8
                 + 14 12"
@@ -909,17 +906,26 @@ mod tests {
         let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
 
         let source = create_source_new();
+        let state_table = create_in_memory_state_table(
+            &[
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+            ],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 3],
+        );
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (1, Some(3)),
-                vec![3],
-                MemoryStateStore::new(),
-                TableId::from(0x2333),
+                vec![0, 3],
                 0,
                 1,
                 vec![],
+                state_table,
             )
             .unwrap(),
         );
@@ -952,7 +958,7 @@ mod tests {
                 "  I I I I
                 +  1 9 1 1003
                 +  9 8 1 1004
-                -  9 8 1 1004
+                - 9 8 1 1004
                 +  1 1 4 1001",
             ),
         );
@@ -962,7 +968,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                -  5 1 4 1002
+                - 5 1 4 1002
                 +  1 0 2 1006",
             )
         );
@@ -977,18 +983,26 @@ mod tests {
     #[tokio::test]
     async fn test_top_n_executor_with_offset_and_limit_new_after_recovery() {
         let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
-
+        let state_table = create_in_memory_state_table(
+            &[
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+            ],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 3],
+        );
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 create_source_new_before_recovery() as Box<dyn Executor>,
                 order_types.clone(),
                 (1, Some(3)),
-                vec![3],
-                MemoryStateStore::shared(),
-                TableId::from(0x2333),
+                vec![0, 3],
                 0,
                 1,
                 vec![],
+                state_table.clone(),
             )
             .unwrap(),
         );
@@ -1027,11 +1041,10 @@ mod tests {
                 order_types.clone(),
                 (1, Some(3)),
                 vec![3],
-                MemoryStateStore::shared(),
-                TableId::from(0x2333),
                 0,
                 1,
                 vec![],
+                state_table,
             )
             .unwrap(),
         );
@@ -1050,7 +1063,7 @@ mod tests {
                 "  I I I I
                 +  1 9 1 1003
                 +  9 8 1 1004
-                -  9 8 1 1004
+                - 9 8 1 1004
                 +  1 1 4 1001",
             ),
         );
@@ -1060,7 +1073,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                -  5 1 4 1002
+                - 5 1 4 1002
                 +  1 0 2 1006",
             )
         );

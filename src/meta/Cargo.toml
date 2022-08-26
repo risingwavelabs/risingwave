@@ -8,7 +8,6 @@ anyhow = "1"
 assert_matches = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-axum = "0.5"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -16,7 +15,7 @@ clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 derivative = "2"
 either = "1"
-etcd-client = "0.9"
+etcd-client = "0.10"
 fail = "0.5"
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -24,7 +23,6 @@ hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
-log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -55,12 +53,15 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = { version = "0.2", package = "madsim-tonic" }
+tonic = { version = "0.2.1", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
-tracing = { version = "0.1" }
+tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[target.'cfg(not(madsim))'.dependencies]
+axum = "0.5"
+tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 
 [dev-dependencies]
 assert_matches = "1"

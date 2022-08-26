@@ -6,12 +6,12 @@ edition = "2021"
 [dependencies]
 anyhow = { version = "1", features = ["backtrace"] }
 clap = { version = "3", features = ["derive"] }
-env_logger = "0.9"
-log = "0.4"
 path-absolutize = "3.0"
 similar = "2"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "process"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [[bin]]

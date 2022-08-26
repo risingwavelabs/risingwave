@@ -114,7 +114,7 @@ impl CompactorRunner {
                 }
             }
         }
-        Ok(UnorderedMergeIteratorInner::new(
+        Ok(UnorderedMergeIteratorInner::for_compactor(
             table_iters,
             self.compactor.context.stats.clone(),
         ))

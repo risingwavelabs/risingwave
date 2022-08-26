@@ -27,7 +27,7 @@ use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -39,7 +39,6 @@ use super::{
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
-use crate::task::ActorId;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -50,9 +49,8 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     identity: String,
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
-    right_table: RowBasedStateTable<S>,
+    right_table: StateTable<S>,
     is_right_table_writer: bool,
-    actor_id: ActorId,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
 }
@@ -67,10 +65,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         comparator: ExprNodeType,
-        mut state_table_l: RowBasedStateTable<S>,
-        mut state_table_r: RowBasedStateTable<S>,
+        mut state_table_l: StateTable<S>,
+        mut state_table_r: StateTable<S>,
         is_right_table_writer: bool,
-        actor_id: ActorId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         // TODO: enable sanity check for dynamic filter <https://github.com/singularity-data/risingwave/issues/3893>
@@ -89,7 +86,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
             right_table: state_table_r,
             is_right_table_writer,
-            actor_id,
             metrics,
             schema,
         }
@@ -108,7 +104,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let eval_results = condition.map(|cond| {
             cond.eval_infallible(data_chunk, |err| {
-                self.ctx.lock().on_compute_error(err, self.identity())
+                self.ctx.on_compute_error(err, self.identity())
             })
         });
 
@@ -259,7 +255,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
-            self.actor_id,
+            self.ctx.id,
             self.metrics.clone(),
         );
 
@@ -355,7 +351,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     prev_epoch_value = Some(curr);
 
                     // Update the vnode bitmap for the left state table if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.range_cache
                             .state_table
                             .update_vnode_bitmap(vnode_bitmap);
@@ -398,21 +394,19 @@ mod tests {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::ActorContext;
 
-    fn create_in_memory_state_table() -> (
-        RowBasedStateTable<MemoryStateStore>,
-        RowBasedStateTable<MemoryStateStore>,
-    ) {
+    fn create_in_memory_state_table() -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>)
+    {
         let mem_state = MemoryStateStore::new();
 
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
-        let state_table_l = RowBasedStateTable::new_without_distribution(
+        let state_table_l = StateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
             vec![OrderType::Ascending],
             vec![0],
         );
-        let state_table_r = RowBasedStateTable::new_without_distribution(
+        let state_table_r = StateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             vec![column_descs],
@@ -433,7 +427,7 @@ mod tests {
 
         let (mem_state_l, mem_state_r) = create_in_memory_state_table();
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),
             0,
@@ -443,7 +437,6 @@ mod tests {
             mem_state_l,
             mem_state_r,
             true,
-            1,
             Arc::new(StreamingMetrics::unused()),
         );
         (tx_l, tx_r, Box::new(executor).execute())

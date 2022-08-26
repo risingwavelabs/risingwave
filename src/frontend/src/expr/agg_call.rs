@@ -93,7 +93,7 @@ impl AggCall {
     /// Returns error if not supported or the arguments are invalid.
     pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Result<DataType> {
         let invalid = || {
-            let args = inputs.iter().map(|t| format!("{:?}", t)).join(", ");
+            let args = inputs.iter().map(|t| format!("{}", t)).join(", ");
             Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
                 "Invalid aggregation: {}({})",
                 agg_kind, args
@@ -131,11 +131,22 @@ impl AggCall {
             },
             (AggKind::Sum, _) => return invalid(),
 
+            // ApproxCountDistinct
+            (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
+            (AggKind::ApproxCountDistinct, _) => return invalid(),
+
             // Count
-            (AggKind::Count | AggKind::ApproxCountDistinct, _) => DataType::Int64,
+            (AggKind::Count, [] | [_]) => DataType::Int64,
+            (AggKind::Count, _) => return invalid(),
 
             // StringAgg
-            (AggKind::StringAgg, _) => DataType::Varchar,
+            (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
+            (AggKind::StringAgg, _) => return invalid(),
+
+            (AggKind::ArrayAgg, [input]) => DataType::List {
+                datatype: Box::new(input.clone()),
+            },
+            (AggKind::ArrayAgg, _) => return invalid(),
 
             // SingleValue
             (AggKind::SingleValue, [input]) => input.clone(),

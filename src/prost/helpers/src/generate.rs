@@ -14,6 +14,7 @@
 
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use proc_macro_error::abort;
+use quote::quote;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
 use syn::{self, Field, GenericArgument, Lit, Meta, PathArguments, PathSegment, Type};

@@ -549,7 +549,7 @@ impl LogicalJoin {
         mut predicate: EqJoinPredicate,
     ) -> Option<PlanRef> {
         if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
-            log::warn!(
+            tracing::warn!(
                 "Lookup Join only supports basic tables on the join's right side. A \
             different join will be used instead."
             );
@@ -567,7 +567,7 @@ impl LogicalJoin {
 
         let order_col_ids = table_desc.order_column_ids();
         if order_col_ids.len() != predicate.right_eq_indexes().len() {
-            log::warn!("{}", eq_col_warn_message);
+            tracing::warn!("{}", eq_col_warn_message);
             return None;
         }
 
@@ -576,7 +576,7 @@ impl LogicalJoin {
             .zip_eq(predicate.right_eq_indexes())
         {
             if order_col_id != output_column_ids[eq_idx] {
-                log::warn!("{}", eq_col_warn_message);
+                tracing::warn!("{}", eq_col_warn_message);
                 return None;
             }
         }

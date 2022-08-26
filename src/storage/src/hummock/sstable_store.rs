@@ -29,17 +29,17 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, Sstable, SstableBuilderOptions, SstableMeta, SstableWriter, TieredCache,
-    TieredCacheKey, TieredCacheValue,
+    Block, BlockCache, BlockMeta, Sstable, SstableBuilderOptions, SstableMeta, SstableWriter,
+    TieredCache, TieredCacheKey, TieredCacheValue,
 };
-use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
+use crate::hummock::{BlockHolder, CacheableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
-pub type TableHolder = CachableEntry<HummockSstableId, Box<Sstable>>;
+pub type TableHolder = CacheableEntry<HummockSstableId, Box<Sstable>>;
 
 // BEGIN section for tiered cache
 
@@ -175,6 +175,26 @@ impl SstableStore {
         Ok(())
     }
 
+    /// Deletes all SSTs specified in the given list of IDs from storage and cache.
+    pub async fn delete_list(&self, sst_id_list: &[HummockSstableId]) -> HummockResult<()> {
+        let mut paths = Vec::with_capacity(sst_id_list.len() * 2);
+
+        for &sst_id in sst_id_list {
+            paths.push(self.get_sst_meta_path(sst_id));
+            paths.push(self.get_sst_data_path(sst_id));
+        }
+
+        // Delete from storage.
+        self.store.delete_objects(&paths).await?;
+
+        // Delete from cache.
+        for &sst_id in sst_id_list {
+            self.meta_cache.erase(sst_id, &sst_id);
+        }
+
+        Ok(())
+    }
+
     pub fn delete_cache(&self, sst_id: HummockSstableId) {
         self.meta_cache.erase(sst_id, &sst_id);
     }
@@ -204,17 +224,6 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub fn add_block_cache(
-        &self,
-        sst_id: HummockSstableId,
-        block_idx: u64,
-        block_data: Bytes,
-    ) -> HummockResult<()> {
-        let block = Box::new(Block::decode(&block_data)?);
-        self.block_cache.insert(sst_id, block_idx, block);
-        Ok(())
-    }
-
     pub async fn get(
         &self,
         sst: &Sstable,
@@ -240,6 +249,7 @@ impl SstableStore {
             let store = self.store.clone();
             let sst_id = sst.id;
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
+            let uncompressed_capacity = block_meta.uncompressed_size as usize;
 
             async move {
                 if use_tiered_cache && let Some(holder) = tiered_cache
@@ -252,7 +262,7 @@ impl SstableStore {
                 }
 
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(&block_data)?;
+                let block = Block::decode(&block_data, uncompressed_capacity)?;
                 Ok(Box::new(block))
             }
         };
@@ -490,7 +500,7 @@ pub struct BatchUploadWriter {
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
     buf: BytesMut,
-    block_ranges: Vec<BlockRange>,
+    block_info: Vec<(BlockRange, usize)>,
     tracker: Option<MemoryTracker>,
 }
 
@@ -506,7 +516,7 @@ impl BatchUploadWriter {
             sstable_store,
             policy,
             buf: BytesMut::with_capacity(options.capacity_hint.unwrap_or(0)),
-            block_ranges: Vec::new(),
+            block_info: Vec::new(),
             tracker: options.tracker,
         }
     }
@@ -515,14 +525,17 @@ impl BatchUploadWriter {
 impl SstableWriter for BatchUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
-    fn write_block(&mut self, block: &[u8]) -> HummockResult<()> {
+    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         let block_offset = self.buf.len();
         self.buf.put_slice(block);
         if let CachePolicy::Fill = self.policy {
-            self.block_ranges.push(BlockRange {
-                begin: block_offset,
-                end: self.buf.len(),
-            });
+            self.block_info.push((
+                BlockRange {
+                    begin: block_offset,
+                    end: self.buf.len(),
+                },
+                meta.uncompressed_size as usize,
+            ));
         }
         Ok(())
     }
@@ -550,9 +563,9 @@ impl SstableWriter for BatchUploadWriter {
 
             // Add block cache.
             if let CachePolicy::Fill = self.policy && ret.is_ok() {
-                debug_assert!(!self.block_ranges.is_empty());
-                for (block_idx, block_range) in self.block_ranges.iter().enumerate() {
-                    let block = Block::decode(&data[block_range.begin..block_range.end])?;
+                debug_assert!(!self.block_info.is_empty());
+                for (block_idx, (block_range, uncompressed_size)) in self.block_info.iter().enumerate() {
+                    let block = Block::decode(&data[block_range.begin..block_range.end], *uncompressed_size)?;
                 self.sstable_store.block_cache
                     .insert(self.sst_id, block_idx as u64, Box::new(block));
                 }
@@ -574,8 +587,8 @@ pub struct StreamingUploadWriter {
     policy: CachePolicy,
     /// Data are uploaded block by block, except for the size footer.
     object_uploader: ObjectStreamingUploader,
-    /// Compressed blocks to refill block or meta cache.
-    blocks: Vec<Bytes>,
+    /// Compressed blocks to refill block or meta cache. Keep the uncompressed capacity for decode.
+    blocks: Vec<(Bytes, usize)>,
     data_len: usize,
     tracker: Option<MemoryTracker>,
 }
@@ -603,11 +616,12 @@ impl StreamingUploadWriter {
 impl SstableWriter for StreamingUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
-    fn write_block(&mut self, block: &[u8]) -> HummockResult<()> {
+    fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.data_len += block.len();
         let block = BytesMut::from(block).freeze();
         if let CachePolicy::Fill = self.policy {
-            self.blocks.push(block.clone());
+            self.blocks
+                .push((block.clone(), meta.uncompressed_size as usize));
         }
         self.object_uploader
             .write_bytes(block)
@@ -640,8 +654,8 @@ impl SstableWriter for StreamingUploadWriter {
             // Add block cache.
             if let CachePolicy::Fill = self.policy && ret.is_ok() {
                 debug_assert!(!self.blocks.is_empty());
-                for (block_idx, block) in self.blocks.iter().enumerate() {
-                    let block = Block::decode(block.chunk())?;
+                for (block_idx, (block, uncompressed_size)) in self.blocks.iter().enumerate() {
+                    let block = Block::decode(block.chunk(), *uncompressed_size)?;
                     self.sstable_store.block_cache
                         .insert(self.sst_id, block_idx as u64, Box::new(block));
                 }

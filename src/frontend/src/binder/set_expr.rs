@@ -40,7 +40,7 @@ impl BoundSetExpr {
     pub fn is_correlated(&self) -> bool {
         match self {
             BoundSetExpr::Select(s) => s.is_correlated(),
-            BoundSetExpr::Values(_) => false,
+            BoundSetExpr::Values(v) => v.is_correlated(),
         }
     }
 
@@ -52,7 +52,9 @@ impl BoundSetExpr {
             BoundSetExpr::Select(s) => {
                 s.collect_correlated_indices_by_depth_and_assign_id(correlated_id)
             }
-            BoundSetExpr::Values(_) => vec![],
+            BoundSetExpr::Values(v) => {
+                v.collect_correlated_indices_by_depth_and_assign_id(correlated_id)
+            }
         }
     }
 }

@@ -75,7 +75,6 @@ fn build_type_derive_map() -> AggFuncSigMap {
         A::Max,
         A::Count,
         A::Avg,
-        A::StringAgg,
         A::SingleValue,
         A::ApproxCountDistinct,
     ] {
@@ -86,6 +85,12 @@ fn build_type_derive_map() -> AggFuncSigMap {
             }
         }
     }
+    // Handle special case for `string_agg`, for it accepts two input arguments.
+    map.insert(
+        AggKind::StringAgg,
+        vec![DataTypeName::Varchar, DataTypeName::Varchar],
+        DataTypeName::Varchar,
+    );
     map
 }
 

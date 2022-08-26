@@ -25,7 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -37,8 +37,8 @@ use super::{
 };
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
-use crate::task::ActorId;
 
+/// Limit number of the cached entries (one per join key) on each side
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -203,7 +203,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
 
-    actor_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -387,12 +386,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         params_r: JoinParams,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
-        actor_id: ActorId,
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        mut state_table_l: RowBasedStateTable<S>,
-        mut state_table_r: RowBasedStateTable<S>,
+        mut state_table_l: StateTable<S>,
+        mut state_table_r: StateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -459,7 +457,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
         Self {
-            ctx,
+            ctx: ctx.clone(),
             input_l: Some(input_l),
             input_r: Some(input_r),
             output_data_types: original_output_data_types,
@@ -472,7 +470,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     col_l_datatypes.clone(),
                     state_table_l,
                     metrics.clone(),
-                    actor_id,
+                    ctx.id,
                     "left",
                 ), // TODO: decide the target cap
                 key_indices: params_l.key_indices,
@@ -488,7 +486,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     col_r_datatypes.clone(),
                     state_table_r,
                     metrics.clone(),
-                    actor_id,
+                    ctx.id,
                     "right",
                 ), // TODO: decide the target cap
                 key_indices: params_r.key_indices,
@@ -503,7 +501,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             op_info,
             epoch: 0,
             append_only_optimize,
-            actor_id,
             metrics,
         }
     }
@@ -515,11 +512,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
-            self.actor_id,
+            self.ctx.id,
             self.metrics.clone(),
         );
 
-        let actor_id_str = self.actor_id.to_string();
+        let actor_id_str = self.ctx.id.to_string();
         let mut start_time = minstant::Instant::now();
 
         pin_mut!(aligned_stream);
@@ -581,13 +578,33 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.epoch = epoch;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.actor_id) {
+                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.side_l
                             .ht
                             .state_table
                             .update_vnode_bitmap(vnode_bitmap.clone());
                         self.side_r.ht.state_table.update_vnode_bitmap(vnode_bitmap);
                     }
+
+                    // Report metrics of cached join rows/entries
+                    let cached_rows_l: usize = self.side_l.ht.values().map(|e| e.size()).sum();
+                    let cached_rows_r: usize = self.side_r.ht.values().map(|e| e.size()).sum();
+                    self.metrics
+                        .join_cached_rows
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .set(cached_rows_l as i64);
+                    self.metrics
+                        .join_cached_rows
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .set(cached_rows_r as i64);
+                    self.metrics
+                        .join_cached_entries
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .set(self.side_l.ht.len() as i64);
+                    self.metrics
+                        .join_cached_entries
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .set(self.side_r.ht.len() as i64);
 
                     yield Message::Barrier(barrier);
                 }
@@ -677,9 +694,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut check_join_condition = |row_update: &RowRef<'_>,
                                         row_matched: &Row|
          -> StreamExecutorResult<bool> {
-            // TODO(yuhao-su): We should find a better way to eval the
-            // expression without concat
-            // two rows.
+            // TODO(yuhao-su): We should find a better way to eval the expression without concat two
+            // rows.
             let mut cond_match = true;
             // if there are non-equi expressions
             if let Some(ref mut cond) = cond {
@@ -687,7 +703,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
 
                 cond_match = cond
-                    .eval_row_infallible(&new_row, |err| ctx.lock().on_compute_error(err, identity))
+                    .eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
                     .map(|s| *s.as_bool())
                     .unwrap_or(false);
             }
@@ -835,10 +851,7 @@ mod tests {
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
-    ) -> (
-        RowBasedStateTable<MemoryStateStore>,
-        RowBasedStateTable<MemoryStateStore>,
-    ) {
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();
 
         // The last column is for degree.
@@ -847,14 +860,14 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table_l = RowBasedStateTable::new_without_distribution(
+        let state_table_l = StateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(0),
             column_descs.clone(),
             order_types.to_vec(),
             pk_indices.to_vec(),
         );
-        let state_table_r = RowBasedStateTable::new_without_distribution(
+        let state_table_r = StateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             column_descs,
@@ -901,14 +914,13 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
-            1,
             1,
             cond,
             "HashJoinExecutor".to_string(),
@@ -956,14 +968,13 @@ mod tests {
             _ => source_l.schema().len() + source_r.schema().len(),
         };
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
-            ActorContext::create(),
+            ActorContext::create(123),
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![1],
             (0..schema_len).into_iter().collect_vec(),
-            1,
             1,
             cond,
             "HashJoinExecutor".to_string(),

@@ -14,13 +14,12 @@
 
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
+use super::{ColumnId, SourceId};
 
 pub mod with_options {
     pub const APPEND_ONLY: &str = "appendonly";
@@ -42,29 +41,6 @@ pub struct SourceCatalog {
     pub owner: u32,
 }
 
-impl SourceCatalog {
-    /// Extract `field_descs` from `column_desc` and add in source catalog.
-    pub fn flatten(mut self) -> Self {
-        let mut catalogs = vec![];
-        for col in &self.columns {
-            // Extract `field_descs` and return `column_catalogs`.
-            catalogs.append(
-                &mut col
-                    .column_desc
-                    .flatten()
-                    .into_iter()
-                    .map(|c| ColumnCatalog {
-                        column_desc: c,
-                        is_hidden: col.is_hidden,
-                    })
-                    .collect_vec(),
-            )
-        }
-        self.columns = catalogs.clone();
-        self
-    }
-}
-
 impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
         let id = prost.id;
@@ -75,15 +51,21 @@ impl From<&ProstSource> for SourceCatalog {
                 source.columns.clone(),
                 source
                     .pk_column_ids
-                    .iter()
-                    .map(|id| ColumnId::new(*id))
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
                     .collect(),
                 source.properties.clone(),
             ),
             Some(Info::TableSource(source)) => (
                 SourceType::Table,
                 source.columns.clone(),
-                vec![TABLE_SOURCE_PK_COLID],
+                source
+                    .pk_column_ids
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
                 source.properties.clone(),
             ),
             None => unreachable!(),

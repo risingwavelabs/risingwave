@@ -16,6 +16,7 @@ pub mod config;
 pub mod enumerator;
 pub mod source;
 pub mod split;
+mod utils;
 
 use std::collections::HashMap;
 
@@ -87,6 +88,18 @@ pub struct NexmarkPropertiesInner {
     pub out_of_order_group_size: Option<usize>,
 
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "nexmark.avg.person.byte.size", default = "none")]
+    pub avg_person_byte_size: Option<usize>,
+
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "nexmark.avg.auction.byte.size", default = "none")]
+    pub avg_auction_byte_size: Option<usize>,
+
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "nexmark.avg.bid.byte.size", default = "none")]
+    pub avg_bid_byte_size: Option<usize>,
+
+    #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.hot.seller.ratio", default = "none")]
     pub hot_seller_ratio: Option<usize>,
 
@@ -97,6 +110,10 @@ pub struct NexmarkPropertiesInner {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.hot.bidder.ratio", default = "none")]
     pub hot_bidder_ratio: Option<usize>,
+
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "nexmark.hot.channel.ratio", default = "none")]
+    pub hot_channel_ratio: Option<usize>,
 
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.first.event.id", default = "none")]

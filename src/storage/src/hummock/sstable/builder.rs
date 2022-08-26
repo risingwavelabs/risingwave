@@ -177,6 +177,7 @@ impl<WO> SstableBuilder<WO> {
                 offset: self.writer.data_len() as u32,
                 len: 0,
                 smallest_key: full_key.to_vec(),
+                uncompressed_size: 0,
             })
         }
 
@@ -284,8 +285,9 @@ impl<WO> SstableBuilder<WO> {
         }
 
         let mut block_meta = self.block_metas.last_mut().unwrap();
+        block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
-        self.writer.write_block(block)?;
+        self.writer.write_block(block, block_meta)?;
         block_meta.len = self.writer.data_len() as u32 - block_meta.offset;
         self.block_builder.clear();
         Ok(())

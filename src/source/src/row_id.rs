@@ -32,7 +32,7 @@ pub struct RowIdGenerator {
     /// Last timestamp part of row id.
     last_duration_ms: i64,
     /// Current vnode id.
-    vnode_id: u32,
+    pub vnode_id: u32,
     /// Last sequence part of row id.
     sequence: u16,
 }

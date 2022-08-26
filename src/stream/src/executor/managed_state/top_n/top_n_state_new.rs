@@ -16,20 +16,17 @@ use std::collections::BTreeMap;
 
 use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::top_n::TopNCache;
-use crate::executor::PkIndices;
 
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
-    pub(crate) state_table: RowBasedStateTable<S>,
+    pub(crate) state_table: StateTable<S>,
     /// The total number of rows in state table.
     total_count: usize,
     /// For deserializing `OrderedRow`.
@@ -51,28 +48,9 @@ impl TopNStateRow {
 impl<S: StateStore> ManagedTopNStateNew<S> {
     pub fn new(
         total_count: usize,
-        store: S,
-        table_id: TableId,
-        data_types: Vec<DataType>,
+        state_table: StateTable<S>,
         ordered_row_deserializer: OrderedRowDeserializer,
-        pk_indices: PkIndices,
     ) -> Self {
-        let order_types = ordered_row_deserializer.get_order_types().to_vec();
-
-        let column_descs = data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| {
-                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
-            })
-            .collect::<Vec<_>>();
-        let state_table = RowBasedStateTable::new_without_distribution(
-            store,
-            table_id,
-            column_descs,
-            order_types,
-            pk_indices,
-        );
         Self {
             state_table,
             total_count,
@@ -229,27 +207,27 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::TableId;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_storage::memory::MemoryStateStore;
 
     // use std::collections::BTreeMap;
     use super::*;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::row_nonnull;
 
     #[tokio::test]
     async fn test_managed_top_n_state() {
-        let store = MemoryStateStore::new();
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+        let state_table = create_in_memory_state_table(
+            &[DataType::Varchar, DataType::Int64],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 1],
+        );
         let mut managed_state = ManagedTopNStateNew::new(
             0,
-            store,
-            TableId::from(0x11),
-            data_types.clone(),
+            state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
-            vec![0, 1],
         );
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];
@@ -329,16 +307,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_top_n_state_fill_cache() {
-        let store = MemoryStateStore::new();
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+        let state_table = create_in_memory_state_table(
+            &[DataType::Varchar, DataType::Int64],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 1],
+        );
         let mut managed_state = ManagedTopNStateNew::new(
             0,
-            store,
-            TableId::from(0x11),
-            data_types.clone(),
+            state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
-            vec![0, 1],
         );
 
         let row1 = row_nonnull!["abc".to_string(), 2i64];

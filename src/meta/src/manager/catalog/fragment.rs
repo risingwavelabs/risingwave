@@ -19,9 +19,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -74,6 +73,14 @@ pub struct ActorInfos {
 
     /// all reachable source actors
     pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+}
+
+pub struct FragmentVNodeInfo {
+    /// actor id => parallel unit
+    pub actor_parallel_unit_maps: BTreeMap<ActorId, ParallelUnit>,
+
+    /// fragment vnode mapping info
+    pub vnode_mapping: Option<ParallelUnitMapping>,
 }
 
 #[derive(Default)]
@@ -526,18 +533,45 @@ where
         Ok(info)
     }
 
-    pub async fn get_sink_parallel_unit_ids(
+    pub async fn get_sink_vnode_bitmap_info(
         &self,
         table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>> {
+    ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>> {
         let map = &self.core.read().await.table_fragments;
-        let mut info: HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>> = HashMap::new();
+        let mut info: HashMap<TableId, Vec<(ActorId, Option<Buffer>)>> = HashMap::new();
 
         for table_id in table_ids {
             match map.get(table_id) {
                 Some(table_fragment) => {
-                    info.insert(*table_id, table_fragment.parallel_unit_sink_actor_id());
+                    info.insert(*table_id, table_fragment.sink_vnode_bitmap_info());
                 }
+                None => {
+                    bail!("table_fragment not exist: id={}", table_id);
+                }
+            }
+        }
+        Ok(info)
+    }
+
+    pub async fn get_sink_fragment_vnode_info(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<HashMap<TableId, FragmentVNodeInfo>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut info: HashMap<TableId, FragmentVNodeInfo> = HashMap::new();
+
+        for table_id in table_ids {
+            match map.get(table_id) {
+                Some(table_fragment) => {
+                    info.insert(
+                        *table_id,
+                        FragmentVNodeInfo {
+                            actor_parallel_unit_maps: table_fragment.sink_actor_parallel_units(),
+                            vnode_mapping: table_fragment.sink_vnode_mapping(),
+                        },
+                    );
+                }
+
                 None => {
                     bail!("table_fragment not exist: id={}", table_id);
                 }

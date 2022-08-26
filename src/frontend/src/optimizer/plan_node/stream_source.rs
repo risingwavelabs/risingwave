@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, ToStreamProst};
+use crate::catalog::TableId;
 use crate::optimizer::property::Distribution;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
@@ -67,7 +68,7 @@ impl fmt::Display for StreamSource {
 impl ToStreamProst for StreamSource {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         ProstStreamNode::Source(SourceNode {
-            table_id: self.logical.source_catalog.id,
+            source_id: self.logical.source_catalog.id,
             column_ids: self
                 .logical
                 .source_catalog
@@ -76,6 +77,7 @@ impl ToStreamProst for StreamSource {
                 .map(|c| c.column_id().into())
                 .collect(),
             source_type: self.logical.source_catalog.source_type as i32,
+            state_table_id: TableId::placeholder().table_id,
         })
     }
 }

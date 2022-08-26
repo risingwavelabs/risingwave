@@ -82,9 +82,12 @@ pub async fn put_sst(
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
-        writer.write_block(&data[offset..end_offset]).unwrap();
+        writer
+            .write_block(&data[offset..end_offset], block_meta)
+            .unwrap();
     }
-    writer.finish(meta.block_metas.len() as u32).unwrap();
+    let output = writer.finish(meta.block_metas.len() as u32).unwrap();
+    output.await.unwrap().unwrap();
     sstable_store.put_sst_meta(sst_id, meta).await.unwrap()
 }
 
@@ -293,7 +296,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     read_options.clone(),
                 )),
             ];
-            let iter = MultiSstIterator::new(sub_iters, stats.clone());
+            let iter = MultiSstIterator::for_compactor(sub_iters, stats.clone());
             let sstable_store = Arc::new(CompactorSstableStore::new(
                 sstable_store1,
                 MemoryLimiter::unlimit(),
@@ -312,7 +315,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), sstable_store.clone()),
                 ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), sstable_store.clone()),
             ];
-            let iter = UnorderedMergeIteratorInner::new(sub_iters, stats.clone());
+            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters, stats.clone());
             let sstable_store1 = sstable_store.clone();
             async move { compact(iter, sstable_store1).await }
         });

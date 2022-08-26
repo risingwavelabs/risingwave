@@ -18,6 +18,7 @@ use std::sync::Arc;
 use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::Future;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
 use super::StateStoreMetrics;
@@ -231,7 +232,7 @@ where
         }
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             self.inner
                 .wait_epoch(epoch)
@@ -244,17 +245,19 @@ where
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            let (size, ssts) = self
+            let sync_result = self
                 .inner
                 .sync(epoch)
                 .stack_trace("store_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
-            if size != 0 {
-                self.stats.write_l0_size_per_epoch.observe(size as _);
+            if sync_result.sync_size != 0 {
+                self.stats
+                    .write_l0_size_per_epoch
+                    .observe(sync_result.sync_size as _);
             }
-            Ok((size, ssts))
+            Ok(sync_result)
         }
     }
 

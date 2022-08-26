@@ -28,7 +28,9 @@ pub struct TableCatalogBuilder {
     columns: Vec<ColumnCatalog>,
     column_names: HashMap<String, i32>,
     order_key: Vec<FieldOrder>,
-    pk_indices: Vec<usize>,
+    // FIXME(stonepage): stream_key should be meaningless in internal state table, check if we
+    // can remove it later
+    stream_key: Vec<usize>,
     properties: HashMap<String, String>,
 }
 
@@ -61,7 +63,7 @@ impl TableCatalogBuilder {
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
-        self.pk_indices.push(index);
+        self.stream_key.push(index);
         self.order_key.push(FieldOrder {
             index,
             direct: match order_type {
@@ -96,7 +98,7 @@ impl TableCatalogBuilder {
             name: String::new(),
             columns: self.columns,
             order_key: self.order_key,
-            pk: self.pk_indices,
+            stream_key: self.stream_key,
             is_index_on: None,
             distribution_key,
             appendonly: append_only,

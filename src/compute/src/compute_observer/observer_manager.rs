@@ -52,6 +52,9 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 self.handle_source_notification(resp.operation(), source_catalog);
             }
 
+            Info::HummockVersionDeltas(_) => { // TODO: handle deltas so that we don't need `pin_worker`
+            }
+
             _ => {
                 panic!("error type notification");
             }

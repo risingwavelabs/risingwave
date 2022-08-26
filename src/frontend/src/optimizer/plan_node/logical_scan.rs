@@ -52,7 +52,7 @@ pub struct LogicalScan {
 
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
-    fn new(
+    pub(crate) fn new(
         table_name: String, // explain-only
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
@@ -82,7 +82,7 @@ impl LogicalScan {
             .collect();
 
         let pk_indices = table_desc
-            .pk
+            .stream_key
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>();
@@ -334,7 +334,7 @@ impl LogicalScan {
         Self::new(
             self.table_name.clone(),
             self.is_sys_table,
-            self.required_col_idx.clone(),
+            self.output_col_idx.clone(),
             self.table_desc.clone(),
             self.indexes.clone(),
             self.base.ctx.clone(),

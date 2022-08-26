@@ -132,7 +132,7 @@ impl FixedLengthFilterKeyExtractor {
 /// prefix_bloom_filter
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
-    /// Perfix key length can be decoded through its `DataType` and `OrderType` which obtained from
+    /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
     read_pattern_prefix_column: usize,
@@ -150,7 +150,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
 
-        // if the key with table_id deserializer fail from schema, that shoud panic here for early
+        // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection
         let pk_prefix_len = self
             .deserializer
@@ -492,7 +492,7 @@ mod tests {
                     index: 3,
                 },
             ],
-            pk: vec![0],
+            stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
