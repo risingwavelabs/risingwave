@@ -87,7 +87,7 @@ impl CompactionPicker for LevelCompactionPicker {
             / cal_file_size(&input_levels[0].table_infos);
 
         // Pick the whole level to reduce write amplification.
-        if write_amplification >= MAX_WRITE_AMPLIFICATION {
+        if write_amplification > MAX_WRITE_AMPLIFICATION {
             // If there is any pending compact file in sub-level 0 or target level,
             //  we can not pick the whole level to compact.
             if is_l0_pending_compact
@@ -121,7 +121,7 @@ impl CompactionPicker for LevelCompactionPicker {
             let all_level_amplification =
                 cal_file_size(&levels.get_level(self.target_level).table_infos) * 100
                     / l0_total_file_size;
-            if write_amplification < all_level_amplification {
+            if all_level_amplification > MAX_WRITE_AMPLIFICATION {
                 return None;
             }
             // reverse because the ix of low sub-level is smaller.

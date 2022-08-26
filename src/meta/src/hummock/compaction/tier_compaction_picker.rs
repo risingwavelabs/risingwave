@@ -39,7 +39,7 @@ impl TierCompactionPicker {
     }
 }
 impl TierCompactionPicker {
-    fn pick_sharding_level(
+    fn pick_whole_level(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
@@ -62,10 +62,12 @@ impl TierCompactionPicker {
                 level_type: level.level_type,
                 table_infos: level.table_infos.clone(),
             }];
+
             let max_compaction_bytes = std::cmp::min(
                 self.config.max_compaction_bytes,
-                self.config.max_bytes_for_level_base,
+                self.config.max_bytes_for_level_base * 2,
             );
+
             let mut compaction_bytes = level.total_file_size;
             let mut max_level_size = level.total_file_size;
             let mut compact_file_count = level.table_infos.len();
@@ -99,13 +101,15 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            let is_write_amp_large =
+                max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
+
             // do not pick a compact task with large write amplification.
-            if level.level_type == non_overlapping_type
-                && max_level_size * self.config.level0_tier_compact_file_number / 2
-                    > compaction_bytes
-            {
+            if level.level_type == non_overlapping_type && is_write_amp_large {
                 continue;
             }
+
+            select_level_inputs.reverse();
 
             return Some(CompactionInput {
                 input_levels: select_level_inputs,
@@ -185,6 +189,6 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(ret);
         }
 
-        self.pick_sharding_level(l0, &level_handlers[0])
+        self.pick_whole_level(l0, &level_handlers[0])
     }
 }
