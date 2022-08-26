@@ -227,9 +227,9 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
 
 struct TableInner<S: StateStore> {
     pk_indices: Vec<usize>,
-    // This should be indentical to the pk in state table.
+    // This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
-    // This should be indentical to the data types in table schema.
+    // This should be identical to the data types in table schema.
     all_data_types: Vec<DataType>,
     pub(crate) table: StateTable<S>,
 }
