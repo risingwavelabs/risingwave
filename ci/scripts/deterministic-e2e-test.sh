@@ -5,8 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-apt-get -y install parallel
-
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
