@@ -119,7 +119,7 @@ impl ScheduledBarriers {
             .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
     }
 
-    async fn rollback_front(&self, scheduled: Scheduled)  {
+    async fn rollback_front(&self, scheduled: Scheduled) {
         if let Command::Plain(x) = &scheduled.0 {
             if x.is_none() {
                 return;
@@ -668,7 +668,8 @@ where
             if let Err(e) = state
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
-                .unwrap() {
+            {
+                tracing::error!("Failed to update epoch because {:?}", e);
                 self.scheduled_barriers.rollback_front((command, notifiers));
                 state.in_flight_prev_epoch = prev_epoch;
                 continue;
