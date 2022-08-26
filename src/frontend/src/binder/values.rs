@@ -34,10 +34,16 @@ impl BoundValues {
         &self.schema
     }
 
+    pub fn exprs(&self) -> impl Iterator<Item = &ExprImpl> {
+        self.rows.iter().flatten()
+    }
+
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
+        self.rows.iter_mut().flatten()
+    }
+
     pub fn is_correlated(&self) -> bool {
-        self.rows
-            .iter()
-            .flatten()
+        self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth())
     }
 
@@ -45,12 +51,9 @@ impl BoundValues {
         &mut self,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        let mut correlated_indices = vec![];
-        self.rows.iter_mut().flatten().for_each(|expr| {
-            correlated_indices
-                .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
-        });
-        correlated_indices
+        self.exprs_mut()
+            .flat_map(|expr| expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id))
+            .collect()
     }
 }
 
@@ -77,21 +80,10 @@ impl Binder {
         self.context.clause = None;
 
         let num_columns = bound[0].len();
-        // syntax check.
-        {
-            if bound.iter().any(|row| row.len() != num_columns) {
-                return Err(ErrorCode::BindError(
-                    "VALUES lists must all be the same length".into(),
-                )
-                .into());
-            }
-            if bound.iter().flatten().any(|expr| expr.has_subquery()) {
-                return Err(ErrorCode::NotImplemented(
-                    "VALUES is disallowed to have subqueries.".into(),
-                    None.into(),
-                )
-                .into());
-            }
+        if bound.iter().any(|row| row.len() != num_columns) {
+            return Err(
+                ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
+            );
         }
 
         // Calculate column types.
@@ -122,9 +114,18 @@ impl Binder {
             rows: bound,
             schema,
         };
+        if bound_values
+            .rows
+            .iter()
+            .flatten()
+            .any(|expr| expr.has_subquery())
+        {
+            return Err(ErrorCode::NotImplemented("Subquery in VALUES".into(), None.into()).into());
+        }
         if bound_values.is_correlated() {
-            return Err(ErrorCode::InternalError(
-                "Values is disallowed to have CorrelatedInputRef.".to_string(),
+            return Err(ErrorCode::NotImplemented(
+                "CorrelatedInputRef in VALUES".into(),
+                None.into(),
             )
             .into());
         }

@@ -86,19 +86,15 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         self.hummock_manager
             .pin_snapshot(self.context_id)
             .await
-            .map(|e| e.epoch)
             .map_err(mock_err)
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
-        self.hummock_manager
-            .get_last_epoch()
-            .map(|e| e.epoch)
-            .map_err(mock_err)
+    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+        self.hummock_manager.get_last_epoch().map_err(mock_err)
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
@@ -113,7 +109,8 @@ impl HummockMetaClient for MockHummockMetaClient {
             .unpin_snapshot_before(
                 self.context_id,
                 HummockSnapshot {
-                    epoch: pinned_epochs,
+                    committed_epoch: pinned_epochs,
+                    current_epoch: pinned_epochs,
                 },
             )
             .await

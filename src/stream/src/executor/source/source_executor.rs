@@ -155,20 +155,23 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
-        let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
-        if let Some(idx) = self
-            .column_ids
-            .iter()
-            .position(|column_id| *column_id == row_id_column_id)
-        {
-            let (ops, mut columns, bitmap) = chunk.into_inner();
-            if append_only {
-                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
-            } else {
-                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
+        // if row_id_index is None, pk is not row_id, so no need to gen row_id and refill chunk
+        if let Some(row_id_index) = row_id_index {
+            let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
+            if let Some(idx) = self
+                .column_ids
+                .iter()
+                .position(|column_id| *column_id == row_id_column_id)
+            {
+                let (ops, mut columns, bitmap) = chunk.into_inner();
+                if append_only {
+                    columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
+                } else {
+                    columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
+                }
+                return StreamChunk::new(ops, columns, bitmap);
             }
-            return StreamChunk::new(ops, columns, bitmap);
         }
         chunk
     }
@@ -422,7 +425,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
-    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, StreamSourceInfo};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::plan_common::{
@@ -466,8 +469,15 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
+        let row_id_index = Some(0);
+        let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        )?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -590,8 +600,15 @@ mod tests {
                 type_name: "".to_string(),
             },
         ];
+        let row_id_index = Some(0);
+        let pk_column_ids = vec![0];
         let source_manager = MemSourceManager::default();
-        source_manager.create_table_source(&table_id, table_columns)?;
+        source_manager.create_table_source(
+            &table_id,
+            table_columns,
+            row_id_index,
+            pk_column_ids,
+        )?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -691,7 +708,7 @@ mod tests {
             properties,
             row_format: ProstRowFormatType::Json as i32,
             row_schema_location: "".to_string(),
-            row_id_index: 0,
+            row_id_index: Some(ProstColumnIndex { index: 0 }),
             columns,
             pk_column_ids: vec![0],
         }

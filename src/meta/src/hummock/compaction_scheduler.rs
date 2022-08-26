@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
+use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -24,10 +25,9 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
-use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
-use crate::manager::{MetaSrvEnv, META_NODE_ID};
+use crate::manager::MetaSrvEnv;
 use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
@@ -117,6 +117,9 @@ where
                     break;
                 }
             };
+            on_sync_point("BEFORE_SCHEDULE_COMPACTION_TASK")
+                .await
+                .unwrap();
             self.pick_and_assign(compaction_group, request_channel.clone())
                 .await;
         }
@@ -149,21 +152,6 @@ where
             "Picked compaction task. {}",
             compact_task_to_string(&compact_task)
         );
-        // TODO: merge this two operation in one lock guard because the target sub-level may be
-        // removed by the other thread.
-        if CompactStatus::is_trivial_move_task(&compact_task) {
-            compact_task.task_status = true;
-            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
-            tracing::info!(
-                "trivial move task: \n{}",
-                compact_task_to_string(&compact_task)
-            );
-            return self
-                .hummock_manager
-                .report_compact_task_impl(META_NODE_ID, &compact_task, true)
-                .await
-                .is_ok();
-        }
 
         // 2. Assign the compaction task to a compactor.
         'send_task: loop {
@@ -174,12 +162,23 @@ where
                 .await
             {
                 None => {
-                    tracing::warn!("No idle compactor available.");
+                    let current_compactor_tasks =
+                        self.hummock_manager.list_assigned_tasks_number().await;
+                    tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
+                    compact_task.task_status = false;
                     tokio::time::sleep(Duration::from_secs(
                         self.compactor_selection_retry_interval_sec,
                     ))
                     .await;
-                    continue 'send_task;
+                    match self
+                        .hummock_manager
+                        .cancel_compact_task(&compact_task)
+                        .await
+                    {
+                        Ok(_) => return false,
+                        // failed to cancel, try assign to compactor again.
+                        Err(_) => continue 'send_task,
+                    }
                 }
                 Some(compactor) => compactor,
             };

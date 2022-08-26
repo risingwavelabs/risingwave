@@ -403,10 +403,10 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self) -> Result<HummockEpoch> {
+    pub async fn flush(&self) -> Result<HummockSnapshot> {
         let request = FlushRequest::default();
         let resp = self.inner.flush(request).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
     pub async fn list_table_fragments(
@@ -470,18 +470,18 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
         };
         let resp = self.inner.pin_snapshot(req).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockEpoch> {
+    async fn get_epoch(&self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
-        Ok(resp.snapshot.unwrap().epoch)
+        Ok(resp.snapshot.unwrap())
     }
 
     async fn unpin_snapshot(&self) -> Result<()> {
@@ -497,7 +497,8 @@ impl HummockMetaClient for MetaClient {
             context_id: self.worker_id(),
             // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
             min_snapshot: Some(HummockSnapshot {
-                epoch: pinned_epochs,
+                committed_epoch: pinned_epochs,
+                current_epoch: pinned_epochs,
             }),
         };
         self.inner.unpin_snapshot_before(req).await?;

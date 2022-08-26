@@ -59,6 +59,10 @@ impl ComputeNodeService {
             .arg("--metrics-level")
             .arg("1");
 
+        if config.enable_async_stack_trace {
+            cmd.arg("--enable-async-stack-trace");
+        }
+
         if config.enable_tiered_cache {
             let prefix_data = env::var("PREFIX_DATA")?;
             cmd.arg("--file-cache-dir").arg(
@@ -132,6 +136,15 @@ impl Task for ComputeNodeService {
                 Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
             );
         }
+
+        if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
+            // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            cmd.env(
+                "_RJEM_MALLOC_CONF",
+                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
+            );
+        }
+
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;

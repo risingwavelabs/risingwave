@@ -17,7 +17,7 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactTaskProgress, CompactionGroup,
+    pin_version_response, CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
@@ -32,10 +32,10 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     ) -> Result<pin_version_response::Payload>;
     async fn unpin_version(&self) -> Result<()>;
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
-    async fn pin_snapshot(&self) -> Result<HummockEpoch>;
+    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
-    async fn get_epoch(&self) -> Result<HummockEpoch>;
+    async fn get_epoch(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange>;
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()>;
     async fn report_compaction_task_progress(

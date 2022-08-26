@@ -14,7 +14,6 @@
 
 //! Hummock is the state store of the streaming system.
 
-use std::fmt;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -50,6 +49,7 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod store;
 pub mod vacuum;
 pub mod value;
 
@@ -163,11 +163,6 @@ impl HummockStorage {
         check_bloom_filter: bool,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
-        if check_bloom_filter && sstable.value().surely_not_have_user_key(key) {
-            stats.bloom_filter_true_negative_count += 1;
-            return Ok(None);
-        }
-
         if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), key, stats) {
             return Ok(None);
         }
@@ -234,11 +229,5 @@ impl HummockStorage {
         }
 
         !surely_not_have
-    }
-}
-
-impl fmt::Debug for HummockStorage {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
     }
 }
