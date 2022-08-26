@@ -20,6 +20,7 @@ use bytes::Bytes;
 use itertools::zip_eq;
 use regex::Regex;
 
+use crate::error::{PsqlError, PsqlResult};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use crate::pg_protocol::cstr_to_str;
 use crate::pg_response::{PgResponse, StatementType};
@@ -36,14 +37,18 @@ use crate::types::Row;
 /// let params = parse_params(&type_description, &raw_params);
 /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
 /// ```
-fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> Result<Vec<String>, ()> {
+fn parse_params(type_description: &[TypeOid], raw_params: &[Bytes]) -> PsqlResult<Vec<String>> {
     assert_eq!(type_description.len(), raw_params.len());
 
     let mut params = Vec::with_capacity(raw_params.len());
     for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
         let str = match type_oid {
             TypeOid::Varchar => format!("'{}'", cstr_to_str(raw_param).unwrap()),
-            _ => return Err(()),
+            _ => {
+                return Err(PsqlError::BindError(
+                    "Unsupported type for parameter".into(),
+                ))
+            }
         };
         params.push(str)
     }
@@ -114,9 +119,12 @@ impl PgStatement {
     async fn infer_row_description<SM: SessionManager>(
         session: Arc<SM::Session>,
         sql: &str,
-    ) -> Result<Vec<PgFieldDescriptor>, ()> {
+    ) -> PsqlResult<Vec<PgFieldDescriptor>> {
         if sql.len() > 6 && sql[0..6].eq_ignore_ascii_case("select") {
-            return session.infer_return_type(sql).await.map_err(|_e| ());
+            return session
+                .infer_return_type(sql)
+                .await
+                .map_err(|err| PsqlError::BindError(err));
         }
         Ok(vec![])
     }
@@ -127,7 +135,7 @@ impl PgStatement {
         portal_name: String,
         params: &[Bytes],
         result_format: bool,
-    ) -> Result<PgPortal, ()> {
+    ) -> PsqlResult<PgPortal> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
         // params is empty(): Don't need to replace generic params($1,$2).

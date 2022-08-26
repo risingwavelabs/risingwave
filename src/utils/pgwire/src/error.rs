@@ -41,7 +41,7 @@ pub enum PsqlError {
     ParseError(BoxedError),
 
     #[error("BindError: {0}")]
-    BindError(IoError),
+    BindError(BoxedError),
 
     #[error("ExecuteError: {0}")]
     ExecuteError(BoxedError),

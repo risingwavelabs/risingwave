@@ -324,6 +324,8 @@ where
                     .await
                     .map_err(PsqlError::ParseError)?
             } else {
+                // Process the statement with params.
+                // For now, we can only process the statement type like this e.g. 'select $1,$2...'.
                 let generic_params: Vec<&str> = sql
                     .split(&[' ', ',', ';'])
                     .skip(1)
@@ -334,21 +336,15 @@ where
                 let mut idx = Vec::with_capacity(generic_params.len());
                 for x in generic_params.iter() {
                     // NOTE: Assume all output are generic params.
-                    let str = x.strip_prefix('$').ok_or_else(|| {
-                        PsqlError::ParseError(Box::new(IoError::new(
-                            ErrorKind::InvalidInput,
-                            "Invalid generic param",
-                        )))
-                    })?;
+                    let str = x
+                        .strip_prefix('$')
+                        .ok_or_else(|| PsqlError::ParseError("Invalid generic param".into()))?;
                     // NOTE: Assume all generic are valid.
                     let v: i32 = str
                         .parse()
                         .map_err(|e| PsqlError::ParseError(Box::new(e)))?;
                     if !v.is_positive() {
-                        return Err(PsqlError::ParseError(Box::new(IoError::new(
-                            ErrorKind::InvalidInput,
-                            "Invalid generic param",
-                        ))));
+                        return Err(PsqlError::ParseError("Invalid generic param".into()));
                     }
                     idx.push(v);
                 }
@@ -356,10 +352,7 @@ where
                 let mut res = Vec::with_capacity(idx.len());
                 for x in idx.iter() {
                     if ((x - 1) as usize) >= types.len() {
-                        return Err(PsqlError::ParseError(Box::new(IoError::new(
-                            ErrorKind::InvalidInput,
-                            "Invalid generic param",
-                        ))));
+                        return Err(PsqlError::ParseError("Invalid generic param".into()));
                     }
                     res.push(PgFieldDescriptor::new(
                         String::new(),
@@ -399,13 +392,13 @@ where
             &statement_name
         );
         let statement = if statement_name.is_empty() {
-            self.unnamed_statement.as_ref().ok_or_else(|| {
-                PsqlError::BindError(IoError::new(ErrorKind::InvalidInput, "No statement found"))
-            })?
+            self.unnamed_statement
+                .as_ref()
+                .ok_or_else(|| PsqlError::BindError("No statement found".into()))?
         } else {
-            self.named_statements.get(&statement_name).ok_or_else(|| {
-                PsqlError::BindError(IoError::new(ErrorKind::InvalidInput, "No statement found"))
-            })?
+            self.named_statements
+                .get(&statement_name)
+                .ok_or_else(|| PsqlError::BindError("No statement found".into()))?
         };
 
         // 2. Instance the statement to get the portal.
@@ -418,12 +411,7 @@ where
                 msg.result_format_code,
             )
             .await
-            .map_err(|_| {
-                PsqlError::BindError(IoError::new(
-                    ErrorKind::InvalidInput,
-                    "Failed to instance statement",
-                ))
-            })?;
+            .map_err(|_| PsqlError::BindError("Failed to instance statement".into()))?;
 
         // 3. Insert the Portal.
         if portal_name.is_empty() {
@@ -439,20 +427,14 @@ where
         // 1. Get portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let portal = if msg.portal_name.is_empty() {
-            self.unnamed_portal.as_mut().ok_or_else(|| {
-                PsqlError::ExecuteError(Box::new(IoError::new(
-                    ErrorKind::InvalidInput,
-                    "No portal found",
-                )))
-            })?
+            self.unnamed_portal
+                .as_mut()
+                .ok_or_else(|| PsqlError::ExecuteError("No portal found".into()))?
         } else {
             // NOTE Error handle need modify later.
-            self.named_portals.get_mut(&portal_name).ok_or_else(|| {
-                PsqlError::ExecuteError(Box::new(IoError::new(
-                    ErrorKind::InvalidInput,
-                    "No portal found",
-                )))
-            })?
+            self.named_portals
+                .get_mut(&portal_name)
+                .ok_or_else(|| PsqlError::ExecuteError("No portal found".into()))?
         };
 
         tracing::trace!(
