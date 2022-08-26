@@ -1683,58 +1683,50 @@
                 LogicalFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
                   LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
   optimized_logical_plan: |
-    LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey) filter((flag = 0:Int64))] }
-      LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, flag], aggs: [] }
-        LogicalProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, flag] }
-          LogicalExpand { column_subsets: [[part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]] }
-            LogicalJoin { type: LeftAnti, on: (partsupp.ps_suppkey = supplier.s_suppkey), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
-              LogicalJoin { type: Inner, on: (part.p_partkey = partsupp.ps_partkey), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
-                LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
-                LogicalScan { table: part, output_columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], required_columns: [p_partkey, p_brand, p_type, p_size], predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-              LogicalScan { table: supplier, output_columns: [supplier.s_suppkey], required_columns: [s_suppkey, s_comment], predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
+    LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
+      LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
+        LogicalJoin { type: LeftAnti, on: (partsupp.ps_suppkey = supplier.s_suppkey), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
+          LogicalJoin { type: Inner, on: (part.p_partkey = partsupp.ps_partkey), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
+            LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
+            LogicalScan { table: part, output_columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], required_columns: [p_partkey, p_brand, p_type, p_size], predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
+          LogicalScan { table: supplier, output_columns: [supplier.s_suppkey], required_columns: [s_suppkey, s_comment], predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
   batch_plan: |
-    BatchExchange { order: [count(partsupp.ps_suppkey) filter((flag = 0:Int64)) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], dist: Single }
-      BatchSort { order: [count(partsupp.ps_suppkey) filter((flag = 0:Int64)) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC] }
-        BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey) filter((flag = 0:Int64))] }
+    BatchExchange { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], dist: Single }
+      BatchSort { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC] }
+        BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
           BatchExchange { order: [], dist: HashShard(part.p_brand, part.p_type, part.p_size) }
-            BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, flag], aggs: [] }
-              BatchExchange { order: [], dist: HashShard(part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, flag) }
-                BatchProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, flag] }
-                  BatchExpand { column_subsets: [[part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]] }
-                    BatchHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
-                      BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
-                        BatchHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
-                          BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
-                            BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: SomeShard }
-                          BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                            BatchFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-                              BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], distribution: SomeShard }
-                      BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
-                        BatchProject { exprs: [supplier.s_suppkey] }
-                          BatchFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                            BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], distribution: SomeShard }
+            BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
+              BatchHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
+                BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
+                  BatchHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
+                    BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
+                      BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: SomeShard }
+                    BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                      BatchFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
+                        BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], distribution: SomeShard }
+                BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
+                  BatchProject { exprs: [supplier.s_suppkey] }
+                    BatchFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
+                      BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
-      StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey) filter((part.p_size = 0:Int64))] }
-        StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(partsupp.ps_suppkey) filter((part.p_size = 0:Int64))] }
+      StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)] }
+        StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(partsupp.ps_suppkey)] }
           StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
-            StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size] }
-              StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size], aggs: [count] }
-                StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size) }
-                  StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_size, partsupp._row_id, part._row_id, flag] }
-                    StreamExpand { column_subsets: [[part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey]] }
-                      StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp._row_id, part._row_id] }
-                        StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                          StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp._row_id, part._row_id] }
-                            StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                              StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
-                            StreamExchange { dist: HashShard(part.p_partkey) }
-                              StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-                                StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
-                        StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                          StreamProject { exprs: [supplier.s_suppkey, supplier._row_id] }
-                            StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                              StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier._row_id, supplier.s_comment], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
+            StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
+              StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [count] }
+                StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp._row_id, part._row_id] }
+                  StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+                    StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp._row_id, part._row_id] }
+                      StreamExchange { dist: HashShard(partsupp.ps_partkey) }
+                        StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
+                      StreamExchange { dist: HashShard(part.p_partkey) }
+                        StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
+                          StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
+                  StreamExchange { dist: HashShard(supplier.s_suppkey) }
+                    StreamProject { exprs: [supplier.s_suppkey, supplier._row_id] }
+                      StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
+                        StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier._row_id, supplier.s_comment], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
 - id: tpch_q17
   before:
   - create_tables

@@ -74,11 +74,11 @@ impl HashAggExecutorBuilder {
         task_id: TaskId,
         identity: String,
     ) -> Result<BoxedExecutor> {
-        let agg_factories = hash_agg_node
+        let agg_factories: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
             .map(AggStateFactory::new)
-            .collect::<Result<Vec<AggStateFactory>>>()?;
+            .try_collect()?;
 
         let group_key_columns = hash_agg_node
             .get_group_key()
