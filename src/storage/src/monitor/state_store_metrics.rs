@@ -46,6 +46,7 @@ macro_rules! for_all_metrics {
             iter_duration: Histogram,
             iter_scan_duration: Histogram,
             iter_in_process_counts: GenericCounter<AtomicU64>,
+            iter_scan_key_counts: GenericCounterVec<AtomicU64>,
 
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
@@ -213,6 +214,13 @@ impl StateStoreMetrics {
             registry
         )
         .unwrap();
+
+        let iter_scan_key_counts = register_int_counter_vec_with_registry!(
+            "state_store_iter_scan_key_counts",
+            "Total number of keys read by iterator",
+            &["type"],
+            registry
+        ).unwrap();
 
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_with_registry!(
@@ -422,6 +430,7 @@ impl StateStoreMetrics {
             iter_duration,
             iter_scan_duration,
             iter_in_process_counts,
+            iter_scan_key_counts,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
