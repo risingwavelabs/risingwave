@@ -72,23 +72,23 @@ enum Commands {
     Test(TestOptions),
 }
 
-fn get_seed_table_sql(opt: &TestOptions) -> String {
+fn get_seed_table_sql(testdata: &str) -> String {
     let seed_files = vec!["tpch.sql", "nexmark.sql"];
     seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>()
 }
 
 async fn create_tables(
     rng: &mut impl Rng,
-    opt: &TestOptions,
+    testdata: &str,
     client: &tokio_postgres::Client,
 ) -> (Vec<Table>, Vec<Table>, String) {
     tracing::info!("Preparing tables...");
 
     let mut setup_sql = String::with_capacity(1000);
-    let sql = get_seed_table_sql(opt);
+    let sql = get_seed_table_sql(testdata);
     let statements = parse_sql(&sql);
     let mut tables = statements
         .iter()
@@ -120,7 +120,7 @@ async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
         .unwrap();
 }
 
-async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgres::Client) {
+async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::Client) {
     tracing::info!("Cleaning tables...");
 
     for mview in mviews.iter().rev() {
@@ -130,7 +130,7 @@ async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgre
     let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
     let sql = seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>();
 
     for stmt in sql.lines() {
@@ -218,10 +218,12 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
+    run(&client, &opt.testdata, opt.count).await;
+}
 
+async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
     let mut rng = rand::thread_rng();
-
-    let (tables, mviews, setup_sql) = create_tables(&mut rng, &opt, &client).await;
+    let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
 
     // Test batch
     // Queries we generate are complex, can cause overflow in
@@ -230,7 +232,7 @@ async fn main() {
         .query("SET query_mode TO distributed;", &[])
         .await
         .unwrap();
-    for _ in 0..opt.count {
+    for _ in 0..count {
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
@@ -238,7 +240,7 @@ async fn main() {
     }
 
     // Test stream
-    for _ in 0..opt.count {
+    for _ in 0..count {
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;
@@ -246,5 +248,5 @@ async fn main() {
         drop_mview_table(&table, &client).await;
     }
 
-    drop_tables(&mviews, &opt, &client).await;
+    drop_tables(&mviews, testdata, &client).await;
 }
