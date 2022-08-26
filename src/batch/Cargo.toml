@@ -30,6 +30,7 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
@@ -50,6 +51,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2.1", package = "madsim-tonic" }
 tracing = "0.1"
@@ -87,4 +89,8 @@ harness = false
 
 [[bench]]
 name = "top_n"
+harness = false
+
+[[bench]]
+name = "hash_agg"
 harness = false

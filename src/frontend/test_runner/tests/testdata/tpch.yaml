@@ -107,7 +107,7 @@
       LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
         LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)), lineitem.l_discount] }
           LogicalFilter { predicate: (lineitem.l_shipdate <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
-            LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+            LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32), RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32), RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32), count] }
       LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax))), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
@@ -189,22 +189,22 @@
               LogicalJoin { type: Inner, on: true, output: all }
                 LogicalJoin { type: Inner, on: true, output: all }
                   LogicalJoin { type: Inner, on: true, output: all }
-                    LogicalScan { table: partsupp, columns: [partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
-                    LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
-                  LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-              LogicalScan { table: region, columns: [region._row_id, region.r_regionkey, region.r_name, region.r_comment] }
+                    LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment, partsupp._row_id] }
+                    LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
+                  LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
+              LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._row_id] }
             LogicalProject { exprs: [min(partsupp.ps_supplycost)] }
               LogicalAgg { aggs: [min(partsupp.ps_supplycost)] }
                 LogicalProject { exprs: [partsupp.ps_supplycost] }
-                  LogicalFilter { predicate: (CorrelatedInputRef { index: 7, correlated_id: 1 } = partsupp.ps_partkey) AND (supplier.s_suppkey = partsupp.ps_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'AFRICA':Varchar) }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 6, correlated_id: 1 } = partsupp.ps_partkey) AND (supplier.s_suppkey = partsupp.ps_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_regionkey = region.r_regionkey) AND (region.r_name = 'AFRICA':Varchar) }
                     LogicalJoin { type: Inner, on: true, output: all }
                       LogicalJoin { type: Inner, on: true, output: all }
                         LogicalJoin { type: Inner, on: true, output: all }
-                          LogicalScan { table: partsupp, columns: [partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
-                          LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                        LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-                      LogicalScan { table: region, columns: [region._row_id, region.r_regionkey, region.r_name, region.r_comment] }
+                          LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment, partsupp._row_id] }
+                          LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                        LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
+                      LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._row_id] }
   optimized_logical_plan: |
     LogicalTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
       LogicalJoin { type: Inner, on: (nation.n_regionkey = region.r_regionkey), output: [supplier.s_acctbal, supplier.s_name, nation.n_name, part.p_partkey, part.p_mfgr, supplier.s_address, supplier.s_phone, supplier.s_comment] }
@@ -361,9 +361,9 @@
             LogicalFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) AND (customer.c_custkey = orders.o_custkey) AND (lineitem.l_orderkey = orders.o_orderkey) AND (orders.o_orderdate < '1995-03-29':Varchar::Date) AND (lineitem.l_shipdate > '1995-03-29':Varchar::Date) }
               LogicalJoin { type: Inner, on: true, output: all }
                 LogicalJoin { type: Inner, on: true, output: all }
-                  LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
-                  LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                  LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
+                  LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalTopN { order: "[sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) DESC, orders.o_orderdate ASC]", limit: 10, offset: 0 }
       LogicalProject { exprs: [lineitem.l_orderkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))), orders.o_orderdate, orders.o_shippriority] }
@@ -449,10 +449,10 @@
         LogicalProject { exprs: [orders.o_orderpriority] }
           LogicalFilter { predicate: (orders.o_orderdate >= '1997-07-01':Varchar::Date) AND (orders.o_orderdate < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
             LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-              LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
+              LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
               LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 1, correlated_id: 1 }) AND (lineitem.l_commitdate < lineitem.l_receiptdate) }
-                  LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 0, correlated_id: 1 }) AND (lineitem.l_commitdate < lineitem.l_receiptdate) }
+                  LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [orders.o_orderpriority], aggs: [count] }
       LogicalJoin { type: LeftSemi, on: (lineitem.l_orderkey = orders.o_orderkey), output: [orders.o_orderpriority] }
@@ -524,12 +524,12 @@
                 LogicalJoin { type: Inner, on: true, output: all }
                   LogicalJoin { type: Inner, on: true, output: all }
                     LogicalJoin { type: Inner, on: true, output: all }
-                      LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
-                      LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                    LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                  LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-              LogicalScan { table: region, columns: [region._row_id, region.r_regionkey, region.r_name, region.r_comment] }
+                      LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
+                      LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                    LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+                  LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
+              LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._row_id] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [nation.n_name], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
       LogicalProject { exprs: [nation.n_name, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
@@ -624,7 +624,7 @@
       LogicalAgg { aggs: [sum((lineitem.l_extendedprice * lineitem.l_discount))] }
         LogicalProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount)] }
           LogicalFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND (lineitem.l_discount >= (0.08:Decimal - 0.01:Decimal)) AND (lineitem.l_discount <= (0.08:Decimal + 0.01:Decimal)) AND (lineitem.l_quantity < 24:Int32) }
-            LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+            LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum((lineitem.l_extendedprice * lineitem.l_discount))] }
       LogicalProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount)] }
@@ -699,12 +699,12 @@
                   LogicalJoin { type: Inner, on: true, output: all }
                     LogicalJoin { type: Inner, on: true, output: all }
                       LogicalJoin { type: Inner, on: true, output: all }
-                        LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                        LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                      LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                    LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
-                  LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-                LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+                        LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                        LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+                      LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                    LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
+                  LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
+                LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate)], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
       LogicalProject { exprs: [nation.n_name, nation.n_name, Extract('YEAR':Varchar, lineitem.l_shipdate), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
@@ -833,14 +833,14 @@
                       LogicalJoin { type: Inner, on: true, output: all }
                         LogicalJoin { type: Inner, on: true, output: all }
                           LogicalJoin { type: Inner, on: true, output: all }
-                            LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                            LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
-                          LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                        LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                      LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
-                    LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-                  LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-                LogicalScan { table: region, columns: [region._row_id, region.r_regionkey, region.r_name, region.r_comment] }
+                            LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+                            LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
+                          LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                        LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                      LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
+                    LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
+                  LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
+                LogicalScan { table: region, columns: [region.r_regionkey, region.r_name, region.r_comment, region._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit((sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), 6:Int32)] }
       LogicalAgg { group_key: [Extract('YEAR':Varchar, orders.o_orderdate)], aggs: [sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
@@ -990,12 +990,12 @@
                   LogicalJoin { type: Inner, on: true, output: all }
                     LogicalJoin { type: Inner, on: true, output: all }
                       LogicalJoin { type: Inner, on: true, output: all }
-                        LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                        LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
-                      LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                    LogicalScan { table: partsupp, columns: [partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
-                  LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+                        LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+                        LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
+                      LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                    LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment, partsupp._row_id] }
+                  LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit(sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity))), 2:Int32)] }
       LogicalAgg { group_key: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate)], aggs: [sum(((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)))] }
@@ -1115,10 +1115,10 @@
               LogicalJoin { type: Inner, on: true, output: all }
                 LogicalJoin { type: Inner, on: true, output: all }
                   LogicalJoin { type: Inner, on: true, output: all }
-                    LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
-                    LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                  LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+                    LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
+                    LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                  LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+                LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
   optimized_logical_plan: |
     LogicalTopN { order: "[sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))) DESC]", limit: 20, offset: 0 }
       LogicalProject { exprs: [customer.c_custkey, customer.c_name, sum((lineitem.l_extendedprice * (1.00:Decimal - lineitem.l_discount))), customer.c_acctbal, nation.n_name, customer.c_address, customer.c_phone, customer.c_comment] }
@@ -1222,18 +1222,18 @@
               LogicalFilter { predicate: (partsupp.ps_suppkey = supplier.s_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'ARGENTINA':Varchar) }
                 LogicalJoin { type: Inner, on: true, output: all }
                   LogicalJoin { type: Inner, on: true, output: all }
-                    LogicalScan { table: partsupp, columns: [partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
-                    LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                  LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+                    LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment, partsupp._row_id] }
+                    LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                  LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
           LogicalProject { exprs: [(sum((partsupp.ps_supplycost * partsupp.ps_availqty)) * 0.0001000000:Decimal)] }
             LogicalAgg { aggs: [sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
               LogicalProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty)] }
                 LogicalFilter { predicate: (partsupp.ps_suppkey = supplier.s_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'ARGENTINA':Varchar) }
                   LogicalJoin { type: Inner, on: true, output: all }
                     LogicalJoin { type: Inner, on: true, output: all }
-                      LogicalScan { table: partsupp, columns: [partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
-                      LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                    LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+                      LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment, partsupp._row_id] }
+                      LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                    LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) * 0.0001000000:Decimal)), output: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
       LogicalAgg { group_key: [partsupp.ps_partkey], aggs: [sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
@@ -1359,8 +1359,8 @@
         LogicalProject { exprs: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)] }
           LogicalFilter { predicate: (orders.o_orderkey = lineitem.l_orderkey) AND In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_receiptdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
             LogicalJoin { type: Inner, on: true, output: all }
-              LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-              LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+              LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+              LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [lineitem.l_shipmode], aggs: [sum(Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32)), sum(Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32))] }
       LogicalProject { exprs: [lineitem.l_shipmode, Case(((orders.o_orderpriority = '1-URGENT':Varchar) OR (orders.o_orderpriority = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case(((orders.o_orderpriority <> '1-URGENT':Varchar) AND (orders.o_orderpriority <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)] }
@@ -1425,8 +1425,8 @@
             LogicalAgg { group_key: [customer.c_custkey], aggs: [count(orders.o_orderkey)] }
               LogicalProject { exprs: [customer.c_custkey, orders.o_orderkey] }
                 LogicalJoin { type: LeftOuter, on: (customer.c_custkey = orders.o_custkey) AND Not(Like(orders.o_comment, '%:1%:2%':Varchar)), output: all }
-                  LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
-                  LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
+                  LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
+                  LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [count(orders.o_orderkey)], aggs: [count] }
       LogicalProject { exprs: [count(orders.o_orderkey)] }
@@ -1485,8 +1485,8 @@
         LogicalProject { exprs: [Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
           LogicalFilter { predicate: (lineitem.l_partkey = part.p_partkey) AND (lineitem.l_shipdate >= '1995-09-01':Varchar::Date) AND (lineitem.l_shipdate < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
             LogicalJoin { type: Inner, on: true, output: all }
-              LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-              LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
+              LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+              LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [((100.00:Decimal * sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
       LogicalAgg { aggs: [sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
@@ -1561,12 +1561,12 @@
       LogicalFilter { predicate: (supplier.s_suppkey = lineitem.l_suppkey) AND (sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) = max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))) }
         LogicalJoin { type: LeftOuter, on: true, output: all }
           LogicalJoin { type: Inner, on: true, output: all }
-            LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
+            LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
             LogicalProject { exprs: [lineitem.l_suppkey, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
               LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
                 LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
                   LogicalFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                    LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                    LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
           LogicalProject { exprs: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
             LogicalAgg { aggs: [max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
               LogicalProject { exprs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
@@ -1574,7 +1574,7 @@
                   LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
                     LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
                       LogicalFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                        LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                        LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))) = max(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
       LogicalJoin { type: Inner, on: (supplier.s_suppkey = lineitem.l_suppkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
@@ -1677,11 +1677,11 @@
           LogicalFilter { predicate: (part.p_partkey = partsupp.ps_partkey) AND (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
             LogicalJoin { type: LeftAnti, on: (partsupp.ps_suppkey = supplier.s_suppkey), output: all }
               LogicalJoin { type: Inner, on: true, output: all }
-                LogicalScan { table: partsupp, columns: [partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
-                LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
+                LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment, partsupp._row_id] }
+                LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
               LogicalProject { exprs: [supplier.s_suppkey] }
                 LogicalFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                  LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
+                  LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
       LogicalAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
@@ -1755,13 +1755,13 @@
           LogicalFilter { predicate: (part.p_partkey = lineitem.l_partkey) AND (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) AND (lineitem.l_quantity < (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))) }
             LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
               LogicalJoin { type: Inner, on: true, output: all }
-                LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
+                LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+                LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
               LogicalProject { exprs: [(0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))] }
                 LogicalAgg { aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
                   LogicalProject { exprs: [lineitem.l_quantity] }
-                    LogicalFilter { predicate: (lineitem.l_partkey = CorrelatedInputRef { index: 18, correlated_id: 1 }) }
-                      LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                    LogicalFilter { predicate: (lineitem.l_partkey = CorrelatedInputRef { index: 17, correlated_id: 1 }) }
+                      LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [RoundDigit((sum(lineitem.l_extendedprice) / 7.0:Decimal), 16:Int32)] }
       LogicalAgg { aggs: [sum(lineitem.l_extendedprice)] }
@@ -1872,14 +1872,14 @@
               LogicalJoin { type: LeftSemi, on: (orders.o_orderkey = lineitem.l_orderkey), output: all }
                 LogicalJoin { type: Inner, on: true, output: all }
                   LogicalJoin { type: Inner, on: true, output: all }
-                    LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
-                    LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                  LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                    LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
+                    LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                  LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
                 LogicalProject { exprs: [lineitem.l_orderkey] }
                   LogicalFilter { predicate: (sum(lineitem.l_quantity) > 1:Int32) }
                     LogicalAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity)] }
                       LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_quantity] }
-                        LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                        LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0 }
       LogicalAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [sum(lineitem.l_quantity)] }
@@ -1980,8 +1980,8 @@
         LogicalProject { exprs: [(lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
           LogicalFilter { predicate: (part.p_partkey = lineitem.l_partkey) AND (part.p_size >= 1:Int32) AND In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) AND (((((((part.p_brand = 'Brand#52':Varchar) AND In(part.p_container, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND (lineitem.l_quantity >= 1:Int32)) AND (lineitem.l_quantity <= 11:Int32)) AND (part.p_size <= 5:Int32)) OR (((((part.p_brand = 'Brand#24':Varchar) AND In(part.p_container, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND (lineitem.l_quantity >= 30:Int32)) AND (lineitem.l_quantity <= 40:Int32)) AND (part.p_size <= 10:Int32))) OR (((((part.p_brand = 'Brand#32':Varchar) AND In(part.p_container, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND (lineitem.l_quantity >= 10:Int32)) AND (lineitem.l_quantity <= 20:Int32)) AND (part.p_size <= 15:Int32))) }
             LogicalJoin { type: Inner, on: true, output: all }
-              LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-              LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
+              LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+              LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
       LogicalProject { exprs: [(lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))] }
@@ -2064,21 +2064,21 @@
       LogicalFilter { predicate: (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'KENYA':Varchar) }
         LogicalJoin { type: LeftSemi, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: all }
           LogicalJoin { type: Inner, on: true, output: all }
-            LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-            LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+            LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+            LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
           LogicalProject { exprs: [partsupp.ps_suppkey] }
             LogicalFilter { predicate: (partsupp.ps_availqty > (0.5:Decimal * sum(lineitem.l_quantity))) }
               LogicalApply { type: LeftOuter, on: true, correlated_id: 3 }
                 LogicalJoin { type: LeftSemi, on: (partsupp.ps_partkey = part.p_partkey), output: all }
-                  LogicalScan { table: partsupp, columns: [partsupp._row_id, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment] }
+                  LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_comment, partsupp._row_id] }
                   LogicalProject { exprs: [part.p_partkey] }
                     LogicalFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-                      LogicalScan { table: part, columns: [part._row_id, part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment] }
+                      LogicalScan { table: part, columns: [part.p_partkey, part.p_name, part.p_mfgr, part.p_brand, part.p_type, part.p_size, part.p_container, part.p_retailprice, part.p_comment, part._row_id] }
                 LogicalProject { exprs: [(0.5:Decimal * sum(lineitem.l_quantity))] }
                   LogicalAgg { aggs: [sum(lineitem.l_quantity)] }
                     LogicalProject { exprs: [lineitem.l_quantity] }
-                      LogicalFilter { predicate: (lineitem.l_partkey = CorrelatedInputRef { index: 1, correlated_id: 3 }) AND (lineitem.l_suppkey = CorrelatedInputRef { index: 2, correlated_id: 3 }) AND (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-                        LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                      LogicalFilter { predicate: (lineitem.l_partkey = CorrelatedInputRef { index: 0, correlated_id: 3 }) AND (lineitem.l_suppkey = CorrelatedInputRef { index: 1, correlated_id: 3 }) AND (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                        LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: [supplier.s_name, supplier.s_address] }
       LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address] }
@@ -2218,16 +2218,16 @@
                   LogicalJoin { type: Inner, on: true, output: all }
                     LogicalJoin { type: Inner, on: true, output: all }
                       LogicalJoin { type: Inner, on: true, output: all }
-                        LogicalScan { table: supplier, columns: [supplier._row_id, supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-                        LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                      LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                    LogicalScan { table: nation, columns: [nation._row_id, nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
+                        LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._row_id] }
+                        LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
+                      LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
+                    LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._row_id] }
                   LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                    LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 9, correlated_id: 1 }) AND (lineitem.l_suppkey <> CorrelatedInputRef { index: 11, correlated_id: 1 }) }
-                      LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                    LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 8, correlated_id: 1 }) AND (lineitem.l_suppkey <> CorrelatedInputRef { index: 10, correlated_id: 1 }) }
+                      LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
                 LogicalProject { exprs: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
-                  LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 9, correlated_id: 2 }) AND (lineitem.l_suppkey <> CorrelatedInputRef { index: 11, correlated_id: 2 }) AND (lineitem.l_receiptdate > lineitem.l_commitdate) }
-                    LogicalScan { table: lineitem, columns: [lineitem._row_id, lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
+                  LogicalFilter { predicate: (lineitem.l_orderkey = CorrelatedInputRef { index: 8, correlated_id: 2 }) AND (lineitem.l_suppkey <> CorrelatedInputRef { index: 10, correlated_id: 2 }) AND (lineitem.l_receiptdate > lineitem.l_commitdate) }
+                    LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment, lineitem._row_id] }
   optimized_logical_plan: |
     LogicalTopN { order: "[count DESC, supplier.s_name ASC]", limit: 100, offset: 0 }
       LogicalAgg { group_key: [supplier.s_name], aggs: [count] }
@@ -2358,15 +2358,15 @@
             LogicalFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) AND (customer.c_acctbal > (sum(customer.c_acctbal) / count(customer.c_acctbal))) }
               LogicalJoin { type: LeftOuter, on: true, output: all }
                 LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
-                  LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
+                  LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
                   LogicalProject { exprs: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
-                    LogicalFilter { predicate: (orders.o_custkey = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-                      LogicalScan { table: orders, columns: [orders._row_id, orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment] }
+                    LogicalFilter { predicate: (orders.o_custkey = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
+                      LogicalScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderstatus, orders.o_totalprice, orders.o_orderdate, orders.o_orderpriority, orders.o_clerk, orders.o_shippriority, orders.o_comment, orders._row_id] }
                 LogicalProject { exprs: [(sum(customer.c_acctbal) / count(customer.c_acctbal))] }
                   LogicalAgg { aggs: [sum(customer.c_acctbal), count(customer.c_acctbal)] }
                     LogicalProject { exprs: [customer.c_acctbal] }
                       LogicalFilter { predicate: (customer.c_acctbal > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
-                        LogicalScan { table: customer, columns: [customer._row_id, customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment] }
+                        LogicalScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_mktsegment, customer.c_comment, customer._row_id] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [Substr(customer.c_phone, 1:Int32, 2:Int32)], aggs: [count, sum(customer.c_acctbal)] }
       LogicalProject { exprs: [Substr(customer.c_phone, 1:Int32, 2:Int32), customer.c_acctbal] }

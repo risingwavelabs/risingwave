@@ -23,6 +23,7 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
@@ -685,7 +686,7 @@ impl StateStore for HummockStorage {
         self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
     }
 

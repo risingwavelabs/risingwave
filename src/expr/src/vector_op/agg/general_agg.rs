@@ -15,12 +15,13 @@
 use std::marker::PhantomData;
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
+use crate::Result;
 
 #[derive(Clone)]
 pub struct GeneralAgg<T, F, R>
@@ -139,11 +140,7 @@ macro_rules! impl_aggregator {
                 {
                     self.update_single_concrete(i, input, row_id)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
-                    ))
-                    .into())
+                    bail!("Input fail to match {}.", stringify!($input_variant))
                 }
             }
 
@@ -158,12 +155,11 @@ macro_rules! impl_aggregator {
                 {
                     self.update_multi_concrete(i, input, start_row_id, end_row_id)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
+                    bail!(
                         "Input fail to match {} or builder fail to match {}.",
                         stringify!($input_variant),
                         stringify!($result_variant)
-                    ))
-                    .into())
+                    )
                 }
             }
 
@@ -171,11 +167,7 @@ macro_rules! impl_aggregator {
                 if let ArrayBuilderImpl::$result_variant(b) = builder {
                     self.output_concrete(b)
                 } else {
-                    Err(ErrorCode::InternalError(format!(
-                        "Builder fail to match {}.",
-                        stringify!($result_variant)
-                    ))
-                    .into())
+                    bail!("Builder fail to match {}.", stringify!($result_variant))
                 }
             }
         }
@@ -360,6 +352,48 @@ mod tests {
         let actual = actual.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         assert_eq!(actual, vec![Some("aa")]);
+        Ok(())
+    }
+
+    #[test]
+    fn vec_min_list() -> Result<()> {
+        use risingwave_common::array;
+        let input = ListArray::from_slices(
+            &[true, true, true],
+            vec![
+                Some(array! { I32Array, [Some(0)] }.into()),
+                Some(array! { I32Array, [Some(1)] }.into()),
+                Some(array! { I32Array, [Some(2)] }.into()),
+            ],
+            DataType::Int32,
+        )?;
+        let agg_type = AggKind::Min;
+        let input_type = DataType::List {
+            datatype: Box::new(DataType::Int32),
+        };
+        let return_type = DataType::List {
+            datatype: Box::new(DataType::Int32),
+        };
+        let actual = eval_agg(
+            input_type,
+            Arc::new(input.into()),
+            agg_type,
+            return_type,
+            ArrayBuilderImpl::List(ListArrayBuilder::with_meta(
+                0,
+                ArrayMeta::List {
+                    datatype: Box::new(DataType::Int32),
+                },
+            )),
+        )?;
+        let actual = actual.as_list();
+        let actual = actual.iter().collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            vec![Some(ListRef::ValueRef {
+                val: &ListValue::new(vec![Some(ScalarImpl::Int32(0))])
+            })]
+        );
         Ok(())
     }
 

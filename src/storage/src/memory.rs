@@ -22,6 +22,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version_manager::SyncResult;
@@ -237,7 +238,7 @@ impl StateStore for MemoryStateStore {
         async move { unimplemented!() }
     }
 
-    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             // memory backend doesn't support wait for epoch, so this is a no-op.
             Ok(())

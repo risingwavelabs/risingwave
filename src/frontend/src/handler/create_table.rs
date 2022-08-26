@@ -18,25 +18,27 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
-use risingwave_pb::plan_common::ColumnCatalog;
+use risingwave_pb::catalog::{
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
+    TableSourceInfo,
+};
+use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, TableConstraint,
 };
 
 use super::create_source::make_prost_source;
 use crate::binder::{bind_data_type, bind_struct_field};
-use crate::catalog::{check_valid_column_name, row_id_column_desc};
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenterV2;
-
-// FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
@@ -46,12 +48,9 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
     let mut pk_column_id = None;
 
     let column_descs = {
-        let mut column_descs = Vec::with_capacity(columns.len() + 1);
-        // Put the hidden row id column in the first column. This is used for PK.
-        column_descs.push(row_id_column_desc());
-        // Then user columns.
+        let mut column_descs = Vec::with_capacity(columns.len());
         for (i, column) in columns.into_iter().enumerate() {
-            let column_id = ColumnId::new((i + 1) as i32);
+            let column_id = ColumnId::new(i as i32);
             // Destruct to make sure all fields are properly handled rather than ignored.
             // Do NOT use `..` to ignore fields you do not want to deal with.
             // Reject them with a clear NotImplemented error.
@@ -112,13 +111,13 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
 }
 
 /// Binds table constraints given the binding results from column definitions.
-/// It returns the columns together with `pk_column_ids`.
-// TODO(#4726): Once `row_id` is optional, also return `Option<RowIdIndex>`.
+/// It returns the columns together with `pk_column_ids`, and an optional row id column index if
+/// added.
 pub fn bind_sql_table_constraints(
-    column_descs: &[ColumnDesc],
+    column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
-) -> Result<(Vec<ColumnCatalog>, Vec<i32>)> {
+) -> Result<(Vec<ProstColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
     let mut pk_column_names = vec![];
     for constraint in constraints {
         match constraint {
@@ -144,16 +143,20 @@ pub fn bind_sql_table_constraints(
             }
         }
     }
-    let pk_column_ids = match (pk_column_id_from_columns, pk_column_names.is_empty()) {
+    let mut pk_column_ids = match (pk_column_id_from_columns, pk_column_names.is_empty()) {
         (Some(_), false) => {
             return Err(ErrorCode::BindError("multiple primary keys are not allowed".into()).into())
         }
-        (None, true) => vec![0],
-        (Some(cid), true) => vec![cid.get_id()],
+        (None, true) => {
+            // We don't have a pk column now, so we need to add row_id column as the pk column
+            // later.
+            vec![]
+        }
+        (Some(cid), true) => vec![ColumnId::new(cid.get_id())],
         (None, false) => {
             let name_to_id = column_descs
                 .iter()
-                .map(|c| (c.name.as_str(), c.column_id.get_id()))
+                .map(|c| (c.name.as_str(), ColumnId::new(c.column_id.get_id())))
                 .collect::<HashMap<_, _>>();
             pk_column_names
                 .iter()
@@ -169,15 +172,27 @@ pub fn bind_sql_table_constraints(
         }
     };
 
-    let columns_catalog = column_descs
-        .iter()
-        .enumerate()
-        .map(|(i, c)| ColumnCatalog {
-            column_desc: c.to_protobuf().into(),
-            is_hidden: i == 0, // the row id column is hidden
+    let mut columns_catalog = column_descs
+        .into_iter()
+        .map(|c| {
+            ColumnCatalog {
+                column_desc: c,
+                // All columns except `_row_id` should be visible.
+                is_hidden: false,
+            }
+            .to_protobuf()
         })
         .collect_vec();
-    Ok((columns_catalog, pk_column_ids))
+
+    // Add `_row_id` column if `pk_column_ids` is empty.
+    let row_id_index = pk_column_ids.is_empty().then(|| {
+        let row_id_index = columns_catalog.len();
+        let row_id_column_id = ColumnId::new(row_id_index as i32);
+        columns_catalog.push(ColumnCatalog::row_id_column(row_id_column_id).to_protobuf());
+        pk_column_ids.push(row_id_column_id);
+        row_id_index
+    });
+    Ok((columns_catalog, pk_column_ids, row_id_index))
 }
 
 pub(crate) fn gen_create_table_plan(
@@ -188,20 +203,15 @@ pub(crate) fn gen_create_table_plan(
     constraints: Vec<TableConstraint>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
-    let (columns, pk_column_ids) =
-        bind_sql_table_constraints(&column_descs, pk_column_id_from_columns, constraints)?;
-    if pk_column_ids != [0] {
-        return Err(ErrorCode::NotImplemented(
-            "specifying primary key for table".into(),
-            4256.into(),
-        )
-        .into());
-    }
+    let (columns, pk_column_ids, row_id_index) =
+        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let source = make_prost_source(
         session,
         table_name,
         Info::TableSource(TableSourceInfo {
+            row_id_index: row_id_index.map(|index| ProstColumnIndex { index: index as _ }),
             columns,
+            pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
             properties: context.inner().with_properties.clone(),
         }),
     )?;
@@ -220,11 +230,18 @@ pub(crate) fn gen_materialized_source_plan(
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
+        let row_id_index = {
+            let (Info::StreamSource(StreamSourceInfo { row_id_index, .. })
+            | Info::TableSource(TableSourceInfo { row_id_index, .. })) = source.info.unwrap();
+            row_id_index.as_ref().map(|index| index.index as _)
+        };
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
-        required_cols.toggle(0);
         let mut out_names = source_node.schema().names();
-        out_names.remove(0);
+        if let Some(row_id_index) = row_id_index {
+            required_cols.toggle(row_id_index);
+            out_names.remove(row_id_index);
+        }
 
         PlanRoot::new(
             source_node,
@@ -336,9 +353,9 @@ mod tests {
     #[test]
     fn test_bind_primary_key() {
         for (sql, expected) in [
-            ("create table t (v1 int, v2 int)", Ok(&[0] as &[_])),
-            ("create table t (v1 int primary key, v2 int)", Ok(&[1])),
-            ("create table t (v1 int, v2 int primary key)", Ok(&[2])),
+            ("create table t (v1 int, v2 int)", Ok(&[2] as &[_])),
+            ("create table t (v1 int primary key, v2 int)", Ok(&[0])),
+            ("create table t (v1 int, v2 int primary key)", Ok(&[1])),
             (
                 "create table t (v1 int primary key, v2 int primary key)",
                 Err("multiple primary keys are not allowed"),
@@ -349,15 +366,15 @@ mod tests {
             ),
             (
                 "create table t (v1 int, v2 int, primary key (v1))",
-                Ok(&[1]),
+                Ok(&[0]),
             ),
             (
                 "create table t (v1 int, primary key (v2), v2 int)",
-                Ok(&[2]),
+                Ok(&[1]),
             ),
             (
                 "create table t (primary key (v2, v1), v1 int, v2 int)",
-                Ok(&[2, 1]),
+                Ok(&[1, 0]),
             ),
             (
                 "create table t (v1 int, primary key (v1), v2 int, primary key (v1))",
@@ -380,15 +397,19 @@ mod tests {
                 } = ast.remove(0) else { panic!("test case should be create table") };
             let actual: Result<_> = (|| {
                 let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
-                let (_, pk_column_ids) = bind_sql_table_constraints(
-                    &column_descs,
+                let (_, pk_column_ids, _) = bind_sql_table_constraints(
+                    column_descs,
                     pk_column_id_from_columns,
                     constraints,
                 )?;
                 Ok(pk_column_ids)
             })();
             match (expected, actual) {
-                (Ok(expected), Ok(actual)) => assert_eq!(expected, actual, "sql: {sql}"),
+                (Ok(expected), Ok(actual)) => assert_eq!(
+                    expected.iter().copied().map(ColumnId::new).collect_vec(),
+                    actual,
+                    "sql: {sql}"
+                ),
                 (Ok(_), Err(actual)) => panic!("sql: {sql}\nunexpected error: {actual:?}"),
                 (Err(_), Ok(actual)) => panic!("sql: {sql}\nexpects error but got: {actual:?}"),
                 (Err(expected), Err(actual)) => assert!(

@@ -122,6 +122,10 @@ impl LocalVersion {
         }
     }
 
+    pub fn get_max_sync_epoch(&self) -> HummockEpoch {
+        self.max_sync_epoch
+    }
+
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
         self.shared_buffer.get_mut(&epoch)
     }
@@ -212,14 +216,14 @@ impl LocalVersion {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
         let mut cleaned_epoch = vec![];
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
-            cleaned_epoch.append(
-                &mut self
-                    .shared_buffer
-                    .keys()
-                    .filter(|e| **e <= new_pinned_version.max_committed_epoch)
-                    .cloned()
-                    .collect_vec(),
-            );
+            for (epochs, _) in &self.sync_uncommitted_data {
+                for epoch in epochs {
+                    if *epoch <= new_pinned_version.max_committed_epoch {
+                        cleaned_epoch.push(*epoch);
+                    }
+                }
+            }
+
             self.replicated_batches
                 .retain(|epoch, _| *epoch > new_pinned_version.max_committed_epoch);
             assert!(self
@@ -228,7 +232,7 @@ impl LocalVersion {
                 .all(|(epoch, _)| *epoch > new_pinned_version.max_committed_epoch));
             self.sync_uncommitted_data.retain(|(epoch, _)| {
                 epoch
-                    .first()
+                    .last()
                     .gt(&Some(&new_pinned_version.max_committed_epoch))
             });
         }
@@ -322,9 +326,16 @@ impl LocalVersion {
     }
 
     pub fn clear_shared_buffer(&mut self) -> Vec<HummockEpoch> {
-        let cleaned_epochs = self.shared_buffer.keys().cloned().collect_vec();
+        let mut cleaned_epoch = self.shared_buffer.keys().cloned().collect_vec();
+        for (epochs, _) in &self.sync_uncommitted_data {
+            for epoch in epochs {
+                cleaned_epoch.push(*epoch);
+            }
+        }
+        self.sync_uncommitted_data.clear();
         self.shared_buffer.clear();
-        cleaned_epochs
+        self.replicated_batches.clear();
+        cleaned_epoch
     }
 }
 
@@ -372,6 +383,10 @@ impl PinnedVersion {
 
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
+    }
+
+    pub fn max_current_epoch(&self) -> u64 {
+        self.version.max_current_epoch
     }
 
     pub fn safe_epoch(&self) -> u64 {

@@ -1736,23 +1736,16 @@ fn parse_bad_constraint() {
     );
 }
 
-fn run_explain_analyze(
-    query: &str,
-    expected_verbose: bool,
-    expected_analyze: bool,
-    expected_trace: bool,
-) {
-    match verified_stmt(query) {
+fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: ExplainOptions) {
+    match one_statement_parses_to(query, "") {
         Statement::Explain {
             describe_alias: _,
             analyze,
-            verbose,
-            trace,
             statement,
+            options,
         } => {
-            assert_eq!(verbose, expected_verbose);
             assert_eq!(analyze, expected_analyze);
-            assert_eq!(trace, expected_trace);
+            assert_eq!(options, expected_options);
             assert_eq!("SELECT sqrt(id) FROM foo", statement.to_string());
         }
         _ => panic!("Unexpected Statement, must be Explain"),
@@ -1761,32 +1754,80 @@ fn run_explain_analyze(
 
 #[test]
 fn parse_explain_analyze_with_simple_select() {
-    run_explain_analyze("EXPLAIN SELECT sqrt(id) FROM foo", false, false, false);
     run_explain_analyze(
-        "EXPLAIN VERBOSE SELECT sqrt(id) FROM foo",
-        true,
+        "EXPLAIN SELECT sqrt(id) FROM foo",
         false,
+        ExplainOptions {
+            ..Default::default()
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (VERBOSE) SELECT sqrt(id) FROM foo",
         false,
+        ExplainOptions {
+            verbose: true,
+            ..Default::default()
+        },
     );
     run_explain_analyze(
         "EXPLAIN ANALYZE SELECT sqrt(id) FROM foo",
-        false,
         true,
-        false,
+        ExplainOptions {
+            ..Default::default()
+        },
     );
-    run_explain_analyze("EXPLAIN TRACE SELECT sqrt(id) FROM foo", false, false, true);
     run_explain_analyze(
-        "EXPLAIN ANALYZE VERBOSE SELECT sqrt(id) FROM foo",
-        true,
-        true,
+        "EXPLAIN (TRACE) SELECT sqrt(id) FROM foo",
         false,
+        ExplainOptions {
+            trace: true,
+            ..Default::default()
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN ANALYZE (VERBOSE) SELECT sqrt(id) FROM foo",
+        true,
+        ExplainOptions {
+            verbose: true,
+            ..Default::default()
+        },
     );
 
     run_explain_analyze(
-        "EXPLAIN VERBOSE TRACE SELECT sqrt(id) FROM foo",
-        true,
+        "EXPLAIN (VERBOSE  , TRACE) SELECT sqrt(id) FROM foo",
         false,
-        true,
+        ExplainOptions {
+            verbose: true,
+            trace: true,
+            ..Default::default()
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (DISTSQL, TRACE ,VERBOSE) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: true,
+            verbose: true,
+            explain_type: ExplainType::DistSQL,
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (DISTSQL, TRACE false ,VERBOSE true) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: false,
+            verbose: true,
+            explain_type: ExplainType::DistSQL,
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (TYPE DISTSQL, TRACE false ,VERBOSE true) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: false,
+            verbose: true,
+            explain_type: ExplainType::DistSQL,
+        },
     );
 }
 

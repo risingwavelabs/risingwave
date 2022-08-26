@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -287,7 +287,10 @@ async fn test_basic() {
     assert_eq!(len, 4);
     let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
-    hummock_storage.wait_epoch(epoch1).await.unwrap();
+    hummock_storage
+        .wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .await
+        .unwrap();
     let value = hummock_storage
         .get(
             &Bytes::from("bb"),
@@ -930,7 +933,10 @@ async fn test_delete_get() {
         .unwrap();
     let ssts = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch2, ssts).await.unwrap();
-    hummock_storage.wait_epoch(epoch2).await.unwrap();
+    hummock_storage
+        .wait_epoch(HummockReadEpoch::Committed(epoch2))
+        .await
+        .unwrap();
     assert!(hummock_storage
         .get(
             "bb".as_bytes(),
@@ -1073,6 +1079,9 @@ async fn test_multiple_epoch_sync() {
         .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
         .await
         .unwrap();
-    hummock_storage.wait_epoch(epoch3).await.unwrap();
+    hummock_storage
+        .wait_epoch(HummockReadEpoch::Committed(epoch3))
+        .await
+        .unwrap();
     test_get().await;
 }

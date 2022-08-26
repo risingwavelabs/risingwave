@@ -46,15 +46,22 @@ impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
     type Output = BoxedExecutor;
 
     fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
-        Box::new(HashAggExecutor::<K>::new(input))
+        Box::new(HashAggExecutor::<K>::new(
+            input.agg_factories,
+            input.group_key_columns,
+            input.group_key_types,
+            input.schema,
+            input.child,
+            input.identity,
+        ))
     }
 }
 
 pub struct HashAggExecutorBuilder {
     agg_factories: Vec<AggStateFactory>,
     group_key_columns: Vec<usize>,
-    child: BoxedExecutor,
     group_key_types: Vec<DataType>,
+    child: BoxedExecutor,
     schema: Schema,
     task_id: TaskId,
     identity: String,
@@ -67,17 +74,17 @@ impl HashAggExecutorBuilder {
         task_id: TaskId,
         identity: String,
     ) -> Result<BoxedExecutor> {
+        let agg_factories: Vec<_> = hash_agg_node
+            .get_agg_calls()
+            .iter()
+            .map(AggStateFactory::new)
+            .try_collect()?;
+
         let group_key_columns = hash_agg_node
             .get_group_key()
             .iter()
             .map(|x| *x as usize)
             .collect_vec();
-
-        let agg_factories = hash_agg_node
-            .get_agg_calls()
-            .iter()
-            .map(AggStateFactory::new)
-            .collect::<Result<Vec<AggStateFactory>>>()?;
 
         let child_schema = child.schema();
 
@@ -98,8 +105,8 @@ impl HashAggExecutorBuilder {
         let builder = HashAggExecutorBuilder {
             agg_factories,
             group_key_columns,
-            child,
             group_key_types,
+            child,
             schema: Schema { fields },
             task_id,
             identity,
@@ -131,29 +138,36 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 }
 
 /// `HashAggExecutor` implements the hash aggregate algorithm.
-pub(crate) struct HashAggExecutor<K> {
-    /// factories to construct aggregator for each groups
+pub struct HashAggExecutor<K> {
+    /// Factories to construct aggregator for each groups
     agg_factories: Vec<AggStateFactory>,
     /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
-    /// child executor
-    child: BoxedExecutor,
-    /// the data types of key columns
+    /// Data types of group key columns
     group_key_types: Vec<DataType>,
+    /// Output schema
     schema: Schema,
+    child: BoxedExecutor,
     identity: String,
     _phantom: PhantomData<K>,
 }
 
 impl<K> HashAggExecutor<K> {
-    fn new(builder: HashAggExecutorBuilder) -> Self {
+    pub fn new(
+        agg_factories: Vec<AggStateFactory>,
+        group_key_columns: Vec<usize>,
+        group_key_types: Vec<DataType>,
+        schema: Schema,
+        child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
         HashAggExecutor {
-            agg_factories: builder.agg_factories,
-            group_key_columns: builder.group_key_columns,
-            child: builder.child,
-            group_key_types: builder.group_key_types,
-            schema: builder.schema,
-            identity: builder.identity,
+            agg_factories,
+            group_key_columns,
+            group_key_types,
+            schema,
+            child,
+            identity,
             _phantom: PhantomData,
         }
     }
