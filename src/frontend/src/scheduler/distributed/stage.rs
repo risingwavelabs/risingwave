@@ -548,12 +548,11 @@ impl StageRunner {
         task_id: TaskId,
         partition: Option<PartitionInfo>,
     ) -> PlanFragment {
-        // Used to maintain auto-increment identity_id of each PlanNodeType for a task.
-        let identity_ids: Rc<RefCell<HashMap<PlanNodeType, u64>>> =
-            Rc::new(RefCell::new(HashMap::new()));
+        // Used to maintain auto-increment identity_id of a task.
+        let identity_id: Rc<RefCell<u64>> = Rc::new(RefCell::new(0));
 
         let plan_node_prost =
-            self.convert_plan_node(&self.stage.root, task_id, partition, identity_ids);
+            self.convert_plan_node(&self.stage.root, task_id, partition, identity_id);
         let exchange_info = self.stage.exchange_info.clone();
 
         PlanFragment {
@@ -567,14 +566,14 @@ impl StageRunner {
         execution_plan_node: &ExecutionPlanNode,
         task_id: TaskId,
         partition: Option<PartitionInfo>,
-        identity_ids: Rc<RefCell<HashMap<PlanNodeType, u64>>>,
+        identity_id: Rc<RefCell<u64>>,
     ) -> PlanNodeProst {
         // Generate identity
         let identity = {
             let identity_type = execution_plan_node.plan_node_type;
-            let identity_id = *identity_ids.borrow_mut().entry(identity_type).or_insert(0);
-            *identity_ids.borrow_mut().get_mut(&identity_type).unwrap() = identity_id + 1;
-            format!("{}-{}", identity_type.to_string(), identity_id)
+            let id = *identity_id.borrow();
+            identity_id.replace(id + 1);
+            format!("{:?}-{}", identity_type, id)
         };
 
         match execution_plan_node.plan_node_type {
@@ -647,7 +646,7 @@ impl StageRunner {
                     &execution_plan_node.children[0],
                     task_id,
                     partition,
-                    identity_ids,
+                    identity_id,
                 );
 
                 PlanNodeProst {
@@ -661,7 +660,7 @@ impl StageRunner {
                     .children
                     .iter()
                     .map(|e| {
-                        self.convert_plan_node(e, task_id, partition.clone(), identity_ids.clone())
+                        self.convert_plan_node(e, task_id, partition.clone(), identity_id.clone())
                     })
                     .collect();
 
