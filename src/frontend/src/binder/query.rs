@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{CorrelatedId, ExprImpl};
+use crate::expr::{CorrelatedId, Depth, ExprImpl};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
@@ -85,11 +85,12 @@ impl BoundQuery {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
         self.body
-            .collect_correlated_indices_by_depth_and_assign_id(correlated_id)
+            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
     }
 }
 
