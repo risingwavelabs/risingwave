@@ -259,9 +259,10 @@
                           BatchHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr] }
                             BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
                               BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                            BatchProject { exprs: [part.p_partkey, part.p_mfgr] }
-                              BatchFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
-                                BatchScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], distribution: UpstreamHashShard(part.p_partkey) }
+                            BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                              BatchProject { exprs: [part.p_partkey, part.p_mfgr] }
+                                BatchFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
+                                  BatchScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], distribution: UpstreamHashShard(part.p_partkey) }
                         BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                           BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], distribution: UpstreamHashShard(supplier.s_suppkey) }
                     BatchHashAgg { group_key: [part.p_partkey], aggs: [min(partsupp.ps_supplycost)] }
@@ -281,14 +282,16 @@
                                       BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                                 BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
                                   BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-                            BatchProject { exprs: [region.r_regionkey] }
-                              BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                                BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
+                            BatchExchange { order: [], dist: HashShard(region.r_regionkey) }
+                              BatchProject { exprs: [region.r_regionkey] }
+                                BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
+                                  BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
                 BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
                   BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-            BatchProject { exprs: [region.r_regionkey] }
-              BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
+            BatchExchange { order: [], dist: HashShard(region.r_regionkey) }
+              BatchProject { exprs: [region.r_regionkey] }
+                BatchFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
+                  BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
   stream_plan: |
     StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, supplier.s_suppkey(hidden), part.p_partkey(hidden), nation.n_nationkey(hidden), region.r_regionkey(hidden)], pk_columns: [supplier.s_suppkey, part.p_partkey, nation.n_nationkey, region.r_regionkey], order_descs: [s_acctbal, n_name, s_name, p_partkey, supplier.s_suppkey, part.p_partkey, nation.n_nationkey, region.r_regionkey] }
       StreamTopN { order: "[supplier.s_acctbal DESC, nation.n_name ASC, supplier.s_name ASC, part.p_partkey ASC]", limit: 100, offset: 0 }
@@ -304,17 +307,19 @@
                           StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, partsupp.ps_supplycost, part.p_partkey, part.p_mfgr, partsupp.ps_partkey] }
                             StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                               StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                            StreamProject { exprs: [part.p_partkey, part.p_mfgr] }
-                              StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
-                                StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                            StreamExchange { dist: HashShard(part.p_partkey) }
+                              StreamProject { exprs: [part.p_partkey, part.p_mfgr] }
+                                StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
+                                  StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                         StreamExchange { dist: HashShard(supplier.s_suppkey) }
                           StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                     StreamProject { exprs: [part.p_partkey, min(partsupp.ps_supplycost)] }
                       StreamHashAgg { group_key: [part.p_partkey], aggs: [count, min(partsupp.ps_supplycost)] }
                         StreamHashJoin { type: LeftOuter, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost, partsupp.ps_partkey, supplier.s_suppkey, nation.n_nationkey, region.r_regionkey] }
-                          StreamProject { exprs: [part.p_partkey] }
-                            StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                              StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                          StreamExchange { dist: HashShard(part.p_partkey) }
+                            StreamProject { exprs: [part.p_partkey] }
+                              StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+                                StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                           StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                             StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_suppkey, nation.n_nationkey, region.r_regionkey] }
                               StreamExchange { dist: HashShard(nation.n_regionkey) }
@@ -327,14 +332,16 @@
                                         StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                                   StreamExchange { dist: HashShard(nation.n_nationkey) }
                                     StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-                              StreamProject { exprs: [region.r_regionkey] }
-                                StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                                  StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+                              StreamExchange { dist: HashShard(region.r_regionkey) }
+                                StreamProject { exprs: [region.r_regionkey] }
+                                  StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
+                                    StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
                 StreamExchange { dist: HashShard(nation.n_nationkey) }
                   StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-            StreamProject { exprs: [region.r_regionkey] }
-              StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-                StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+            StreamExchange { dist: HashShard(region.r_regionkey) }
+              StreamProject { exprs: [region.r_regionkey] }
+                StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
+                  StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
 - id: tpch_q3
   before:
   - create_tables
@@ -394,9 +401,10 @@
                   BatchHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount] }
                     BatchExchange { order: [], dist: HashShard(orders.o_orderkey) }
                       BatchHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [orders.o_orderkey, orders.o_orderdate, orders.o_shippriority] }
-                        BatchProject { exprs: [customer.c_custkey] }
-                          BatchFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) }
-                            BatchScan { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], distribution: UpstreamHashShard(customer.c_custkey) }
+                        BatchExchange { order: [], dist: HashShard(customer.c_custkey) }
+                          BatchProject { exprs: [customer.c_custkey] }
+                            BatchFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) }
+                              BatchScan { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], distribution: UpstreamHashShard(customer.c_custkey) }
                         BatchExchange { order: [], dist: HashShard(orders.o_custkey) }
                           BatchFilter { predicate: (orders.o_orderdate < '1995-03-29':Varchar::Date) }
                             BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], distribution: UpstreamHashShard(orders.o_orderkey) }
@@ -415,9 +423,10 @@
                   StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderdate, orders.o_shippriority, lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderkey, customer.c_custkey, lineitem.l_linenumber] }
                     StreamExchange { dist: HashShard(orders.o_orderkey) }
                       StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [orders.o_orderkey, orders.o_orderdate, orders.o_shippriority, customer.c_custkey] }
-                        StreamProject { exprs: [customer.c_custkey] }
-                          StreamFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) }
-                            StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
+                        StreamExchange { dist: HashShard(customer.c_custkey) }
+                          StreamProject { exprs: [customer.c_custkey] }
+                            StreamFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) }
+                              StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
                         StreamExchange { dist: HashShard(orders.o_custkey) }
                           StreamFilter { predicate: (orders.o_orderdate < '1995-03-29':Varchar::Date) }
                             StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
@@ -471,9 +480,10 @@
         BatchHashAgg { group_key: [orders.o_orderpriority], aggs: [count] }
           BatchExchange { order: [], dist: HashShard(orders.o_orderpriority) }
             BatchHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority] }
-              BatchProject { exprs: [orders.o_orderkey, orders.o_orderpriority] }
-                BatchFilter { predicate: (orders.o_orderdate >= '1997-07-01':Varchar::Date) AND (orders.o_orderdate < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                  BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], distribution: UpstreamHashShard(orders.o_orderkey) }
+              BatchExchange { order: [], dist: HashShard(orders.o_orderkey) }
+                BatchProject { exprs: [orders.o_orderkey, orders.o_orderpriority] }
+                  BatchFilter { predicate: (orders.o_orderdate >= '1997-07-01':Varchar::Date) AND (orders.o_orderdate < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                    BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], distribution: UpstreamHashShard(orders.o_orderkey) }
               BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
                 BatchProject { exprs: [lineitem.l_orderkey] }
                   BatchFilter { predicate: (lineitem.l_commitdate < lineitem.l_receiptdate) }
@@ -484,9 +494,10 @@
         StreamHashAgg { group_key: [orders.o_orderpriority], aggs: [count, count] }
           StreamExchange { dist: HashShard(orders.o_orderpriority) }
             StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderpriority, orders.o_orderkey] }
-              StreamProject { exprs: [orders.o_orderkey, orders.o_orderpriority] }
-                StreamFilter { predicate: (orders.o_orderdate >= '1997-07-01':Varchar::Date) AND (orders.o_orderdate < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                  StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+              StreamExchange { dist: HashShard(orders.o_orderkey) }
+                StreamProject { exprs: [orders.o_orderkey, orders.o_orderpriority] }
+                  StreamFilter { predicate: (orders.o_orderdate >= '1997-07-01':Varchar::Date) AND (orders.o_orderdate < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                    StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
               StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                 StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_linenumber] }
                   StreamFilter { predicate: (lineitem.l_commitdate < lineitem.l_receiptdate) }
@@ -576,9 +587,10 @@
                           BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], distribution: SomeShard }
                     BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
                       BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-                BatchProject { exprs: [region.r_regionkey] }
-                  BatchFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
-                    BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
+                BatchExchange { order: [], dist: HashShard(region.r_regionkey) }
+                  BatchProject { exprs: [region.r_regionkey] }
+                    BatchFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
+                      BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
   stream_plan: |
     StreamMaterialize { columns: [n_name, revenue], pk_columns: [n_name], order_descs: [revenue, n_name] }
       StreamProject { exprs: [nation.n_name, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
@@ -606,9 +618,10 @@
                           StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                     StreamExchange { dist: HashShard(nation.n_nationkey) }
                       StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-                StreamProject { exprs: [region.r_regionkey] }
-                  StreamFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
-                    StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+                StreamExchange { dist: HashShard(region.r_regionkey) }
+                  StreamProject { exprs: [region.r_regionkey] }
+                    StreamFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
+                      StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
 - id: tpch_q6
   before:
   - create_tables
@@ -885,9 +898,10 @@
                                         BatchHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount] }
                                           BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
                                             BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], distribution: SomeShard }
-                                          BatchProject { exprs: [part.p_partkey] }
-                                            BatchFilter { predicate: (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
-                                              BatchScan { table: part, columns: [part.p_partkey, part.p_type], distribution: UpstreamHashShard(part.p_partkey) }
+                                          BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                                            BatchProject { exprs: [part.p_partkey] }
+                                              BatchFilter { predicate: (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
+                                                BatchScan { table: part, columns: [part.p_partkey, part.p_type], distribution: UpstreamHashShard(part.p_partkey) }
                                       BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                                         BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                                   BatchExchange { order: [], dist: HashShard(orders.o_orderkey) }
@@ -899,9 +913,10 @@
                             BatchScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], distribution: UpstreamHashShard(customer.c_custkey) }
                       BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
                         BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-                  BatchProject { exprs: [region.r_regionkey] }
-                    BatchFilter { predicate: (region.r_name = 'ASIA':Varchar) }
-                      BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
+                  BatchExchange { order: [], dist: HashShard(region.r_regionkey) }
+                    BatchProject { exprs: [region.r_regionkey] }
+                      BatchFilter { predicate: (region.r_name = 'ASIA':Varchar) }
+                        BatchScan { table: region, columns: [region.r_regionkey, region.r_name], distribution: UpstreamHashShard(region.r_regionkey) }
   stream_plan: |
     StreamMaterialize { columns: [o_year, mkt_share], pk_columns: [o_year] }
       StreamProject { exprs: [Extract('YEAR':Varchar, orders.o_orderdate), RoundDigit((sum(Case((nation.n_name = 'IRAN':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))), 6:Int32)] }
@@ -923,9 +938,10 @@
                                       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, part.p_partkey] }
                                         StreamExchange { dist: HashShard(lineitem.l_partkey) }
                                           StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-                                        StreamProject { exprs: [part.p_partkey] }
-                                          StreamFilter { predicate: (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
-                                            StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                                        StreamExchange { dist: HashShard(part.p_partkey) }
+                                          StreamProject { exprs: [part.p_partkey] }
+                                            StreamFilter { predicate: (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
+                                              StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                                     StreamExchange { dist: HashShard(supplier.s_suppkey) }
                                       StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                                 StreamExchange { dist: HashShard(orders.o_orderkey) }
@@ -937,9 +953,10 @@
                           StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], distribution: UpstreamHashShard(customer.c_custkey) }
                     StreamExchange { dist: HashShard(nation.n_nationkey) }
                       StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-                StreamProject { exprs: [region.r_regionkey] }
-                  StreamFilter { predicate: (region.r_name = 'ASIA':Varchar) }
-                    StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
+                StreamExchange { dist: HashShard(region.r_regionkey) }
+                  StreamProject { exprs: [region.r_regionkey] }
+                    StreamFilter { predicate: (region.r_name = 'ASIA':Varchar) }
+                      StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], distribution: UpstreamHashShard(region.r_regionkey) }
 - id: tpch_q9
   before:
   - create_tables
@@ -1027,9 +1044,10 @@
                               BatchHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount] }
                                 BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
                                   BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount], distribution: SomeShard }
-                                BatchProject { exprs: [part.p_partkey] }
-                                  BatchFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
-                                    BatchScan { table: part, columns: [part.p_partkey, part.p_name], distribution: UpstreamHashShard(part.p_partkey) }
+                                BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                                  BatchProject { exprs: [part.p_partkey] }
+                                    BatchFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
+                                      BatchScan { table: part, columns: [part.p_partkey, part.p_name], distribution: UpstreamHashShard(part.p_partkey) }
                             BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                               BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                           BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
@@ -1054,9 +1072,10 @@
                             StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: all }
                               StreamExchange { dist: HashShard(lineitem.l_partkey) }
                                 StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-                              StreamProject { exprs: [part.p_partkey] }
-                                StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
-                                  StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                              StreamExchange { dist: HashShard(part.p_partkey) }
+                                StreamProject { exprs: [part.p_partkey] }
+                                  StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
+                                    StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                           StreamExchange { dist: HashShard(supplier.s_suppkey) }
                             StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                         StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
@@ -1260,9 +1279,10 @@
                         BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                         BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-                  BatchProject { exprs: [nation.n_nationkey] }
-                    BatchFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-                      BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
+                  BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
+                    BatchProject { exprs: [nation.n_nationkey] }
+                      BatchFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
+                        BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
         BatchProject { exprs: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)] }
           BatchSimpleAgg { aggs: [sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
             BatchExchange { order: [], dist: Single }
@@ -1275,9 +1295,10 @@
                           BatchScan { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], distribution: SomeShard }
                         BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                           BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-                    BatchProject { exprs: [nation.n_nationkey] }
-                      BatchFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-                        BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
+                    BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
+                      BatchProject { exprs: [nation.n_nationkey] }
+                        BatchFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
+                          BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
   stream_plan: |
     StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
       StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
@@ -1293,9 +1314,10 @@
                           StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                         StreamExchange { dist: HashShard(supplier.s_suppkey) }
                           StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-                    StreamProject { exprs: [nation.n_nationkey] }
-                      StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-                        StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                    StreamExchange { dist: HashShard(nation.n_nationkey) }
+                      StreamProject { exprs: [nation.n_nationkey] }
+                        StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
+                          StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
           StreamExchange { dist: Broadcast }
             StreamProject { exprs: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)] }
               StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
@@ -1309,9 +1331,10 @@
                               StreamTableScan { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_partkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                             StreamExchange { dist: HashShard(supplier.s_suppkey) }
                               StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-                        StreamProject { exprs: [nation.n_nationkey] }
-                          StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-                            StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                        StreamExchange { dist: HashShard(nation.n_nationkey) }
+                          StreamProject { exprs: [nation.n_nationkey] }
+                            StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
+                              StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
 - id: tpch_q12
   before:
   - create_tables
@@ -1691,14 +1714,14 @@
                 BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
                   BatchHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
                     BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
-                      BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: SomeShard }
+                      BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     BatchExchange { order: [], dist: HashShard(part.p_partkey) }
                       BatchFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-                        BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], distribution: SomeShard }
+                        BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], distribution: UpstreamHashShard(part.p_partkey) }
                 BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                   BatchProject { exprs: [supplier.s_suppkey] }
                     BatchFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                      BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], distribution: SomeShard }
+                      BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], distribution: UpstreamHashShard(supplier.s_suppkey) }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
       StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)] }
@@ -1706,18 +1729,18 @@
           StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
             StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
               StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [count] }
-                StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp._row_id, part._row_id] }
+                StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, part.p_partkey] }
                   StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                    StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp._row_id, part._row_id] }
+                    StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
                       StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                        StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp._row_id], pk: [partsupp._row_id], distribution: UpstreamHashShard(partsupp._row_id) }
+                        StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       StreamExchange { dist: HashShard(part.p_partkey) }
                         StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-                          StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size, part._row_id], pk: [part._row_id], distribution: UpstreamHashShard(part._row_id) }
+                          StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                   StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                    StreamProject { exprs: [supplier.s_suppkey, supplier._row_id] }
+                    StreamProject { exprs: [supplier.s_suppkey] }
                       StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                        StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier._row_id, supplier.s_comment], pk: [supplier._row_id], distribution: UpstreamHashShard(supplier._row_id) }
+                        StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
 - id: tpch_q17
   before:
   - create_tables
@@ -1778,9 +1801,10 @@
                     BatchHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey] }
                       BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
                         BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice], distribution: SomeShard }
-                      BatchProject { exprs: [part.p_partkey] }
-                        BatchFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                          BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], distribution: UpstreamHashShard(part.p_partkey) }
+                      BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                        BatchProject { exprs: [part.p_partkey] }
+                          BatchFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+                            BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], distribution: UpstreamHashShard(part.p_partkey) }
                   BatchProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))] }
                     BatchHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
                       BatchHashJoin { type: LeftOuter, predicate: part.p_partkey = lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity] }
@@ -1802,15 +1826,17 @@
                       StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber] }
                         StreamExchange { dist: HashShard(lineitem.l_partkey) }
                           StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-                        StreamProject { exprs: [part.p_partkey] }
-                          StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                            StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                        StreamExchange { dist: HashShard(part.p_partkey) }
+                          StreamProject { exprs: [part.p_partkey] }
+                            StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+                              StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                     StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))] }
                       StreamHashAgg { group_key: [part.p_partkey], aggs: [count, sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
                         StreamHashJoin { type: LeftOuter, predicate: part.p_partkey = lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                          StreamProject { exprs: [part.p_partkey] }
-                            StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                              StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                          StreamExchange { dist: HashShard(part.p_partkey) }
+                            StreamProject { exprs: [part.p_partkey] }
+                              StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
+                                StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                           StreamExchange { dist: HashShard(lineitem.l_partkey) }
                             StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
 - id: tpch_q18
@@ -2090,9 +2116,10 @@
             BatchHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address] }
               BatchExchange { order: [], dist: HashShard(supplier.s_nationkey) }
                 BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-              BatchProject { exprs: [nation.n_nationkey] }
-                BatchFilter { predicate: (nation.n_name = 'KENYA':Varchar) }
-                  BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
+              BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
+                BatchProject { exprs: [nation.n_nationkey] }
+                  BatchFilter { predicate: (nation.n_name = 'KENYA':Varchar) }
+                    BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
           BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
             BatchProject { exprs: [partsupp.ps_suppkey] }
               BatchFilter { predicate: (partsupp.ps_availqty > (0.5:Decimal * sum(lineitem.l_quantity))) }
@@ -2101,9 +2128,10 @@
                     BatchHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
                       BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
                         BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                      BatchProject { exprs: [part.p_partkey] }
-                        BatchFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-                          BatchScan { table: part, columns: [part.p_partkey, part.p_name], distribution: UpstreamHashShard(part.p_partkey) }
+                      BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                        BatchProject { exprs: [part.p_partkey] }
+                          BatchFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
+                            BatchScan { table: part, columns: [part.p_partkey, part.p_name], distribution: UpstreamHashShard(part.p_partkey) }
                   BatchProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))] }
                     BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(lineitem.l_quantity)] }
                       BatchHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
@@ -2121,9 +2149,10 @@
           StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, nation.n_nationkey] }
             StreamExchange { dist: HashShard(supplier.s_nationkey) }
               StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
-            StreamProject { exprs: [nation.n_nationkey] }
-              StreamFilter { predicate: (nation.n_name = 'KENYA':Varchar) }
-                StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+            StreamExchange { dist: HashShard(nation.n_nationkey) }
+              StreamProject { exprs: [nation.n_nationkey] }
+                StreamFilter { predicate: (nation.n_name = 'KENYA':Varchar) }
+                  StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
         StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
           StreamProject { exprs: [partsupp.ps_suppkey, partsupp.ps_partkey, partsupp.ps_partkey, partsupp.ps_suppkey] }
             StreamFilter { predicate: (partsupp.ps_availqty > (0.5:Decimal * sum(lineitem.l_quantity))) }
@@ -2132,15 +2161,17 @@
                   StreamHashJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey, output: all }
                     StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                       StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                    StreamProject { exprs: [part.p_partkey] }
-                      StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-                        StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
+                    StreamExchange { dist: HashShard(part.p_partkey) }
+                      StreamProject { exprs: [part.p_partkey] }
+                        StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
+                          StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                 StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))] }
                   StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count, sum(lineitem.l_quantity)] }
                     StreamHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                      StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
-                        StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
-                          StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                      StreamExchange { dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                        StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey] }
+                          StreamHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [count] }
+                            StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                         StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                           StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -2243,12 +2274,14 @@
                               BatchProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey] }
                                 BatchFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
                                   BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_commitdate, lineitem.l_receiptdate], distribution: SomeShard }
-                        BatchProject { exprs: [nation.n_nationkey] }
-                          BatchFilter { predicate: (nation.n_name = 'GERMANY':Varchar) }
-                            BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
-                    BatchProject { exprs: [orders.o_orderkey] }
-                      BatchFilter { predicate: (orders.o_orderstatus = 'F':Varchar) }
-                        BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], distribution: UpstreamHashShard(orders.o_orderkey) }
+                        BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
+                          BatchProject { exprs: [nation.n_nationkey] }
+                            BatchFilter { predicate: (nation.n_name = 'GERMANY':Varchar) }
+                              BatchScan { table: nation, columns: [nation.n_nationkey, nation.n_name], distribution: UpstreamHashShard(nation.n_nationkey) }
+                    BatchExchange { order: [], dist: HashShard(orders.o_orderkey) }
+                      BatchProject { exprs: [orders.o_orderkey] }
+                        BatchFilter { predicate: (orders.o_orderstatus = 'F':Varchar) }
+                          BatchScan { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], distribution: UpstreamHashShard(orders.o_orderkey) }
                   BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
                     BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey], distribution: SomeShard }
                 BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
@@ -2275,12 +2308,14 @@
                                 StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
                                   StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
                                     StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-                          StreamProject { exprs: [nation.n_nationkey] }
-                            StreamFilter { predicate: (nation.n_name = 'GERMANY':Varchar) }
-                              StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
-                      StreamProject { exprs: [orders.o_orderkey] }
-                        StreamFilter { predicate: (orders.o_orderstatus = 'F':Varchar) }
-                          StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
+                          StreamExchange { dist: HashShard(nation.n_nationkey) }
+                            StreamProject { exprs: [nation.n_nationkey] }
+                              StreamFilter { predicate: (nation.n_name = 'GERMANY':Varchar) }
+                                StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], distribution: UpstreamHashShard(nation.n_nationkey) }
+                      StreamExchange { dist: HashShard(orders.o_orderkey) }
+                        StreamProject { exprs: [orders.o_orderkey] }
+                          StreamFilter { predicate: (orders.o_orderstatus = 'F':Varchar) }
+                            StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], distribution: UpstreamHashShard(orders.o_orderkey) }
                     StreamExchange { dist: HashShard(lineitem.l_orderkey) }
                       StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                   StreamExchange { dist: HashShard(lineitem.l_orderkey) }
