@@ -11,6 +11,8 @@ prost-helpers = { path = "helpers" }
 prost-types = "0.11"
 serde = { version = "1", features = ["derive"] }
 tonic = { version = "0.2.4", package = "madsim-tonic" }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [build-dependencies]

@@ -61,6 +61,8 @@ tracing = "0.1"
 twox-hash = "1"
 url = "2"
 urlencoding = "2"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

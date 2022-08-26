@@ -73,11 +73,11 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 twox-hash = "1"
-workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 risingwave_tracing = { path = "../tracing" }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["async_futures"] }
