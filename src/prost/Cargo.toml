@@ -10,7 +10,7 @@ prost = "0.11"
 prost-helpers = { path = "helpers" }
 prost-types = "0.11"
 serde = { version = "1", features = ["derive"] }
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2.4", package = "madsim-tonic" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [build-dependencies]

@@ -53,7 +53,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 uuid = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

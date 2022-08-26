@@ -15,7 +15,7 @@ risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_compute = { path = "../../compute" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
-sqllogictest = "0.6.3"
+sqllogictest = "0.6.4"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
 tracing = "0.1"

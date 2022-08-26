@@ -70,7 +70,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 twox-hash = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

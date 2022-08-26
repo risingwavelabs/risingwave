@@ -11,7 +11,7 @@ risingwave_common = { path = "../" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors"] }
 tracing = "0.1"
