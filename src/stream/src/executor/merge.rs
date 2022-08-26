@@ -98,7 +98,8 @@ impl MergeExecutor {
     async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
         let select_all = SelectReceivers::new(self.ctx.id, self.upstreams);
-        let actor_id_str = self.ctx.id.to_string();
+        let actor_id = self.ctx.id;
+        let actor_id_str = actor_id.to_string();
         let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         // Channels that're blocked by the barrier to align.
@@ -109,9 +110,9 @@ impl MergeExecutor {
                 .actor_input_buffer_blocking_duration_ns
                 .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
-            let msg: Message = msg?;
+            let mut msg: Message = msg?;
 
-            match &msg {
+            match &mut msg {
                 Message::Chunk(chunk) => {
                     self.metrics
                         .actor_in_record_cnt
@@ -119,6 +120,15 @@ impl MergeExecutor {
                         .inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
+                    if cfg!(debug_assertions) {
+                        tracing::trace!(
+                            actor_id = actor_id,
+                            "receiver receives barrier from path: {:?}",
+                            barrier.passed_actors
+                        );
+                        barrier.passed_actors.push(actor_id);
+                    }
+
                     if let Some(update) = barrier.as_update_merge(self.ctx.id) {
                         // Create new upstreams receivers.
                         let new_upstreams = update

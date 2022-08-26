@@ -247,6 +247,8 @@ pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
+
+    pub passed_actors: Vec<ActorId>,
 }
 
 impl Barrier {
@@ -476,6 +478,7 @@ impl Barrier {
             epoch,
             mutation,
             checkpoint,
+            passed_actors,
             ..
         }: Barrier = self.clone();
         ProstBarrier {
@@ -486,6 +489,7 @@ impl Barrier {
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             span: vec![],
             checkpoint,
+            passed_actors,
         }
     }
 
@@ -501,6 +505,7 @@ impl Barrier {
             checkpoint: prost.checkpoint,
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
+            passed_actors: prost.get_passed_actors().clone(),
         })
     }
 }
