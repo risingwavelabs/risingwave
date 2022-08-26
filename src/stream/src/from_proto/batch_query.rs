@@ -69,7 +69,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
         let distribution = match params.vnode_bitmap {
             Some(vnodes) => Distribution {
                 dist_key_indices,

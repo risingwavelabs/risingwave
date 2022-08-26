@@ -502,7 +502,21 @@ impl<S: StateStore> StorageTable<S> {
             false,
         );
 
-        let prefix_hint = if pk_prefix.size() == 0 {
+        assert!(pk_prefix.size() <= self.pk_indices.len());
+        let pk_prefix_indices = (0..pk_prefix.size())
+            .into_iter()
+            .map(|index| self.pk_indices[index])
+            .collect_vec();
+        let prefix_hint = if self.dist_key_indices.is_empty()
+            || self.dist_key_indices != pk_prefix_indices
+        {
+            trace!(
+                "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                self.keyspace.table_id(),
+                pk_prefix,
+                self.dist_key_indices,
+                pk_prefix_indices
+            );
             None
         } else {
             let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
@@ -511,10 +525,14 @@ impl<S: StateStore> StorageTable<S> {
         };
 
         trace!(
-            "iter_with_pk_bounds: prefix_hint {:?} start_key: {:?}, end_key: {:?}",
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            self.keyspace.table_id(),
             prefix_hint,
             start_key,
-            end_key
+            end_key,
+            pk_prefix,
+            self.dist_key_indices,
+            pk_prefix_indices
         );
 
         self.iter_with_encoded_key_range(
