@@ -106,7 +106,7 @@ where
                     match compaction_group {
                         Some(compaction_group) => compaction_group,
                         None => {
-                            tracing::warning!("Compactor Scheduler: The Hummock manager has dropped the connection,
+                            tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
                                 it means it has either died or started a new session. Exiting.");
                             break;
                         }
