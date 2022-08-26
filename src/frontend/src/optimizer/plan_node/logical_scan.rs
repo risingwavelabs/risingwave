@@ -236,9 +236,8 @@ impl LogicalScan {
                         .copied();
                     match out_idx {
                         Some(idx) => match order.order_type {
-                            // FIXME(st1page): fix the storage's order same with catalog.
-                            OrderType::Ascending => Some(FieldOrder::descending(idx)),
-                            OrderType::Descending => Some(FieldOrder::ascending(idx)),
+                            OrderType::Ascending => Some(FieldOrder::ascending(idx)),
+                            OrderType::Descending => Some(FieldOrder::descending(idx)),
                         },
                         None => None,
                     }
