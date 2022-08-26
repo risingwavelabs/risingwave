@@ -726,7 +726,8 @@ where
         Ok(Some(compact_task))
     }
 
-    pub async fn cancel_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+    pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
+        compact_task.task_status = false;
         self.report_compact_task_impl(None, compact_task).await
     }
 
@@ -806,6 +807,9 @@ where
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
+    ///
+    /// If context_id is not None, its validity will be checked when committing meta store
+    /// transaction.
     #[named]
     pub async fn report_compact_task_impl(
         &self,
@@ -829,11 +833,9 @@ where
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
 
-        // For cancel task, there is no need to check the task assignment because
-        // we have not assign any compactor to it.
-        if let Some(context_id) = context_id {
-            match assignee_context_id {
-                Some(id) => {
+        match assignee_context_id {
+            Some(id) => {
+                if let Some(context_id) = context_id {
                     // Assignee id mismatch.
                     if id != context_id {
                         tracing::warn!(
@@ -845,11 +847,11 @@ where
                         return Ok(false);
                     }
                 }
-                None => {
-                    // The task is not found.
-                    tracing::warn!("Compaction task {} not found", compact_task.task_id);
-                    return Ok(false);
-                }
+            }
+            None => {
+                // The task is not found.
+                tracing::warn!("Compaction task {} not found", compact_task.task_id);
+                return Ok(false);
             }
         }
         compact_status.report_compact_task(compact_task);
@@ -1374,11 +1376,7 @@ where
         }
 
         if need_cancel_task {
-            compact_task.task_status = false;
-            if let Err(e) = self
-                .report_compact_task(compactor.context_id(), &compact_task)
-                .await
-            {
+            if let Err(e) = self.cancel_compact_task(&mut compact_task).await {
                 tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
                 // TODO #3677: handle cancellation via compaction heartbeat after #4496
             }
