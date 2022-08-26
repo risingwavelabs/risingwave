@@ -490,6 +490,15 @@ impl ExprImpl {
         }
     }
 
+    pub fn as_or_disjunctions(&self) -> Option<Vec<ExprImpl>> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+            function_call.get_expr_type() == ExprType::Or {
+            Some(to_disjunctions(self.clone()))
+        } else {
+            None
+        }
+    }
+
     pub fn to_project_set_select_item_proto(&self) -> ProjectSetSelectItem {
         use risingwave_pb::expr::project_set_select_item::SelectItem::*;
 

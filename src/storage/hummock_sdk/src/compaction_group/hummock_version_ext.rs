@@ -190,6 +190,7 @@ impl HummockVersionExt for HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.max_current_epoch = version_delta.max_current_epoch;
         self.safe_epoch = version_delta.safe_epoch;
     }
 
@@ -374,6 +375,7 @@ mod tests {
                 },
             )]),
             max_committed_epoch: 0,
+            max_current_epoch: 0,
             safe_epoch: 0,
         };
         assert_eq!(version.get_sst_ids().len(), 0);

@@ -40,7 +40,12 @@ pub struct DeleteExecutor {
 }
 
 impl DeleteExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+    pub fn new(
+        table_id: TableId,
+        source_manager: SourceManagerRef,
+        child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
         Self {
             table_id,
             source_manager,
@@ -49,7 +54,7 @@ impl DeleteExecutor {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "DeleteExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -129,6 +134,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
                 .source_manager_ref()
                 .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
             child,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
@@ -201,6 +207,7 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
+            "DeleteExecutor".to_string(),
         ));
 
         let handle = tokio::spawn(async move {
