@@ -871,7 +871,7 @@ where
             new_version.id = new_version_id;
             commit_multi_var!(
                 self,
-                assignee_context_id,
+                context_id,
                 compact_status,
                 compact_task_assignment,
                 hummock_version_deltas
@@ -893,12 +893,7 @@ where
                 );
         } else {
             // The compaction task is cancelled.
-            commit_multi_var!(
-                self,
-                assignee_context_id,
-                compact_status,
-                compact_task_assignment
-            )?;
+            commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
         tracing::trace!(
