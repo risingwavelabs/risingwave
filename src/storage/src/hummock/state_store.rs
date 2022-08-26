@@ -662,10 +662,11 @@ impl StateStore for HummockStorage {
             // not check
         }
 
-        let span = self.tracing.new_tracer("hummock_iter");
-
-        self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options)
-            .in_span(span)
+        let iter = self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options);
+        #[cfg(not(madsim))]
+        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
+        #[cfg(madsim)]
+        iter
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
