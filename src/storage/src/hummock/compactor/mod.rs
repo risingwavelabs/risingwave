@@ -21,7 +21,6 @@ mod shared_buffer_compact;
 mod sstable_store;
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -242,13 +241,22 @@ impl Compactor {
                 }
                 future_result = buffered.next() => {
                     match future_result {
-                        Some(Ok((split_index, ssts))) => {
+                        Some(Ok(Ok((split_index, ssts)))) => {
                             output_ssts.push((split_index, ssts));
+                        }
+                        Some(Ok(Err(e))) => {
+                            compact_success = false;
+                            tracing::warn!(
+                                "Compaction task {} failed with error: {:#?}",
+                                compact_task.task_id,
+                                e
+                            );
+                            break;
                         }
                         Some(Err(e)) => {
                             compact_success = false;
                             tracing::warn!(
-                                "Compaction task {} failed with join error: {:#?}",
+                                "Compaction task {} failed with join handle error: {:#?}",
                                 compact_task.task_id,
                                 e
                             );
@@ -351,8 +359,8 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(60);
         let task_progress = compactor_context.context.task_progress.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
-        let shutdown_map = CompactionShutdownMap::default();
         let join_handle = tokio::spawn(async move {
+            let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
             // This outer loop is to recreate stream.
@@ -421,36 +429,39 @@ impl Compactor {
                                 None => continue 'consume_stream,
                             };
 
+                            let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
                             executor.execute(async move {
                                 match task {
                                     Task::CompactTask(compact_task) => {
                                         let (tx, rx) = tokio::sync::oneshot::channel();
-                                        shutdown_map
+                                        let task_id = compact_task.task_id;
+                                        shutdown
                                             .lock()
                                             .unwrap()
-                                            .insert(compact_task.task_id, tx);
-                                        Compactor::compact(compactor_context, compact_task, rx).await;
+                                            .insert(task_id, tx);
+                                        Compactor::compact(context, compact_task, rx).await;
+                                        shutdown.lock().unwrap().remove(&task_id);
                                     }
                                     Task::VacuumTask(vacuum_task) => {
                                         Vacuum::vacuum(
                                             vacuum_task,
-                                            compactor_context.context.sstable_store.clone(),
-                                            hummock_meta_client,
+                                            context.context.sstable_store.clone(),
+                                            meta_client,
                                         )
                                         .await;
                                     }
                                     Task::FullScanTask(full_scan_task) => {
                                         Vacuum::full_scan(
                                             full_scan_task,
-                                            compactor_context.context.sstable_store.clone(),
-                                            hummock_meta_client,
+                                            context.context.sstable_store.clone(),
+                                            meta_client,
                                         )
                                         .await;
                                     }
                                     Task::CancelCompactTask(cancel_compact_task) => {
-                                        if let Some(tx) = shutdown_map
+                                        if let Some(tx) = shutdown
                                             .lock()
                                             .unwrap()
                                             .remove(&cancel_compact_task.task_id)

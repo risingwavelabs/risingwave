@@ -942,9 +942,12 @@ where
             )?;
         }
 
-        // A task heartbeat is removed IFF a task report has been successfully committed.
-        self.compactor_manager
-            .remove_task_heartbeat(context_id, compact_task.task_id);
+        // A task heartbeat is removed IFF a task report has an associated context_id
+        // and its task_status has been committed.
+        if let Some(context_id) = context_id {
+            self.compactor_manager
+                .remove_task_heartbeat(context_id, compact_task.task_id);
+        }
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
