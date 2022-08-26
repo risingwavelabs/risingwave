@@ -159,7 +159,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             output_indices,
             left_child,
             right_child,
-            "NestedLoopExecutor".into(),
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
