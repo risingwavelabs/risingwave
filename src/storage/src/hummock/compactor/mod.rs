@@ -34,7 +34,7 @@ pub use compaction_filter::{
 };
 pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
-use futures::{stream, FutureExt, StreamExt};
+use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -638,13 +638,13 @@ impl Compactor {
 
             // Upload metadata.
             let sstable_store_cloned = self.sstable_store.clone();
-            let upload_join_handle =
-                upload_join_handle.then(move |upload_data_result| async move {
-                    upload_data_result.map_err(|e| {
-                        HummockError::other(format!("fail to upload sst data: {:?}", e))
-                    })??;
-                    sstable_store_cloned.put_sst_meta(sst_id, meta).await
-                });
+            let upload_join_handle = async move {
+                let upload_data_result = upload_join_handle.await;
+                upload_data_result.map_err(|e| {
+                    HummockError::other(format!("fail to upload sst data: {:?}", e))
+                })??;
+                sstable_store_cloned.put_sst_meta(sst_id, meta).await
+            };
             upload_join_handles.push(upload_join_handle);
             // upload_join_handles.push(upload_join_handle);
 
