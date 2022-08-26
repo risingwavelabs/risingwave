@@ -46,7 +46,6 @@
 #![feature(map_try_insert)]
 #![feature(result_option_inspect)]
 #![feature(never_type)]
-#![feature(anonymous_lifetime_in_impl_trait)]
 #[macro_use]
 extern crate tracing;
 
