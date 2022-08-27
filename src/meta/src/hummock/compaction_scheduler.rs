@@ -20,6 +20,7 @@ use parking_lot::Mutex;
 use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
@@ -161,7 +162,7 @@ where
                     let current_compactor_tasks =
                         self.hummock_manager.list_assigned_tasks_number().await;
                     tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
-                    compact_task.task_status = false;
+                    compact_task.set_task_status(TaskStatus::Canceled);
                     tokio::time::sleep(Duration::from_secs(
                         self.compactor_selection_retry_interval_sec,
                     ))
@@ -220,7 +221,7 @@ where
                     e
                 );
                 // Cancel the task at best effort
-                compact_task.task_status = false;
+                compact_task.set_task_status(TaskStatus::Canceled);
                 if let Err(e) = self
                     .hummock_manager
                     .report_compact_task(compactor.context_id(), &compact_task)

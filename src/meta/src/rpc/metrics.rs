@@ -16,8 +16,9 @@ use std::sync::atomic::AtomicU64;
 
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, IntGaugeVec, Registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
+    HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 
 pub struct MetaMetrics {
@@ -47,6 +48,8 @@ pub struct MetaMetrics {
     pub level_sst_num: IntGaugeVec,
     // /// num of SSTs to be merged to next level in each level
     pub level_compact_cnt: IntGaugeVec,
+    /// The number of compact tasks
+    pub compact_frequency: IntCounterVec,
 
     pub level_file_size: IntGaugeVec,
     /// hummock version size
@@ -137,8 +140,17 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let compact_frequency = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequency",
+            "num of compactions from each level to next level",
+            &["group", "result"],
+            registry
+        )
+        .unwrap();
+
         let version_size =
             register_int_gauge_with_registry!("version_size", "version size", registry).unwrap();
+
         let level_file_size = register_int_gauge_vec_with_registry!(
             "storage_level_total_file_size",
             "KBs total file bytes in each level",
@@ -177,6 +189,7 @@ impl MetaMetrics {
             uncommitted_sst_num,
             level_sst_num,
             level_compact_cnt,
+            compact_frequency,
             level_file_size,
             version_size,
             hummock_manager_lock_time,

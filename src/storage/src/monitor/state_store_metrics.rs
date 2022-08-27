@@ -62,7 +62,6 @@ macro_rules! for_all_metrics {
             shared_buffer_to_sstable_size: Histogram,
 
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
-            compact_frequency: GenericCounterVec<AtomicU64>,
             compact_write_bytes: GenericCounterVec<AtomicU64>,
             compact_read_current_level: GenericCounterVec<AtomicU64>,
             compact_read_next_level: GenericCounterVec<AtomicU64>,
@@ -373,14 +372,6 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        let compact_frequency = register_int_counter_vec_with_registry!(
-            "storage_level_compact_frequency",
-            "num of compactions from each level to next level",
-            &["group", "result"],
-            registry
-        )
-        .unwrap();
-
         let compact_task_pending_num = register_int_gauge_with_registry!(
             "storage_compact_task_pending_num",
             "the num of storage compact parallelism",
@@ -434,7 +425,6 @@ impl StateStoreMetrics {
             shared_buffer_to_sstable_size,
 
             compaction_upload_sst_counts,
-            compact_frequency,
             compact_write_bytes,
             compact_read_current_level,
             compact_read_next_level,

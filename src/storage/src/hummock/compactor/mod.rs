@@ -43,6 +43,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
@@ -121,7 +122,7 @@ impl Compactor {
     pub async fn compact(
         compactor_context: Arc<CompactorContext>,
         mut compact_task: CompactTask,
-    ) -> bool {
+    ) -> TaskStatus {
         let context = compactor_context.context.clone();
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
         // write op. The watermark is invalidated when this method exits.
@@ -129,7 +130,7 @@ impl Compactor {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
                 tracing::warn!("Failed to track pending SST id. {:#?}", err);
-                return false;
+                return TaskStatus::Failed;
             }
         };
         let sstable_id_manager_clone = context.sstable_id_manager.clone();
@@ -208,7 +209,7 @@ impl Compactor {
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
         context.stats.compact_task_pending_num.inc();
-        let mut compact_success = true;
+        let mut task_status = TaskStatus::Success;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
 
@@ -235,7 +236,7 @@ impl Compactor {
                     output_ssts.push((split_index, ssts));
                 }
                 Ok(Err(e)) => {
-                    compact_success = false;
+                    task_status = TaskStatus::Failed;
                     tracing::warn!(
                         "Compaction task {} failed with error: {:#?}",
                         compact_task.task_id,
@@ -243,7 +244,7 @@ impl Compactor {
                     );
                 }
                 Err(e) => {
-                    compact_success = false;
+                    task_status = TaskStatus::Failed;
                     tracing::warn!(
                         "Compaction task {} failed with join handle error: {:#?}",
                         compact_task.task_id,
@@ -258,13 +259,7 @@ impl Compactor {
 
         on_sync_point("BEFORE_COMPACT_REPORT").await.unwrap();
         // After a compaction is done, mutate the compaction task.
-        Self::compact_done(
-            &mut compact_task,
-            context.clone(),
-            output_ssts,
-            compact_success,
-        )
-        .await;
+        Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
         on_sync_point("AFTER_COMPACT_REPORT").await.unwrap();
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
@@ -278,7 +273,7 @@ impl Compactor {
                 context.sstable_store.delete_cache(table.id);
             }
         }
-        compact_success
+        task_status
     }
 
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
@@ -286,9 +281,9 @@ impl Compactor {
         compact_task: &mut CompactTask,
         context: Arc<Context>,
         output_ssts: Vec<CompactOutput>,
-        task_ok: bool,
+        task_status: TaskStatus,
     ) {
-        compact_task.task_status = task_ok;
+        compact_task.set_task_status(task_status);
         compact_task
             .sorted_output_ssts
             .reserve(compact_task.splits.len());
@@ -312,12 +307,6 @@ impl Compactor {
             .compact_write_sstn
             .with_label_values(&[group_label.as_str(), level_label.as_str()])
             .inc_by(compact_task.sorted_output_ssts.len() as u64);
-        let ret_label = if task_ok { "success" } else { "failed" };
-        context
-            .stats
-            .compact_frequency
-            .with_label_values(&[group_label.as_str(), ret_label])
-            .inc();
 
         if let Err(e) = context
             .hummock_meta_client
