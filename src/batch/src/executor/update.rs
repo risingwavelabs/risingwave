@@ -50,6 +50,7 @@ impl UpdateExecutor {
         source_manager: SourceManagerRef,
         child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
+        identity: String,
     ) -> Self {
         assert_eq!(
             child.schema().data_types(),
@@ -66,7 +67,7 @@ impl UpdateExecutor {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "UpdateExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -187,6 +188,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.context().try_get_source_manager_ref()?,
             child,
             exprs,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
@@ -267,6 +269,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             exprs,
+            "UpdateExecutor".to_string(),
         ));
 
         let handle = tokio::spawn(async move {

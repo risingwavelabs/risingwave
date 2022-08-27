@@ -42,7 +42,12 @@ pub struct InsertExecutor {
 }
 
 impl InsertExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+    pub fn new(
+        table_id: TableId,
+        source_manager: SourceManagerRef,
+        child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
         Self {
             table_id,
             source_manager,
@@ -50,7 +55,7 @@ impl InsertExecutor {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "InsertExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -142,6 +147,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .source_manager_ref()
                 .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
             child,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }
@@ -237,6 +243,7 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
+            "InsertExecutor".to_string(),
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
