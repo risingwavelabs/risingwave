@@ -41,7 +41,7 @@ fn get_builder_options(
 ) -> SstableBuilderOptions {
     SstableBuilderOptions {
         capacity: capacity_mb * 1024 * 1024,
-        block_capacity: 1 * 1024 * 1024,
+        block_capacity: 1024 * 1024,
         restart_interval: 16,
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
