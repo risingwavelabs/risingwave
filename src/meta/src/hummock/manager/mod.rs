@@ -833,8 +833,7 @@ where
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
 
-        // For cancel task, there is no need to check the task assignment because
-        // we want to cancel it anyway.
+        // For context_id is None, there is no need to check the task assignment.
         if let Some(context_id) = context_id {
             match assignee_context_id {
                 Some(id) => {
