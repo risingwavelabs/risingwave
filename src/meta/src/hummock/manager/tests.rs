@@ -213,8 +213,8 @@ async fn test_hummock_compaction_task() {
         .cancel_compact_task(&mut compact_task)
         .await
         .unwrap());
-    // Cancel the task and told the task is not found, which may have been processed previously.
-    assert!(!hummock_manager
+    // Cancel a non-existent task and succeed.
+    assert!(hummock_manager
         .cancel_compact_task(&mut compact_task)
         .await
         .unwrap());
