@@ -34,11 +34,15 @@
 
 mod meta_client;
 
+#[cfg(madsim)]
+use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(not(madsim))]
 use anyhow::anyhow;
 use async_trait::async_trait;
 pub use meta_client::{GrpcMetaClient, MetaClient};
+#[cfg(not(madsim))]
 use moka::future::Cache;
 mod compute_client;
 pub use compute_client::*;
@@ -50,6 +54,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
 pub use stream_client::*;
+#[cfg(madsim)]
+use tokio::sync::Mutex;
 
 use crate::error::Result;
 
@@ -60,7 +66,12 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
 
 #[derive(Clone)]
 pub struct RpcClientPool<S> {
+    #[cfg(not(madsim))]
     clients: Cache<HostAddr, S>,
+
+    // moka::Cache internally uses system thread, so we can't use it in simulation
+    #[cfg(madsim)]
+    clients: Arc<Mutex<HashMap<HostAddr, S>>>,
 }
 
 impl<S> Default for RpcClientPool<S>
@@ -78,7 +89,10 @@ where
 {
     pub fn new(cache_capacity: u64) -> Self {
         Self {
+            #[cfg(not(madsim))]
             clients: Cache::new(cache_capacity),
+            #[cfg(madsim)]
+            clients: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -91,11 +105,23 @@ where
 
     /// Gets the RPC client for the given addr. If the connection is not established, a
     /// new client will be created and returned.
+    #[cfg(not(madsim))]
     pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
         self.clients
             .try_get_with(addr.clone(), S::new_client(addr))
             .await
             .map_err(|e| anyhow!("failed to create RPC client: {:?}", e).into())
+    }
+
+    #[cfg(madsim)]
+    pub async fn get_by_addr(&self, addr: HostAddr) -> Result<S> {
+        let mut clients = self.clients.lock().await;
+        if let Some(client) = clients.get(&addr) {
+            return Ok(client.clone());
+        }
+        let client = S::new_client(addr.clone()).await?;
+        clients.insert(addr, client.clone());
+        Ok(client)
     }
 }
 
