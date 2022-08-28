@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::GroupTopNExecutor;
@@ -42,7 +42,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .collect();
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = RowBasedStateTable::from_table_catalog(table, store, vnodes);
+        let state_table = StateTable::from_table_catalog(table, store, vnodes);
         let order_pairs = table
             .get_order_key()
             .iter()

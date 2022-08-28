@@ -30,6 +30,7 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable,
 };
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -122,7 +123,7 @@ impl LocalFrontend {
             Planner::new(OptimizerContext::new(session, Arc::from(raw_sql.as_str())).into())
                 .plan(bound)
                 .unwrap()
-                .gen_batch_query_plan()
+                .gen_batch_distributed_plan()
         } else {
             unreachable!()
         }
@@ -578,16 +579,25 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn pin_snapshot(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
-    async fn get_epoch(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn get_epoch(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
-    async fn flush(&self) -> RpcResult<u64> {
-        Ok(0)
+    async fn flush(&self) -> RpcResult<HummockSnapshot> {
+        Ok(HummockSnapshot {
+            committed_epoch: 0,
+            current_epoch: 0,
+        })
     }
 
     async fn list_table_fragments(

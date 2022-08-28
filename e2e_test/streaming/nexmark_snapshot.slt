@@ -17,6 +17,7 @@ include ./nexmark/q8.slt.part
 include ./nexmark/q10.slt.part
 include ./nexmark/q14.slt.part
 include ./nexmark/q15.slt.part
+include ./nexmark/q16.slt.part
 include ./nexmark/q17.slt.part
 include ./nexmark/q20.slt.part
 

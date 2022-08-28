@@ -20,7 +20,9 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder, Op, StreamChunk,
+};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
@@ -151,6 +153,12 @@ impl ProjectSetExecutor {
                             .max()
                             .unwrap();
 
+                        // ProjectSet cannot preserve that U- is followed by U+,
+                        // so we rewrite update to insert/delete.
+                        let op = match op {
+                            Op::Delete | Op::UpdateDelete => Op::Delete,
+                            Op::Insert | Op::UpdateInsert => Op::Insert,
+                        };
                         ret_ops.extend(vec![op; max_tf_len]);
                         for i in 0..max_tf_len {
                             projected_row_id_builder.append(Some(i as i64))?;

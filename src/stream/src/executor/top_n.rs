@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
@@ -42,7 +42,7 @@ impl<S: StateStore> TopNExecutor<S> {
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
@@ -313,7 +313,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_internal_key(&order_pairs, &pk_indices, &schema);

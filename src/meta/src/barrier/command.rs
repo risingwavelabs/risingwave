@@ -277,8 +277,26 @@ where
                             .get_running_actors_of_fragment(downstream_fragment_id)
                             .await?;
 
+                        // Downstream removed actors should be skipped
+                        // Newly created actors of the current fragment will not dispatch Update
+                        // barriers to them
+                        let downstream_removed_actors: HashSet<_> = reschedules
+                            .get(&downstream_fragment_id)
+                            .map(|downstream_reschedule| {
+                                downstream_reschedule
+                                    .removed_actors
+                                    .iter()
+                                    .copied()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
                         // Record updates for all actors.
                         for actor_id in downstream_actor_ids {
+                            if downstream_removed_actors.contains(&actor_id) {
+                                continue;
+                            }
+
                             actor_merge_update
                                 .try_insert(
                                     actor_id,

@@ -9,6 +9,7 @@ anyhow = "1"
 console = "0.15"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
+libtest-mimic = "0.5"
 risingwave_frontend = { path = ".." }
 risingwave_sqlparser = { path = "../../sqlparser" }
 serde = { version = "1", features = ["derive"] }
@@ -24,10 +25,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 walkdir = "2"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
-libtest-mimic = "0.4"
 tempfile = "3"
 
 [build-dependencies]
