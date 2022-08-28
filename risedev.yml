@@ -471,7 +471,7 @@ template:
     id: compute-node-${port}
 
     # Whether to enable async stack trace for this compute node.
-    enable-async-stack-trace: false
+    enable-async-stack-trace: true
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false

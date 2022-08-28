@@ -442,10 +442,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let join_key_indices_l = params_l.join_key_indices;
         let join_key_indices_r = params_r.join_key_indices;
 
-        let degree_pk_indices_l =
-            (join_key_indices_l.len()..join_key_indices_l.len() + state_pk_indices_l.len()).collect_vec();
-        let degree_pk_indices_r =
-            (join_key_indices_r.len()..join_key_indices_r.len() + state_pk_indices_r.len()).collect_vec();
+        let degree_pk_indices_l = (join_key_indices_l.len()
+            ..join_key_indices_l.len() + state_pk_indices_l.len())
+            .collect_vec();
+        let degree_pk_indices_r = (join_key_indices_r.len()
+            ..join_key_indices_r.len() + state_pk_indices_r.len())
+            .collect_vec();
 
         // check whether join key contains pk in both side
         let append_only_optimize = if is_append_only {

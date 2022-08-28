@@ -97,7 +97,8 @@ pub async fn merge_by_pk<'a, S>(
 {
     pin_mut!(stream1);
     pin_mut!(stream2);
-    loop {
+    'outer: loop {
+        dbg!(1);
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
             select(stream1.next(), stream2.next()).await
@@ -115,33 +116,35 @@ pub async fn merge_by_pk<'a, S>(
             }
             Either::Left((Some(row), _)) => {
                 let left_row = row?;
-                loop {
+                'inner: loop {
+                    dbg!(2);
                     let right_row = stream2.next().await;
                     match right_row {
                         Some(row) => {
                             let right_row = row?;
                             if Row::eq_by_pk(&left_row, pk_indices1, &right_row, pk_indices2) {
                                 yield (left_row, right_row);
-                                break;
+                                break 'inner;
                             }
                         }
-                        None => break,
+                        None => break 'outer,
                     }
                 }
             }
             Either::Right((Some(row), _)) => {
                 let right_row = row?;
-                loop {
+                'inner: loop {
+                    dbg!(3);
                     let left_row = stream1.next().await;
                     match left_row {
                         Some(row) => {
                             let left_row = row?;
                             if Row::eq_by_pk(&left_row, pk_indices1, &right_row, pk_indices2) {
                                 yield (left_row, right_row);
-                                break;
+                                break 'inner;
                             }
                         }
-                        None => break,
+                        None => break 'outer,
                     }
                 }
             }
