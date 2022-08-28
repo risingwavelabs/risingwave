@@ -236,6 +236,7 @@ impl<WO> SstableBuilder<WO> {
         let largest_key = self.last_full_key.clone();
 
         self.build_block()?;
+        // The extra 4 bytes is for the size footer.
         let data_len = self.writer.data_len() + 4;
         assert!(!smallest_key.is_empty());
 
