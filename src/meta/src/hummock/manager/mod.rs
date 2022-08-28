@@ -833,9 +833,11 @@ where
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
 
-        match assignee_context_id {
-            Some(id) => {
-                if let Some(context_id) = context_id {
+        // For cancel task, there is no need to check the task assignment because
+        // we want to cancel it anyway.
+        if let Some(context_id) = context_id {
+            match assignee_context_id {
+                Some(id) => {
                     // Assignee id mismatch.
                     if id != context_id {
                         tracing::warn!(
@@ -847,11 +849,11 @@ where
                         return Ok(false);
                     }
                 }
-            }
-            None => {
-                // The task is not found.
-                tracing::warn!("Compaction task {} not found", compact_task.task_id);
-                return Ok(false);
+                None => {
+                    // The task is not found.
+                    tracing::warn!("Compaction task {} not found", compact_task.task_id);
+                    return Ok(false);
+                }
             }
         }
         compact_status.report_compact_task(compact_task);
