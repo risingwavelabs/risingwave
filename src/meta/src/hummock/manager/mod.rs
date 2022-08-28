@@ -973,7 +973,13 @@ where
 
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.
-        for (compaction_group_id, sstables) in &sstables.into_iter().group_by(|(cg_id, _)| *cg_id) {
+        for (compaction_group_id, sstables) in &sstables
+            .into_iter()
+            // the sort is stable sort, and will not change the order within compaction group.
+            // Do a sort so that sst in the same compaction group can be consecutive
+            .sorted_by_key(|(cg_id, _)| *cg_id)
+            .group_by(|(cg_id, _)| *cg_id)
+        {
             modified_compaction_groups.push(compaction_group_id);
             let group_sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
             let level_deltas = &mut new_version_delta

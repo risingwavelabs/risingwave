@@ -22,7 +22,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::prost_key_range::KeyRangeExt;
-use crate::{CompactionGroupId, HummockSstableId};
+use crate::{can_concat, CompactionGroupId, HummockSstableId};
 
 pub struct LevelDeltasSummary {
     pub delete_sst_levels: Vec<u32>,
@@ -283,20 +283,35 @@ impl HummockLevelsExt for Levels {
         }
         if !insert_table_infos.is_empty() {
             if insert_sst_level_id == 0 {
-                let mut found = false;
                 let l0 = self.l0.as_mut().unwrap();
-                for level in &mut l0.sub_levels {
-                    if level.sub_level_id == insert_sub_level_id {
-                        level_insert_ssts(level, insert_table_infos);
-                        found = true;
-                        break;
+                let index = l0
+                    .sub_levels
+                    .partition_point(|level| level.sub_level_id < insert_sub_level_id);
+                if local_related_only {
+                    // Some sub level in the full hummock version may be empty in the local related
+                    // pruned version, so it's possible the level to be inserted is not found
+                    if index == l0.sub_levels.len()
+                        || l0.sub_levels[index].sub_level_id > insert_sub_level_id
+                    {
+                        // level not found, insert a new level
+                        let new_level = new_sub_level(
+                            insert_sub_level_id,
+                            LevelType::Nonoverlapping,
+                            insert_table_infos,
+                        );
+                        l0.sub_levels.insert(index, new_level);
+                    } else {
+                        // level found, add to the level.
+                        level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
                     }
+                } else {
+                    assert!(
+                        index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
+                        "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
+                        insert_sub_level_id
+                    );
+                    level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
                 }
-                assert!(
-                    found,
-                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
-                    insert_sub_level_id
-                );
             } else {
                 let idx = insert_sst_level_id as usize - 1;
                 level_insert_ssts(&mut self.levels[idx], insert_table_infos);
@@ -320,25 +335,51 @@ impl HummockLevelsExt for Levels {
     }
 }
 
+pub fn new_sub_level(
+    sub_level_id: u64,
+    level_type: LevelType,
+    table_infos: Vec<SstableInfo>,
+) -> Level {
+    if level_type == LevelType::Nonoverlapping {
+        debug_assert!(
+            can_concat(&table_infos.iter().collect_vec()),
+            "sst of non-overlapping level is not concat-able: {:?}",
+            table_infos
+        );
+    }
+    let total_file_size = table_infos.iter().map(|table| table.file_size).sum();
+    Level {
+        level_idx: 0,
+        level_type: level_type as i32,
+        table_infos,
+        total_file_size,
+        sub_level_id,
+    }
+}
+
 pub fn add_new_sub_level(
     l0: &mut OverlappingLevel,
     insert_sub_level_id: u64,
     insert_table_infos: Vec<SstableInfo>,
 ) {
+    if let Some(newest_level) = l0.sub_levels.last() {
+        assert!(
+            newest_level.sub_level_id < insert_sub_level_id,
+            "inserted new level is not the newest: prev newest: {}, insert: {}. L0: {:?}",
+            newest_level.sub_level_id,
+            insert_sub_level_id,
+            l0,
+        );
+    }
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.
-    let total_file_size = insert_table_infos
-        .iter()
-        .map(|table| table.file_size)
-        .sum::<u64>();
-    l0.sub_levels.push(Level {
-        level_idx: 0,
-        level_type: LevelType::Overlapping as i32,
-        table_infos: insert_table_infos,
-        total_file_size,
-        sub_level_id: insert_sub_level_id,
-    });
-    l0.total_file_size += total_file_size;
+    let level = new_sub_level(
+        insert_sub_level_id,
+        LevelType::Overlapping,
+        insert_table_infos,
+    );
+    l0.total_file_size += level.total_file_size;
+    l0.sub_levels.push(level);
 }
 
 /// Delete sstables if the table id is in the id set.
@@ -371,6 +412,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
+    debug_assert!(can_concat(&operand.table_infos.iter().collect_vec()));
 }
 
 pub trait HummockVersionDeltaExt {

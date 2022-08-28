@@ -100,19 +100,6 @@ where
         .collect()
 }
 
-pub fn can_concat(ssts: &[&SstableInfo]) -> bool {
-    let len = ssts.len();
-    for i in 0..len - 1 {
-        if user_key(&ssts[i].get_key_range().as_ref().unwrap().right).cmp(user_key(
-            &ssts[i + 1].get_key_range().as_ref().unwrap().left,
-        )) != Ordering::Less
-        {
-            return false;
-        }
-    }
-    true
-}
-
 /// Search the SST containing the specified key within a level, using binary search.
 pub(crate) fn search_sst_idx<B>(ssts: &[&SstableInfo], key: &B) -> usize
 where
