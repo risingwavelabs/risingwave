@@ -726,6 +726,7 @@ where
         Ok(Some(compact_task))
     }
 
+    /// Cancels a compaction task no matter it's assigned or unassigned.
     pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
         compact_task.task_status = false;
         self.report_compact_task_impl(None, compact_task).await
@@ -804,12 +805,13 @@ where
         Ok(ret)
     }
 
-    /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
-    /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
-    /// been processed previously.
+    /// Finishes or cancels a compaction task, according to `task_status`.
     ///
-    /// If context_id is not None, its validity will be checked when committing meta store
-    /// transaction.
+    /// If `context_id` is not None, its validity will be checked when writing meta store.
+    /// Its ownership of the task is checked as well.
+    ///
+    /// Return Ok(false) indicates either the task is not found,
+    /// or the task is not owned by `context_id` when `context_id` is not None.
     #[named]
     pub async fn report_compact_task_impl(
         &self,
