@@ -52,7 +52,7 @@ pub struct LogicalScan {
 
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
-    fn new(
+    pub(crate) fn new(
         table_name: String, // explain-only
         is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
@@ -249,12 +249,11 @@ impl LogicalScan {
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &HashMap<usize, usize>,
     ) -> LogicalScan {
-        let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
-
-        // create index scan plan to match the output order of the current table scan
-        for &col_idx in &self.required_col_idx {
-            new_required_col_idx.push(*primary_to_secondary_mapping.get(&col_idx).unwrap());
-        }
+        let new_output_col_idx = self
+            .output_col_idx
+            .iter()
+            .map(|col_idx| *primary_to_secondary_mapping.get(col_idx).unwrap())
+            .collect_vec();
 
         struct Rewriter<'a> {
             primary_to_secondary_mapping: &'a HashMap<usize, usize>,
@@ -280,7 +279,7 @@ impl LogicalScan {
         Self::new(
             index_name.to_string(),
             false,
-            new_required_col_idx,
+            new_output_col_idx,
             index_table_desc,
             vec![],
             self.ctx(),

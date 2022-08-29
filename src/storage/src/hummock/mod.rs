@@ -49,6 +49,7 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod store;
 pub mod vacuum;
 pub mod value;
 
@@ -89,6 +90,7 @@ pub struct HummockStorage {
 
     sstable_id_manager: SstableIdManagerRef,
 
+    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -149,6 +151,7 @@ impl HummockStorage {
             stats,
             compaction_group_client,
             sstable_id_manager,
+            #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
         Ok(instance)

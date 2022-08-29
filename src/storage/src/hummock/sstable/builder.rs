@@ -160,6 +160,7 @@ impl SstableBuilder {
                 offset: self.buf.len() as u32,
                 len: 0,
                 smallest_key: full_key.to_vec(),
+                uncompressed_size: 0,
             })
         }
 
@@ -264,6 +265,7 @@ impl SstableBuilder {
         }
 
         let mut block_meta = self.block_metas.last_mut().unwrap();
+        block_meta.uncompressed_size = self.block_builder.uncompressed_block_size() as u32;
         let block = self.block_builder.build();
         self.buf.put_slice(block);
         block_meta.len = self.buf.len() as u32 - block_meta.offset;
