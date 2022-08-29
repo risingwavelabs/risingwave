@@ -59,7 +59,7 @@ impl Aggregator for Filter {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        let bitmap = if start_row_id == 0 && end_row_id == input.cardinality() {
+        let bitmap = if start_row_id == 0 && end_row_id == input.capacity() {
             // if the input if the whole chunk, use `eval` to speed up
             self.filter.eval(input)?.as_bool().to_bitmap()
         } else {
