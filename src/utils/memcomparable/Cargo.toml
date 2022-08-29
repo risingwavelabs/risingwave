@@ -9,6 +9,8 @@ description = "Memcomparable format."
 bytes = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]

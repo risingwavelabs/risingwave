@@ -64,7 +64,7 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Array(exprs) => self.bind_array(exprs),
-            Expr::ArrayIndex { obj, indices } => self.bind_array_index(*obj, indices),
+            Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
