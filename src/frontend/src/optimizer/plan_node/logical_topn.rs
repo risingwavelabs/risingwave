@@ -302,7 +302,7 @@ impl ToStream for LogicalTopN {
                 "Doesn't support OFFSET without LIMIT".to_string(),
             )));
         }
-        let stream_top_n = self.gen_dist_stream_top_n_plan(self.input().to_stream()?)?;
+        let stream_top_n = self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?;
         Ok(stream_top_n)
     }
 
