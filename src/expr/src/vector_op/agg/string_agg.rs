@@ -16,14 +16,16 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::bail;
+use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
 use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
+#[derive(Clone)]
 enum StringAggState {
     WithoutOrder {
         result: Option<String>,
@@ -35,6 +37,7 @@ enum StringAggState {
     },
 }
 
+#[derive(Clone)]
 pub struct StringAgg {
     agg_col_idx: usize,
     delimiter: ExpressionRef,
@@ -111,45 +114,9 @@ impl StringAgg {
         Ok(())
     }
 
-    fn get_result(&self) -> Result<Option<String>> {
-        match &self.state {
-            StringAggState::WithoutOrder { result } => Ok(result.clone()),
-            StringAggState::WithOrder {
-                order_pairs: _,
-                min_heap,
-                encodable: _,
-            } => {
-                if min_heap.is_empty() {
-                    Ok(None)
-                } else {
-                    let mut result = String::new();
-                    let mut first = true;
-                    for orow in min_heap.clone().into_iter_sorted() {
-                        let mut row = orow.row;
-                        if !first {
-                            let delim = Self::eval_delimiter(&self.delimiter, &row)?;
-                            result.push_str(&delim);
-                        }
-                        let value = match row.0[self.agg_col_idx] {
-                            Some(ScalarImpl::Utf8(ref mut s)) => std::mem::take(s),
-                            _ => panic!("Expected Utf8"),
-                        };
-                        result.push_str(&value);
-                        first = false;
-                    }
-                    Ok(Some(result))
-                }
-            }
-        }
-    }
-
     fn get_result_and_reset(&mut self) -> Result<Option<String>> {
         match &mut self.state {
-            StringAggState::WithoutOrder { result } => {
-                let res = result.clone();
-                *result = None;
-                Ok(res)
-            }
+            StringAggState::WithoutOrder { result } => Ok(std::mem::take(result)),
             StringAggState::WithOrder {
                 order_pairs: _,
                 min_heap,
@@ -193,10 +160,7 @@ impl Aggregator for StringAgg {
             }
             Ok(())
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Input fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Input fail to match {}.", stringify!(Utf8))
         }
     }
 
@@ -218,44 +182,18 @@ impl Aggregator for StringAgg {
             }
             Ok(())
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Input fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Input fail to match {}.", stringify!(Utf8))
         }
     }
 
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+    fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
-            let s = self.get_result()?;
-            if let Some(s) = s {
-                builder.append(Some(&s))
-            } else {
-                builder.append(None)
-            }
-            .map_err(Into::into)
+            let res = self.get_result_and_reset()?;
+            builder
+                .append(res.as_ref().map(|x| x.as_scalar_ref()))
+                .map_err(Into::into)
         } else {
-            Err(
-                ErrorCode::InternalError(format!("Builder fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
-        }
-    }
-
-    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        if let ArrayBuilderImpl::Utf8(builder) = builder {
-            let s = self.get_result_and_reset()?;
-            if let Some(s) = s {
-                builder.append(Some(&s))
-            } else {
-                builder.append(None)
-            }
-            .map_err(Into::into)
-        } else {
-            Err(
-                ErrorCode::InternalError(format!("Builder fail to match {}.", stringify!(Utf8)))
-                    .into(),
-            )
+            bail!("Builder fail to match {}.", stringify!(Utf8))
         }
     }
 }
@@ -287,12 +225,11 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        agg.output_and_reset(&mut builder)?;
         let output = builder.finish()?;
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "aaabbbcccddd";
-        assert_eq!(actual, &[Some(expected), Some(expected)]);
+        assert_eq!(actual, &[Some(expected)]);
         Ok(())
     }
 
@@ -318,12 +255,11 @@ mod tests {
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
-        agg.output_and_reset(&mut builder)?;
         let output = builder.finish()?;
         let actual = output.as_utf8();
         let actual = actual.iter().collect::<Vec<_>>();
         let expected = "cccbbbdddaaa";
-        assert_eq!(actual, &[Some(expected), Some(expected)]);
+        assert_eq!(actual, &[Some(expected)]);
         Ok(())
     }
 }

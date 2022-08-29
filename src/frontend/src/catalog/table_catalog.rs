@@ -138,6 +138,14 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
+    pub fn to_state_table_prost(&self) -> ProstTable {
+        use risingwave_common::catalog::{DatabaseId, SchemaId};
+        self.to_prost(
+            SchemaId::placeholder() as u32,
+            DatabaseId::placeholder() as u32,
+        )
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
             id: self.id.table_id as u32,
@@ -247,7 +255,7 @@ mod tests {
             name: "test".to_string(),
             columns: vec![
                 ProstColumnCatalog {
-                    column_desc: Some((&row_id_column_desc()).into()),
+                    column_desc: Some((&row_id_column_desc(ColumnId::new(0))).into()),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
@@ -298,7 +306,7 @@ mod tests {
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
                 columns: vec![
-                    ColumnCatalog::row_id_column(),
+                    ColumnCatalog::row_id_column(ColumnId::new(0)),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::new_struct(

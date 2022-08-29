@@ -290,7 +290,7 @@ pub mod tests {
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     #[test]
-    fn test_manaul_compaction_picker() {
+    fn test_manual_compaction_picker() {
         let levels = vec![
             Level {
                 level_idx: 1,

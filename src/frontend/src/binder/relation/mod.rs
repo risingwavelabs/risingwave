@@ -34,7 +34,7 @@ pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, Depth};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
@@ -82,25 +82,26 @@ impl Relation {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         match self {
             Relation::Subquery(subquery) => subquery
                 .query
-                .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             Relation::Join(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
                     join.cond
-                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices.extend(
                     join.left
-                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices.extend(
                     join.right
-                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 );
                 correlated_indices
             }
@@ -209,7 +210,7 @@ impl Binder {
                 field,
             ));
             self.context
-                .indexs_of
+                .indices_of
                 .entry(name)
                 .or_default()
                 .push(self.context.columns.len() - 1);

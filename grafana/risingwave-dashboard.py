@@ -197,9 +197,9 @@ def section_compaction(panels):
                 "sum(storage_level_total_file_size) by (instance, level_index)", "L{{level_index}}"
             ),
         ]),
-        panels.timeseries_count("Compaction Count", [
+        panels.timeseries_count("Compaction Success & Failure Counts", [
             panels.target(
-                "storage_level_compact_frequency", "{{job}} @ {{instance}} @ Group-{{group}} @ Level-{{level_index}}"
+                "sum(storage_level_compact_frequency) by (instance, group, result)", "{{instance}} - {{result}} - group-{{group}}"
             ),
         ]),
 
@@ -329,6 +329,13 @@ def section_object_storage(panels):
             panels.target(
                 "sum(rate(object_store_operation_latency_count[$__rate_interval])) by (le, type, job, instance)", "{{type}} - {{job}} @ {{instance}}"
             ),
+            panels.target(
+                "sum(rate(object_store_operation_latency_count{type=~'upload|delete'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-write - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(object_store_operation_latency_count{type=~'read|readv|list|metadata'}[$__rate_interval])) by (le, media_type, job, instance)", "{{media_type}}-read - {{job}} @ {{instance}}"
+            ),
+
         ]),
         panels.timeseries_bytes("Operation Size", [
             panels.target(
@@ -462,7 +469,7 @@ def section_streaming_actors(outer_panels):
             ]),
             panels.timeseries_percentage("Actor Input Blocking Time Ratio", [
                 panels.target(
-                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upsteam_fragment_id}}"
+                    "rate(stream_actor_input_buffer_blocking_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}->{{upstream_fragment_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
@@ -588,6 +595,16 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_join_actor_input_waiting_duration_ns[$__rate_interval]) / 1000000000", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_count("Stream Join Cached Entries", [
+                panels.target(
+                    "stream_join_cached_entries", "{{actor_id}} {{side}}"
+                ),
+            ]),
+            panels.timeseries_count("Stream Join Cached Rows", [
+                panels.target(
+                    "stream_join_cached_rows", "{{actor_id}} {{side}}"
+                ),
+            ])
         ])
     ]
 
@@ -652,6 +669,18 @@ def section_hummock(panels):
         panels.timeseries_ops("Cache Ops", [
             panels.target(
                 "sum(rate(state_store_sst_store_block_request_counts[$__rate_interval])) by (job, instance, type)", "{{type}} - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_get_latency_count[$__rate_interval])) by (instance)", "file cache get @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_miss[$__rate_interval])) by (instance)", "file cache miss @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_insert_latency_count[$__rate_interval])) by (instance)", "file cache insert @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_erase_latency_count[$__rate_interval])) by (instance)", "file cache erase @ {{instance}}"
             ),
         ]),
         panels.timeseries_ops("Read Ops", [
@@ -799,13 +828,14 @@ def section_hummock(panels):
             panels.target(
                 "(sum(rate(state_store_bloom_filter_true_negative_counts[$__rate_interval])) by (job,instance)) / (sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (job,instance))", "bloom filter hit rate - {{job}} @ {{instance}}"
             ),
-
             panels.target(
                 "((sum(rate(state_store_sst_store_block_request_counts{type='meta_total'}[$__rate_interval])) by (job,instance)) - (sum(rate(state_store_sst_store_block_request_counts{type='meta_miss'}[$__rate_interval])) by (job,instance))) / (sum(rate(state_store_sst_store_block_request_counts{type='meta_total'}[$__rate_interval])) by (job,instance))", "meta cache hit rate - {{job}} @ {{instance}}"
             ),
-
             panels.target(
                 "((sum(rate(state_store_sst_store_block_request_counts{type='data_total'}[$__rate_interval])) by (job,instance)) - (sum(rate(state_store_sst_store_block_request_counts{type='data_miss'}[$__rate_interval])) by (job,instance))) / (sum(rate(state_store_sst_store_block_request_counts{type='data_total'}[$__rate_interval])) by (job,instance))", "block cache hit rate - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                "((sum(rate(file_cache_get_latency_count[$__rate_interval])) by (instance)) - (sum(rate(file_cache_miss[$__rate_interval])) by (instance))) / (sum(rate(file_cache_get_latency_count[$__rate_interval])) by (instance))", "file cache hit rate @ {{instance}}"
             ),
         ]),
 
@@ -896,6 +926,86 @@ def section_hummock(panels):
             ),
             panels.target(
                 "sum by(le, job, instance) (rate(batch_row_seq_scan_next_duration_sum[$__rate_interval])) / sum by(le, job, instance) (rate(batch_row_seq_scan_next_duration_count[$__rate_interval]))", "row_seq_scan next avg - {{job}} @ {{instance}}"
+            ),
+        ]),
+    ]
+
+def section_hummock_tiered_cache(panels):
+    return [
+        panels.row("Hummock Tiered Cache"),
+        panels.timeseries_ops("Ops", [
+            panels.target(
+                "sum(rate(file_cache_get_latency_count[$__rate_interval])) by (instance)", "file cache get @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_miss[$__rate_interval])) by (instance)", "file cache miss @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_insert_latency_count[$__rate_interval])) by (instance)", "file cache insert @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_erase_latency_count[$__rate_interval])) by (instance)", "file cache erase @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_disk_read_latency_count[$__rate_interval])) by (instance)", "file cache disk read @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_disk_write_latency_count[$__rate_interval])) by (instance)", "file cache disk write @ {{instance}}"
+            ),
+        ]),
+        panels.timeseries_latency("Latency", [
+            panels.target(
+                "histogram_quantile(0.5, sum(rate(file_cache_get_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache get @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.9, sum(rate(file_cache_get_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache get @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.99, sum(rate(file_cache_get_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache get @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.5, sum(rate(file_cache_insert_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache insert @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.9, sum(rate(file_cache_insert_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache insert @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.99, sum(rate(file_cache_insert_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache insert @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.5, sum(rate(file_cache_erase_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache erase @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.9, sum(rate(file_cache_erase_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache erase @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.99, sum(rate(file_cache_erase_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache erase @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.5, sum(rate(file_cache_disk_read_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache disk read @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.9, sum(rate(file_cache_disk_read_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache disk read @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.99, sum(rate(file_cache_disk_read_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache disk read @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.5, sum(rate(file_cache_disk_write_latency_bucket[$__rate_interval])) by (le, instance))", "p50 - file cache disk write @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.9, sum(rate(file_cache_disk_write_latency_bucket[$__rate_interval])) by (le, instance))", "p90 - file cache disk write @ {{instance}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.99, sum(rate(file_cache_disk_write_latency_bucket[$__rate_interval])) by (le, instance))", "p99 - file cache disk write @ {{instance}}"
+            ),
+        ]),
+        panels.timeseries_bytes_per_sec("Throughput", [
+            panels.target(
+                "sum(rate(file_cache_disk_read_throughput[$__rate_interval])) by (instance)", "disk read @ {{instance}}"
+            ),
+            panels.target(
+                "sum(rate(file_cache_disk_write_throughput[$__rate_interval])) by (instance)", "disk write @ {{instance}}"
             ),
         ]),
     ]
@@ -1248,7 +1358,7 @@ def section_grpc_hummock_meta_client(outer_panels):
                     "sum(irate(state_store_get_new_sst_ids_latency_counts[$__rate_interval]))by(job,instance)", "get_new_sst_ids_latency_counts - {{instance}} "
                 ),
             ]),
-            panels.timeseries_latency("compation_latency", [
+            panels.timeseries_latency("compaction_latency", [
                 panels.target(
                     "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[$__rate_interval])) by (le, job, instance))", "report_compaction_task_latency_p50 - {{instance}}"
                 ),
@@ -1286,6 +1396,7 @@ dashboard = Dashboard(
         *section_streaming_exchange(panels),
         *section_batch_exchange(panels),
         *section_hummock(panels),
+        *section_hummock_tiered_cache(panels),
         *section_hummock_manager(panels),
         *section_grpc_meta_catalog_service(panels),
         *section_grpc_meta_cluster_service(panels),

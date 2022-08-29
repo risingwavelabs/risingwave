@@ -86,7 +86,7 @@ pub enum ErrorCode {
     ConnectorError(BoxedError),
     #[error(transparent)]
     ProstError(prost::DecodeError),
-    #[error("Feature is not yet implemented: {0}, {1}")]
+    #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
     #[error(transparent)]
     IoError(IoError),

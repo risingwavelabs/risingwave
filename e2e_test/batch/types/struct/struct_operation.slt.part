@@ -13,7 +13,7 @@ CREATE TABLE b(id INTEGER, j VARCHAR);
 statement ok
 INSERT INTO b VALUES (1, 'hello');
 
-# unequality join
+# inequality join
 query IIII
 SELECT * FROM a LEFT JOIN b ON a.id<>b.id
 ----

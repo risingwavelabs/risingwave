@@ -1,0 +1,10 @@
+[default.extend-words]
+indexs = "indices"
+Stichting = "Stichting"
+fo = "fo"
+FPR = "FPR"
+ot = "ot"
+inout = "inout"
+
+[files]
+extend-exclude = ["src/tests/regress/data", "e2e_test", "**/*.svg", "scripts"]

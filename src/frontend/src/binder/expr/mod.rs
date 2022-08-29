@@ -64,7 +64,7 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Array(exprs) => self.bind_array(exprs),
-            Expr::ArrayIndex { obj, indexs } => self.bind_array_index(*obj, indexs),
+            Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
             Expr::Function(f) => self.bind_function(f),
             // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
@@ -444,14 +444,14 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         ),
         AstDataType::Text => {
             return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:?}", data_type),
+                format!("unsupported data type: {:}", data_type),
                 2535.into(),
             )
             .into())
         }
         _ => {
             return Err(ErrorCode::NotImplemented(
-                format!("unsupported data type: {:?}", data_type),
+                format!("unsupported data type: {:}", data_type),
                 None.into(),
             )
             .into())

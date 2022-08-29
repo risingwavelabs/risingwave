@@ -74,8 +74,8 @@ impl CacheFile {
     /// Opens the cache file.
     ///
     /// The underlying file is opened with `O_DIRECT` flag. All I/O requests must be aligned with
-    /// the logical block size. Additionally, [`CacheFile`] requires I/O size must be a multipler of
-    /// `options.block_size` (which is required to be a multipler of the file system block size).
+    /// the logical block size. Additionally, [`CacheFile`] requires I/O size must be a multiple of
+    /// `options.block_size` (which is required to be a multiple of the file system block size).
     /// With this restriction, blocks can be directly reclaimed by the file system after hole
     /// punching.
     pub async fn open(path: impl AsRef<Path>, options: CacheFileOptions) -> Result<Self> {

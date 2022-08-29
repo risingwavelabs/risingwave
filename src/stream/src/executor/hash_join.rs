@@ -25,7 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -38,6 +38,7 @@ use super::{
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
+/// Limit number of the cached entries (one per join key) on each side
 pub const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -388,8 +389,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        mut state_table_l: RowBasedStateTable<S>,
-        mut state_table_r: RowBasedStateTable<S>,
+        mut state_table_l: StateTable<S>,
+        mut state_table_r: StateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -584,6 +585,26 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             .update_vnode_bitmap(vnode_bitmap.clone());
                         self.side_r.ht.state_table.update_vnode_bitmap(vnode_bitmap);
                     }
+
+                    // Report metrics of cached join rows/entries
+                    let cached_rows_l: usize = self.side_l.ht.values().map(|e| e.size()).sum();
+                    let cached_rows_r: usize = self.side_r.ht.values().map(|e| e.size()).sum();
+                    self.metrics
+                        .join_cached_rows
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .set(cached_rows_l as i64);
+                    self.metrics
+                        .join_cached_rows
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .set(cached_rows_r as i64);
+                    self.metrics
+                        .join_cached_entries
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .set(self.side_l.ht.len() as i64);
+                    self.metrics
+                        .join_cached_entries
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .set(self.side_r.ht.len() as i64);
 
                     yield Message::Barrier(barrier);
                 }
@@ -830,10 +851,7 @@ mod tests {
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
-    ) -> (
-        RowBasedStateTable<MemoryStateStore>,
-        RowBasedStateTable<MemoryStateStore>,
-    ) {
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();
 
         // The last column is for degree.
@@ -842,14 +860,14 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table_l = RowBasedStateTable::new_without_distribution(
+        let state_table_l = StateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(0),
             column_descs.clone(),
             order_types.to_vec(),
             pk_indices.to_vec(),
         );
-        let state_table_r = RowBasedStateTable::new_without_distribution(
+        let state_table_r = StateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             column_descs,

@@ -102,6 +102,9 @@ pub struct StreamingConfig {
 
     #[serde(default = "default::worker_node_parallelism")]
     pub worker_node_parallelism: usize,
+
+    #[serde(default)]
+    pub actor_runtime_worker_threads_num: Option<usize>,
 }
 
 impl Default for StreamingConfig {

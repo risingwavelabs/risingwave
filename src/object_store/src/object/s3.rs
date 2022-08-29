@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
 use std::sync::Arc;
 
-use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Endpoint, Region};
 use fail::fail_point;
@@ -116,7 +117,7 @@ impl S3StreamingUploader {
         self.join_handles.push(tokio::spawn(async move {
             let timer = metrics
                 .operation_latency
-                .with_label_values(&["s3_upload_part"])
+                .with_label_values(&["s3", "s3_upload_part"])
                 .start_timer();
             let upload_output = client_cloned
                 .upload_part()
@@ -392,6 +393,44 @@ impl ObjectStore for S3ObjectStore {
         Ok(())
     }
 
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    ///
+    /// Uses AWS' DeleteObjects API. See [AWS Docs](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html) for more details.
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        // AWS restricts the number of objects per request to 1000.
+        const MAX_LEN: usize = 1000;
+
+        // If needed, split given set into subsets of size with no more than `MAX_LEN` objects.
+        for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
+            let end_idx /* exclusive */ = cmp::min(paths.len(), start_idx + MAX_LEN);
+            let slice = &paths[start_idx..end_idx];
+
+            // Create identifiers from paths.
+            let mut obj_ids = Vec::with_capacity(slice.len());
+            for path in slice {
+                obj_ids.push(ObjectIdentifier::builder().key(path).build());
+            }
+
+            // Build and submit request to delete objects.
+            let delete_builder = Delete::builder().set_objects(Some(obj_ids));
+            let delete_output = self
+                .client
+                .delete_objects()
+                .bucket(&self.bucket)
+                .delete(delete_builder.build())
+                .send()
+                .await?;
+
+            // Check if there were errors.
+            if let Some(err_list) = delete_output.errors() && !err_list.is_empty() {
+                return Err(ObjectError::internal(format!("DeleteObjects request returned exception for some objects: {:?}", err_list)));
+            }
+        }
+
+        Ok(())
+    }
+
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         let mut ret: Vec<ObjectMetadata> = vec![];
         let mut next_continuation_token = None;
@@ -430,6 +469,10 @@ impl ObjectStore for S3ObjectStore {
             }
         }
         Ok(ret)
+    }
+
+    fn store_media_type(&self) -> &'static str {
+        "s3"
     }
 }
 

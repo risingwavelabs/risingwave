@@ -1,7 +1,10 @@
 query TTTI rowsort
 select * from nexmark_q3;
 ----
-vicky noris  boise        ca     1001
-vicky noris  boise        ca     1007
-vicky noris  boise        ca     1019
-peter noris  los angeles  or     1004
+vicky noris boise   ca 1021
+vicky noris boise   ca 1011
+vicky noris boise   ca 1025
+vicky noris boise   ca 1002
+vicky noris boise   ca 1007
+peter jones seattle or 1026
+vicky noris boise   ca 1023

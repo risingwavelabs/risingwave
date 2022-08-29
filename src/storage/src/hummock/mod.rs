@@ -14,7 +14,6 @@
 
 //! Hummock is the state store of the streaming system.
 
-use std::fmt;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -50,11 +49,12 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod store;
 pub mod vacuum;
 pub mod value;
 
 pub use error::*;
-pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
+pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
@@ -89,6 +89,9 @@ pub struct HummockStorage {
     compaction_group_client: Arc<dyn CompactionGroupClient>,
 
     sstable_id_manager: SstableIdManagerRef,
+
+    #[cfg(not(madsim))]
+    tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
 impl HummockStorage {
@@ -148,6 +151,8 @@ impl HummockStorage {
             stats,
             compaction_group_client,
             sstable_id_manager,
+            #[cfg(not(madsim))]
+            tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
         Ok(instance)
     }
@@ -160,11 +165,6 @@ impl HummockStorage {
         check_bloom_filter: bool,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
-        if check_bloom_filter && sstable.value().surely_not_have_user_key(key) {
-            stats.bloom_filter_true_negative_count += 1;
-            return Ok(None);
-        }
-
         if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), key, stats) {
             return Ok(None);
         }
@@ -231,11 +231,5 @@ impl HummockStorage {
         }
 
         !surely_not_have
-    }
-}
-
-impl fmt::Debug for HummockStorage {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
     }
 }

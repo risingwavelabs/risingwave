@@ -131,9 +131,10 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     // table source node
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            table_id: 1,
+            source_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
+            state_table_id: 1,
         })),
         stream_key: vec![2],
         ..Default::default()
@@ -144,6 +145,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Source as i32,
         is_singleton: false,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -216,6 +218,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Others as i32,
         is_singleton: false,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     // exchange node
@@ -303,6 +306,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_type: FragmentType::Sink as i32,
         is_singleton: true,
         table_ids_cnt: 0,
+        upstream_table_ids: vec![],
     });
 
     fragments

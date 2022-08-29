@@ -57,6 +57,7 @@ pub struct DatabaseManager<S: MetaStore> {
     /// Cached index key information.
     indexes: HashSet<IndexKey>,
     /// Relation refer count mapping.
+    // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
     relation_ref_count: HashMap<RelationId, usize>,
 
     // In-progress creation tracker
@@ -100,7 +101,10 @@ where
         );
         let tables = HashSet::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
-                relation_ref_count.entry(*depend_relation_id).or_insert(0);
+                relation_ref_count
+                    .entry(*depend_relation_id)
+                    .and_modify(|e| *e += 1)
+                    .or_insert(1);
             }
             (table.database_id, table.schema_id, table.name)
         }));

@@ -28,7 +28,7 @@ num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
 pin-project = "1"
-postgres-types = { version = "0.2", features = ["derive","with-chrono-0_4"] }
+postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
 prometheus = { version = "0.13" }
 prost = "0.11"
 rand = "0.8"
@@ -44,10 +44,12 @@ thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
 toml = "0.5"
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 twox-hash = "1"
 url = "2"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]

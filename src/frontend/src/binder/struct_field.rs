@@ -43,9 +43,9 @@ impl Binder {
             // The reason is that in pgsql, if table name v3 have a column name v3, which
             // has a field name v3. `SELECT (v3).v3 FROM v3` will return the field value instead
             // of column value.
-            Expr::Identifier(ident) => match self.context.indexs_of.get(&ident.real_value()) {
-                Some(indexs) => {
-                    if indexs.len() == 1 {
+            Expr::Identifier(ident) => match self.context.indices_of.get(&ident.real_value()) {
+                Some(indices) => {
+                    if indices.len() == 1 {
                         (Some((None, ident.real_value())), ids)
                     } else {
                         // When there are multiple tables having the same column, the table name

@@ -9,9 +9,9 @@
       LogicalFilter { predicate: (t1.v1 = t2.v3) AND (t1.v1 = t3.v5) }
         LogicalJoin { type: Inner, on: true, output: all }
           LogicalJoin { type: Inner, on: true, output: all }
-            LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
-            LogicalScan { table: t2, columns: [t2._row_id, t2.v3, t2.v4] }
-          LogicalScan { table: t3, columns: [t3._row_id, t3.v5, t3.v6] }
+            LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+            LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+          LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, t3._row_id] }
       StreamExchange { dist: HashShard(t1._row_id, t2._row_id, t3._row_id) }
@@ -30,8 +30,8 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v1] }
       LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
-        LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
-        LogicalScan { table: t, columns: [t._row_id, t.v1, t.v2] }
+        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [t1v1, t2v1, t._row_id(hidden), t._row_id#1(hidden)], pk_columns: [t._row_id, t._row_id#1] }
       StreamExchange { dist: HashShard(t._row_id, t._row_id) }
@@ -274,10 +274,10 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t3.v2] }
       LogicalJoin { type: Inner, on: true, output: all }
-        LogicalScan { table: t3, columns: [t3._row_id, t3.v2] }
+        LogicalScan { table: t3, columns: [t3.v2, t3._row_id] }
         LogicalJoin { type: Inner, on: (t1.v1 = t2.v1), output: all }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.v1] }
-          LogicalScan { table: t2, columns: [t2._row_id, t2.v1] }
+          LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
+          LogicalScan { table: t2, columns: [t2.v1, t2._row_id] }
 - sql: |
     /* Ensure correct binding of join with ON clause */
     create table t1(v1 varchar);
@@ -287,10 +287,10 @@
   logical_plan: |
     LogicalProject { exprs: [t3.v3, t1.v1, t2.v2] }
       LogicalJoin { type: Inner, on: true, output: all }
-        LogicalScan { table: t3, columns: [t3._row_id, t3.v3] }
+        LogicalScan { table: t3, columns: [t3.v3, t3._row_id] }
         LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.v1] }
-          LogicalScan { table: t2, columns: [t2._row_id, t2.v2] }
+          LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
+          LogicalScan { table: t2, columns: [t2.v2, t2._row_id] }
 - sql: |
     /* Ensure correct binding with USING clause with left outer join */
     create table t1(v1 varchar);
@@ -300,10 +300,10 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t3.v2] }
       LogicalJoin { type: Inner, on: true, output: all }
-        LogicalScan { table: t3, columns: [t3._row_id, t3.v2] }
+        LogicalScan { table: t3, columns: [t3.v2, t3._row_id] }
         LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1), output: all }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.v1] }
-          LogicalScan { table: t2, columns: [t2._row_id, t2.v1] }
+          LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
+          LogicalScan { table: t2, columns: [t2.v1, t2._row_id] }
 - sql: |
     /* Ensure correct binding with ON clause with left outer join */
     create table t1(v1 varchar);
@@ -313,10 +313,10 @@
   logical_plan: |
     LogicalProject { exprs: [t3.v3, t1.v1, t2.v2] }
       LogicalJoin { type: Inner, on: true, output: all }
-        LogicalScan { table: t3, columns: [t3._row_id, t3.v3] }
+        LogicalScan { table: t3, columns: [t3.v3, t3._row_id] }
         LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v2), output: all }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.v1] }
-          LogicalScan { table: t2, columns: [t2._row_id, t2.v2] }
+          LogicalScan { table: t1, columns: [t1.v1, t1._row_id] }
+          LogicalScan { table: t2, columns: [t2.v2, t2._row_id] }
 - sql: |
     /* Ensure that ON clause cannot reference correlated columns */
     create table a(a1 int);
@@ -328,8 +328,9 @@
     create table a(a1 int);
     create table b(b1 int);
     select * from a join lateral (select * from b where a1 = b1);
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported,
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
+  binder_error: |-
+    Feature is not yet implemented: lateral subqueries are not yet supported
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -340,9 +341,9 @@
     LogicalProject { exprs: [a.x, c.y] }
       LogicalJoin { type: Inner, on: true, output: all }
         LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
-          LogicalScan { table: a, columns: [a._row_id, a.x] }
-          LogicalScan { table: b, columns: [b._row_id, b.x] }
-        LogicalScan { table: c, columns: [c._row_id, c.y] }
+          LogicalScan { table: a, columns: [a.x, a._row_id] }
+          LogicalScan { table: b, columns: [b.x, b._row_id] }
+        LogicalScan { table: c, columns: [c.y, c._row_id] }
 - sql: |
     /* Ensure that natural joins can disambiguate columns */
     create table a(x int);
@@ -351,8 +352,8 @@
   logical_plan: |
     LogicalProject { exprs: [a.x, a.x, b.x] }
       LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
-        LogicalScan { table: a, columns: [a._row_id, a.x] }
-        LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: a, columns: [a.x, a._row_id] }
+        LogicalScan { table: b, columns: [b.x, b._row_id] }
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -363,9 +364,9 @@
     LogicalProject { exprs: [a.x, c.y] }
       LogicalJoin { type: Inner, on: true, output: all }
         LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
-          LogicalScan { table: a, columns: [a._row_id, a.x] }
-          LogicalScan { table: b, columns: [b._row_id, b.x] }
-        LogicalScan { table: c, columns: [c._row_id, c.y] }
+          LogicalScan { table: a, columns: [a.x, a._row_id] }
+          LogicalScan { table: b, columns: [b.x, b._row_id] }
+        LogicalScan { table: c, columns: [c.y, c._row_id] }
 - sql: |
     /* Ensure that natural joins can disambiguate columns */
     create table a(x int);
@@ -374,8 +375,8 @@
   logical_plan: |
     LogicalProject { exprs: [a.x, a.x, b.x] }
       LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
-        LogicalScan { table: a, columns: [a._row_id, a.x] }
-        LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: a, columns: [a.x, a._row_id] }
+        LogicalScan { table: b, columns: [b.x, b._row_id] }
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -386,9 +387,9 @@
     LogicalProject { exprs: [a.x, c.y] }
       LogicalJoin { type: Inner, on: true, output: all }
         LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
-          LogicalScan { table: a, columns: [a._row_id, a.x] }
-          LogicalScan { table: b, columns: [b._row_id, b.x] }
-        LogicalScan { table: c, columns: [c._row_id, c.y] }
+          LogicalScan { table: a, columns: [a.x, a._row_id] }
+          LogicalScan { table: b, columns: [b.x, b._row_id] }
+        LogicalScan { table: c, columns: [c.y, c._row_id] }
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -397,8 +398,8 @@
   logical_plan: |
     LogicalProject { exprs: [a.x] }
       LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
-        LogicalScan { table: a, columns: [a._row_id, a.x] }
-        LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: a, columns: [a.x, a._row_id] }
+        LogicalScan { table: b, columns: [b.x, b._row_id] }
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -407,8 +408,8 @@
   logical_plan: |
     LogicalProject { exprs: [a.x] }
       LogicalJoin { type: LeftOuter, on: (a.x = b.x), output: all }
-        LogicalScan { table: a, columns: [a._row_id, a.x] }
-        LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: a, columns: [a.x, a._row_id] }
+        LogicalScan { table: b, columns: [b.x, b._row_id] }
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -417,8 +418,8 @@
   logical_plan: |
     LogicalProject { exprs: [b.x, a.x, b.x] }
       LogicalJoin { type: RightOuter, on: (a.x = b.x), output: all }
-        LogicalScan { table: a, columns: [a._row_id, a.x] }
-        LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: a, columns: [a.x, a._row_id] }
+        LogicalScan { table: b, columns: [b.x, b._row_id] }
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -427,8 +428,8 @@
   logical_plan: |
     LogicalProject { exprs: [Coalesce(a.x, b.x), a.x, b.x] }
       LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
-        LogicalScan { table: a, columns: [a._row_id, a.x] }
-        LogicalScan { table: b, columns: [b._row_id, b.x] }
+        LogicalScan { table: a, columns: [a.x, a._row_id] }
+        LogicalScan { table: b, columns: [b.x, b._row_id] }
 - sql: |
     /* Ensure that nested natural joins bind and disambiguate columns */
     create table a(x int, y int);
@@ -439,9 +440,9 @@
     LogicalProject { exprs: [a.x, a.x, b.x, c.x] }
       LogicalJoin { type: Inner, on: (a.x = c.x), output: all }
         LogicalJoin { type: Inner, on: (a.x = b.x), output: all }
-          LogicalScan { table: a, columns: [a._row_id, a.x, a.y] }
-          LogicalScan { table: b, columns: [b._row_id, b.x, b.z] }
-        LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
+          LogicalScan { table: a, columns: [a.x, a.y, a._row_id] }
+          LogicalScan { table: b, columns: [b.x, b.z, b._row_id] }
+        LogicalScan { table: c, columns: [c.x, c.a, c._row_id] }
 - sql: |
     /* Ensure that nested natural joins bind and disambiguate columns */
     create table a(x int, y int);
@@ -452,9 +453,9 @@
     LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
       LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: all }
         LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
-          LogicalScan { table: a, columns: [a._row_id, a.x, a.y] }
-          LogicalScan { table: b, columns: [b._row_id, b.x, b.z] }
-        LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
+          LogicalScan { table: a, columns: [a.x, a.y, a._row_id] }
+          LogicalScan { table: b, columns: [b.x, b.z, b._row_id] }
+        LogicalScan { table: c, columns: [c.x, c.a, c._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
       LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: [a.x, b.x, c.x] }
@@ -474,9 +475,9 @@
     LogicalProject { exprs: [Coalesce(a.a, c.a), Coalesce(b.x, c.x), a.a, c.a, b.x, c.x] }
       LogicalJoin { type: FullOuter, on: (a.a = c.a) AND (b.x = c.x), output: all }
         LogicalJoin { type: FullOuter, on: true, output: all }
-          LogicalScan { table: a, columns: [a._row_id, a.a, a.y] }
-          LogicalScan { table: b, columns: [b._row_id, b.x, b.z] }
-        LogicalScan { table: c, columns: [c._row_id, c.x, c.a] }
+          LogicalScan { table: a, columns: [a.a, a.y, a._row_id] }
+          LogicalScan { table: b, columns: [b.x, b.z, b._row_id] }
+        LogicalScan { table: c, columns: [c.x, c.a, c._row_id] }
 - sql: |
     /* Ensure error on non-existent USING col */
     create table t1(v1 int, v2 int);
@@ -502,11 +503,11 @@
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
       LogicalJoin { type: FullOuter, on: (t1.v2 = t3.v6) AND (t2.v4 = t4.v8), output: all }
         LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
-          LogicalScan { table: t1, columns: [t1._row_id, t1.v1, t1.v2] }
-          LogicalScan { table: t2, columns: [t2._row_id, t2.v3, t2.v4] }
+          LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+          LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
         LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
-          LogicalScan { table: t3, columns: [t3._row_id, t3.v5, t3.v6] }
-          LogicalScan { table: t4, columns: [t4._row_id, t4.v7, t4.v8] }
+          LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
+          LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
 - sql: |
     /* Ensure that we can correctly bind nested joins with ambiguous column names */
     create table t1(x int);
@@ -516,10 +517,10 @@
   logical_plan: |
     LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x), Coalesce(t1.x, t2.x, t3.x), t1.x, t2.x, t3.x] }
       LogicalJoin { type: FullOuter, on: (t1.x = Coalesce(t2.x, t3.x)), output: all }
-        LogicalScan { table: t1, columns: [t1._row_id, t1.x] }
+        LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
         LogicalJoin { type: FullOuter, on: (t2.x = t3.x), output: all }
-          LogicalScan { table: t2, columns: [t2._row_id, t2.x] }
-          LogicalScan { table: t3, columns: [t3._row_id, t3.x] }
+          LogicalScan { table: t2, columns: [t2.x, t2._row_id] }
+          LogicalScan { table: t3, columns: [t3.x, t3._row_id] }
 - sql: |
     /* Ensure that non-trivial ambiguous references can be resolved */
     create table a(x int);
@@ -530,8 +531,8 @@
       LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
         LogicalFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
           LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
-            LogicalScan { table: a, columns: [a._row_id, a.x] }
-            LogicalScan { table: b, columns: [b._row_id, b.x] }
+            LogicalScan { table: a, columns: [a.x, a._row_id] }
+            LogicalScan { table: b, columns: [b.x, b._row_id] }
   batch_plan: |
     BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
       BatchExchange { order: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) ASC], dist: Single }
@@ -562,8 +563,8 @@
       LogicalProject { exprs: [test.a, test.b, test2.c, test.a] }
         LogicalFilter { predicate: (test.a = test2.a) AND (test.b <> test2.c) }
           LogicalJoin { type: Inner, on: true, output: all }
-            LogicalScan { table: test, columns: [test._row_id, test.a, test.b] }
-            LogicalScan { table: test2, columns: [test2._row_id, test2.a, test2.c] }
+            LogicalScan { table: test, columns: [test.a, test.b, test._row_id] }
+            LogicalScan { table: test2, columns: [test2.a, test2.c, test2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (test.a = test2.a) AND (test.b <> test2.c), output: [test.a, test.b, test2.c, test.a] }
       LogicalScan { table: test, columns: [test.a, test.b] }

@@ -29,6 +29,7 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
@@ -81,7 +82,7 @@ struct ScheduledBarriers {
 /// Since the checkpoints might be concurrent, the meta store of table fragments is only updated
 /// after the command is committed. When resolving the actor info for those commands after this
 /// command, this command might be in-flight and the changes are not yet committed, so we need to
-/// record these uncommited changes and assume they will be eventually successful.
+/// record these uncommitted changes and assume they will be eventually successful.
 ///
 /// See also [`CheckpointControl::can_actor_send_or_collect`].
 #[derive(Debug, Clone)]
@@ -239,7 +240,7 @@ struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order.
     command_ctx_queue: VecDeque<EpochNode<S>>,
 
-    // Below for uncommited changes for the inflight barriers.
+    // Below for uncommitted changes for the inflight barriers.
     /// In addition to the actors with status `Running`. The barrier needs to send or collect the
     /// actors of these tables.
     creating_tables: HashSet<TableId>,
@@ -329,7 +330,7 @@ where
             CommandChanges::CreateTable(table) => {
                 assert!(
                     !self.dropping_tables.contains(&table),
-                    "confict table in concurrent checkpoint"
+                    "conflict table in concurrent checkpoint"
                 );
                 assert!(
                     self.creating_tables.insert(table),
@@ -357,7 +358,7 @@ where
             CommandChanges::DropTable(table) => {
                 assert!(
                     !self.creating_tables.contains(&table),
-                    "confict table in concurrent checkpoint"
+                    "conflict table in concurrent checkpoint"
                 );
                 assert!(
                     self.dropping_tables.insert(table),
@@ -527,7 +528,9 @@ enum BarrierEpochState {
     /// This barrier is current in-flight on the stream graph of compute nodes.
     InFlight,
 
-    /// This barrier is completed or failed. Whether this barrier can do checkpoint
+    /// This barrier is completed or failed. We use a bool to mark if this barrier needs to do
+    /// checkpoint, If it is false, we will just use `update_current_epoch` instead of
+    /// `commit_epoch`
     Completed((Vec<BarrierCompleteResponse>, bool)),
 }
 
@@ -572,7 +575,7 @@ where
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self, checkpoint: bool) -> MetaResult<u64> {
+    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockSnapshot> {
         let start = Instant::now();
 
         debug!("start barrier flush");
@@ -581,8 +584,8 @@ where
         let elapsed = Instant::now().duration_since(start);
         debug!("barrier flushed in {:?}", elapsed);
 
-        let max_committed_epoch = self.hummock_manager.get_last_epoch()?.epoch;
-        Ok(max_committed_epoch)
+        let snapshot = self.hummock_manager.get_last_epoch()?;
+        Ok(snapshot)
     }
 
     pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {
@@ -975,6 +978,10 @@ where
                             .into_iter()
                             .for_each(Notifier::notify_finished);
                     }
+                } else if prev_epoch != INVALID_EPOCH {
+                    self.hummock_manager
+                        .update_current_epoch(prev_epoch)
+                        .await?;
                 }
                 node.timer.take().unwrap().observe_duration();
                 node.wait_commit_timer.take().unwrap().observe_duration();

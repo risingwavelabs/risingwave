@@ -227,7 +227,7 @@ impl FunctionCall {
         }
     }
 
-    /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbirary
+    /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbitrary
     /// expressions, like `ROW(1)::STRUCT<i INTEGER>` to `STRUCT<VARCHAR>`, although an integer
     /// is castible to VARCHAR. It's to simply the casting rules.
     fn cast_nested(expr: ExprImpl, target_type: DataType, allows: CastContext) -> Result<ExprImpl> {

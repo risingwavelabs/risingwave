@@ -107,22 +107,17 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_index(&mut self, obj: Expr, indexs: Vec<Expr>) -> Result<ExprImpl> {
+    pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr(obj)?;
         match obj.return_type() {
             DataType::List {
                 datatype: return_type,
-            } => {
-                let mut indexs = indexs
-                    .into_iter()
-                    .map(|e| self.bind_expr(e))
-                    .collect::<Result<Vec<ExprImpl>>>()?;
-                indexs.insert(0, obj);
-
-                let expr: ExprImpl =
-                    FunctionCall::new_unchecked(ExprType::ArrayAccess, indexs, *return_type).into();
-                Ok(expr)
-            }
+            } => Ok(FunctionCall::new_unchecked(
+                ExprType::ArrayAccess,
+                vec![obj, self.bind_expr(index)?],
+                *return_type,
+            )
+            .into()),
             data_type => Err(ErrorCode::BindError(format!(
                 "array index applied to type {}, which is not a composite type",
                 data_type

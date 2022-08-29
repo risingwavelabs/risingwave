@@ -229,7 +229,7 @@ impl Parser {
 
         match self.next_token() {
             Token::Word(w) if self.peek_token() == Token::Period => {
-                // Since there's no parentesis, `w` must be a column or a table
+                // Since there's no parenthesis, `w` must be a column or a table
                 // So what follows must be dot-delimited identifiers, e.g. `a.b.c.*`
                 let wildcard_expr = self.parse_simple_wildcard_expr(index)?;
                 return self.word_concat_wildcard_expr(w.to_ident(), wildcard_expr);
@@ -242,7 +242,7 @@ impl Parser {
             Token::LParen => {
                 let mut expr = self.parse_expr()?;
                 if self.consume_token(&Token::RParen) {
-                    // Cast off nested expression to avoid interface by parentesis.
+                    // Cast off nested expression to avoid interface by parenthesis.
                     while let Expr::Nested(expr1) = expr {
                         expr = *expr1;
                     }
@@ -493,14 +493,6 @@ impl Parser {
                     Ok(expr)
                 }
             }
-
-            Token::LBrace => {
-                self.prev_token();
-                Ok(Expr::Array(self.parse_token_wrapped_exprs(
-                    &Token::LBrace,
-                    &Token::RBrace,
-                )?))
-            }
             unexpected => self.expected("an expression:", unexpected),
         }?;
 
@@ -518,7 +510,7 @@ impl Parser {
     pub fn parse_struct_selection(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         if let Expr::Nested(compound_expr) = expr.clone() {
             let mut nested_expr = *compound_expr;
-            // Cast off nested expression to avoid interface by parentesis.
+            // Cast off nested expression to avoid interface by parenthesis.
             while let Expr::Nested(expr1) = nested_expr {
                 nested_expr = *expr1;
             }
@@ -934,7 +926,7 @@ impl Parser {
         // of the duration specified in the string literal.
         //
         // Note that PostgreSQL allows omitting the qualifier, so we provide
-        // this more general implemenation.
+        // this more general implementation.
         let leading_field = match self.peek_token() {
             Token::Word(kw)
                 if [
@@ -1101,18 +1093,21 @@ impl Parser {
     }
 
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let index = self.parse_expr()?;
+        let index = Box::new(self.parse_expr()?);
         self.expect_token(&Token::RBracket)?;
-        let mut indexs: Vec<Expr> = vec![index];
-        while self.consume_token(&Token::LBracket) {
-            let index = self.parse_expr()?;
-            self.expect_token(&Token::RBracket)?;
-            indexs.push(index);
-        }
-        Ok(Expr::ArrayIndex {
+
+        // Create ArrayIndex
+        let array_index = Expr::ArrayIndex {
             obj: Box::new(expr),
-            indexs,
-        })
+            index,
+        };
+
+        // Return ArrayIndex Expr after after recursively checking for more indices
+        if self.consume_token(&Token::LBracket) {
+            self.parse_array_index(array_index)
+        } else {
+            Ok(array_index)
+        }
     }
 
     /// Parses the parens following the `[ NOT ] IN` operator
@@ -2357,23 +2352,71 @@ impl Parser {
         })
     }
 
+    pub fn parse_optional_boolean(&mut self, default: bool) -> bool {
+        if let Some(keyword) = self.parse_one_of_keywords(&[Keyword::TRUE, Keyword::FALSE]) {
+            match keyword {
+                Keyword::TRUE => true,
+                Keyword::FALSE => false,
+                _ => unreachable!(),
+            }
+        } else {
+            default
+        }
+    }
+
     pub fn parse_explain(&mut self, describe_alias: bool) -> Result<Statement, ParserError> {
+        let mut options = ExplainOptions::default();
+        let parse_explain_option = |parser: &mut Parser| -> Result<(), ParserError> {
+            while let Some(keyword) = parser.parse_one_of_keywords(&[
+                Keyword::VERBOSE,
+                Keyword::TRACE,
+                Keyword::TYPE,
+                Keyword::LOGICAL,
+                Keyword::PHYSICAL,
+                Keyword::DISTSQL,
+            ]) {
+                match keyword {
+                    Keyword::VERBOSE => options.verbose = parser.parse_optional_boolean(true),
+                    Keyword::TRACE => options.trace = parser.parse_optional_boolean(true),
+                    Keyword::TYPE => {
+                        let explain_type = parser.expect_one_of_keywords(&[
+                            Keyword::LOGICAL,
+                            Keyword::PHYSICAL,
+                            Keyword::DISTSQL,
+                        ])?;
+                        match explain_type {
+                            Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
+                            Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
+                            Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                            _ => unreachable!("{}", keyword),
+                        }
+                    }
+                    Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
+                    Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
+                    Keyword::DISTSQL => options.explain_type = ExplainType::DistSQL,
+                    _ => unreachable!("{}", keyword),
+                }
+            }
+            Ok(())
+        };
+
         let analyze = self.parse_keyword(Keyword::ANALYZE);
-        let verbose = self.parse_keyword(Keyword::VERBOSE);
-        let trace = self.parse_keyword(Keyword::TRACE);
+        if self.consume_token(&Token::LParen) {
+            self.parse_comma_separated(parse_explain_option)?;
+            self.expect_token(&Token::RParen)?;
+        }
 
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
             describe_alias,
             analyze,
-            verbose,
-            trace,
             statement: Box::new(statement),
+            options,
         })
     }
 
     /// Parse a query expression, i.e. a `SELECT` statement optionally
-    /// preceeded with some `WITH` CTE declarations and optionally followed
+    /// preceded with some `WITH` CTE declarations and optionally followed
     /// by `ORDER BY`. Unlike some other parse_... methods, this one doesn't
     /// expect the initial keyword to be already consumed
     pub fn parse_query(&mut self) -> Result<Query, ParserError> {

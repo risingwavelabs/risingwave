@@ -37,7 +37,7 @@ macro_rules! gen_eval {
                 )*
 
                 let bitmap = data_chunk.get_visibility_ref();
-                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity());
+                let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {

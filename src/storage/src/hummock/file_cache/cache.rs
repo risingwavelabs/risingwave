@@ -23,6 +23,7 @@ use tokio::sync::Notify;
 use super::buffer::TwoLevelBuffer;
 use super::error::Result;
 use super::meta::SlotId;
+use super::metrics::FileCacheMetricsRef;
 use super::store::{Store, StoreOptions, StoreRef};
 use super::{utils, LRU_SHARD_BITS};
 use crate::hummock::{HashBuilder, TieredCacheEntryHolder, TieredCacheKey, TieredCacheValue};
@@ -132,6 +133,8 @@ where
 
     buffer: TwoLevelBuffer<K, V>,
     buffer_flusher_notifier: Arc<Notify>,
+
+    metrics: FileCacheMetricsRef,
 }
 
 impl<K, V, S> Clone for FileCache<K, V, S>
@@ -147,6 +150,7 @@ where
             store: self.store.clone(),
             buffer: self.buffer.clone(),
             buffer_flusher_notifier: self.buffer_flusher_notifier.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 }
@@ -156,9 +160,9 @@ where
     K: TieredCacheKey,
     V: TieredCacheValue,
 {
-    pub async fn open(options: FileCacheOptions) -> Result<Self> {
+    pub async fn open(options: FileCacheOptions, metrics: FileCacheMetricsRef) -> Result<Self> {
         let hash_builder = RandomState::new();
-        Self::open_with_hasher(options, hash_builder).await
+        Self::open_with_hasher(options, hash_builder, metrics).await
     }
 }
 
@@ -168,7 +172,11 @@ where
     V: TieredCacheValue,
     S: HashBuilder,
 {
-    pub async fn open_with_hasher(options: FileCacheOptions, hash_builder: S) -> Result<Self> {
+    pub async fn open_with_hasher(
+        options: FileCacheOptions,
+        hash_builder: S,
+        metrics: FileCacheMetricsRef,
+    ) -> Result<Self> {
         let buffer_capacity = options.total_buffer_capacity / 2;
 
         let store = Store::open(StoreOptions {
@@ -176,6 +184,7 @@ where
             capacity: options.capacity,
             buffer_capacity,
             cache_file_fallocate_unit: options.cache_file_fallocate_unit,
+            metrics: metrics.clone(),
         })
         .await?;
         let store = Arc::new(store);
@@ -216,20 +225,30 @@ where
 
             buffer,
             buffer_flusher_notifier,
+
+            metrics,
         })
     }
 
     pub fn insert(&self, key: K, value: V) -> Result<()> {
+        let timer = self.metrics.insert_latency.start_timer();
+
         let hash = self.hash_builder.hash_one(&key);
         self.buffer.insert(hash, key, value.len(), value);
 
         self.buffer_flusher_notifier.notify_one();
+
+        timer.observe_duration();
+
         Ok(())
     }
 
     pub async fn get(&self, key: &K) -> Result<Option<TieredCacheEntryHolder<K, V>>> {
+        let timer = self.metrics.get_latency.start_timer();
+
         let hash = self.hash_builder.hash_one(key);
         if let Some(holder) = self.buffer.get(hash, key) {
+            timer.observe_duration();
             return Ok(Some(holder));
         }
 
@@ -237,13 +256,21 @@ where
             let slot = *entry.value();
             let raw = self.store.get(slot).await?;
             let value = V::decode(raw);
+
+            timer.observe_duration();
+
             return Ok(Some(TieredCacheEntryHolder::from_owned_value(value)));
         }
+
+        timer.observe_duration();
+        self.metrics.cache_miss_counter.inc();
 
         Ok(None)
     }
 
     pub fn erase(&self, key: &K) -> Result<()> {
+        let timer = self.metrics.erase_latency.start_timer();
+
         let hash = self.hash_builder.hash_one(key);
         self.buffer.erase(hash, key);
 
@@ -252,6 +279,8 @@ where
             self.indices.erase(hash, key);
             self.store.erase(slot).unwrap();
         }
+
+        timer.observe_duration();
 
         Ok(())
     }
@@ -263,9 +292,12 @@ mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 
+    use prometheus::Registry;
+
     use super::super::test_utils::{datasize, key, FlushHolder, ModuloHasherBuilder, TestCacheKey};
     use super::super::utils;
     use super::*;
+    use crate::hummock::file_cache::metrics::FileCacheMetrics;
     use crate::hummock::file_cache::test_utils::TestCacheValue;
 
     const SHARDS: usize = 1 << LRU_SHARD_BITS;
@@ -311,9 +343,13 @@ mod tests {
 
             flush_buffer_hooks,
         };
-        FileCache::open_with_hasher(options, ModuloHasherBuilder)
-            .await
-            .unwrap()
+        FileCache::open_with_hasher(
+            options,
+            ModuloHasherBuilder,
+            Arc::new(FileCacheMetrics::new(Registry::new())),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]

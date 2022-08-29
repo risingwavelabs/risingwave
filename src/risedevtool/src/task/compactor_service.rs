@@ -44,7 +44,7 @@ impl CompactorService {
         }
     }
 
-    /// Apply command args accroding to config
+    /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
@@ -53,6 +53,8 @@ impl CompactorService {
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
+            .arg("--client-address")
+            .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")
             .arg("--max-concurrent-task-number")
@@ -97,6 +99,15 @@ impl Task for CompactorService {
                 Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
             );
         }
+
+        if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
+            // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            cmd.env(
+                "_RJEM_MALLOC_CONF",
+                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compactor",
+            );
+        }
+
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;

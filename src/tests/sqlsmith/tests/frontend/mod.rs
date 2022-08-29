@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::sync::Arc;
-use std::{env, panic};
 
 use itertools::Itertools;
-use libtest_mimic::{run_tests, Arguments, Outcome, Test};
+use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -26,6 +26,9 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
 };
+use tokio::runtime::Runtime;
+
+type Result<T> = std::result::Result<T, Failed>;
 
 /// Environment for Sqlsmith to generate and test queries
 pub struct SqlsmithEnv {
@@ -35,15 +38,16 @@ pub struct SqlsmithEnv {
 }
 
 lazy_static::lazy_static! {
-    static ref SQLSMITH_ENV: SqlsmithEnv = setup_sqlsmith_with_seed(0);
+    static ref SQLSMITH_ENV: SqlsmithEnv = setup_sqlsmith_with_seed(0).unwrap();
 }
 
 /// Executes sql queries, prints recoverable errors.
 /// Panic recovery happens separately.
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) {
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<()> {
     handler::handle(session.clone(), stmt, sql, false)
         .await
-        .unwrap_or_else(|e| panic!("Error Reason:\n{}", e));
+        .map(|_| ())
+        .map_err(|e| format!("Error Reason:\n{}", e).into())
 }
 
 fn get_seed_table_sql() -> String {
@@ -57,7 +61,7 @@ fn get_seed_table_sql() -> String {
 /// Prints failing queries and their setup code.
 /// NOTE: This depends on convention of test suites
 /// not writing to stderr, unless the test fails.
-/// (This applies to nexmark).
+/// (This applies to nextest).
 fn reproduce_failing_queries(setup: &str, failing: &str) {
     eprintln!(
         "
@@ -76,7 +80,10 @@ fn reproduce_failing_queries(setup: &str, failing: &str) {
 }
 
 /// Create the tables defined in testdata.
-async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Table>, String) {
+async fn create_tables(
+    session: Arc<SessionImpl>,
+    rng: &mut impl Rng,
+) -> Result<(Vec<Table>, String)> {
     let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql();
     setup_sql.push_str(&sql);
@@ -89,7 +96,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
 
     for s in statements.into_iter() {
         let create_sql = s.to_string();
-        handle(session.clone(), s, &create_sql).await;
+        handle(session.clone(), s, &create_sql).await?;
     }
 
     // Generate some mviews
@@ -98,10 +105,10 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
         setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        handle(session.clone(), stmt, &sql).await;
+        handle(session.clone(), stmt, &sql).await?;
         tables.push(table);
     }
-    (tables, setup_sql)
+    Ok((tables, setup_sql))
 }
 
 async fn test_stream_query(
@@ -109,7 +116,7 @@ async fn test_stream_query(
     tables: Vec<Table>,
     seed: u64,
     setup_sql: &str,
-) {
+) -> Result<()> {
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
         rng = SmallRng::from_entropy();
@@ -122,15 +129,21 @@ async fn test_stream_query(
     // The generated SQL must be parsable.
     let statements = parse_sql(&sql);
     let stmt = statements[0].clone();
-    handle(session.clone(), stmt, &sql).await;
+    handle(session.clone(), stmt, &sql).await?;
 
     let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
     let drop_stmts = parse_sql(&drop_sql);
     let drop_stmt = drop_stmts[0].clone();
-    handle(session.clone(), drop_stmt, &drop_sql).await;
+    handle(session.clone(), drop_stmt, &drop_sql).await?;
+    Ok(())
 }
 
-fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, setup_sql: &str) {
+fn test_batch_query(
+    session: Arc<SessionImpl>,
+    tables: Vec<Table>,
+    seed: u64,
+    setup_sql: &str,
+) -> Result<()> {
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
         rng = SmallRng::from_entropy();
@@ -152,31 +165,35 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
             let mut binder = Binder::new(&session);
             let bound = binder
                 .bind(stmt)
-                .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
+                .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
             let mut planner = Planner::new(context);
-            let logical_plan = planner
-                .plan(bound)
-                .unwrap_or_else(|e| panic!("Failed to generate logical plan:\nReason:\n{}", e));
-            logical_plan
-                .gen_batch_query_plan()
-                .unwrap_or_else(|e| panic!("Failed to generate batch plan:\nReason:\n{}", e));
+            let logical_plan = planner.plan(bound).map_err(|e| {
+                Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e))
+            })?;
+            logical_plan.gen_batch_distributed_plan().map_err(|e| {
+                Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e))
+            })?;
+            Ok(())
         }
-        _ => panic!("Invalid Query: {}", stmt),
+        _ => Err(format!("Invalid Query: {}", stmt).into()),
     }
 }
 
-/// Setup schema, session for sqlsmith query tests to run.
-/// It is synchronous as constrained by the `libtest_mimic` framework.
-fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
-    // tokio runtime is required by frontend to execute query phases.
+fn build_runtime() -> Runtime {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(setup_sqlsmith_with_seed_inner(seed))
 }
 
-async fn setup_sqlsmith_with_seed_inner(seed: u64) -> SqlsmithEnv {
+/// Setup schema, session for sqlsmith query tests to run.
+/// It is synchronous as constrained by the `libtest_mimic` framework.
+/// NOTE: tokio runtime is required by frontend to execute query phases.
+fn setup_sqlsmith_with_seed(seed: u64) -> Result<SqlsmithEnv> {
+    build_runtime().block_on(setup_sqlsmith_with_seed_inner(seed))
+}
+
+async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     let frontend = LocalFrontend::new(FrontendOpts::default()).await;
     let session = frontend.session_ref();
 
@@ -186,12 +203,12 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> SqlsmithEnv {
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
-    let (tables, setup_sql) = create_tables(session.clone(), &mut rng).await;
-    SqlsmithEnv {
+    let (tables, setup_sql) = create_tables(session.clone(), &mut rng).await?;
+    Ok(SqlsmithEnv {
         session,
         tables,
         setup_sql,
-    }
+    })
 }
 
 pub fn run() {
@@ -199,30 +216,21 @@ pub fn run() {
 
     let num_tests = 512;
     let tests = (0..num_tests)
-        .map(|i| Test {
-            name: format!("run_sqlsmith_on_frontend_{}", i),
-            kind: "".into(),
-            is_ignored: false,
-            is_bench: false,
-            data: i,
+        .map(|i| {
+            Trial::test(format!("run_sqlsmith_on_frontend_{}", i), move || {
+                let SqlsmithEnv {
+                    session,
+                    tables,
+                    setup_sql,
+                } = &*SQLSMITH_ENV;
+                test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
+                let test_stream_query =
+                    test_stream_query(session.clone(), tables.clone(), i, setup_sql);
+                build_runtime().block_on(test_stream_query)?;
+                Ok(())
+            })
         })
         .collect();
 
-    run_tests(&args, tests, |test| {
-        let SqlsmithEnv {
-            session,
-            tables,
-            setup_sql,
-        } = &*SQLSMITH_ENV;
-        test_batch_query(session.clone(), tables.clone(), test.data, setup_sql);
-        let test_stream_query =
-            test_stream_query(session.clone(), tables.clone(), test.data, setup_sql);
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(test_stream_query);
-        Outcome::Passed
-    })
-    .exit();
+    libtest_mimic::run(&args, tests).exit();
 }
