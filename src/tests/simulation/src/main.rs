@@ -72,13 +72,12 @@ pub struct Args {
     #[clap(long)]
     kill_node: bool,
 
-    /// Path to the testing data files.
+    /// The number of sqlsmith test cases to generate.
+    ///
+    /// If this argument is set, the `files` argument refers to a directory containing sqlsmith
+    /// test data.
     #[clap(long)]
-    sqlsmith: bool,
-
-    /// The number of test cases to generate.
-    #[clap(long, default_value = "100")]
-    sqlsmith_count: usize,
+    sqlsmith: Option<usize>,
 }
 
 static ARGS: LazyLock<Args> = LazyLock::new(Args::parse);
@@ -197,14 +196,13 @@ async fn main() {
         .ip([192, 168, 100, 1].into())
         .build();
 
-    if args.sqlsmith {
+    if let Some(count) = args.sqlsmith {
         client_node
             .spawn(async move {
                 let i = rand::thread_rng().gen_range(0..frontend_ip.len());
                 let host = frontend_ip[i].clone();
                 let rw = Risingwave::connect(host, "dev".into()).await;
-                risingwave_sqlsmith::runner::run(&rw.client, &args.files, args.sqlsmith_count)
-                    .await;
+                risingwave_sqlsmith::runner::run(&rw.client, &args.files, count).await;
             })
             .await
             .unwrap();
