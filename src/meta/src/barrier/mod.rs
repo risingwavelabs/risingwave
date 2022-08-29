@@ -957,7 +957,7 @@ where
                     resps,
                     CheckpointPost {
                         command_contexts: command_ctx,
-                        collect_notifiers_checkpoint: collect_notifiers_checkpoint,
+                        collect_notifiers_checkpoint,
                         finish_notifiers,
                     },
                 );
