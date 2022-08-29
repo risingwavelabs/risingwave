@@ -160,9 +160,8 @@ mod tests {
     use risingwave_common::array::{
         ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, I64ArrayBuilder,
     };
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
 
-    use crate::expr::{Expression, LiteralExpression};
     use crate::vector_op::agg::aggregator::Aggregator;
     use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 
@@ -186,13 +185,7 @@ mod tests {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let mut agg = ApproxCountDistinct::new(
-            DataType::Int64,
-            0,
-            Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        );
+        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
@@ -212,13 +205,7 @@ mod tests {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let mut agg = ApproxCountDistinct::new(
-            DataType::Int64,
-            0,
-            Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        );
+        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
