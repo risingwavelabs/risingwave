@@ -186,6 +186,10 @@ pub struct StorageConfig {
 
     #[serde(default)]
     pub file_cache: FileCacheConfig,
+
+    /// Whether to enable streaming upload for sstable.
+    #[serde(default = "default::enable_sst_streaming_upload")]
+    pub enable_sst_streaming_upload: bool,
 }
 
 impl Default for StorageConfig {
@@ -353,6 +357,10 @@ mod default {
     pub fn file_cache_cache_file_fallocate_unit() -> usize {
         // 96 MiB
         96 * 1024 * 1024
+    }
+
+    pub fn enable_sst_streaming_upload() -> bool {
+        false
     }
 }
 

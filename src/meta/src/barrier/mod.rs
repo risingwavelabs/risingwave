@@ -285,7 +285,8 @@ where
         }
     }
 
-    /// Whether the barrier(checkpoint = true) should be injected. If true, reset `num_distance_checkpoint`
+    /// Whether the barrier(checkpoint = true) should be injected. If true, reset
+    /// `num_distance_checkpoint`
     fn try_get_checkpoint(&mut self) -> bool {
         if self.num_distance_checkpoint == 0 {
             self.num_distance_checkpoint = self.checkpoint_frequency;
@@ -760,6 +761,7 @@ where
                     // TODO(chi): add distributed tracing
                     span: vec![],
                     checkpoint: command_context.checkpoint,
+                    passed_actors: vec![],
                 };
                 async move {
                     let client = self.env.stream_client_pool().get(node).await?;
@@ -918,19 +920,23 @@ where
                 let command_ctx = node.command_ctx.clone();
 
                 // Notify about collected without checkpoint.
-                notifiers.iter_mut().for_each(Notifier::notify_collected_no_checkpoint);
+                notifiers
+                    .iter_mut()
+                    .for_each(Notifier::notify_collected_no_checkpoint);
                 // Save rx about collected with checkpoint to wait a barrier(checkpoint = true)
                 let collect_notifiers_checkpoint = notifiers
                     .iter_mut()
-                    .map(|notifier| {
-                        notifier.take_collected_checkpoint()
-                    })
+                    .map(|notifier| notifier.take_collected_checkpoint())
                     .collect_vec();
 
                 // Save Notify about finished to wait a barrier(checkpoint = true)
                 let actors_to_finish = command_ctx.actors_to_track();
                 let mut finish_notifiers = vec![];
-                finish_notifiers.push(tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers));
+                finish_notifiers.push(tracker.add(
+                    command_ctx.curr_epoch,
+                    actors_to_finish,
+                    notifiers,
+                ));
 
                 for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
                     if let Some(notifier) = tracker.update(&progress) {
@@ -939,8 +945,11 @@ where
                 }
                 let finish_notifiers = finish_notifiers.into_iter().flatten().collect_vec();
 
-                // If we need to wait for a barrier (checkpoint) to post-process, we will inject checkpoint in next barrier.
-                if (!finish_notifiers.is_empty() || !collect_notifiers_checkpoint.is_empty()) && *checkpoint {
+                // If we need to wait for a barrier (checkpoint) to post-process, we will inject
+                // checkpoint in next barrier.
+                if (!finish_notifiers.is_empty() || !collect_notifiers_checkpoint.is_empty())
+                    && *checkpoint
+                {
                     checkpoint_control.inject_checkpoint_in_next_barrier();
                 }
 
@@ -966,7 +975,7 @@ where
                     }
                     while let Some(CheckpointPost {
                         command_contexts,
-                                       collect_notifiers_checkpoint
+                        collect_notifiers_checkpoint,
                         finish_notifiers,
                     }) = uncommitted_messages.uncommitted_checkpoint_post.pop_back()
                     {

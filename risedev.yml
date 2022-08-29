@@ -26,8 +26,8 @@ risedev:
     # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
-    - use: prometheus
-    - use: grafana
+    # - use: prometheus
+    # - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
@@ -265,18 +265,21 @@ risedev:
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-0}
       enable-async-stack-trace: true
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-1
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-1}
       enable-async-stack-trace: true
+      enable-tiered-cache: true
 
     - use: compute-node
       id: compute-node-2
       listen-address: "0.0.0.0"
       address: ${dns-host:rw-compute-2}
       enable-async-stack-trace: true
+      enable-tiered-cache: true
 
     - use: frontend
       id: frontend-node-0

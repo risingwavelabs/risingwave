@@ -99,7 +99,7 @@ impl CreateMviewProgressTracker {
         ddl_epoch: Epoch,
         actors: impl IntoIterator<Item = ActorId>,
         notifiers: impl IntoIterator<Item = Notifier>,
-    ) -> Vec<Notifier>{
+    ) -> Vec<Notifier> {
         let actors = actors.into_iter().collect_vec();
         if actors.is_empty() {
             // The command can be finished immediately.

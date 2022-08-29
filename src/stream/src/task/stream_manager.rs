@@ -312,6 +312,7 @@ impl LocalStreamManager {
             epoch,
             mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
             checkpoint: true,
+            passed_actors: vec![],
         };
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
