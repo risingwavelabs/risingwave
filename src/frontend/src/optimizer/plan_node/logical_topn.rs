@@ -130,7 +130,7 @@ impl LogicalTopN {
         internal_table_catalog_builder.build(dist_keys, self.base.append_only)
     }
 
-    fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+    fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input_dist = stream_input.distribution().clone();
 
         let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
@@ -302,7 +302,7 @@ impl ToStream for LogicalTopN {
                 "Doesn't support OFFSET without LIMIT".to_string(),
             )));
         }
-        let stream_top_n = self.gen_dist_stream_agg_plan(self.input().to_stream()?)?;
+        let stream_top_n = self.gen_dist_stream_top_n_plan(self.input().to_stream()?)?;
         Ok(stream_top_n)
     }
 
