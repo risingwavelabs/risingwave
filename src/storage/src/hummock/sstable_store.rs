@@ -364,7 +364,7 @@ impl SstableStore {
         Ok(())
     }
 
-    /// Returns a [BlockHolder] of the specified block if it is stored in cache, otherwise `None`.
+    /// Returns a [`BlockHolder`] of the specified block if it is stored in cache, otherwise `None`.
     pub async fn get_from_cache(
         &self,
         sst: &Sstable,

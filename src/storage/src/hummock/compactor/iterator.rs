@@ -158,8 +158,8 @@ impl SstableStreamIterator {
     // BlockStream follows a different approach. After new(), we do not seek, instead next()
     // returns the first value.
 
-    /// Initialises a new [SstableStreamIterator] which iterates over the given SST using the given
-    /// block stream. The stream reads at most `max_block_count` from the stream.
+    /// Initialises a new [`SstableStreamIterator`] which iterates over the given SST using the
+    /// given block stream. The stream reads at most `max_block_count` from the stream.
     pub fn new(sst: TableHolder, block_stream: BlockStream, max_block_count: usize) -> Self {
         Self {
             block_stream,
@@ -232,7 +232,7 @@ impl SstableStreamIterator {
         }
 
         // Unwrap internal iterator.
-        let Some(block_iter) = self.block_iter.as_mut();
+        let block_iter = self.block_iter.as_mut().unwrap();
 
         // Can we continue in current block?
         block_iter.next();
