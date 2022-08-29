@@ -269,11 +269,18 @@ message SubscribeCompactTasksRequest {
   uint64 max_concurrent_task_number = 2;
 }
 
+message ValidationTask {
+  repeated uint64 sst_ids = 1;
+  map<uint64, uint32> sst_id_to_worker_id = 2;
+  uint64 epoch = 3;
+}
+
 message SubscribeCompactTasksResponse {
   oneof task {
     CompactTask compact_task = 1;
     VacuumTask vacuum_task = 2;
     FullScanTask full_scan_task = 3;
+    ValidationTask validation_task = 4;
   }
 }
 
