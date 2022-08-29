@@ -544,9 +544,7 @@ impl<S: StateStore> StorageTable<S> {
     }
 
     /// Construct a [`StorageTableIter`] for batch executors.
-    /// Differs from the streaming one, this iterator will wait for the epoch before iteration, and
-    /// the order of the rows among different virtual nodes is not guaranteed.
-    // TODO: introduce ordered batch iterator.
+    /// Differs from the streaming one, this iterator will wait for the epoch before iteration
     pub async fn batch_iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,

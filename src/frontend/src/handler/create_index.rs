@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
     session: &SessionImpl,
@@ -308,7 +308,7 @@ pub async fn handle_create_index(
             columns,
             include,
         )?;
-        let graph = StreamFragmenterV2::build_graph(plan);
+        let graph = build_graph(plan);
 
         (graph, index_table, index)
     };

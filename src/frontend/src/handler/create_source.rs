@@ -33,7 +33,7 @@ use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn make_prost_source(
     session: &SessionImpl,
@@ -134,7 +134,7 @@ pub async fn handle_create_source(
         let (graph, table) = {
             let (plan, table) =
                 gen_materialized_source_plan(context.into(), source.clone(), session.user_id())?;
-            let graph = StreamFragmenterV2::build_graph(plan);
+            let graph = build_graph(plan);
 
             (graph, table)
         };
