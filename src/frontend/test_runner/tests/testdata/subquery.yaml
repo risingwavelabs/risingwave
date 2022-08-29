@@ -98,7 +98,6 @@
     select * from t JOIN (select t.x) as t1;
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
-    /* We should be able to handle nested correlated subquery */
     create table ab (a int, b int);
     create table bc (b int, c int);
     create table t (v1 int, v2 varchar);
@@ -107,16 +106,15 @@
           select * from t where v1 = a
       ) as t0
     );
-  logical_plan: |
-    LogicalProject { exprs: [ab.a, ab.b] }
-      LogicalJoin { type: LeftSemi, on: true, output: all }
-        LogicalScan { table: ab, columns: [ab.a, ab.b, ab._row_id] }
-        LogicalProject { exprs: [bc.b, bc.c, t.v1, t.v2] }
-          LogicalJoin { type: Inner, on: true, output: all }
-            LogicalScan { table: bc, columns: [bc.b, bc.c, bc._row_id] }
-            LogicalProject { exprs: [t.v1, t.v2] }
-              LogicalFilter { predicate: (t.v1 = CorrelatedInputRef { index: 0, correlated_id: 0 }) }
-                LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (ab.a = ab.a), output: all }
+      LogicalScan { table: ab, columns: [ab.a, ab.b] }
+      LogicalJoin { type: Inner, on: true, output: all }
+        LogicalJoin { type: Inner, on: (ab.a = t.v1), output: [ab.a] }
+          LogicalAgg { group_key: [ab.a], aggs: [] }
+            LogicalScan { table: ab, columns: [ab.a] }
+          LogicalScan { table: t, columns: [t.v1] }
+        LogicalScan { table: bc, columns: [] }
 - sql: |
     /* We cannot reference columns in left table if not lateral */
     create table ab (a int, b int);

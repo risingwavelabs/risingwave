@@ -261,7 +261,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
             build_key_idxs,
             left_child,
             right_child,
-            "SortMergeJoinExecutor".into(),
+            source.plan_node().get_identity().clone(),
         )))
     }
 }

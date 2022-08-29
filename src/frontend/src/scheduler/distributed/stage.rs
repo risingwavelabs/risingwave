@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -37,7 +39,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
 use tracing::error;
-use uuid::Uuid;
 use StageEvent::Failed;
 
 use crate::optimizer::plan_node::PlanNodeType;
@@ -547,7 +548,11 @@ impl StageRunner {
         task_id: TaskId,
         partition: Option<PartitionInfo>,
     ) -> PlanFragment {
-        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, partition);
+        // Used to maintain auto-increment identity_id of a task.
+        let identity_id: Rc<RefCell<u64>> = Rc::new(RefCell::new(0));
+
+        let plan_node_prost =
+            self.convert_plan_node(&self.stage.root, task_id, partition, identity_id);
         let exchange_info = self.stage.exchange_info.clone();
 
         PlanFragment {
@@ -561,7 +566,16 @@ impl StageRunner {
         execution_plan_node: &ExecutionPlanNode,
         task_id: TaskId,
         partition: Option<PartitionInfo>,
+        identity_id: Rc<RefCell<u64>>,
     ) -> PlanNodeProst {
+        // Generate identity
+        let identity = {
+            let identity_type = execution_plan_node.plan_node_type;
+            let id = *identity_id.borrow();
+            identity_id.replace(id + 1);
+            format!("{:?}-{}", identity_type, id)
+        };
+
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 // Find the stage this exchange node should fetch from and get all exchange sources.
@@ -575,31 +589,25 @@ impl StageRunner {
                 let exchange_sources = child_stage.all_exchange_sources_for(task_id);
 
                 match &execution_plan_node.node {
-                    NodeBody::Exchange(_exchange_node) => {
-                        PlanNodeProst {
-                            children: vec![],
-                            // TODO: Generate meaningful identify
-                            identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::Exchange(ExchangeNode {
+                    NodeBody::Exchange(_exchange_node) => PlanNodeProst {
+                        children: vec![],
+                        identity,
+                        node_body: Some(NodeBody::Exchange(ExchangeNode {
+                            sources: exchange_sources,
+                            input_schema: execution_plan_node.schema.clone(),
+                        })),
+                    },
+                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => PlanNodeProst {
+                        children: vec![],
+                        identity,
+                        node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
+                            exchange: Some(ExchangeNode {
                                 sources: exchange_sources,
                                 input_schema: execution_plan_node.schema.clone(),
-                            })),
-                        }
-                    }
-                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => {
-                        PlanNodeProst {
-                            children: vec![],
-                            // TODO: Generate meaningful identify
-                            identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
-                                exchange: Some(ExchangeNode {
-                                    sources: exchange_sources,
-                                    input_schema: execution_plan_node.schema.clone(),
-                                }),
-                                column_orders: sort_merge_exchange_node.column_orders.clone(),
-                            })),
-                        }
-                    }
+                            }),
+                            column_orders: sort_merge_exchange_node.column_orders.clone(),
+                        })),
+                    },
                     _ => unreachable!(),
                 }
             }
@@ -613,8 +621,7 @@ impl StageRunner {
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {
                     children: vec![],
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
                 }
             }
@@ -635,12 +642,16 @@ impl StageRunner {
                     _ => unreachable!(),
                 }
 
-                let left_child =
-                    self.convert_plan_node(&execution_plan_node.children[0], task_id, partition);
+                let left_child = self.convert_plan_node(
+                    &execution_plan_node.children[0],
+                    task_id,
+                    partition,
+                    identity_id,
+                );
 
                 PlanNodeProst {
                     children: vec![left_child],
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(node_body),
                 }
             }
@@ -648,13 +659,14 @@ impl StageRunner {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, task_id, partition.clone()))
+                    .map(|e| {
+                        self.convert_plan_node(e, task_id, partition.clone(), identity_id.clone())
+                    })
                     .collect();
 
                 PlanNodeProst {
                     children,
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
+                    identity,
                     node_body: Some(execution_plan_node.node.clone()),
                 }
             }
