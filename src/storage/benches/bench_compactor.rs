@@ -246,7 +246,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
-        let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
@@ -270,7 +269,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         MemoryLimiter::unlimit(),
     ));
     c.bench_function("bench_merge_iterator", |b| {
-        let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {
             let sub_iters = vec![
                 ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), compact_store.clone()),
