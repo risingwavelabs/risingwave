@@ -173,7 +173,7 @@ impl LogicalTopN {
         );
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
-        let local_agg = StreamGroupTopN::new(
+        let local_top_n = StreamGroupTopN::new(
             project.into(),
             vec![vnode_col_idx],
             self.limit,
@@ -181,15 +181,15 @@ impl LogicalTopN {
             self.order.clone(),
         );
         let exchange =
-            RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg = StreamTopN::new(LogicalTopN::new(
+            RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
+        let global_top_n = StreamTopN::new(LogicalTopN::new(
             exchange,
             self.limit,
             self.offset,
             self.order.clone(),
         ));
         exprs.pop();
-        let project = StreamProject::new(LogicalProject::new(global_agg.into(), exprs));
+        let project = StreamProject::new(LogicalProject::new(global_top_n.into(), exprs));
         Ok(project.into())
     }
 }
