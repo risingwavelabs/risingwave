@@ -649,15 +649,7 @@ impl StageRunner {
                             .as_ref()
                             .expect("no side table desc");
                         node.probe_side_vnode_mapping = self
-                            .catalog_reader
-                            .read_guard()
-                            .get_table_by_id(&side_table_desc.table_id.into())
-                            .map(|table| {
-                                self.worker_node_manager
-                                    .get_fragment_mapping(&table.fragment_id)
-                            })
-                            .ok()
-                            .flatten()
+                            .get_vnode_mapping(&side_table_desc.table_id.into())
                             .unwrap_or_default();
                         node.worker_nodes = self.worker_node_manager.list_worker_nodes();
                     }
