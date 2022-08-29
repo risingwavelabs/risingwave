@@ -293,8 +293,8 @@ impl StreamFragmenter {
                 // Allocate local table id. It will be rewrite to global table id after get table id
                 // offset from id generator.
                 hash_join_node.left_table.as_mut().unwrap().id = state.gen_table_id();
-                hash_join_node.right_table.as_mut().unwrap().id = state.gen_table_id();
                 hash_join_node.left_degree_table.as_mut().unwrap().id = state.gen_table_id();
+                hash_join_node.right_table.as_mut().unwrap().id = state.gen_table_id();
                 hash_join_node.right_degree_table.as_mut().unwrap().id = state.gen_table_id();
             }
 
@@ -429,7 +429,15 @@ mod tests {
                         id: 0,
                         ..Default::default()
                     }),
+                    left_degree_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
                     right_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
+                    right_degree_table: Some(Table {
                         id: 0,
                         ..Default::default()
                     }),
@@ -448,7 +456,17 @@ mod tests {
                 expect_table_id += 1;
                 assert_eq!(
                     expect_table_id,
+                    hash_join_node.left_degree_table.as_ref().unwrap().id
+                );
+                expect_table_id += 1;
+                assert_eq!(
+                    expect_table_id,
                     hash_join_node.right_table.as_ref().unwrap().id
+                );
+                expect_table_id += 1;
+                assert_eq!(
+                    expect_table_id,
+                    hash_join_node.right_degree_table.as_ref().unwrap().id
                 );
             }
         }
