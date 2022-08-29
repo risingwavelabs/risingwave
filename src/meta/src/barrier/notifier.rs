@@ -40,7 +40,7 @@ impl Notifier {
         }
     }
 
-    pub fn take_collected(&mut self) -> Option<oneshot::Sender<MetaResult<()>>> {
+    pub fn take_collected_checkpoint(&mut self) -> Option<oneshot::Sender<MetaResult<()>>> {
         self.collected_checkpoint.take()
     }
 

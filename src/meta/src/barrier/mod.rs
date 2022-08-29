@@ -209,7 +209,9 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 /// Post-processing information for barriers.
 struct CheckpointPost<S: MetaStore> {
     command_contexts: Arc<CommandContext<S>>,
-    collect_notifier: Vec<Option<oneshot::Sender<MetaResult<()>>>>,
+    /// The tx about collected with checkpoint.
+    collect_notifiers_checkpoint: Vec<Option<oneshot::Sender<MetaResult<()>>>>,
+    /// Create mv over, we need to notify `finish_rx`
     finish_notifiers: Vec<Notifier>,
 }
 
@@ -283,6 +285,7 @@ where
         }
     }
 
+    /// Whether the barrier(checkpoint = true) should be injected. If true, reset `num_distance_checkpoint`
     fn try_get_checkpoint(&mut self) -> bool {
         if self.num_distance_checkpoint == 0 {
             self.num_distance_checkpoint = self.checkpoint_frequency;
@@ -293,6 +296,7 @@ where
         }
     }
 
+    /// Make the `checkpoint` of the next barrier must be true
     fn inject_checkpoint_in_next_barrier(&mut self) {
         self.num_distance_checkpoint = 0;
     }
@@ -916,26 +920,27 @@ where
                 // Notify about collected without checkpoint.
                 notifiers.iter_mut().for_each(Notifier::notify_collected_no_checkpoint);
                 // Save rx about collected with checkpoint to wait a barrier(checkpoint = true)
-                let notifiers_collect = notifiers
+                let collect_notifiers_checkpoint = notifiers
                     .iter_mut()
                     .map(|notifier| {
-                        notifier.take_collected()
+                        notifier.take_collected_checkpoint()
                     })
                     .collect_vec();
 
                 // Save Notify about finished to wait a barrier(checkpoint = true)
                 let actors_to_finish = command_ctx.actors_to_track();
-                let mut finish_notifier = vec![];
-                finish_notifier.push(tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers));
+                let mut finish_notifiers = vec![];
+                finish_notifiers.push(tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers));
 
                 for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
                     if let Some(notifier) = tracker.update(&progress) {
-                        finish_notifier.push(notifier);
+                        finish_notifiers.push(notifier);
                     }
                 }
-                let finish_notifier = finish_notifier.into_iter().flatten().collect_vec();
+                let finish_notifiers = finish_notifiers.into_iter().flatten().collect_vec();
 
-                if (!finish_notifier.is_empty() || !notifiers_collect.is_empty()) && *checkpoint {
+                // If we need to wait for a barrier (checkpoint) to post-process, we will inject checkpoint in next barrier.
+                if (!finish_notifiers.is_empty() || !collect_notifiers_checkpoint.is_empty()) && *checkpoint {
                     checkpoint_control.inject_checkpoint_in_next_barrier();
                 }
 
@@ -943,8 +948,8 @@ where
                     resps,
                     CheckpointPost {
                         command_contexts: command_ctx,
-                        collect_notifier: notifiers_collect,
-                        finish_notifiers: finish_notifier,
+                        collect_notifiers_checkpoint: collect_notifiers_checkpoint,
+                        finish_notifiers,
                     },
                 );
                 // If no checkpoint, we can't notify collection completion
@@ -961,7 +966,7 @@ where
                     }
                     while let Some(CheckpointPost {
                         command_contexts,
-                        collect_notifier,
+                                       collect_notifiers_checkpoint
                         finish_notifiers,
                     }) = uncommitted_messages.uncommitted_checkpoint_post.pop_back()
                     {
@@ -969,7 +974,7 @@ where
                         command_contexts.post_collect().await?;
 
                         // Notify about collected first.
-                        collect_notifier.into_iter().for_each(|send| {
+                        collect_notifiers_checkpoint.into_iter().for_each(|send| {
                             if let Some(tx) = send {
                                 tx.send(Ok(())).ok();
                             }
