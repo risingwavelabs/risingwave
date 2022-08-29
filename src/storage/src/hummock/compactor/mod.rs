@@ -19,6 +19,7 @@ mod context;
 mod iterator;
 mod shared_buffer_compact;
 mod sstable_store;
+mod stream_iterator;
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -36,6 +37,7 @@ pub use context::{CompactorContext, Context};
 use futures::future::{try_join_all, RemoteHandle};
 use futures::{stream, FutureExt, StreamExt};
 pub use iterator::ConcatSstableIterator;
+pub use stream_iterator::ConcatSstableStreamIterator;
 use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
