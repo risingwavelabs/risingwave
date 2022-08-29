@@ -64,12 +64,8 @@ pub struct S3StreamingUploader {
     /// Moreover, we preserve at least `MIN_PART_SIZE` of data in the buffer when uploading a part
     /// due to the minimum part size limitation of S3.
     buf: Vec<Bytes>,
-    /// Length of the data that have not been uploaded to S3.
-    not_uploaded_len: usize,
     /// Length of the data that exceeds the current part to be uploaded in the buffer.
     next_part_len: usize,
-    /// The data included in the next part are `buf[..part_end]`.
-    part_end: usize,
     /// To record metrics for uploading part.
     metrics: Arc<ObjectStoreMetrics>,
 }
@@ -92,15 +88,13 @@ impl S3StreamingUploader {
             next_part_id: MIN_PART_ID,
             join_handles: Default::default(),
             buf: Default::default(),
-            not_uploaded_len: 0,
             next_part_len: 0,
-            part_end: 0,
             metrics,
         }
     }
 
-    fn upload_next_part(&mut self, data: Vec<Bytes>, len: usize) {
-        debug_assert_eq!(data.iter().map(Bytes::len).sum::<usize>(), len);
+    fn upload_next_part(&mut self, data: Vec<Bytes>) {
+        let len = data.iter().map(Bytes::len).sum::<usize>();
 
         let part_id = self.next_part_id;
         self.next_part_id += 1;
@@ -135,10 +129,10 @@ impl S3StreamingUploader {
     }
 
     async fn flush_and_complete(&mut self) -> ObjectResult<()> {
-        self.upload_next_part(
-            Vec::from_iter(self.buf.iter().cloned()),
-            self.not_uploaded_len,
-        );
+        if !self.buf.is_empty() {
+            let buf = std::mem::take(&mut self.buf);
+            self.upload_next_part(buf);
+        }
 
         // If any part fails to upload, abort the upload.
         let join_handles = self.join_handles.drain(..).collect_vec();
@@ -207,24 +201,13 @@ impl StreamingUploader for S3StreamingUploader {
             "s3 write bytes error"
         )));
         let data_len = data.len();
-        self.not_uploaded_len += data_len;
+        self.next_part_len += data_len;
         self.buf.push(data);
 
-        if self.not_uploaded_len > self.part_size {
-            if self.part_end == 0 {
-                // Mark current slice of buffer to be the next part to be uploaded.
-                self.part_end = self.buf.len();
-            } else {
-                // `data` should be uploaded in the next part.
-                self.next_part_len += data_len;
-            }
-        }
-        if self.next_part_len >= MIN_PART_SIZE {
+        if self.next_part_len > self.part_size {
             // Take a 16MiB part and upload it. `Bytes` performs shallow clone.
-            let part = self.buf.drain(..self.part_end).collect();
-            self.upload_next_part(part, self.not_uploaded_len - self.next_part_len);
-            self.not_uploaded_len = self.next_part_len;
-            self.part_end = 0;
+            let part = std::mem::take(&mut self.buf);
+            self.upload_next_part(part);
             self.next_part_len = 0;
         }
         Ok(())
@@ -243,12 +226,13 @@ impl StreamingUploader for S3StreamingUploader {
             return if self.buf.is_empty() {
                 Err(ObjectError::internal("upload empty object"))
             } else {
+                let uploaded_len = self.buf.iter().map(Bytes::len).sum::<usize>();
                 self.client
                     .put_object()
                     .bucket(&self.bucket)
                     .key(&self.key)
                     .body(get_upload_body(self.buf))
-                    .content_length(self.not_uploaded_len as i64)
+                    .content_length(uploaded_len as i64)
                     .send()
                     .await?;
                 Ok(())
