@@ -379,8 +379,8 @@ impl LocalVersion {
         self
             .sync_uncommitted_data
             .drain_filter(|(epoch, data)| {
-                let max_epoch = *epoch.first().expect("epoch list should not be empty");
-                let min_epoch = *epoch.last().expect("epoch list should not be empty");
+                let min_epoch = *epoch.first().expect("epoch list should not be empty");
+                let max_epoch = *epoch.last().expect("epoch list should not be empty");
                 assert!(
                     max_epoch <= max_committed_epoch
                         || min_epoch > max_committed_epoch,
