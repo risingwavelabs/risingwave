@@ -153,7 +153,17 @@ impl Binder {
         })
     }
 
-    fn bind_order_by_expr(
+    /// Bind an `ORDER BY` expression, which can be either:
+    /// * an output-column name
+    /// * index of an output column
+    /// * an arbitrary expression
+    ///
+    /// # Arguments
+    ///
+    /// * `name_to_index` - visible output column name -> index. Ambiguous (duplicate) output names
+    ///   are marked with `usize::MAX`.
+    /// * `visible_output_num` - the number of all visible output columns, including duplicates.
+    pub(super) fn bind_order_by_expr(
         &mut self,
         order_by_expr: OrderByExpr,
         name_to_index: &HashMap<String, usize>,
@@ -185,6 +195,20 @@ impl Binder {
             }
         };
         Ok(FieldOrder { index, direct })
+    }
+
+    /// `ORDER BY` in `OVER` works similarly to a query-level ORDER BY
+    /// ([`Self::bind_order_by_expr`]), but cannot use output-column names or numbers.
+    pub(super) fn bind_order_by_expr_in_over(
+        &mut self,
+        order_by_expr: OrderByExpr,
+    ) -> Result<(ExprImpl, Direction)> {
+        let direct = match order_by_expr.asc {
+            None | Some(true) => Direction::Asc,
+            Some(false) => Direction::Desc,
+        };
+        let expr = self.bind_expr(order_by_expr.expr)?;
+        Ok((expr, direct))
     }
 
     fn bind_with(&mut self, with: With) -> Result<()> {

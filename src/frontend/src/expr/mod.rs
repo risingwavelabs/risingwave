@@ -28,6 +28,7 @@ mod input_ref;
 mod literal;
 mod subquery;
 mod table_function;
+mod window_function;
 
 mod expr_mutator;
 mod expr_rewriter;
@@ -42,6 +43,7 @@ pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
+pub use window_function::{WindowFunction, WindowFunctionType};
 
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
@@ -72,6 +74,7 @@ pub enum ExprImpl {
     AggCall(Box<AggCall>),
     Subquery(Box<Subquery>),
     TableFunction(Box<TableFunction>),
+    WindowFunction(Box<WindowFunction>),
 }
 
 impl ExprImpl {
@@ -182,7 +185,7 @@ impl ExprImpl {
 ///
 /// It will not traverse inside subqueries.
 macro_rules! impl_has_variant {
-    ( $($variant:ident),* ) => {
+    ( $($variant:ty),* ) => {
         paste! {
             impl ExprImpl {
                 $(
@@ -209,7 +212,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction}
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction, WindowFunction}
 
 impl ExprImpl {
     /// This function is not meant to be called. In most cases you would want
@@ -521,6 +524,7 @@ impl Expr for ExprImpl {
             ExprImpl::Subquery(expr) => expr.return_type(),
             ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
             ExprImpl::TableFunction(expr) => expr.return_type(),
+            ExprImpl::WindowFunction(expr) => expr.return_type(),
         }
     }
 
@@ -535,6 +539,7 @@ impl Expr for ExprImpl {
             ExprImpl::TableFunction(_e) => {
                 unreachable!("Table function should not be converted to ExprNode")
             }
+            ExprImpl::WindowFunction(_e) => todo!(),
         }
     }
 }
@@ -581,6 +586,12 @@ impl From<TableFunction> for ExprImpl {
     }
 }
 
+impl From<WindowFunction> for ExprImpl {
+    fn from(wf: WindowFunction) -> Self {
+        ExprImpl::WindowFunction(Box::new(wf))
+    }
+}
+
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
         merge_expr_by_binary(
@@ -607,6 +618,7 @@ impl std::fmt::Debug for ExprImpl {
                     f.debug_tuple("CorrelatedInputRef").field(arg0).finish()
                 }
                 Self::TableFunction(arg0) => f.debug_tuple("TableFunction").field(arg0).finish(),
+                Self::WindowFunction(arg0) => f.debug_tuple("WindowFunction").field(arg0).finish(),
             };
         }
         match self {
@@ -617,6 +629,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::Subquery(x) => write!(f, "{:?}", x),
             Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
             Self::TableFunction(x) => write!(f, "{:?}", x),
+            Self::WindowFunction(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -652,6 +665,10 @@ impl std::fmt::Debug for ExprDisplay<'_> {
             ExprImpl::CorrelatedInputRef(x) => write!(f, "{:?}", x),
             ExprImpl::TableFunction(x) => {
                 // TODO: TableFunctionCallVerboseDisplay
+                write!(f, "{:?}", x)
+            }
+            ExprImpl::WindowFunction(x) => {
+                // TODO: WindowFunctionCallVerboseDisplay
                 write!(f, "{:?}", x)
             }
         }

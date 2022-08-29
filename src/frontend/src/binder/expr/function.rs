@@ -20,13 +20,13 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
-use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
+use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{
     AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
-    TableFunction, TableFunctionType,
+    TableFunction, TableFunctionType, WindowFunction, WindowFunctionType,
 };
 use crate::optimizer::property::Direction;
 use crate::utils::Condition;
@@ -43,14 +43,6 @@ impl Binder {
             .into());
         };
 
-        if f.over.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                format!("over window function: {}", f.name),
-                3646.into(),
-            )
-            .into());
-        }
-
         // agg calls
         let agg_kind = match function_name.as_str() {
             "count" => Some(AggKind::Count),
@@ -65,6 +57,13 @@ impl Binder {
             _ => None,
         };
         if let Some(kind) = agg_kind {
+            if f.over.is_some() {
+                return Err(ErrorCode::NotImplemented(
+                    format!("aggregate function as over window function: {}", kind),
+                    4978.into(),
+                )
+                .into());
+            }
             return self.bind_agg(f, kind);
         }
 
@@ -76,12 +75,42 @@ impl Binder {
                 .into());
         }
 
-        let mut inputs = f
+        let inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
             .flatten_ok()
             .try_collect()?;
+
+        // window function
+        if let Some(WindowSpec {
+            partition_by,
+            order_by,
+            window_frame,
+        }) = f.over
+        {
+            self.ensure_window_function_allowed()?;
+            if let Some(window_frame) = window_frame {
+                return Err(ErrorCode::NotImplemented(
+                    format!("window frame: {}", window_frame),
+                    None.into(),
+                )
+                .into());
+            }
+            let window_function_type = WindowFunctionType::from_str(&function_name)?;
+            let partition_by = partition_by
+                .into_iter()
+                .map(|arg| self.bind_expr(arg))
+                .try_collect()?;
+
+            let order_by = order_by
+                .into_iter()
+                .map(|order_by_expr| self.bind_order_by_expr_in_over(order_by_expr))
+                .collect::<Result<_>>()?;
+            return Ok(
+                WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into(),
+            );
+        }
 
         // table function
         let table_function_type = TableFunctionType::from_str(function_name.as_str());
@@ -91,6 +120,7 @@ impl Binder {
         }
 
         // normal function
+        let mut inputs = inputs;
         let function_type = match function_name.as_str() {
             // comparison
             "booleq" => {
@@ -321,14 +351,32 @@ impl Binder {
         ])
     }
 
+    fn ensure_window_function_allowed(&self) -> Result<()> {
+        if let Some(clause) = self.context.clause {
+            match clause {
+                Clause::Where | Clause::Values | Clause::GroupBy | Clause::Having => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "window functions are not allowed in {}",
+                        clause
+                    ))
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
-            if clause == Clause::Values || clause == Clause::Where {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "aggregate functions are not allowed in {}",
-                    clause
-                ))
-                .into());
+            match clause {
+                Clause::Where | Clause::Values | Clause::GroupBy => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "aggregate functions are not allowed in {}",
+                        clause
+                    ))
+                    .into())
+                }
+                Clause::Having => {}
             }
         }
         Ok(())

@@ -44,6 +44,8 @@ impl ColumnBinding {
 pub enum Clause {
     Where,
     Values,
+    GroupBy,
+    Having,
 }
 
 impl Display for Clause {
@@ -51,6 +53,8 @@ impl Display for Clause {
         match self {
             Clause::Where => write!(f, "WHERE"),
             Clause::Values => write!(f, "VALUES"),
+            Clause::GroupBy => write!(f, "GROUP BY"),
+            Clause::Having => write!(f, "HAVING"),
         }
     }
 }
