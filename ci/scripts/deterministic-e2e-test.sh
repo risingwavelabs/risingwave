@@ -31,10 +31,10 @@ seq 10 | parallel MADSIM_TEST_SEED={} $RUNNER -j 16 './e2e_test/batch/\*\*/\*.sl
 
 # bugs here!
 echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, streaming"
-seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-node './e2e_test/streaming/\*\*/\*.slt' || true
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/streaming/\*\*/\*.slt' || true
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, batch"
-seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-node './e2e_test/batch/\*\*/\*.slt'
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-compute './e2e_test/batch/\*\*/\*.slt'
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, fuzzing"
 seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
