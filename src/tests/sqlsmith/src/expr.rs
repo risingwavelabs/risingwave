@@ -282,28 +282,34 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let distinct = self.flip_coin() && self.is_distinct_allowed;
         self.make_agg_expr(func.func, &exprs, distinct)
+            .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
-    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Expr {
+    /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
+    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Option<Expr> {
         use AggKind as A;
 
         match func {
-            A::Sum => Expr::Function(make_agg_func("sum", exprs, distinct)),
-            A::Min => Expr::Function(make_agg_func("min", exprs, distinct)),
-            A::Max => Expr::Function(make_agg_func("max", exprs, distinct)),
-            A::Count => Expr::Function(make_agg_func("count", exprs, distinct)),
-            A::Avg => Expr::Function(make_agg_func("avg", exprs, distinct)),
-            A::StringAgg => Expr::Function(make_agg_func("string_agg", exprs, distinct)),
-            A::SingleValue => Expr::Function(make_agg_func("single_value", exprs, false)),
+            A::Sum => Some(Expr::Function(make_agg_func("sum", exprs, distinct))),
+            A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct))),
+            A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct))),
+            A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
+            A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
+            A::StringAgg => Some(Expr::Function(make_agg_func("string_agg", exprs, distinct))),
+            A::SingleValue => None,
             A::ApproxCountDistinct => {
                 if distinct {
-                    self.gen_simple_scalar(DataTypeName::Int64)
+                    None
                 } else {
-                    Expr::Function(make_agg_func("approx_count_distinct", exprs, false))
+                    Some(Expr::Function(make_agg_func(
+                        "approx_count_distinct",
+                        exprs,
+                        false,
+                    )))
                 }
             }
             // TODO(yuchao): `array_agg` support is still WIP, see #4657.
-            A::ArrayAgg => self.gen_simple_scalar(DataTypeName::List),
+            A::ArrayAgg => None,
         }
     }
 }

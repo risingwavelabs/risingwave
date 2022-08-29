@@ -49,7 +49,7 @@ timeout 5m sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-3fe, batch distributed"
+echo "--- e2e, ci-3cn-3fe, batch"
 cargo make ci-start ci-3cn-3fe
 timeout 2m sqllogictest ${host_args} -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
 timeout 2m sqllogictest ${host_args} -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-batch-${profile}"

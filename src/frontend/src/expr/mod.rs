@@ -36,7 +36,7 @@ mod type_inference;
 mod utils;
 
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
-pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
+pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use function_call::{FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
@@ -250,19 +250,10 @@ impl ExprImpl {
                 self.depth += 1;
                 match &subquery.query.body {
                     BoundSetExpr::Select(select) => {
-                        select
-                            .select_items
-                            .iter()
-                            .chain(select.group_by.iter())
-                            .chain(select.where_clause.iter())
-                            .for_each(|expr| self.visit_expr(expr));
+                        select.exprs().for_each(|expr| self.visit_expr(expr))
                     }
                     BoundSetExpr::Values(values) => {
-                        values
-                            .rows
-                            .iter()
-                            .flatten()
-                            .for_each(|expr| self.visit_expr(expr));
+                        values.exprs().for_each(|expr| self.visit_expr(expr))
                     }
                 }
                 self.depth -= 1;
@@ -293,13 +284,12 @@ impl ExprImpl {
             fn visit_subquery(&mut self, subquery: &Subquery) {
                 use crate::binder::BoundSetExpr;
                 match &subquery.query.body {
-                    BoundSetExpr::Select(select) => select
-                        .select_items
-                        .iter()
-                        .chain(select.group_by.iter())
-                        .chain(select.where_clause.iter())
-                        .for_each(|expr| self.visit_expr(expr)),
-                    BoundSetExpr::Values(_) => {}
+                    BoundSetExpr::Select(select) => {
+                        select.exprs().for_each(|expr| self.visit_expr(expr))
+                    }
+                    BoundSetExpr::Values(values) => {
+                        values.exprs().for_each(|expr| self.visit_expr(expr))
+                    }
                 }
             }
         }
@@ -316,10 +306,11 @@ impl ExprImpl {
     /// assign absolute `correlated_id` for them.
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         struct Collector {
-            depth: usize,
+            depth: Depth,
             correlated_indices: Vec<usize>,
             correlated_id: CorrelatedId,
         }
@@ -340,20 +331,19 @@ impl ExprImpl {
 
                 self.depth += 1;
                 match &mut subquery.query.body {
-                    BoundSetExpr::Select(select) => select
-                        .select_items
-                        .iter_mut()
-                        .chain(select.group_by.iter_mut())
-                        .chain(select.where_clause.iter_mut())
-                        .for_each(|expr| self.visit_expr(expr)),
-                    BoundSetExpr::Values(_) => {}
+                    BoundSetExpr::Select(select) => {
+                        select.exprs_mut().for_each(|expr| self.visit_expr(expr))
+                    }
+                    BoundSetExpr::Values(values) => {
+                        values.exprs_mut().for_each(|expr| self.visit_expr(expr))
+                    }
                 }
                 self.depth -= 1;
             }
         }
 
         let mut collector = Collector {
-            depth: 1,
+            depth,
             correlated_indices: vec![],
             correlated_id,
         };
@@ -495,6 +485,15 @@ impl ExprImpl {
             }).collect();
 
            Some((input_ref, list))
+        } else {
+            None
+        }
+    }
+
+    pub fn as_or_disjunctions(&self) -> Option<Vec<ExprImpl>> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+            function_call.get_expr_type() == ExprType::Or {
+            Some(to_disjunctions(self.clone()))
         } else {
             None
         }

@@ -657,7 +657,7 @@ where
             let mut source_count = 0;
             if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
                 // TODO: refactor using source id.
-                source_node.table_id = source_id;
+                source_node.source_id = source_id;
                 source_count += 1;
             }
             for input in &mut stream_node.input {
@@ -787,7 +787,7 @@ fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> MetaResult<V
     ) -> MetaResult<()> {
         match stream_node.node_body.as_ref().unwrap() {
             NodeBody::Source(source_node) => {
-                dependent_relations.insert(source_node.get_table_id());
+                dependent_relations.insert(source_node.get_source_id());
             }
             NodeBody::Chain(chain_node) => {
                 dependent_relations.insert(chain_node.get_table_id());

@@ -40,7 +40,6 @@ use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::GlobalBarrierManager;
-use crate::dashboard::DashboardService;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::CompactionScheduler;
 use crate::manager::{
@@ -330,8 +329,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
+    #[cfg(not(madsim))]
     if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
-        let dashboard_service = DashboardService {
+        let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
