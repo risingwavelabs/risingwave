@@ -82,8 +82,8 @@ impl Binder {
             Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
             Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
             Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
-            Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(false, *left, *right),
-            Expr::IsNotDistinctFrom(left, right) => self.bind_distinct_from(true, *left, *right),
+            Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
+            Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
             Expr::Case {
                 operand,
                 conditions,
@@ -359,22 +359,18 @@ impl Binder {
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
-    pub(super) fn bind_distinct_from(
-        &mut self,
-        negated: bool,
-        left: Expr,
-        right: Expr,
-    ) -> Result<ExprImpl> {
+    pub(super) fn bind_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
         let left = self.bind_expr(left)?;
         let right = self.bind_expr(right)?;
-
         let func_call = FunctionCall::new(ExprType::IsDistinctFrom, vec![left, right]);
+        Ok(func_call?.into())
+    }
 
-        if negated {
-            Ok(FunctionCall::new(ExprType::Not, vec![func_call?.into()])?.into())
-        } else {
-            Ok(func_call?.into())
-        }
+    pub(super) fn bind_not_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
+        let left = self.bind_expr(left)?;
+        let right = self.bind_expr(right)?;
+        let func_call = FunctionCall::new(ExprType::IsNotDistinctFrom, vec![left, right]);
+        Ok(func_call?.into())
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
