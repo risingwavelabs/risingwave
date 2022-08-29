@@ -19,6 +19,7 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 pub use tier_compaction_picker::TierCompactionPicker;
 mod base_level_compaction_picker;
 use std::collections::{HashMap, HashSet};
@@ -26,14 +27,11 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{
-    CompactTask, CompactionConfig, HummockVersion, InputLevel, KeyRange, LevelType,
-};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
@@ -170,7 +168,7 @@ impl CompactStatus {
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
             gc_delete_keys: target_level_id == self.level_handlers.len() - 1 && select_level_id > 0,
-            task_status: false,
+            task_status: TaskStatus::Pending as i32,
             compaction_group_id,
             existing_table_ids: vec![],
             compression_algorithm,
@@ -231,7 +229,7 @@ impl CompactStatus {
         )
     }
 
-    /// Declares a task is either finished or canceled.
+    /// Declares a task as either succeeded, failed or canceled.
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
         for level in &compact_task.input_ssts {
             self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);
@@ -249,36 +247,6 @@ impl CompactStatus {
             }
         }
         count
-    }
-
-    /// Applies the compact task result and get a new hummock version.
-    pub fn apply_compact_result(
-        compact_task: &CompactTask,
-        based_hummock_version: HummockVersion,
-    ) -> HummockVersion {
-        let mut new_version = based_hummock_version;
-        new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
-        let mut removed_table: HashSet<u64> = HashSet::default();
-        let mut removed_levels = vec![];
-        for input_level in &compact_task.input_ssts {
-            for table in &input_level.table_infos {
-                removed_table.insert(table.id);
-            }
-            removed_levels.push(input_level.level_idx);
-        }
-
-        removed_levels.sort();
-        removed_levels.dedup();
-        new_version.apply_compact_ssts(
-            compact_task.compaction_group_id,
-            &removed_levels,
-            &removed_table,
-            compact_task.target_level,
-            compact_task.target_sub_level_id,
-            compact_task.sorted_output_ssts.clone(),
-        );
-
-        new_version
     }
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {

@@ -97,6 +97,10 @@ impl MetaNodeService {
             .arg("--min-sst-retention-time-sec")
             .arg(format!("{}", config.min_sst_retention_time_sec));
 
+        if config.enable_committed_sst_sanity_check {
+            cmd.arg("--enable-committed-sst-sanity-check");
+        }
+
         Ok(())
     }
 }

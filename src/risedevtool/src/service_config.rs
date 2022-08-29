@@ -64,6 +64,7 @@ pub struct MetaNodeConfig {
     pub vacuum_interval_sec: u64,
     pub collect_gc_watermark_spin_interval_sec: u64,
     pub min_sst_retention_time_sec: u64,
+    pub enable_committed_sst_sanity_check: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

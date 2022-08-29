@@ -125,6 +125,19 @@ pub fn serialize(row: Row) -> Result<Vec<u8>> {
     Ok(res)
 }
 
+pub fn batch_deserialize(
+    column_mapping: Arc<ColumnDescMapping>,
+    value: impl AsRef<[u8]>,
+) -> Result<Row> {
+    let mut origin_row = streaming_deserialize(&column_mapping.all_data_types, value.as_ref())?;
+
+    let mut output_row = Vec::with_capacity(column_mapping.output_index.len());
+    for col_idx in &column_mapping.output_index {
+        output_row.push(origin_row.0[*col_idx].take());
+    }
+    Ok(Row(output_row))
+}
+
 /// used for streaming table deserialize
 pub fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Result<Row> {
     // value encoding
@@ -132,5 +145,6 @@ pub fn streaming_deserialize(data_types: &[DataType], mut row: impl Buf) -> Resu
     for ty in data_types {
         values.push(deserialize_datum(&mut row, ty)?);
     }
+
     Ok(Row(values))
 }
