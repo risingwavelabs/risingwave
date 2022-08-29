@@ -50,6 +50,10 @@ pub struct Args {
     #[clap(long, default_value = "3")]
     compute_nodes: usize,
 
+    /// The number of compactor nodes.
+    #[clap(long, default_value = "1")]
+    compactor_nodes: usize,
+
     /// The number of CPU cores for each compute node.
     ///
     /// This determines worker_node_parallelism.
@@ -88,6 +92,8 @@ async fn main() {
         .init(|| async {
             let opts = risingwave_meta::MetaNodeOpts::parse_from([
                 "meta-node",
+                // "--config-path",
+                // "src/config/risingwave.toml",
                 "--listen-addr",
                 "0.0.0.0:5690",
             ]);
@@ -122,7 +128,7 @@ async fn main() {
 
     // compute node
     for i in 1..=args.compute_nodes {
-        handle
+        let mut builder = handle
             .create_node()
             .name(format!("compute-{i}"))
             .ip([192, 168, 3, i as u8].into())
@@ -130,6 +136,8 @@ async fn main() {
             .init(move || async move {
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                     "compute-node",
+                    // "--config-path",
+                    // "src/config/risingwave.toml",
                     "--host",
                     "0.0.0.0:5688",
                     "--client-address",
@@ -140,10 +148,38 @@ async fn main() {
                     "hummock+memory-shared",
                 ]);
                 risingwave_compute::start(opts).await
+            });
+        if args.kill_node {
+            builder = builder.restart_on_panic();
+        }
+        builder.build();
+    }
+
+    // compactor node
+    for i in 1..=args.compactor_nodes {
+        handle
+            .create_node()
+            .name(format!("compactor-{i}"))
+            .ip([192, 168, 4, i as u8].into())
+            .init(move || async move {
+                let opts = risingwave_compactor::CompactorOpts::parse_from([
+                    "compactor-node",
+                    // "--config-path",
+                    // "src/config/risingwave.toml",
+                    "--host",
+                    "0.0.0.0:6660",
+                    "--client-address",
+                    &format!("192.168.4.{i}:6660"),
+                    "--meta-address",
+                    "192.168.1.1:5690",
+                    "--state-store",
+                    "hummock+memory-shared",
+                ]);
+                risingwave_compactor::start(opts).await
             })
-            .restart_on_panic()
             .build();
     }
+
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     // client

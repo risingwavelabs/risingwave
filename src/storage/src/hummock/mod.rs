@@ -91,6 +91,7 @@ pub struct HummockStorage {
 
     sstable_id_manager: SstableIdManagerRef,
 
+    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -151,6 +152,7 @@ impl HummockStorage {
             stats,
             compaction_group_client,
             sstable_id_manager,
+            #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
         Ok(instance)

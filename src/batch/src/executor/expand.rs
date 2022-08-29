@@ -115,7 +115,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             column_subsets,
             child: input,
             schema,
-            identity: "ExpandExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }
