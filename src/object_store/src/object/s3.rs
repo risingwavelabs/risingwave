@@ -260,6 +260,10 @@ impl StreamingUploader for S3StreamingUploader {
         }
         Ok(())
     }
+
+    fn get_memory_usage(&self) -> u64 {
+        (self.part_size + MIN_PART_SIZE) as u64
+    }
 }
 
 fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
