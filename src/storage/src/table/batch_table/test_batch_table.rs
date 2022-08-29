@@ -19,9 +19,9 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
-use crate::batch_table::storage_table::StorageTable;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
+use crate::table::batch_table::storage_table::StorageTable;
 use crate::table::streaming_table::state_table::StateTable;
 use crate::table::{Distribution, TableIter};
 

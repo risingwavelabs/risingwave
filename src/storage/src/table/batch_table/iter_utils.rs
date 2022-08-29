@@ -19,8 +19,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 
-use super::PkAndRowStream;
-use crate::batch_table::storage_table::StorageError;
+use super::storage_table::PkAndRowStream;
+use crate::error::StorageError;
 
 /// We use a binary heap to merge the results of the different streams in order.
 /// This is the node type of the heap.

@@ -18,7 +18,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_storage::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 

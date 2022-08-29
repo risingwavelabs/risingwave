@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_storage::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 

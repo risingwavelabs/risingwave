@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_storage::batch_table::storage_table::{StorageTable, StorageTableIter};
+use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 

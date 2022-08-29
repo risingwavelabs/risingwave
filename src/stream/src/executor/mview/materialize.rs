@@ -196,8 +196,8 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_storage::batch_table::storage_table::StorageTable;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
