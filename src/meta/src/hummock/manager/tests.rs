@@ -210,14 +210,13 @@ async fn test_hummock_compaction_task() {
     assert_eq!(compact_task.get_task_id(), 2);
 
     // Cancel the task and succeed.
-    compact_task.set_task_status(TaskStatus::Canceled);
     assert!(hummock_manager
-        .report_compact_task(context_id, &compact_task)
+        .cancel_compact_task(&mut compact_task)
         .await
         .unwrap());
-    // Cancel the task and told the task is not found, which may have been processed previously.
-    assert!(!hummock_manager
-        .report_compact_task(context_id, &compact_task)
+    // Cancel a non-existent task and succeed.
+    assert!(hummock_manager
+        .cancel_compact_task(&mut compact_task)
         .await
         .unwrap());
 

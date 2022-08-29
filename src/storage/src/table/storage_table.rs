@@ -618,16 +618,14 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     }
 
     /// Construct a [`StorageTableIter`] for batch executors.
-    /// Differs from the streaming one, this iterator will wait for the epoch before iteration, and
-    /// the order of the rows among different virtual nodes is not guaranteed.
-    // TODO: introduce ordered batch iterator.
+    /// Differs from the streaming one, this iterator will wait for the epoch before iteration
     pub async fn batch_iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false)
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true)
             .await
     }
 

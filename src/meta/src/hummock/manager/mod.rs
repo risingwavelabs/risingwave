@@ -623,27 +623,23 @@ where
 
             // need to regain the newest version ynder the protection of a write lock, otherwise the
             // old version may be used to overwrite the new one
-            let current_version = versioning_guard.current_version.clone();
-            let new_version_id = current_version.id + 1;
             let versioning = versioning_guard.deref_mut();
+            let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            apply_version_delta(
+            let version_delta = apply_version_delta(
                 &mut hummock_version_deltas,
-                &current_version,
+                current_version,
                 &compact_task,
                 true,
             );
 
-            // FIXME: refactor the implementation of `apply_compact_result` by using
-            // `hummock_version_deltas`
-            let mut new_version =
-                CompactStatus::apply_compact_result(&compact_task, current_version);
-            new_version.id = new_version_id;
             commit_multi_var!(self, None, hummock_version_deltas)?;
-            // this task has been finished and does not need to be schedule.
+            current_version.apply_version_delta(&version_delta);
+
+            // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
-            versioning.current_version = new_version;
+
             trigger_sst_stat(
                 &self.metrics,
                 Some(
@@ -654,6 +650,15 @@ where
                 ),
                 &versioning.current_version,
                 compaction_group_id,
+            );
+
+            tracing::info!(
+                "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
+                compaction_group_id,
+                compact_task.input_ssts[0].table_infos.len(),
+                compact_task.input_ssts[0].level_idx,
+                compact_task.target_level,
+                start_time.elapsed()
             );
         } else {
             let existing_table_ids_from_meta = self
@@ -697,13 +702,9 @@ where
             compact_task.compaction_filter_mask =
                 compact_status.compaction_config.compaction_filter_mask;
             commit_multi_var!(self, None, compact_status)?;
-            tracing::trace!(
-                    "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
-                    compaction_group_id,
-                    compact_task.input_ssts[0].table_infos.len(),
-                    compact_task.input_ssts[0].level_idx,
-                    start_time.elapsed()
-                );
+
+            // this task has been finished.
+            compact_task.set_task_status(TaskStatus::Pending);
 
             trigger_sst_stat(
                 &self.metrics,
@@ -716,6 +717,14 @@ where
                 &current_version,
                 compaction_group_id,
             );
+
+            tracing::trace!(
+                "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
+                compaction_group_id,
+                compact_task.input_ssts[0].table_infos.len(),
+                compact_task.input_ssts[0].level_idx,
+                start_time.elapsed()
+            );
         }
         #[cfg(test)]
         {
@@ -726,7 +735,9 @@ where
         Ok(Some(compact_task))
     }
 
-    pub async fn cancel_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+    /// Cancels a compaction task no matter it's assigned or unassigned.
+    pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
+        compact_task.set_task_status(TaskStatus::Canceled);
         self.report_compact_task_impl(None, compact_task).await
     }
 
@@ -803,9 +814,13 @@ where
         Ok(ret)
     }
 
-    /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
-    /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
-    /// been processed previously.
+    /// Finishes or cancels a compaction task, according to `task_status`.
+    ///
+    /// If `context_id` is not None, its validity will be checked when writing meta store.
+    /// Its ownership of the task is checked as well.
+    ///
+    /// Return Ok(false) indicates either the task is not found,
+    /// or the task is not owned by `context_id` when `context_id` is not None.
     #[named]
     pub async fn report_compact_task_impl(
         &self,
@@ -829,8 +844,7 @@ where
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
 
-        // For cancel task, there is no need to check the task assignment because
-        // we have not assign any compactor to it.
+        // For context_id is None, there is no need to check the task assignment.
         if let Some(context_id) = context_id {
             match assignee_context_id {
                 Some(id) => {
@@ -861,27 +875,26 @@ where
         if let TaskStatus::Success = task_status {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
-            let old_version = versioning_guard.current_version.clone();
             let versioning = versioning_guard.deref_mut();
+            let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            apply_version_delta(
+            let version_delta = apply_version_delta(
                 &mut hummock_version_deltas,
-                &old_version,
+                current_version,
                 compact_task,
                 false,
             );
-            let new_version_id = old_version.id + 1;
-            let mut new_version = CompactStatus::apply_compact_result(compact_task, old_version);
-            new_version.id = new_version_id;
+
             commit_multi_var!(
                 self,
-                assignee_context_id,
+                context_id,
                 compact_status,
                 compact_task_assignment,
                 hummock_version_deltas
             )?;
-            versioning.current_version = new_version;
+
+            current_version.apply_version_delta(&version_delta);
 
             self.env
                 .notification_manager()
@@ -898,12 +911,7 @@ where
                 );
         } else {
             // The compaction task is cancelled or failed.
-            commit_multi_var!(
-                self,
-                assignee_context_id,
-                compact_status,
-                compact_task_assignment
-            )?;
+            commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
 
         // Update compaaction task count.
@@ -1396,11 +1404,7 @@ where
         }
 
         if need_cancel_task {
-            compact_task.set_task_status(TaskStatus::Canceled);
-            if let Err(e) = self
-                .report_compact_task(compactor.context_id(), &compact_task)
-                .await
-            {
+            if let Err(e) = self.cancel_compact_task(&mut compact_task).await {
                 tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);
                 // TODO #3677: handle cancellation via compaction heartbeat after #4496
             }
@@ -1449,7 +1453,7 @@ fn apply_version_delta<'a>(
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,
-) {
+) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
@@ -1479,5 +1483,7 @@ fn apply_version_delta<'a>(
     level_deltas.push(level_delta);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     version_delta.id = old_version.id + 1;
-    txn.insert(version_delta.id, version_delta);
+    txn.insert(version_delta.id, version_delta.clone());
+
+    version_delta
 }
