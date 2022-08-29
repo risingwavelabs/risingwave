@@ -41,7 +41,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompactorSstableStore, CompressionAlgorithm, InMemWriter, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
-    SstableStoreWrite, SstableWriteMode, SstableWriterOptions, TieredCache,
+    SstableWriteMode, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -177,10 +177,7 @@ fn bench_table_scan(c: &mut Criterion) {
     });
 }
 
-async fn compact<I: HummockIterator<Direction = Forward>>(
-    iter: I,
-    sstable_store: Arc<CompactorSstableStore>,
-) {
+async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store: SstableStoreRef) {
     let opt = SstableBuilderOptions {
         capacity: 32 * 1024 * 1024,
         block_capacity: 64 * 1024,

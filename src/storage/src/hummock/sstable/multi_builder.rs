@@ -20,13 +20,12 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use tokio::task::JoinHandle;
 
-use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::utils::MemoryTracker;
 use super::SstableMeta;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
-    SstableStoreWrite, SstableWriterOptions,
+    SstableWriterOptions,
 };
 use crate::monitor::StateStoreMetrics;
 
@@ -184,7 +183,7 @@ where
 /// Used for unit tests and benchmarks.
 pub struct LocalTableBuilderFactory {
     next_id: AtomicU64,
-    sstable_store: Arc<dyn SstableStoreWrite>,
+    sstable_store: SstableStoreRef,
     options: SstableBuilderOptions,
     policy: CachePolicy,
     limiter: MemoryLimiter,
@@ -193,7 +192,7 @@ pub struct LocalTableBuilderFactory {
 impl LocalTableBuilderFactory {
     pub fn new(
         next_id: u64,
-        sstable_store: Arc<dyn SstableStoreWrite>,
+        sstable_store: SstableStoreRef,
         options: SstableBuilderOptions,
     ) -> Self {
         Self {

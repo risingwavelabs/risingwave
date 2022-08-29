@@ -58,6 +58,7 @@ use super::{HummockResult, SstableBuilderOptions, SstableWriterOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
@@ -67,7 +68,7 @@ use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub struct RemoteBuilderFactory {
     sstable_id_manager: SstableIdManagerRef,
-    sstable_store: Arc<dyn SstableStoreWrite>,
+    sstable_store: SstableStoreRef,
     limiter: Arc<MemoryLimiter>,
     options: SstableBuilderOptions,
     policy: CachePolicy,
@@ -571,7 +572,7 @@ impl Compactor {
 
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
-            sstable_store: self.sstable_store.clone(),
+            sstable_store: self.context.sstable_store.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options,
             policy: self.task_config.cache_policy,
@@ -631,7 +632,7 @@ impl Compactor {
             ssts.push(sst_info);
 
             // Upload metadata.
-            let sstable_store_cloned = self.sstable_store.clone();
+            let sstable_store_cloned = self.context.sstable_store.clone();
             let upload_join_handle = async move {
                 let upload_data_result = upload_join_handle.await;
                 upload_data_result.map_err(|e| {
