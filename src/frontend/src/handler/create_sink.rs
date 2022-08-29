@@ -29,7 +29,7 @@ use crate::handler::privilege::ObjectCheckItem;
 use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
@@ -134,7 +134,7 @@ pub async fn handle_create_sink(
     let (sink, graph) = {
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
-        (sink, StreamFragmenterV2::build_graph(plan))
+        (sink, build_graph(plan))
     };
 
     let catalog_writer = session.env().catalog_writer();
