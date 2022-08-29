@@ -24,7 +24,7 @@ For all data $k \in U_k$, where $U_k$ is an unbounded set, we apply a hash funct
 
 ![initial data distribution](./images/consistent-hash/data-distribution.svg)
 
-Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. In other words, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/singularity-data/risingwave/blob/91bdbced198642a1e7f1b67321b3cb923aa1fbd8/src/meta/src/manager/hash_mapping.rs).
+Then we have vnode mapping, which ensures that vnodes are mapped evenly to parallel units in the cluster. In other words, the number of vnodes that are mapped to each parallel unit should be as close as possible. This is denoted by different colors in the figure above. As is depicted, we have 3 parallel units (shown as circles), each taking $\frac{1}{3}$ of total vnodes. Vnode mapping is [constructed and maintained by meta](https://github.com/singularity-data/risingwave/blob/main/src/meta/src/stream/scheduler.rs).
 
 As long as the hash function $H$ could ensure uniformity, the data distribution determined by this strategy would be even across physical resources. The evenness will be retained even if data in $U_k$ are skewed to a certain range, say, most students scoring over 60 in a hundred-mark system.
 
