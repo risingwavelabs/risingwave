@@ -34,7 +34,7 @@ use super::{
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, AggOrderBy, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
-    InputRefDisplay,
+    InputRefDisplay, Literal,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
@@ -710,16 +710,17 @@ impl LogicalAggBuilder {
 
         Ok(())
     }
-}
 
-impl ExprRewriter for LogicalAggBuilder {
     /// When there is an agg call, there are 3 things to do:
     /// 1. eval its inputs via project;
     /// 2. add a `PlanAggCall` to agg;
     /// 3. rewrite it as an `InputRef` to the agg result in select list.
     ///
     /// Note that the rewriter does not traverse into inputs of agg calls.
-    fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
+    fn try_rewrite_agg_call(
+        &mut self,
+        agg_call: AggCall,
+    ) -> std::result::Result<ExprImpl, ErrorCode> {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs, distinct, mut order_by, filter) = agg_call.decompose();
         match &agg_kind {
@@ -744,27 +745,18 @@ impl ExprRewriter for LogicalAggBuilder {
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
 
-        let inputs_or_err: std::result::Result<_, &'static str> = inputs
+        let inputs: Vec<_> = inputs
             .iter()
             .map(|expr| {
                 let index = self.input_proj_builder.add_expr(expr)?;
                 Ok(InputRef::new(index, expr.return_type()))
             })
-            .try_collect();
-        let inputs: Vec<_> = match inputs_or_err {
-            Ok(inputs) => inputs,
-            Err(err) => {
-                self.error = Some(ErrorCode::NotImplemented(
-                    format!("{err} inside aggregation calls"),
-                    None.into(),
-                ));
-                return AggCall::new(agg_kind, inputs, distinct, order_by, filter)
-                    .unwrap()
-                    .into();
-            }
-        };
+            .try_collect()
+            .map_err(|err: &'static str| {
+                ErrorCode::NotImplemented(format!("{err} inside aggregation calls"), None.into())
+            })?;
 
-        let order_by_fields_or_err: std::result::Result<_, &'static str> = order_by
+        let order_by_fields: Vec<_> = order_by
             .sort_exprs
             .iter()
             .map(|e| {
@@ -775,19 +767,13 @@ impl ExprRewriter for LogicalAggBuilder {
                     nulls_first: e.nulls_first,
                 })
             })
-            .try_collect();
-        let order_by_fields: Vec<_> = match order_by_fields_or_err {
-            Ok(order_by_fields) => order_by_fields,
-            Err(err) => {
-                self.error = Some(ErrorCode::NotImplemented(
+            .try_collect()
+            .map_err(|err: &'static str| {
+                ErrorCode::NotImplemented(
                     format!("{err} inside aggregation calls order by"),
                     None.into(),
-                ));
-                return AggCall::new(agg_kind, vec![], distinct, order_by, filter)
-                    .unwrap()
-                    .into();
-            }
-        };
+                )
+            })?;
 
         if agg_kind == AggKind::Avg {
             assert_eq!(inputs.len(), 1);
@@ -828,7 +814,11 @@ impl ExprRewriter for LogicalAggBuilder {
                 right_return_type,
             );
 
-            ExprImpl::from(FunctionCall::new(ExprType::Divide, vec![left, right.into()]).unwrap())
+            Ok(
+                FunctionCall::new(ExprType::Divide, vec![left, right.into()])
+                    .unwrap()
+                    .into(),
+            )
         } else {
             self.agg_calls.push(PlanAggCall {
                 agg_kind,
@@ -838,10 +828,20 @@ impl ExprRewriter for LogicalAggBuilder {
                 order_by_fields,
                 filter,
             });
-            ExprImpl::from(InputRef::new(
-                self.group_key.len() + self.agg_calls.len() - 1,
-                return_type,
-            ))
+            Ok(InputRef::new(self.group_key.len() + self.agg_calls.len() - 1, return_type).into())
+        }
+    }
+}
+
+impl ExprRewriter for LogicalAggBuilder {
+    fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
+        let dummy = Literal::new(None, agg_call.return_type()).into();
+        match self.try_rewrite_agg_call(agg_call) {
+            Ok(expr) => expr,
+            Err(err) => {
+                self.error = Some(err);
+                dummy
+            }
         }
     }
 
