@@ -102,6 +102,14 @@ pub async fn playground() -> Result<()> {
                             },
                         )?;
                         apply_config_file(&mut command);
+                        if config.enable_tiered_cache {
+                            let prefix_data = env::var("PREFIX_DATA")?;
+                            cmd.arg("--file-cache-dir").arg(
+                                PathBuf::from(prefix_data)
+                                    .join("filecache")
+                                    .join(config.port.to_string()),
+                            );
+                        }
                         rw_services.push(RisingWaveService::Compute(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));

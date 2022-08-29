@@ -1,6 +1,6 @@
 // Copyright 2022 Singularity Data
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
+// Licensed under the Apa&che License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
@@ -135,7 +135,10 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::ComputeNode(c) => (c.address.clone(), c.compose(&compose_config)?),
+            ServiceConfig::ComputeNode(c) => {
+                volumes.insert(c.id.clone(), ComposeVolume::default());
+                (c.address.clone(), c.compose(&compose_config)?)
+            }
             ServiceConfig::MetaNode(c) => {
                 if opts.deploy {
                     let public_ip = &compose_deploy_config
