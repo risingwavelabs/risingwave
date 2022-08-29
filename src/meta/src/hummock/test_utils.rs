@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -85,7 +86,7 @@ where
     )
     .await;
     compact_task.sorted_output_ssts = test_tables_2.clone();
-    compact_task.task_status = true;
+    compact_task.set_task_status(TaskStatus::Success);
     hummock_manager
         .report_compact_task(context_id, &compact_task)
         .await
@@ -221,7 +222,7 @@ pub async fn setup_compute_env_with_config(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), Duration::from_secs(1))
+        ClusterManager::new_for_test(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
