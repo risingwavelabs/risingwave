@@ -48,6 +48,9 @@ pub struct GenericExtremeState<S: StateStore> {
     /// Contains the column mapping between upstream schema and state table.
     state_table_col_mapping: Arc<StateTableColumnMapping>,
 
+    // The column to aggregate in input chunk.
+    upstream_agg_col_idx: usize,
+
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
 
@@ -113,6 +116,7 @@ impl<S: StateStore> GenericExtremeState<S> {
         row_count: usize,
         cache_capacity: usize,
     ) -> Self {
+        let upstream_agg_col_idx = agg_call.args.val_indices()[0];
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(agg_call.args.val_indices()[0])
@@ -140,6 +144,7 @@ impl<S: StateStore> GenericExtremeState<S> {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
             state_table_col_mapping: col_mapping,
+            upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_order_col_indices,
             state_table_order_types,
@@ -168,12 +173,12 @@ impl<S: StateStore> GenericExtremeState<S> {
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
 
-        for (i, op) in ops.iter().enumerate() {
-            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
-            if !visible {
-                continue;
-            }
-
+        for (i, op) in ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+            .filter(|(i, _)| columns[self.upstream_agg_col_idx].datum_at(*i).is_some())
+        {
             let state_row = Row::new(
                 self.state_table_col_mapping
                     .upstream_columns()
@@ -657,7 +662,9 @@ mod tests {
             epoch += 1;
 
             match managed_state_1.get_output(epoch, &state_table_1).await? {
-                None => {} // pass
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(&s, "a");
+                }
                 _ => panic!("unexpected output"),
             }
             match managed_state_2.get_output(epoch, &state_table_2).await? {

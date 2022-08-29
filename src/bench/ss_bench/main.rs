@@ -24,6 +24,8 @@ use operations::*;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::monitor::Print;
+use risingwave_compute::compute_observer::observer_manager::ComputeObserverNode;
+use risingwave_compute::server::StateStoreImpl::HummockStateStore;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::compactor::CompactionExecutor;
@@ -31,7 +33,7 @@ use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
-
+use risingwave_storage::test_utils::{get_test_observer_manager, TestNotificationClient};
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
     // ----- backend type  -----
@@ -164,7 +166,7 @@ async fn main() {
         compactor_memory_limit_mb: opts.meta_cache_capacity_mb as usize * 2,
     });
 
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
@@ -182,6 +184,23 @@ async fn main() {
     )
     .await
     .expect("Failed to get state_store");
+    let local_version_manager = match &state_store {
+        HummockStateStore(monitored) => monitored.local_version_manager(),
+        _ => {
+            panic!();
+        }
+    };
+    let client = TestNotificationClient::new(env.notification_manager_ref(), hummock_manager_ref);
+    let compute_observer_node =
+        ComputeObserverNode::new(table_id_to_filter_key_extractor.clone(), local_version_manager);
+    let observer_manager = get_test_observer_manager(
+        client,
+        worker_node.get_host().unwrap().into(),
+        Box::new(compute_observer_node),
+        worker_node.get_type().unwrap(),
+    )
+    .await;
+    observer_manager.start().await.unwrap();
     let mut context = None;
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
         context = Some((
