@@ -12,81 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Buf;
 use memcomparable::from_slice;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 
 use super::ColumnDescMapping;
-
-#[allow(clippy::len_without_is_empty)]
-impl ColumnDescMapping {
-    fn new_inner(
-        output_columns: Vec<ColumnDesc>,
-        all_data_types: Vec<DataType>,
-        output_index: Vec<usize>,
-    ) -> Arc<Self> {
-        let output_id_to_index = output_columns
-            .iter()
-            .enumerate()
-            .map(|(index, d)| (d.column_id, index))
-            .collect();
-        Self {
-            output_columns,
-            output_id_to_index,
-            all_data_types,
-            output_index,
-        }
-        .into()
-    }
-
-    /// Create a mapping with given `output_columns`.
-    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
-        let all_data_types = output_columns.iter().map(|d| d.data_type.clone()).collect();
-        let output_index: Vec<usize> = output_columns
-            .iter()
-            .map(|c| c.column_id.get_id() as usize)
-            .collect();
-        Self::new_inner(output_columns, all_data_types, output_index)
-    }
-
-    /// Create a mapping with given `table_columns` projected on the `column_ids`.
-    pub fn new_partial(table_columns: &[ColumnDesc], output_column_ids: &[ColumnId]) -> Arc<Self> {
-        let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
-        let mut table_columns = table_columns
-            .iter()
-            .enumerate()
-            .map(|(index, c)| (c.column_id, (c.clone(), index)))
-            .collect::<HashMap<_, _>>();
-        let (output_columns, output_index): (
-            Vec<risingwave_common::catalog::ColumnDesc>,
-            Vec<usize>,
-        ) = output_column_ids
-            .iter()
-            .map(|id| table_columns.remove(id).unwrap())
-            .unzip();
-        Self::new_inner(output_columns, all_data_types, output_index)
-    }
-
-    /// Get the [`ColumnDesc`] and its index in the output with given `id`.
-    pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
-        self.output_id_to_index
-            .get(&id)
-            .map(|&index| (&self.output_columns[index], index))
-    }
-
-    /// Get the length of output columns.
-    pub fn len(&self) -> usize {
-        self.output_columns.len()
-    }
-}
 
 pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
     let mut result = vec![];
