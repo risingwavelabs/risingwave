@@ -634,10 +634,12 @@
 - sql: |
     /* distinct aggregates only have one distinct argument doesn't need expand */
     create table t(x int, y int);
-    select count(x), min(distinct y), max(distinct y) from t;
+    select count(x), sum(distinct y), sum(distinct y) from t;
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(t.x), min(t.y), max(t.y)] }
-      LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), sum(t.y), sum(t.y)] }
+      LogicalAgg { aggs: [sum(count(t.x)), sum(t.y), sum(t.y)] }
+        LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
+          LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select count(y), min(distinct y) from t;
