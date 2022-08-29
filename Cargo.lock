@@ -2664,9 +2664,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f26e34ff2d7e2d3c0e7403ef85848ed3667f9c89fc50321d62d480c03388f8cf"
+checksum = "2fbcfa3e52808d948f10928c17a720efd3324942b1059cef77cc88077ea639f9"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2714,9 +2714,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.1"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f9a94d5152ffebadc3ced26c8c9c5ba64ee1a2374669599f6b4cdd13cf4017"
+checksum = "efddb30ea11cec8e8a74c73e24ee8dce75746c55152542a6d3a04393926a5792"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -4135,6 +4135,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",
@@ -5557,9 +5558,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be941156714c31025cba4ddae47005e15b0b76efffcb3826ba559bd31a2f0f49"
+checksum = "e69883160fe47b7662659307bb7d32e854791c05e9951d1fe87c35bc09bd6422"
 dependencies = [
  "async-trait",
  "difference",

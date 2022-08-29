@@ -509,18 +509,16 @@
     select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x) filter((flag = 0:Int64))), output: [] }
+      LogicalJoin { type: Inner, on: (a.z = a.z) AND (a.y::Int64 = count(b.x)), output: [] }
         LogicalProject { exprs: [a.z, a.y::Int64] }
           LogicalScan { table: a, columns: [a.y, a.z] }
-        LogicalAgg { group_key: [a.z], aggs: [count(b.x) filter((flag = 0:Int64))] }
-          LogicalAgg { group_key: [a.z, b.x, flag], aggs: [] }
-            LogicalProject { exprs: [a.z, b.x, flag] }
-              LogicalExpand { column_subsets: [[a.z, b.x]] }
-                LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
-                  LogicalAgg { group_key: [a.z], aggs: [] }
-                    LogicalScan { table: a, columns: [a.z] }
-                  LogicalProject { exprs: [b.z, b.x] }
-                    LogicalScan { table: b, columns: [b.x, b.z] }
+        LogicalAgg { group_key: [a.z], aggs: [count(b.x)] }
+          LogicalAgg { group_key: [a.z, b.x], aggs: [] }
+            LogicalJoin { type: LeftOuter, on: (a.z = b.z), output: [a.z, b.x] }
+              LogicalAgg { group_key: [a.z], aggs: [] }
+                LogicalScan { table: a, columns: [a.z] }
+              LogicalProject { exprs: [b.z, b.x] }
+                LogicalScan { table: b, columns: [b.x, b.z] }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -665,3 +663,30 @@
         LogicalAgg { group_key: [t1.a], aggs: [] }
           LogicalScan { table: t1, columns: [t1.a] }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(x int, y int);
+    select * from t1 where exists(select t3.x from (select x,y from t2 where t1.y = t2.y) t2 join t3 on t2.x = t3.x);
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y), output: all }
+      LogicalScan { table: t1, columns: [t1.x, t1.y] }
+      LogicalJoin { type: Inner, on: (t2.x = t3.x), output: [t2.y] }
+        LogicalJoin { type: Inner, on: (t2.y = t1.y), output: [t2.x, t2.y] }
+          LogicalScan { table: t2, columns: [t2.x, t2.y] }
+          LogicalAgg { group_key: [t1.y], aggs: [] }
+            LogicalScan { table: t1, columns: [t1.y] }
+        LogicalScan { table: t3, columns: [t3.x] }
+- sql: |
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    select * from a where a1 = (select min(b1) from (select * from b where b2 = a2) as z);
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (a.a2 = a.a2) AND (a.a1 = min(b.b1)), output: [a.a1, a.a2] }
+      LogicalScan { table: a, columns: [a.a1, a.a2] }
+      LogicalAgg { group_key: [a.a2], aggs: [min(b.b1)] }
+        LogicalJoin { type: LeftOuter, on: (a.a2 = b.b2), output: [a.a2, b.b1] }
+          LogicalAgg { group_key: [a.a2], aggs: [] }
+            LogicalScan { table: a, columns: [a.a2] }
+          LogicalProject { exprs: [b.b2, b.b1] }
+            LogicalScan { table: b, columns: [b.b1, b.b2] }

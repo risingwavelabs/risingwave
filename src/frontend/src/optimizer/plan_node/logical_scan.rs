@@ -20,6 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::OrderType;
 
 use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
@@ -28,7 +29,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
@@ -69,14 +70,12 @@ impl LogicalScan {
         // table_idx will not changes. and the `required_col_idx is the `table_idx` of the
         // required columns, in other word, is the mapping from operator_idx to table_idx.
 
-        let mut id_to_op_idx = HashMap::new();
+        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&output_col_idx, &table_desc);
 
         let fields = output_col_idx
             .iter()
-            .enumerate()
-            .map(|(op_idx, tb_idx)| {
+            .map(|tb_idx| {
                 let col = &table_desc.columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
                 Field::from_with_table_name_prefix(col, &table_name)
             })
             .collect();
@@ -223,6 +222,30 @@ impl LogicalScan {
         &self.predicate
     }
 
+    /// Return indices of fields the output is ordered by and
+    /// corresponding direction
+    pub fn get_out_column_index_order(&self) -> Order {
+        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
+        Order::new(
+            self.table_desc
+                .order_key
+                .iter()
+                .filter_map(|order| {
+                    let out_idx = id_to_op_idx
+                        .get(&self.table_desc.columns[order.column_idx].column_id)
+                        .copied();
+                    match out_idx {
+                        Some(idx) => match order.order_type {
+                            OrderType::Ascending => Some(FieldOrder::ascending(idx)),
+                            OrderType::Descending => Some(FieldOrder::descending(idx)),
+                        },
+                        None => None,
+                    }
+                })
+                .collect(),
+        )
+    }
+
     /// The mapped distribution key of the scan operator.
     ///
     /// The column indices in it is the position in the `output_col_idx`, instead of the position
@@ -249,12 +272,11 @@ impl LogicalScan {
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &HashMap<usize, usize>,
     ) -> LogicalScan {
-        let mut new_required_col_idx = Vec::with_capacity(self.required_col_idx.len());
-
-        // create index scan plan to match the output order of the current table scan
-        for &col_idx in &self.required_col_idx {
-            new_required_col_idx.push(*primary_to_secondary_mapping.get(&col_idx).unwrap());
-        }
+        let new_output_col_idx = self
+            .output_col_idx
+            .iter()
+            .map(|col_idx| *primary_to_secondary_mapping.get(col_idx).unwrap())
+            .collect_vec();
 
         struct Rewriter<'a> {
             primary_to_secondary_mapping: &'a HashMap<usize, usize>,
@@ -280,7 +302,7 @@ impl LogicalScan {
         Self::new(
             index_name.to_string(),
             false,
-            new_required_col_idx,
+            new_output_col_idx,
             index_table_desc,
             vec![],
             self.ctx(),
@@ -299,6 +321,22 @@ impl LogicalScan {
             })
             .collect_vec();
         output_idx
+    }
+
+    /// Helper function to create a mapping from `column_id` to `operator_idx`
+    fn get_id_to_op_idx_mapping(
+        output_col_idx: &[usize],
+        table_desc: &Rc<TableDesc>,
+    ) -> HashMap<ColumnId, usize> {
+        let mut id_to_op_idx = HashMap::new();
+        output_col_idx
+            .iter()
+            .enumerate()
+            .for_each(|(op_idx, tb_idx)| {
+                let col = &table_desc.columns[*tb_idx];
+                id_to_op_idx.insert(col.column_id, op_idx);
+            });
+        id_to_op_idx
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
