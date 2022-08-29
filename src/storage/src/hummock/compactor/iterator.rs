@@ -24,9 +24,10 @@ use crate::hummock::compactor::CompactorSstableStoreRef;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, BlockStream, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
+/// Iterates over the KV-pairs of an SST which has its blocks already stored in memory.
 pub struct SstablePrefetchIterator {
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
@@ -126,6 +127,135 @@ impl SstablePrefetchIterator {
             self.seek_idx(block_idx + 1, None)?;
         }
         Ok(())
+    }
+}
+
+/// Iterates over the KV-pairs of an SST while downloading it.
+struct SstableStreamIterator {
+    /// The downloading stream of the current block.
+    block_stream: BlockStream,
+
+    /// Iterates over the KV-pairs of the current block.
+    block_iter: Option<BlockIterator>,
+
+    /// The maximum number of remaining blocks that iterator will download and read.
+    remaining_blocks: usize,
+
+    /// Reference to the SST
+    sst: TableHolder,
+}
+
+impl SstableStreamIterator {
+    // We have to handle two internal iterators.
+    //   `block_stream`: iterates over the blocks of the table.
+    //     `block_iter`: iterates over the KV-pairs of the current block.
+    // These iterators work in different ways.
+
+    // BlockIterator works as follows: After new(), we call seek(). That brings us
+    // to the first element. Calling next() then brings us to the second element and does not
+    // return anything.
+
+    // BlockStream follows a different approach. After new(), we do not seek, instead next()
+    // returns the first value.
+
+    /// Initialises a new [SstableStreamIterator] which iterates over the given SST using the given
+    /// block stream. The stream reads at most `max_block_count` from the stream.
+    pub fn new(sst: TableHolder, block_stream: BlockStream, max_block_count: usize) -> Self {
+        Self {
+            block_stream,
+            block_iter: None,
+            remaining_blocks: max_block_count,
+            sst,
+        }
+    }
+
+    /// Initialises the iterator by moving it to the first KV-pair in the stream's first block where
+    /// key >= `start_key`. If that block does not contain such a KV-pair, the iterator continues to
+    /// the first KV-pair of the next block. If `start_key` is not given, the iterator will move to
+    /// the very first KV-pair of the stream's first block.
+    pub async fn start(&mut self, start_key: Option<&[u8]>) -> HummockResult<()> {
+        // Load first block.
+        self.next_block().await?;
+
+        // We assume that a block always contains at least one KV pair. Subsequently, if
+        // `next_block()` loads a new block (i.e., `block_iter` is not `None`), then `block_iter` is
+        // also valid and pointing on the block's first KV-pair.
+
+        if let (Some(block_iter), Some(key)) = (self.block_iter.as_mut(), start_key) {
+            // We now search for `key` in the current block. If `key` is larger than anything stored
+            // in the current block, then `block_iter` searches through the whole block and
+            // eventually ends in an invalid state. We therefore move to the start of the next
+            // block.
+
+            block_iter.seek(key);
+            if !block_iter.is_valid() {
+                self.next_block().await?;
+            }
+        }
+
+        // Reached end of stream?
+        if self.block_iter.is_none() {
+            self.remaining_blocks = 0;
+        }
+
+        Ok(())
+    }
+
+    /// Loads a new block, creates a new iterator for it, and stores that iterator in
+    /// `self.block_iter`. The created iterator points to the block's first KV-pair. If the end of
+    /// the stream is reached or `self.remaining_blocks` is zero, then the function sets
+    /// `self.block_iter` to `None`.
+    async fn next_block(&mut self) -> HummockResult<()> {
+        // Check if we want and if we can load the next block.
+        if self.remaining_blocks > 0 && let Some(block) = self.block_stream.next().await? {
+            self.remaining_blocks -= 1;
+            self.block_iter = Some(BlockIterator::new(block));
+            self.block_iter.as_mut().unwrap().seek_to_first();
+        } else {
+            self.remaining_blocks = 0;
+            self.block_iter = None;
+        }
+
+        Ok(())
+    }
+
+    /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
+    /// the next position is invalid, the function return `Ok(())`.
+    ///
+    /// Do not use `next()` to initialise the iterator (i.e. do not use it to find the first
+    /// KV-pair). Instead, use `start()`. Afterwards, use `next()` to reach the second KV-pair and
+    /// onwards.
+    pub async fn next(&mut self) -> HummockResult<()> {
+        // Ensure iterator is valid.
+        if !self.is_valid() {
+            return Ok(());
+        }
+
+        // Unwrap internal iterator.
+        let Some(block_iter) = self.block_iter.as_mut();
+
+        // Can we continue in current block?
+        block_iter.next();
+        if !block_iter.is_valid() {
+            // No, block is exhausted. We need to load the next block.
+            self.next_block().await?;
+        }
+
+        Ok(())
+    }
+
+    fn key(&self) -> &[u8] {
+        self.block_iter.as_ref().expect("no block iter").key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
+        HummockValue::from_slice(raw_value).expect("decode error")
+    }
+
+    fn is_valid(&self) -> bool {
+        // True iff block_iter exists and is valid.
+        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 }
 
