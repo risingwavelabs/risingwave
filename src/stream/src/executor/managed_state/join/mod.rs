@@ -19,6 +19,7 @@ use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::future::try_join;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
@@ -361,17 +362,18 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
         let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
-        let table_iter = self
+        let table_iter_fut = self
             .state
             .table
-            .iter_with_pk_prefix(&key, self.current_epoch)
-            .await?;
+            .iter_with_pk_prefix(&key, self.current_epoch);
 
-        let degree_table_iter = self
+        let degree_table_iter_fut = self
             .degree_state
             .table
-            .iter_with_pk_prefix(&key, self.current_epoch)
-            .await?;
+            .iter_with_pk_prefix(&key, self.current_epoch);
+
+        let (table_iter, degree_table_iter) =
+            try_join(table_iter_fut, degree_table_iter_fut).await?;
 
         // We need this because ttl may remove some entries from table but leave the entries with
         // the same stream key in degree table.
