@@ -121,7 +121,7 @@ impl StreamFragmenter {
         let f = |child| {
             // For stateful operators, set `exchange_flag = true`. If it's already true,
             // force add an exchange.
-            Ok(if Self::is_stateful_executor(&child) {
+            if Self::is_stateful_executor(&child) {
                 if insert_exchange_flag {
                     let child_node = Self::rewrite_stream_node(state, child, true)?;
 
@@ -129,7 +129,7 @@ impl StreamFragmenter {
                         r#type: DispatcherType::NoShuffle.into(),
                         column_indices: vec![], // TODO: use distribution key
                     };
-                    StreamNode {
+                    Ok(StreamNode {
                         stream_key: child_node.stream_key.clone(),
                         fields: child_node.fields.clone(),
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
@@ -139,9 +139,9 @@ impl StreamFragmenter {
                         append_only: child_node.append_only,
                         input: vec![child_node],
                         identity: "Exchange (NoShuffle)".to_string(),
-                    }
+                    })
                 } else {
-                    Self::rewrite_stream_node(state, child, true)?
+                    Self::rewrite_stream_node(state, child, true)
                 }
             } else {
                 match child.get_node_body()? {
@@ -149,8 +149,8 @@ impl StreamFragmenter {
                     NodeBody::Exchange(_) => Self::rewrite_stream_node(state, child, false),
                     // Otherwise, recursively visit the children.
                     _ => Self::rewrite_stream_node(state, child, insert_exchange_flag),
-                }?
-            })
+                }
+            }
         };
         Ok(StreamNode {
             input: stream_node
@@ -237,20 +237,21 @@ impl StreamFragmenter {
             }
         }
 
-        let inputs = std::mem::take(&mut stream_node.input);
         // Visit plan children.
-        let inputs = inputs
+        stream_node.input = stream_node
+            .input
             .into_iter()
             .map(|mut child_node| -> Result<StreamNode> {
                 match child_node.get_node_body()? {
-                    NodeBody::Exchange(_) if child_node.input.is_empty() => {
-                        // When exchange node is generated when doing rewrites, it could be having
-                        // zero input. In this case, we won't recursively visit its children.
-                        Ok(child_node)
-                    }
+                    // When exchange node is generated when doing rewrites, it could be having
+                    // zero input. In this case, we won't recursively visit its children.
+                    NodeBody::Exchange(_) if child_node.input.is_empty() => Ok(child_node),
                     // Exchange node indicates a new child fragment.
                     NodeBody::Exchange(exchange_node) => {
-                        let exchange_node = exchange_node.clone();
+                        let exchange_node_strategy = exchange_node.get_strategy()?.clone();
+
+                        let is_simple_dispatcher =
+                            exchange_node_strategy.get_type()? == DispatcherType::Simple;
 
                         assert_eq!(child_node.input.len(), 1);
                         let child_fragment =
@@ -259,14 +260,12 @@ impl StreamFragmenter {
                             child_fragment.fragment_id,
                             current_fragment.fragment_id,
                             StreamFragmentEdge {
-                                dispatch_strategy: exchange_node.get_strategy()?.clone(),
+                                dispatch_strategy: exchange_node_strategy,
                                 same_worker_node: false,
                                 link_id: child_node.operator_id,
                             },
                         );
 
-                        let is_simple_dispatcher =
-                            exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
                         if is_simple_dispatcher {
                             current_fragment.is_singleton = true;
                         }
@@ -278,9 +277,6 @@ impl StreamFragmenter {
                 }
             })
             .try_collect()?;
-
-        stream_node.input = inputs;
-
         Ok(stream_node)
     }
 
