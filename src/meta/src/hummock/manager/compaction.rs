@@ -44,6 +44,7 @@ pub fn cancel_all_assigned_tasks(
         CompactTaskAssignment,
     >,
 ) -> Result<()> {
+    // Clean up compact_status.
     for assignment in compact_task_assignment.tree_ref().values() {
         if assignment.context_id != context_id {
             continue;
@@ -62,6 +63,7 @@ pub fn cancel_all_assigned_tasks(
                 .expect("compact_task shouldn't be None"),
         );
     }
+    // Clean up compact_task_assignment.
     let task_ids_to_remove = compact_task_assignment
         .tree_ref()
         .iter()
