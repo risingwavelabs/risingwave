@@ -113,6 +113,11 @@ enum MetaCommands {
     Resume,
     /// get cluster info
     ClusterInfo,
+    /// reschedule
+    Reschedule {
+        /// plan of reschedule
+        plan: String
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -144,6 +149,7 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause().await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume().await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
+        Commands::Meta(MetaCommands::Reschedule { plan }) => cmd_impl::meta::reschedule(plan).await?,
         Commands::Trace => cmd_impl::trace::trace().await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,
     }

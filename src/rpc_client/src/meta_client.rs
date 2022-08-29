@@ -27,6 +27,7 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable,
 };
+use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
@@ -437,6 +438,12 @@ impl MetaClient {
         let resp = self.inner.get_cluster_info(request).await?;
         Ok(resp)
     }
+
+    pub async fn reschedule(&self, reschedules: HashMap<u32, ProstReschedule>) -> Result<bool> {
+        let request = RescheduleRequest{ reschedules };
+        let resp = self.inner.reschedule(request).await?;
+        Ok(resp.success)
+    }
 }
 
 #[async_trait]
@@ -715,6 +722,7 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, pause, PauseRequest, PauseResponse }
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
+            ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
         }
     };
