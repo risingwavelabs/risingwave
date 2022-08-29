@@ -95,10 +95,16 @@ impl StoreLocalStatistic {
                 .inc_by(self.bloom_filter_check_counts);
         }
         if self.processed_key_count > 0 {
-            metrics.iter_scan_key_counts.with_label_values(&["processed"]).inc_by(self.processed_key_count);
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&["processed"])
+                .inc_by(self.processed_key_count);
         }
         if self.scan_key_count > 0 {
-            metrics.iter_scan_key_counts.with_label_values(&["total"]).inc_by(self.scan_key_count);
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&["total"])
+                .inc_by(self.scan_key_count);
         }
     }
 }

@@ -220,7 +220,8 @@ impl StateStoreMetrics {
             "Total number of keys read by iterator",
             &["type"],
             registry
-        ).unwrap();
+        )
+        .unwrap();
 
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_with_registry!(
