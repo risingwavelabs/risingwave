@@ -116,59 +116,48 @@ impl StreamFragmenter {
     fn rewrite_stream_node(
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
-    ) -> Result<StreamNode> {
-        let insert_exchange_flag = Self::is_stateful_executor(&stream_node);
-        Self::rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
-    }
-
-    fn rewrite_stream_node_inner(
-        state: &mut BuildFragmentGraphState,
-        stream_node: StreamNode,
         insert_exchange_flag: bool,
     ) -> Result<StreamNode> {
-        let mut inputs = vec![];
-
-        for child_node in stream_node.input {
-            // For stateful operators, set `exchange_flag = true`. If it's already true, force
-            // add an exchange.
-            let input = if Self::is_stateful_executor(&child_node) {
+        let f = |child| {
+            // For stateful operators, set `exchange_flag = true`. If it's already true,
+            // force add an exchange.
+            Ok(if Self::is_stateful_executor(&child) {
                 if insert_exchange_flag {
-                    let child_node = Self::rewrite_stream_node_inner(state, child_node, true)?;
+                    let child_node = Self::rewrite_stream_node(state, child, true)?;
 
                     let strategy = DispatchStrategy {
                         r#type: DispatcherType::NoShuffle.into(),
                         column_indices: vec![], // TODO: use distribution key
                     };
-                    let append_only = child_node.append_only;
                     StreamNode {
                         stream_key: child_node.stream_key.clone(),
                         fields: child_node.fields.clone(),
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
-                            strategy: Some(strategy.clone()),
+                            strategy: Some(strategy),
                         })),
                         operator_id: state.gen_operator_id() as u64,
+                        append_only: child_node.append_only,
                         input: vec![child_node],
                         identity: "Exchange (NoShuffle)".to_string(),
-                        append_only,
                     }
                 } else {
-                    Self::rewrite_stream_node_inner(state, child_node, true)?
+                    Self::rewrite_stream_node(state, child, true)?
                 }
             } else {
-                match child_node.get_node_body()? {
+                match child.get_node_body()? {
                     // For exchanges, reset the flag.
-                    NodeBody::Exchange(_) => {
-                        Self::rewrite_stream_node_inner(state, child_node, false)?
-                    }
+                    NodeBody::Exchange(_) => Self::rewrite_stream_node(state, child, false),
                     // Otherwise, recursively visit the children.
-                    _ => Self::rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
-                }
-            };
-            inputs.push(input);
-        }
-
+                    _ => Self::rewrite_stream_node(state, child, insert_exchange_flag),
+                }?
+            })
+        };
         Ok(StreamNode {
-            input: inputs,
+            input: stream_node
+                .input
+                .into_iter()
+                .map(f)
+                .collect::<Result<_>>()?,
             ..stream_node
         })
     }
@@ -178,7 +167,8 @@ impl StreamFragmenter {
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<()> {
-        let stream_node = Self::rewrite_stream_node(state, stream_node)?;
+        let stateful = Self::is_stateful_executor(&stream_node);
+        let stream_node = Self::rewrite_stream_node(state, stream_node, stateful)?;
         Self::build_and_add_fragment(state, stream_node)?;
         Ok(())
     }
