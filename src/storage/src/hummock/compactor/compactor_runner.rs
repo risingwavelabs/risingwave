@@ -39,11 +39,6 @@ pub struct CompactorRunner {
 impl CompactorRunner {
     pub fn new(split_index: usize, context: &CompactorContext, task: CompactTask) -> Self {
         let max_target_file_size = context.context.options.sstable_size_mb as usize * (1 << 20);
-        let cache_policy = if task.target_level == 0 {
-            CachePolicy::Fill
-        } else {
-            CachePolicy::NotFill
-        };
         let mut options: SstableBuilderOptions = context.context.options.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
@@ -59,9 +54,8 @@ impl CompactorRunner {
         let compactor = Compactor::new(
             context.context.clone(),
             options,
-            context.sstable_store.clone(),
             key_range,
-            cache_policy,
+            CachePolicy::NotFill,
             task.gc_delete_keys,
             task.watermark,
         );
@@ -101,22 +95,19 @@ impl CompactorRunner {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
                 table_iters.push(ConcatSstableIterator::new(
                     level.table_infos.clone(),
-                    self.compactor.key_range.clone(),
+                    self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
                 ));
             } else {
                 for table_info in &level.table_infos {
                     table_iters.push(ConcatSstableIterator::new(
                         vec![table_info.clone()],
-                        self.compactor.key_range.clone(),
+                        self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
                     ));
                 }
             }
         }
-        Ok(UnorderedMergeIteratorInner::for_compactor(
-            table_iters,
-            self.compactor.context.stats.clone(),
-        ))
+        Ok(UnorderedMergeIteratorInner::for_compactor(table_iters))
     }
 }

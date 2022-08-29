@@ -246,6 +246,7 @@ impl LocalVersion {
                     let mut new_local_related_version = self.local_related_version.version();
                     let mut clean_epochs = Vec::new();
                     for delta in version_deltas {
+                        assert_eq!(new_local_related_version.id, delta.prev_id);
                         clean_epochs.extend(self.apply_version_delta_local_related(
                             &mut new_local_related_version,
                             &delta,

@@ -156,6 +156,9 @@ impl Compose for ComputeNodeConfig {
             HummockInMemoryStrategy::Disallowed,
         )?;
         command.arg("--config-path").arg("/risingwave.toml");
+        if self.enable_tiered_cache {
+            command.arg("--file-cache-dir").arg("/filecache");
+        }
 
         std::fs::copy(
             Path::new("src").join("config").join("risingwave.toml"),
@@ -172,9 +175,12 @@ impl Compose for ComputeNodeConfig {
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
                 .into_iter()
                 .collect(),
-            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
-                .into_iter()
-                .collect(),
+            volumes: [
+                ("./risingwave.toml:/risingwave.toml".to_string()),
+                format!("{}:/filecache", self.id),
+            ]
+            .into_iter()
+            .collect(),
             command,
             expose: vec![self.port.to_string(), self.exporter_port.to_string()],
             depends_on: provide_meta_node

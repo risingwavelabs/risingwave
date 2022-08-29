@@ -74,12 +74,27 @@ impl BuildFragmentGraphState {
     }
 }
 
-pub struct StreamFragmenterV2 {}
+pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+    let stream_node = plan_node.to_stream_prost();
+    let BuildFragmentGraphState {
+        fragment_graph,
+        next_local_fragment_id: _,
+        next_operator_id: _,
+        dependent_table_ids,
+        next_table_id,
+    } = {
+        let mut state = BuildFragmentGraphState::default();
+        StreamFragmenter::generate_fragment_graph(&mut state, stream_node).unwrap();
+        state
+    };
 
-impl StreamFragmenterV2 {
-    pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
-        StreamFragmenter::build_graph(plan_node.to_stream_prost())
-    }
+    let mut fragment_graph = fragment_graph.to_protobuf();
+    fragment_graph.dependent_table_ids = dependent_table_ids
+        .into_iter()
+        .map(|id| id.table_id)
+        .collect();
+    fragment_graph.table_ids_cnt = next_table_id;
+    fragment_graph
 }
 
 pub struct StreamFragmenter {}
@@ -101,59 +116,48 @@ impl StreamFragmenter {
     fn rewrite_stream_node(
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
-    ) -> Result<StreamNode> {
-        let insert_exchange_flag = Self::is_stateful_executor(&stream_node);
-        Self::rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
-    }
-
-    fn rewrite_stream_node_inner(
-        state: &mut BuildFragmentGraphState,
-        stream_node: StreamNode,
         insert_exchange_flag: bool,
     ) -> Result<StreamNode> {
-        let mut inputs = vec![];
-
-        for child_node in stream_node.input {
-            // For stateful operators, set `exchange_flag = true`. If it's already true, force
-            // add an exchange.
-            let input = if Self::is_stateful_executor(&child_node) {
+        let f = |child| {
+            // For stateful operators, set `exchange_flag = true`. If it's already true,
+            // force add an exchange.
+            if Self::is_stateful_executor(&child) {
                 if insert_exchange_flag {
-                    let child_node = Self::rewrite_stream_node_inner(state, child_node, true)?;
+                    let child_node = Self::rewrite_stream_node(state, child, true)?;
 
                     let strategy = DispatchStrategy {
                         r#type: DispatcherType::NoShuffle.into(),
                         column_indices: vec![], // TODO: use distribution key
                     };
-                    let append_only = child_node.append_only;
-                    StreamNode {
+                    Ok(StreamNode {
                         stream_key: child_node.stream_key.clone(),
                         fields: child_node.fields.clone(),
                         node_body: Some(NodeBody::Exchange(ExchangeNode {
-                            strategy: Some(strategy.clone()),
+                            strategy: Some(strategy),
                         })),
                         operator_id: state.gen_operator_id() as u64,
+                        append_only: child_node.append_only,
                         input: vec![child_node],
                         identity: "Exchange (NoShuffle)".to_string(),
-                        append_only,
-                    }
+                    })
                 } else {
-                    Self::rewrite_stream_node_inner(state, child_node, true)?
+                    Self::rewrite_stream_node(state, child, true)
                 }
             } else {
-                match child_node.get_node_body()? {
+                match child.get_node_body()? {
                     // For exchanges, reset the flag.
-                    NodeBody::Exchange(_) => {
-                        Self::rewrite_stream_node_inner(state, child_node, false)?
-                    }
+                    NodeBody::Exchange(_) => Self::rewrite_stream_node(state, child, false),
                     // Otherwise, recursively visit the children.
-                    _ => Self::rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
+                    _ => Self::rewrite_stream_node(state, child, insert_exchange_flag),
                 }
-            };
-            inputs.push(input);
-        }
-
+            }
+        };
         Ok(StreamNode {
-            input: inputs,
+            input: stream_node
+                .input
+                .into_iter()
+                .map(f)
+                .collect::<Result<_>>()?,
             ..stream_node
         })
     }
@@ -163,7 +167,8 @@ impl StreamFragmenter {
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<()> {
-        let stream_node = Self::rewrite_stream_node(state, stream_node)?;
+        let stateful = Self::is_stateful_executor(&stream_node);
+        let stream_node = Self::rewrite_stream_node(state, stream_node, stateful)?;
         Self::build_and_add_fragment(state, stream_node)?;
         Ok(())
     }
@@ -232,20 +237,21 @@ impl StreamFragmenter {
             }
         }
 
-        let inputs = std::mem::take(&mut stream_node.input);
         // Visit plan children.
-        let inputs = inputs
+        stream_node.input = stream_node
+            .input
             .into_iter()
             .map(|mut child_node| -> Result<StreamNode> {
                 match child_node.get_node_body()? {
-                    NodeBody::Exchange(_) if child_node.input.is_empty() => {
-                        // When exchange node is generated when doing rewrites, it could be having
-                        // zero input. In this case, we won't recursively visit its children.
-                        Ok(child_node)
-                    }
+                    // When exchange node is generated when doing rewrites, it could be having
+                    // zero input. In this case, we won't recursively visit its children.
+                    NodeBody::Exchange(_) if child_node.input.is_empty() => Ok(child_node),
                     // Exchange node indicates a new child fragment.
                     NodeBody::Exchange(exchange_node) => {
-                        let exchange_node = exchange_node.clone();
+                        let exchange_node_strategy = exchange_node.get_strategy()?.clone();
+
+                        let is_simple_dispatcher =
+                            exchange_node_strategy.get_type()? == DispatcherType::Simple;
 
                         assert_eq!(child_node.input.len(), 1);
                         let child_fragment =
@@ -254,14 +260,12 @@ impl StreamFragmenter {
                             child_fragment.fragment_id,
                             current_fragment.fragment_id,
                             StreamFragmentEdge {
-                                dispatch_strategy: exchange_node.get_strategy()?.clone(),
+                                dispatch_strategy: exchange_node_strategy,
                                 same_worker_node: false,
                                 link_id: child_node.operator_id,
                             },
                         );
 
-                        let is_simple_dispatcher =
-                            exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
                         if is_simple_dispatcher {
                             current_fragment.is_singleton = true;
                         }
@@ -273,32 +277,7 @@ impl StreamFragmenter {
                 }
             })
             .try_collect()?;
-
-        stream_node.input = inputs;
-
         Ok(stream_node)
-    }
-
-    pub fn build_graph(stream_node: StreamNode) -> StreamFragmentGraphProto {
-        let BuildFragmentGraphState {
-            fragment_graph,
-            next_local_fragment_id: _,
-            next_operator_id: _,
-            dependent_table_ids,
-            next_table_id,
-        } = {
-            let mut state = BuildFragmentGraphState::default();
-            Self::generate_fragment_graph(&mut state, stream_node).unwrap();
-            state
-        };
-
-        let mut fragment_graph = fragment_graph.to_protobuf();
-        fragment_graph.dependent_table_ids = dependent_table_ids
-            .into_iter()
-            .map(|id| id.table_id)
-            .collect();
-        fragment_graph.table_ids_cnt = next_table_id;
-        fragment_graph
     }
 
     /// This function assigns the `table_id` based on the type of `StreamNode`
