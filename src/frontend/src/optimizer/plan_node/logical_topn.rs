@@ -24,10 +24,11 @@ use risingwave_common::util::sort_util::OrderType;
 use super::utils::TableCatalogBuilder;
 use super::{
     gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ToBatch, ToStream,
+    StreamGroupTopN, StreamProject, ToBatch, ToStream,
 };
+use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{FieldOrder, Order, OrderDisplay, RequiredDist};
+use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
@@ -127,6 +128,69 @@ impl LogicalTopN {
             }
         });
         internal_table_catalog_builder.build(dist_keys, self.base.append_only)
+    }
+
+    fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        let input_dist = stream_input.distribution().clone();
+
+        let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
+            Ok(StreamTopN::new(self.clone_with_input(
+                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
+            ))
+            .into())
+        };
+
+        match input_dist {
+            Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
+            Distribution::Broadcast => unreachable!(),
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+                self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
+            }
+        }
+    }
+
+    fn gen_vnode_two_phase_streaming_agg_plan(
+        &self,
+        stream_input: PlanRef,
+        dist_key: &[usize],
+    ) -> Result<PlanRef> {
+        let input_fields = stream_input.schema().fields();
+
+        let mut exprs: Vec<_> = input_fields
+            .iter()
+            .enumerate()
+            .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
+            .collect();
+        exprs.push(
+            FunctionCall::new(
+                ExprType::Vnode,
+                dist_key
+                    .iter()
+                    .map(|idx| InputRef::new(*idx, input_fields[*idx].data_type()).into())
+                    .collect(),
+            )?
+            .into(),
+        );
+        let vnode_col_idx = exprs.len() - 1;
+        let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
+        let local_agg = StreamGroupTopN::new(
+            project.into(),
+            vec![vnode_col_idx],
+            self.limit,
+            self.offset,
+            self.order.clone(),
+        );
+        let exchange =
+            RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
+        let global_agg = StreamTopN::new(LogicalTopN::new(
+            exchange,
+            self.limit,
+            self.offset,
+            self.order.clone(),
+        ));
+        exprs.pop();
+        let project = StreamProject::new(LogicalProject::new(global_agg.into(), exprs));
+        Ok(project.into())
     }
 }
 
@@ -233,17 +297,13 @@ impl ToBatch for LogicalTopN {
 
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> Result<PlanRef> {
-        // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
-        let input = self
-            .input()
-            .to_stream_with_dist_required(&RequiredDist::single())?;
-
         if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
             return Err(RwError::from(InternalError(
                 "Doesn't support OFFSET without LIMIT".to_string(),
             )));
         }
-        Ok(StreamTopN::new(self.clone_with_input(input)).into())
+        let stream_top_n = self.gen_dist_stream_agg_plan(self.input().to_stream()?)?;
+        Ok(stream_top_n)
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
