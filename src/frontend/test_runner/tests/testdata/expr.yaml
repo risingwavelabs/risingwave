@@ -47,7 +47,7 @@
     /* bind is not distinct from */
     SELECT 1 IS NOT DISTINCT FROM 2
   logical_plan: |
-    LogicalProject { exprs: [Not(IsDistinctFrom(1:Int32, 2:Int32))] }
+    LogicalProject { exprs: [IsNotDistinctFrom(1:Int32, 2:Int32)] }
       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     /* in-list with aligned types */

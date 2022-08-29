@@ -26,6 +26,8 @@ mod bloom;
 use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
+pub mod writer;
+pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
