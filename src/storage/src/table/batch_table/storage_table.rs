@@ -39,7 +39,7 @@ use tracing::trace;
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::row_serde_util::batch_deserialize;
+use crate::row_serde::row_serde_util::{batch_deserialize, parse_raw_key_to_vnode_and_key};
 use crate::row_serde::{serialize_pk, ColumnDescMapping};
 use crate::store::ReadOptions;
 use crate::table::{Distribution, TableIter, DEFAULT_VNODE};
@@ -551,7 +551,7 @@ impl<S: StateStore> StorageTable<S> {
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false)
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true)
             .await
     }
 
@@ -597,12 +597,13 @@ impl<S: StateStore> StorageTableIterInner<S> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(mut self) {
-        while let Some((key, value)) = self
+        while let Some((raw_key, value)) = self
             .iter
             .next()
             .stack_trace("storage_table_iter_next")
             .await?
         {
+            let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
             let row = batch_deserialize(self.mapping.clone(), &value).map_err(err)?;
 
             yield (key.to_vec(), row)
