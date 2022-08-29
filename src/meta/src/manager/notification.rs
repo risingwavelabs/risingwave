@@ -24,6 +24,7 @@ use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
 
+pub type MessageStatus = Status;
 pub type Notification = std::result::Result<SubscribeResponse, Status>;
 
 pub type NotificationVersion = u64;
