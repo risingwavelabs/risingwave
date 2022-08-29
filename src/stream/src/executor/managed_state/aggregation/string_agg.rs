@@ -37,8 +37,8 @@ use crate::executor::PkIndices;
 
 #[derive(Clone)]
 struct StringAggData {
-    delim: Option<String>,
-    value: Option<String>,
+    delim: String,
+    value: String,
 }
 
 pub struct ManagedStringAggState<S: StateStore> {
@@ -50,6 +50,9 @@ pub struct ManagedStringAggState<S: StateStore> {
 
     /// Contains the column mapping between upstream schema and state table.
     state_table_col_mapping: Arc<StateTableColumnMapping>,
+
+    // The column to aggregate in input chunk.
+    upstream_agg_col_idx: usize,
 
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
@@ -78,6 +81,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         col_mapping: Arc<StateTableColumnMapping>,
         row_count: usize,
     ) -> Self {
+        let upstream_agg_col_idx = agg_call.args.val_indices()[0];
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .upstream_to_state_table(agg_call.args.val_indices()[0])
@@ -110,6 +114,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
             state_table_col_mapping: col_mapping,
+            upstream_agg_col_idx,
             state_table_agg_col_idx,
             state_table_delim_col_idx,
             state_table_order_col_indices,
@@ -127,10 +132,12 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let cache_data = StringAggData {
             delim: state_row[self.state_table_delim_col_idx]
                 .clone()
-                .map(ScalarImpl::into_utf8),
+                .map(ScalarImpl::into_utf8)
+                .unwrap_or_default(),
             value: state_row[self.state_table_agg_col_idx]
                 .clone()
-                .map(ScalarImpl::into_utf8),
+                .map(ScalarImpl::into_utf8)
+                .expect("NULL values should be filtered out"),
         };
         (cache_key, cache_data)
     }
@@ -144,12 +151,12 @@ impl<S: StateStore> ManagedStringAggState<S> {
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, columns));
 
-        for (i, op) in ops.iter().enumerate() {
-            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
-            if !visible {
-                continue;
-            }
-
+        for (i, op) in ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| visibility.map(|x| x.is_set(*i).unwrap()).unwrap_or(true))
+            .filter(|(i, _)| columns[self.upstream_agg_col_idx].datum_at(*i).is_some())
+        {
             let state_row = Row::new(
                 self.state_table_col_mapping
                     .upstream_columns()
@@ -198,20 +205,15 @@ impl<S: StateStore> ManagedStringAggState<S> {
             self.cache_synced = true;
         }
 
-        let mut agg_result = String::new();
-        let mut first = true;
-        for cache_data in self.cache.iter_values() {
-            if !first {
-                if let Some(delim) = &cache_data.delim {
-                    agg_result.push_str(delim);
-                }
-            }
-            first = false;
-            if let Some(value) = &cache_data.value {
-                agg_result.push_str(value);
-            }
+        let mut result = match self.cache.first_value() {
+            Some(data) => data.value.clone(),
+            None => return Ok(None), // return NULL if no rows to aggregate
+        };
+        for StringAggData { value, delim } in self.cache.iter_values().skip(1) {
+            result.push_str(delim);
+            result.push_str(value);
         }
-        Ok(Some(agg_result.into()))
+        Ok(Some(result.into()))
     }
 }
 
