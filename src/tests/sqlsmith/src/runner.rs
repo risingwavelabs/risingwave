@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 
 use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
 
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rngs::SmallRng::from_entropy();
     let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
 
     // Test batch
