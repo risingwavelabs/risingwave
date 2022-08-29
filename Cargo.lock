@@ -4548,6 +4548,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "pgwire",
+ "prometheus",
  "prost",
  "rand 0.8.5",
  "risingwave_batch",
