@@ -50,3 +50,50 @@ drop materialized view mv;
 
 statement ok
 drop table tweet;
+
+# Test ProjectSet can handle Update Op.
+
+statement ok
+create table t(c int);
+
+# When inserting into t, mv1 will trigger updates.
+statement ok
+create materialized view mv1 as select array_agg(c) as res from t;
+
+statement ok
+create materialized view mv2 as select unnest(res) as u from mv1;
+
+statement ok
+create materialized view mv3 as select * from (select unnest(res) as u from mv1) where u>2;
+
+statement ok
+insert into t values (1),(3);
+
+statement ok
+insert into t values (2),(4);
+
+query I rowsort
+select * from mv2;
+----
+1
+2
+3
+4
+
+query I rowsort
+select * from mv3;
+----
+3
+4
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t;
