@@ -636,24 +636,24 @@
     create table t(x int, y int);
     select count(x), min(distinct y), max(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.x)), 0:Int64), min(t.y), max(t.y)] }
-      LogicalAgg { aggs: [sum(count(t.x)), min(t.y), max(t.y)] }
-        LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
-          LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalAgg { aggs: [count(t.x), min(t.y), max(t.y)] }
+      LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select count(y), min(distinct y) from t;
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(sum(count(t.y)), 0:Int64), min(t.y)] }
-      LogicalAgg { aggs: [sum(count(t.y)), min(t.y)] }
-        LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
-          LogicalScan { table: t, columns: [t.y] }
+    LogicalAgg { aggs: [count(t.y), min(t.y)] }
+      LogicalScan { table: t, columns: [t.y] }
 - sql: |
     create table t(x int, y int);
     select count(distinct x), min(distinct y) from t;
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), min(t.y) filter((flag = 1:Int64))] }
-      LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
-        LogicalProject { exprs: [t.x, t.y, flag] }
-          LogicalExpand { column_subsets: [[t.x], [t.y]] }
-            LogicalScan { table: t, columns: [t.x, t.y] }
+    LogicalAgg { aggs: [count(t.x), min(min(t.y))] }
+      LogicalAgg { group_key: [t.x], aggs: [min(t.y)] }
+        LogicalScan { table: t, columns: [t.x, t.y] }
+- sql: |
+    create table t(x varchar, y int);
+    select string_agg(x, ','), count(distinct y) from t;
+  planner_error: |-
+    Feature is not yet implemented: Non-distinct string_agg can't appear with distinct aggregates
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md
