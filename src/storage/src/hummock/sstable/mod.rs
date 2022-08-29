@@ -60,7 +60,7 @@ pub struct Sstable {
 
 impl Debug for Sstable {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GrpcExchangeSource")
+        f.debug_struct("Sstable")
             .field("id", &self.id)
             .field("meta", &self.meta)
             .finish()
@@ -109,6 +109,7 @@ impl Sstable {
                 inf: false,
             }),
             file_size: self.meta.estimated_size as u64,
+            path_prefix: String::default(),
             table_ids: vec![],
         }
     }

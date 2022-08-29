@@ -125,6 +125,7 @@ impl StateStoreImpl {
             hummock if hummock.starts_with("hummock+") => {
                 let remote_object_store = parse_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
+                    config.s3_prefix_bytes_len,
                     object_store_metrics.clone(),
                 )
                 .await;

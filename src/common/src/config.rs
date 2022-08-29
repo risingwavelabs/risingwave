@@ -135,9 +135,6 @@ pub struct StorageConfig {
     #[serde(default = "default::share_buffer_compaction_worker_threads_number")]
     pub share_buffer_compaction_worker_threads_number: u32,
 
-    // /// Size threshold to trigger shared buffer flush.
-    // #[serde(default = "default::shared_buffer_threshold")]
-    // pub shared_buffer_threshold: u32,
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     #[serde(default = "default::shared_buffer_capacity_mb")]
@@ -146,6 +143,9 @@ pub struct StorageConfig {
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
+
+    #[serde(default = "default::s3_prefix_bytes_len")]
+    pub s3_prefix_bytes_len: u32,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::write_conflict_detection_enabled")]
@@ -275,18 +275,16 @@ mod default {
         4
     }
 
-    #[expect(dead_code)]
-    pub fn shared_buffer_threshold() -> u32 {
-        // 192MB
-        201326592
-    }
-
     pub fn shared_buffer_capacity_mb() -> u32 {
         1024
     }
 
     pub fn data_directory() -> String {
         "hummock_001".to_string()
+    }
+
+    pub fn s3_prefix_bytes_len() -> u32 {
+        1
     }
 
     pub fn write_conflict_detection_enabled() -> bool {

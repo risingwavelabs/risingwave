@@ -123,6 +123,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
                 inf: false,
             }),
             file_size: 2,
+            path_prefix: String::default(),
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
         });
     }

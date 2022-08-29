@@ -55,6 +55,7 @@ pub async fn compactor_serve(
             CompactorConfig::init(config_path).unwrap()
         }
     };
+
     tracing::info!(
         "Starting compactor with config {:?} and opts {:?}",
         config,
@@ -89,6 +90,7 @@ pub async fn compactor_serve(
             opts.state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
+            storage_config.s3_prefix_bytes_len,
             object_metrics,
         )
         .await,
