@@ -226,19 +226,13 @@ impl ApplyJoinRule {
             new_join_condition,
         );
 
-        match join.join_type() {
-            JoinType::LeftSemi | JoinType::LeftAnti => new_join.into(),
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                // Leave other condition for predicate push down to deal with
-                LogicalFilter::create(
-                    new_join.into(),
-                    Condition {
-                        conjunctions: other_condition,
-                    },
-                )
-            }
-            JoinType::RightSemi | JoinType::RightAnti | JoinType::Unspecified => unreachable!(),
-        }
+        // Leave other condition for predicate push down to deal with
+        LogicalFilter::create(
+            new_join.into(),
+            Condition {
+                conjunctions: other_condition,
+            },
+        )
     }
 
     fn push_apply_right_side(
@@ -342,19 +336,13 @@ impl ApplyJoinRule {
             new_join_condition,
         );
 
-        match join.join_type() {
-            JoinType::RightSemi | JoinType::RightAnti => new_join.into(),
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                // Leave other condition for predicate push down to deal with
-                LogicalFilter::create(
-                    new_join.into(),
-                    Condition {
-                        conjunctions: other_condition,
-                    },
-                )
-            }
-            JoinType::LeftSemi | JoinType::LeftAnti | JoinType::Unspecified => unreachable!(),
-        }
+        // Leave other condition for predicate push down to deal with
+        LogicalFilter::create(
+            new_join.into(),
+            Condition {
+                conjunctions: other_condition,
+            },
+        )
     }
 
     fn push_apply_both_side(
