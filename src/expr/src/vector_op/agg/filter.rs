@@ -178,7 +178,7 @@ mod tests {
             ProstType::GreaterThan,
             DataType::Boolean,
             InputRefExpression::new(DataType::Int64, 0).boxed(),
-            LiteralExpression::new(DataType::Int64, Some((5 as i64).into())).boxed(),
+            LiteralExpression::new(DataType::Int64, Some((5_i64).into())).boxed(),
         ));
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
