@@ -35,50 +35,56 @@ pub struct Compaction {
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 }
 
-/// Cancels all tasks assigned to `context_id`.
-pub fn cancel_all_assigned_tasks(
-    context_id: HummockContextId,
-    compact_statuses: &mut BTreeMapTransaction<CompactionGroupId, CompactStatus>,
-    compact_task_assignment: &mut BTreeMapTransaction<
-        HummockCompactionTaskId,
-        CompactTaskAssignment,
-    >,
-) -> Result<()> {
-    // Clean up compact_status.
-    for assignment in compact_task_assignment.tree_ref().values() {
-        if assignment.context_id != context_id {
-            continue;
-        }
-        let task = assignment
-            .compact_task
-            .as_ref()
-            .expect("compact_task shouldn't be None");
-        let mut compact_status = compact_statuses
-            .get_mut(task.compaction_group_id)
-            .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
-        compact_status.report_compact_task(
-            assignment
-                .compact_task
-                .as_ref()
-                .expect("compact_task shouldn't be None"),
-        );
-    }
-    // Clean up compact_task_assignment.
-    let task_ids_to_remove = compact_task_assignment
-        .tree_ref()
-        .iter()
-        .filter_map(|(task_id, v)| {
-            if v.context_id == context_id {
-                Some(*task_id)
-            } else {
-                None
+impl Compaction {
+    /// Cancels all tasks assigned to `context_id`.
+    pub fn cancel_assigned_tasks_for_context_ids(
+        &mut self,
+        context_ids: &[HummockContextId],
+    ) -> Result<(
+        BTreeMapTransaction<CompactionGroupId, CompactStatus>,
+        BTreeMapTransaction<HummockCompactionTaskId, CompactTaskAssignment>,
+    )> {
+        let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut self.compact_task_assignment);
+        for &context_id in context_ids {
+            // Clean up compact_status.
+            for assignment in compact_task_assignment.tree_ref().values() {
+                if assignment.context_id != context_id {
+                    continue;
+                }
+                let task = assignment
+                    .compact_task
+                    .as_ref()
+                    .expect("compact_task shouldn't be None");
+                let mut compact_status = compact_statuses
+                    .get_mut(task.compaction_group_id)
+                    .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
+                compact_status.report_compact_task(
+                    assignment
+                        .compact_task
+                        .as_ref()
+                        .expect("compact_task shouldn't be None"),
+                );
             }
-        })
-        .collect_vec();
-    for task_id in task_ids_to_remove {
-        compact_task_assignment.remove(task_id);
+            // Clean up compact_task_assignment.
+            let task_ids_to_remove = compact_task_assignment
+                .tree_ref()
+                .iter()
+                .filter_map(|(task_id, v)| {
+                    if v.context_id == context_id {
+                        Some(*task_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            for task_id in task_ids_to_remove {
+                compact_task_assignment.remove(task_id);
+            }
+        }
+        Ok((compact_statuses, compact_task_assignment))
     }
-    Ok(())
 }
 
 impl<S> HummockManager<S>
@@ -108,17 +114,14 @@ where
     }
 
     #[named]
-    pub async fn cancel_all_assigned_tasks(&self, context_id: HummockContextId) -> Result<()> {
+    pub async fn cancel_assigned_tasks_for_context_ids(
+        &self,
+        context_id: HummockContextId,
+    ) -> Result<()> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
-        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
-        let mut compact_task_assignment =
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        cancel_all_assigned_tasks(
-            context_id,
-            &mut compact_statuses,
-            &mut compact_task_assignment,
-        )?;
+        let (compact_statuses, compact_task_assignment) =
+            compaction.cancel_assigned_tasks_for_context_ids(&[context_id])?;
         commit_multi_var!(self, None, compact_statuses, compact_task_assignment)?;
         Ok(())
     }

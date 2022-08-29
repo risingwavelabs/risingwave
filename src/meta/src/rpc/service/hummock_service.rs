@@ -200,7 +200,7 @@ where
                 .map_err(meta_error_to_tonic);
         }
         self.hummock_manager
-            .cancel_all_assigned_tasks(context_id)
+            .cancel_assigned_tasks_for_context_ids(context_id)
             .await
             .map_err(meta_error_to_tonic)?;
         let rx = self

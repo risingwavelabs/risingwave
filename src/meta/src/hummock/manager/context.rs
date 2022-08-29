@@ -19,7 +19,6 @@ use function_name::named;
 use risingwave_hummock_sdk::HummockContextId;
 
 use crate::hummock::error::Result;
-use crate::hummock::manager::compaction::cancel_all_assigned_tasks;
 use crate::hummock::manager::{
     commit_multi_var, read_lock, start_measure_real_process_timer, write_lock,
 };
@@ -42,20 +41,13 @@ where
     ) -> Result<()> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
-        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
-        let mut compact_task_assignment =
-            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+        let (compact_statuses, compact_task_assignment) =
+            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref())?;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
         let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning.pinned_snapshots);
         for context_id in context_ids.as_ref() {
-            tracing::debug!("Release context {}", *context_id);
-            cancel_all_assigned_tasks(
-                *context_id,
-                &mut compact_statuses,
-                &mut compact_task_assignment,
-            )?;
             pinned_versions.remove(*context_id);
             pinned_snapshots.remove(*context_id);
         }
