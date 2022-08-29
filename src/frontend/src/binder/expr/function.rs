@@ -238,6 +238,12 @@ impl Binder {
                     )
                     .into());
                 }
+                if expr.has_table_function() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "table function in filter clause is not supported".to_string(),
+                    )
+                    .into());
+                }
                 Condition::with_expr(expr)
             }
             None => Condition::true_cond(),

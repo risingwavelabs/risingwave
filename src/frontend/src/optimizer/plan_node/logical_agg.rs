@@ -741,7 +741,8 @@ impl LogicalAggBuilder {
         }
 
         self.is_in_filter_clause = true;
-        // WIP: subquery/agg/table in filter
+        // filter expr is not added to `input_proj_builder` as a whole. Special exprs incl
+        // subquery/agg/table are rejected in `bind_agg`.
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
 
@@ -814,11 +815,9 @@ impl LogicalAggBuilder {
                 right_return_type,
             );
 
-            Ok(
-                FunctionCall::new(ExprType::Divide, vec![left, right.into()])
-                    .unwrap()
-                    .into(),
-            )
+            Ok(ExprImpl::from(
+                FunctionCall::new(ExprType::Divide, vec![left, right.into()]).unwrap(),
+            ))
         } else {
             self.agg_calls.push(PlanAggCall {
                 agg_kind,
