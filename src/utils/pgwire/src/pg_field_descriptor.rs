@@ -121,7 +121,8 @@ impl error::Error for TypeOidError {
 }
 
 impl TypeOid {
-    // TODO: support more type.
+    // TypeOid can refer from
+    // https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.dat
     pub fn as_type(oid: i32) -> Result<TypeOid, TypeOidError> {
         match oid {
             1043 => Ok(TypeOid::Varchar),

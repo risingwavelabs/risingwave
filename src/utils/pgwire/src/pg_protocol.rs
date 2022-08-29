@@ -325,7 +325,11 @@ where
                     .map_err(PsqlError::ParseError)?
             } else {
                 // Process the statement with params.
-                // For now, we can only process the statement type like this e.g. 'select $1,$2...'.
+                // For now, we can only process the statement type like this e.g. 'select
+                // $1,$2,$3...'. The following process only consider statement as
+                // 'select $1,$2,$3...'.
+
+                // Get the generic params e.g. [$1,$2,$3]
                 let generic_params: Vec<&str> = sql
                     .split(&[' ', ',', ';'])
                     .skip(1)
@@ -333,6 +337,7 @@ where
                     .take_while(|x| !x.is_empty())
                     .collect();
 
+                // Strip the '$' from the generic params e.g. [1,2,3]
                 let mut idx = Vec::with_capacity(generic_params.len());
                 for x in generic_params.iter() {
                     // NOTE: Assume all output are generic params.
@@ -349,6 +354,7 @@ where
                     idx.push(v);
                 }
 
+                // Create the PgFieldDescriptor according the type of generic params.
                 let mut res = Vec::with_capacity(idx.len());
                 for x in idx.iter() {
                     if ((x - 1) as usize) >= types.len() {
@@ -394,11 +400,11 @@ where
         let statement = if statement_name.is_empty() {
             self.unnamed_statement
                 .as_ref()
-                .ok_or_else(|| PsqlError::BindError("No statement found".into()))?
+                .ok_or_else(PsqlError::no_statement_in_bind)?
         } else {
             self.named_statements
                 .get(&statement_name)
-                .ok_or_else(|| PsqlError::BindError("No statement found".into()))?
+                .ok_or_else(PsqlError::no_statement_in_bind)?
         };
 
         // 2. Instance the statement to get the portal.
@@ -429,12 +435,12 @@ where
         let portal = if msg.portal_name.is_empty() {
             self.unnamed_portal
                 .as_mut()
-                .ok_or_else(|| PsqlError::ExecuteError("No portal found".into()))?
+                .ok_or_else(PsqlError::no_portal_in_execute)?
         } else {
             // NOTE Error handle need modify later.
             self.named_portals
                 .get_mut(&portal_name)
-                .ok_or_else(|| PsqlError::ExecuteError("No portal found".into()))?
+                .ok_or_else(PsqlError::no_portal_in_execute)?
         };
 
         tracing::trace!(
@@ -476,12 +482,12 @@ where
             let statement = if name.is_empty() {
                 self.unnamed_statement
                     .as_ref()
-                    .ok_or_else(|| PsqlError::DescribeError("No statement found".to_string()))?
+                    .ok_or_else(PsqlError::no_statement_in_describe)?
             } else {
                 // NOTE Error handle need modify later.
                 self.named_statements
                     .get(&name)
-                    .ok_or_else(|| PsqlError::DescribeError("No statement found".to_string()))?
+                    .ok_or_else(PsqlError::no_statement_in_describe)?
             };
 
             // 1. Send parameter description.
@@ -498,12 +504,12 @@ where
             let portal = if name.is_empty() {
                 self.unnamed_portal
                     .as_ref()
-                    .ok_or_else(|| PsqlError::DescribeError("No portal found".to_string()))?
+                    .ok_or_else(PsqlError::no_portal_in_describe)?
             } else {
                 // NOTE Error handle need modify later.
                 self.named_portals
                     .get(&name)
-                    .ok_or_else(|| PsqlError::DescribeError("No portal found".to_string()))?
+                    .ok_or_else(PsqlError::no_portal_in_describe)?
             };
 
             // 3. Send row description.
