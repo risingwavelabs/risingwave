@@ -221,7 +221,7 @@ pub async fn setup_compute_env_with_config(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), Duration::from_secs(1))
+        ClusterManager::new_for_test(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );

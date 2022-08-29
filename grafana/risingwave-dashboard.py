@@ -68,86 +68,86 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10)
 
-    def timeseries_count(self, title, targets):
+    def timeseries_count(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_percentage(self, title, targets):
+    def timeseries_percentage(self, title, targets, legendCols=["max"]):
         # Percentage should fall into 0.0-1.0
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="percentunit", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_latency(self, title, targets):
+    def timeseries_latency(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_actor_latency(self, title, targets):
+    def timeseries_actor_latency(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=0,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_actor_latency_small(self, title, targets):
+    def timeseries_actor_latency_small(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=0,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_bytes_per_sec(self, title, targets):
+    def timeseries_bytes_per_sec(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="Bps", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_bytes(self, title, targets):
+    def timeseries_bytes(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="decbytes", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_row(self, title, targets):
+    def timeseries_row(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_ns(self, title, targets):
+    def timeseries_ns(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ns", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_kilobytes(self, title, targets):
+    def timeseries_kilobytes(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_dollar(self, title, targets):
+    def timeseries_dollar(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="$", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_ops(self, title, targets):
+    def timeseries_ops(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_actor_ops(self, title, targets):
+    def timeseries_actor_ops(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=0,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_actor_ops_small(self, title, targets):
+    def timeseries_actor_ops_small(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ops", fillOpacity=0,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
-    def timeseries_rowsps(self, title, targets):
+    def timeseries_rowsps(self, title, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="rows/s", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=legendCols)
 
     def timeseries_actor_rowsps(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="rows/s", fillOpacity=0,
-                          legendDisplayMode="table", legendPlacement="right", )
+                          legendDisplayMode="table", legendPlacement="right")
 
     def timeseries_memory(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
@@ -173,6 +173,10 @@ logging.basicConfig(level=logging.WARN)
 def section_cluster_node(panels):
     return [
         panels.row("Cluster Node"),
+        panels.timeseries_count("Node Count", [
+            panels.target(
+                "sum(node_num) by (node_type)", "{{node_type}}"
+            )], ["last"]),
         panels.timeseries_memory("Node Memory", [
             panels.target(
                 "avg(process_resident_memory_bytes) by (job,instance)", "{{job}} @ {{instance}}"
@@ -187,7 +191,7 @@ def section_cluster_node(panels):
 def section_compaction(panels):
     return [
         panels.row("Compaction"),
-        panels.timeseries_count("SST Counts", [
+        panels.timeseries_count("SST Count", [
             panels.target(
                 "sum(storage_level_sst_num) by (instance, level_index)", "L{{level_index}}"
             ),
@@ -197,7 +201,7 @@ def section_compaction(panels):
                 "sum(storage_level_total_file_size) by (instance, level_index)", "L{{level_index}}"
             ),
         ]),
-        panels.timeseries_count("Compaction Success & Failure Counts", [
+        panels.timeseries_count("Compaction Success & Failure Count", [
             panels.target(
                 "sum(storage_level_compact_frequency) by (instance, group, result)", "{{instance}} - {{result}} - group-{{group}}"
             ),
