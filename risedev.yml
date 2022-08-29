@@ -538,7 +538,7 @@ template:
     # 7 days by default.
     min-sst-retention-time-sec: 604800
 
-    # Enable sanity check when SSTs are committed. Disabled ny default.
+    # Enable sanity check when SSTs are committed. Disabled by default.
     enable-committed-sst-sanity-check: false
 
   prometheus:
