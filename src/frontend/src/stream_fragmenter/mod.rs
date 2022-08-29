@@ -313,12 +313,10 @@ impl StreamFragmenter {
             NodeBody::HashJoin(hash_join_node) => {
                 // Allocate local table id. It will be rewrite to global table id after get table id
                 // offset from id generator.
-                if let Some(left_table) = &mut hash_join_node.left_table {
-                    left_table.id = state.gen_table_id();
-                }
-                if let Some(right_table) = &mut hash_join_node.right_table {
-                    right_table.id = state.gen_table_id();
-                }
+                hash_join_node.left_table.as_mut().unwrap().id = state.gen_table_id();
+                hash_join_node.right_table.as_mut().unwrap().id = state.gen_table_id();
+                hash_join_node.left_degree_table.as_mut().unwrap().id = state.gen_table_id();
+                hash_join_node.right_degree_table.as_mut().unwrap().id = state.gen_table_id();
             }
 
             NodeBody::Source(node) => {

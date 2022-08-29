@@ -50,23 +50,23 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             node.get_left_key()
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
             table_l
                 .distribution_key
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
         );
         let params_r = JoinParams::new(
             node.get_right_key()
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
             table_r
                 .distribution_key
                 .iter()
                 .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
+                .collect_vec(),
         );
         let output_indices = node
             .get_output_indices()
@@ -111,12 +111,12 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             };
         }
 
-        let keys = params_l
+        let join_key_data_types = params_l
             .join_key_indices
             .iter()
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
-        let kind = calc_hash_key_kind(&keys);
+        let kind = calc_hash_key_kind(&join_key_data_types);
 
         let state_table_l =
             StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));

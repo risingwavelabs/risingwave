@@ -239,7 +239,21 @@ fn infer_internal_and_degree_table_catalog(
     let schema = &base.schema;
 
     let append_only = input.append_only();
-    let dist_keys = base.dist.dist_column_indices().to_vec();
+
+    let internal_table_dist_keys = base.dist.dist_column_indices().to_vec();
+
+    // Find the dist key position in join key.
+    // FIXME(yuhao): currently the dist key position is not the exact position mapped to the join
+    // key when there are duplicate value in join key indices.
+    let degree_table_dist_keys = internal_table_dist_keys
+        .iter()
+        .map(|idx| {
+            join_key_indices
+                .iter()
+                .position(|v| v == idx)
+                .expect("join key should contain dist key.")
+        })
+        .collect_vec();
 
     // The pk of hash join internal and degree table should be join_key + input_pk.
     let mut pk_indices = join_key_indices;
@@ -286,7 +300,7 @@ fn infer_internal_and_degree_table_catalog(
     }
 
     (
-        internal_table_catalog_builder.build(dist_keys.clone(), append_only),
-        degree_table_catalog_builder.build(dist_keys, append_only),
+        internal_table_catalog_builder.build(internal_table_dist_keys, append_only),
+        degree_table_catalog_builder.build(degree_table_dist_keys, append_only),
     )
 }

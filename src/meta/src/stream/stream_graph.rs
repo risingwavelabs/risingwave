@@ -563,8 +563,14 @@ impl StreamGraphBuilder {
                         if let Some(table) = &mut node.left_table {
                             update_table(table, "HashJoinLeft");
                         }
+                        if let Some(table) = &mut node.left_degree_table {
+                            update_table(table, "HashJoinDegreeLeft");
+                        }
                         if let Some(table) = &mut node.right_table {
                             update_table(table, "HashJoinRight");
+                        }
+                        if let Some(table) = &mut node.right_degree_table {
+                            update_table(table, "HashJoinDegreeRight");
                         }
                     }
 

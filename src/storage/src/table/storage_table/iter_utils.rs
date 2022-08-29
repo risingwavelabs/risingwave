@@ -98,7 +98,6 @@ pub async fn merge_by_pk<'a, S>(
     pin_mut!(stream1);
     pin_mut!(stream2);
     'outer: loop {
-        dbg!(1);
         let prefer_left: bool = rand::random();
         let select_result = if prefer_left {
             select(stream1.next(), stream2.next()).await
@@ -117,7 +116,6 @@ pub async fn merge_by_pk<'a, S>(
             Either::Left((Some(row), _)) => {
                 let left_row = row?;
                 'inner: loop {
-                    dbg!(2);
                     let right_row = stream2.next().await;
                     match right_row {
                         Some(row) => {
@@ -134,7 +132,6 @@ pub async fn merge_by_pk<'a, S>(
             Either::Right((Some(row), _)) => {
                 let right_row = row?;
                 'inner: loop {
-                    dbg!(3);
                     let left_row = stream1.next().await;
                     match left_row {
                         Some(row) => {
