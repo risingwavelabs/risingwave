@@ -48,7 +48,7 @@ use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId,
 };
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::SchedulerError::{Internal, RpcError};
+use crate::scheduler::SchedulerError::RpcError;
 use crate::scheduler::{SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
@@ -278,16 +278,7 @@ impl StageRunner {
         self.msg_sender
             .send(event)
             .await
-            .map_err(|e| {
-                {
-                    Internal(anyhow!(
-                        "Failed to send stage scheduled event: {:?}, reason: {:?}",
-                        self.stage.id,
-                        e
-                    ))
-                }
-            })
-            .expect("Always expect that the chan")
+            .expect("Always expect that the channel should be able to send event")
     }
 
     /// Schedule all tasks to CN and wait process all status messages from RPC. Note that when all
@@ -381,13 +372,8 @@ impl StageRunner {
                                 }
 
                                 TaskStatusProst::Failed => {
-                                    // If receive task failure, report to query runner and abort tasks.
-                                    // let task_execution_err = SchedulerError::TaskExecutionError;
+                                    // Throw the error and caller write the event to channel.
                                     return Err(SchedulerError::TaskExecutionError);
-                                    // self.send_event(QueryMessage::Stage(StageEvent::Failed {id: self.stage.id, reason: task_execution_err})).await?;
-                                    // self.abort_all_running_tasks().await?;
-                                    //
-                                    // break;
                                 }
 
                                 TaskStatusProst::Finished => {
@@ -395,7 +381,7 @@ impl StageRunner {
                                 }
 
                                 status => {
-                                    // The remain possible variant is Pending, but now it won't be pushed from CN.
+                                    // The remain possible variant is Pending & Aborted, but now they won't be pushed from CN.
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }

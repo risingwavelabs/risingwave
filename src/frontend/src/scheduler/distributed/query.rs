@@ -156,6 +156,7 @@ impl QueryExecution {
                     compute_client_pool: self.compute_client_pool.clone(),
                 };
 
+                // Not trace the error here, it will be processed in scheduler.
                 tokio::spawn(async move { runner.run().await });
 
                 let root_stage = root_stage_receiver
