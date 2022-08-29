@@ -52,7 +52,7 @@ else
 fi
 
 date=$(date '+%Y%m%d-%H%M%S')
-TENANT_NAME="bench-${date}"
+TENANT_NAME="${SKU}-${date}"
 
 echo "--- Echo Info"
 echo "Tenant-Name: ${TENANT_NAME}"
@@ -77,7 +77,7 @@ echo "--- Wait Risingwave Instance Ready "
 endpoint=$(rwc t get-endpoint -tenant ${TENANT_NAME})
 polling ${endpoint}
 
-echo "--- Generate Tpch-Bech Args"
+echo "--- Generate Tpch-Bench Args"
 mkdir ~/risingwave-deploy
 echo "--frontend-url ${endpoint}" > ~/risingwave-deploy/tpch-bench-args-frontend
 echo "--kafka-addr ${HOST_IP}:29092" >  ~/risingwave-deploy/tpch-bench-args-kafka
