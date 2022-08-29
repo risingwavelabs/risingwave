@@ -48,7 +48,6 @@ impl From<&CompactStatus> for risingwave_pb::hummock::CompactStatus {
         risingwave_pb::hummock::CompactStatus {
             compaction_group_id: status.compaction_group_id,
             level_handlers: status.level_handlers.iter().map_into().collect(),
-            compaction_config: Some(status.compaction_config.clone()),
         }
     }
 }
@@ -61,11 +60,9 @@ impl From<CompactStatus> for risingwave_pb::hummock::CompactStatus {
 
 impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
     fn from(status: &risingwave_pb::hummock::CompactStatus) -> Self {
-        let compaction_config = status.compaction_config.as_ref().cloned().unwrap();
         CompactStatus {
             compaction_group_id: status.compaction_group_id,
             level_handlers: status.level_handlers.iter().map_into().collect(),
-            compaction_config,
         }
     }
 }
