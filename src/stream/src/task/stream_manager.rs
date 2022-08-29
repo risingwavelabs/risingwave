@@ -549,7 +549,7 @@ impl LocalStreamManagerCore {
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> BoxedExecutor {
-        DebugExecutor::new(
+        WrapperExecutor::new(
             executor,
             input_pos,
             actor_id,
