@@ -331,10 +331,93 @@ mod tests {
         let res = agg_state.get_output(epoch, &state_table).await?;
         match res {
             Some(ScalarImpl::Utf8(s)) => {
-                assert!(s.len() == 3);
+                // should be "a,c" or "c,a"
+                assert_eq!(s.len(), 3);
                 assert!(s.contains('a'));
                 assert!(s.contains('c'));
-                assert!(&s[1..2] == ",");
+                assert_eq!(&s[1..2], ",");
+            }
+            _ => panic!("unexpected output"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_string_agg_state_simple_agg_null_value() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, _delim: varchar, _row_id: int64)
+        // where `a` is the column to aggregate
+
+        let input_pk_indices = vec![2];
+        let agg_call = AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            return_type: DataType::Varchar,
+            order_pairs: vec![],
+            append_only: false,
+            filter: None,
+        };
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // _row_id
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Varchar), // _delim
+        ];
+        let state_table_col_mapping = Arc::new(StateTableColumnMapping::new(vec![2, 0, 1]));
+        let mut state_table = StateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![OrderType::Ascending],
+            vec![0], // [_row_id]
+        );
+
+        let mut agg_state = ManagedStringAggState::new(
+            agg_call,
+            None,
+            input_pk_indices,
+            state_table_col_mapping,
+            0,
+        );
+
+        let mut epoch = 0;
+
+        let chunk = StreamChunk::from_pretty(
+            " T T I
+            + a 1 123
+            + . 2 128
+            + c . 129
+            + d 4 130",
+        );
+        let (ops, columns, visibility) = chunk.into_inner();
+        let column_refs: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+        agg_state
+            .apply_chunk(
+                &ops,
+                visibility.as_ref(),
+                &column_refs,
+                epoch,
+                &mut state_table,
+            )
+            .await?;
+
+        epoch += 1;
+        agg_state.flush(&mut state_table)?;
+        state_table.commit(epoch).await.unwrap();
+
+        let res = agg_state.get_output(epoch, &state_table).await?;
+        match res {
+            Some(ScalarImpl::Utf8(s)) => {
+                // should be something like "ac4d"
+                assert_eq!(s.len(), 4);
+                assert!(s.contains('a'));
+                assert!(s.contains('c'));
+                assert!(s.contains('d'));
+                assert!(s.contains('4'));
+                assert!(!s.contains('2'));
             }
             _ => panic!("unexpected output"),
         }
