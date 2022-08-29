@@ -85,6 +85,9 @@ message Barrier {
   bytes span = 2;
   // Whether this barrier do checkpoint
   bool checkpoint = 9;
+
+  // Record the actors that the barrier has passed. Only used for debugging.
+  repeated uint32 passed_actors = 255;
 }
 
 message StreamMessage {
