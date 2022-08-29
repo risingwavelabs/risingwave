@@ -18,7 +18,6 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
 
-use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
 use crate::Result;
@@ -35,7 +34,6 @@ where
     init_result: Option<R::OwnedItem>,
     result: Option<R::OwnedItem>,
     f: F,
-    filter: ExpressionRef,
     _phantom: PhantomData<T>,
 }
 
@@ -50,7 +48,6 @@ where
         input_col_idx: usize,
         f: F,
         init_result: Option<R::OwnedItem>,
-        filter: ExpressionRef,
     ) -> Self {
         Self {
             return_type,
@@ -58,45 +55,31 @@ where
             init_result: init_result.clone(),
             result: init_result,
             f,
-            filter,
             _phantom: PhantomData,
         }
     }
 
-    pub(super) fn update_single_concrete(
-        &mut self,
-        array: &T,
-        input: &DataChunk,
-        row_id: usize,
-    ) -> Result<()> {
-        let filter_res = self.apply_filter_on_row(input, row_id)?;
-        if filter_res {
-            let tmp = self
-                .f
-                .eval(
-                    self.result.as_ref().map(|x| x.as_scalar_ref()),
-                    array.value_at(row_id),
-                )?
-                .map(|x| x.to_owned_scalar());
-            self.result = tmp;
-        }
+    pub(super) fn update_single_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
+        let datum = self
+            .f
+            .eval(
+                self.result.as_ref().map(|x| x.as_scalar_ref()),
+                input.value_at(row_id),
+            )?
+            .map(|x| x.to_owned_scalar());
+        self.result = datum;
         Ok(())
     }
 
     pub(super) fn update_multi_concrete(
         &mut self,
-        array: &T,
-        input: &DataChunk,
+        input: &T,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
         for row_id in start_row_id..end_row_id {
-            let filter_res = self.apply_filter_on_row(input, row_id)?;
-            if filter_res {
-                let datum_ref = array.value_at(row_id);
-                cur = self.f.eval(cur, datum_ref)?;
-            }
+            cur = self.f.eval(cur, input.value_at(row_id))?;
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
@@ -106,21 +89,6 @@ where
         let res = std::mem::replace(&mut self.result, self.init_result.clone());
         builder.append(res.as_ref().map(|x| x.as_scalar_ref()))?;
         Ok(())
-    }
-
-    /// `apply_filter_on_row` apply a filter on the given row, and return if the row satisfies the
-    /// filter or not
-    /// # SAFETY
-    /// the given row must be visible
-    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
-        let (row, visible) = input.row_at(row_id)?;
-        assert!(visible);
-        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
-            v
-        } else {
-            false
-        };
-        Ok(filter_res)
     }
 }
 
@@ -138,7 +106,7 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_single_concrete(i, input, row_id)
+                    self.update_single_concrete(i, row_id)
                 } else {
                     bail!("Input fail to match {}.", stringify!($input_variant))
                 }
@@ -153,7 +121,7 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_multi_concrete(i, input, start_row_id, end_row_id)
+                    self.update_multi_concrete(i, start_row_id, end_row_id)
                 } else {
                     bail!(
                         "Input fail to match {} or builder fail to match {}.",

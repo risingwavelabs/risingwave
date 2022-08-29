@@ -23,10 +23,9 @@ use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::array_agg::create_array_agg_state;
+use super::filter::Filter;
 use super::string_agg::StringAgg;
-use crate::expr::{
-    build_from_prost, AggKind, Expression, ExpressionRef, InputRefExpression, LiteralExpression,
-};
+use crate::expr::{build_from_prost, AggKind, Expression, InputRefExpression};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
@@ -84,22 +83,12 @@ impl AggStateFactory {
             order_pairs.push(OrderPair::new(col_idx, order_type));
             order_col_types.push(col_type);
         });
-        let filter: ExpressionRef = match prost.filter {
-            Some(ref expr) => Arc::from(build_from_prost(expr)?),
-            None => Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        };
 
         let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
-            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone(), filter)),
+            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),
             (AggKind::ApproxCountDistinct, [arg]) => {
                 let input_col_idx = arg.get_input()?.get_column_idx() as usize;
-                Box::new(ApproxCountDistinct::new(
-                    return_type.clone(),
-                    input_col_idx,
-                    filter,
-                ))
+                Box::new(ApproxCountDistinct::new(return_type.clone(), input_col_idx))
             }
             (AggKind::StringAgg, [agg_arg, delim_arg]) => {
                 assert_eq!(
@@ -139,10 +128,18 @@ impl AggStateFactory {
                     agg_kind,
                     return_type.clone(),
                     distinct,
-                    filter,
                 )?
             }
             _ => bail!("Invalid agg call: {:?}", agg_kind),
+        };
+
+        // wrap the agg state in a `Filter` if needed
+        let initial_agg_state = match prost.filter {
+            Some(ref expr) => Box::new(Filter::new(
+                Arc::from(build_from_prost(expr)?),
+                initial_agg_state,
+            )),
+            None => initial_agg_state,
         };
 
         Ok(Self {
@@ -166,7 +163,6 @@ pub fn create_agg_state_unary(
     agg_kind: AggKind,
     return_type: DataType,
     distinct: bool,
-    filter: ExpressionRef,
 ) -> Result<BoxedAggState> {
     use crate::expr::data_types::*;
 
@@ -185,7 +181,6 @@ pub fn create_agg_state_unary(
                             input_col_idx,
                             $fn,
                             $init_result,
-                            filter
                         ))
                     },
                     ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
@@ -193,7 +188,6 @@ pub fn create_agg_state_unary(
                             return_type,
                             input_col_idx,
                             $fn,
-                            filter,
                         ))
                     },
                 )*
