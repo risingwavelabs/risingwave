@@ -39,6 +39,7 @@
 #![feature(lint_reasons)]
 #![feature(generators)]
 #![feature(map_try_insert)]
+#![feature(anonymous_lifetime_in_impl_trait)]
 
 #[macro_use]
 pub mod error;
