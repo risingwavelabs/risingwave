@@ -670,7 +670,9 @@ where
                 .await
             {
                 tracing::error!("Failed to update epoch because {:?}", e);
-                self.scheduled_barriers.rollback_front((command, notifiers));
+                self.scheduled_barriers
+                    .rollback_front((command, notifiers))
+                    .await;
                 state.in_flight_prev_epoch = prev_epoch;
                 continue;
             }
