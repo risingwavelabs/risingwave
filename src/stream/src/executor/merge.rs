@@ -120,14 +120,13 @@ impl MergeExecutor {
                         .inc_by(chunk.cardinality() as _);
                 }
                 Message::Barrier(barrier) => {
-                    if cfg!(debug_assertions) {
-                        tracing::trace!(
-                            actor_id = actor_id,
-                            "receiver receives barrier from path: {:?}",
-                            barrier.passed_actors
-                        );
-                        barrier.passed_actors.push(actor_id);
-                    }
+                    tracing::trace!(
+                        target: "events::barrier::path",
+                        actor_id = actor_id,
+                        "receiver receives barrier from path: {:?}",
+                        barrier.passed_actors
+                    );
+                    barrier.passed_actors.push(actor_id);
 
                     if let Some(update) = barrier.as_update_merge(self.ctx.id) {
                         // Create new upstreams receivers.
