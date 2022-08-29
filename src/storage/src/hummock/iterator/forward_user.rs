@@ -198,17 +198,18 @@ impl UserIterator {
     ///   (may reach to the end and thus not valid)
     /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
-        self.stats.processed_key_count += 1;
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
-            self.stats.scan_key_count += 1;
 
             // handle multi-version
-            if self.last_key.as_slice() != key
-                && (epoch > self.min_epoch && epoch <= self.read_epoch)
-            {
+            if epoch <= self.min_epoch || epoch > self.read_epoch {
+                self.iterator.next().await?;
+                continue;
+            }
+
+            if self.last_key.as_slice() != key {
                 self.last_key.clear();
                 self.last_key.extend_from_slice(key);
 
@@ -225,13 +226,18 @@ impl UserIterator {
                             Unbounded => {}
                         };
 
+                        self.stats.processed_key_count += 1;
                         return Ok(());
                     }
                     // It means that the key is deleted from the storage.
                     // Deleted kv and the previous versions (if any) of the key should not be
                     // returned to user.
-                    HummockValue::Delete => {}
+                    HummockValue::Delete => {
+                        self.stats.skip_key_count += 1;
+                    }
                 }
+            } else {
+                self.stats.skip_key_count += 1;
             }
 
             self.iterator.next().await?;

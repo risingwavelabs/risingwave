@@ -150,13 +150,11 @@ impl BackwardUserIterator {
             self.last_delete = true;
             return Ok(());
         }
-        self.stats.processed_key_count += 1;
 
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
             let epoch = get_epoch(full_key);
             let key = to_user_key(full_key);
-            self.stats.scan_key_count += 1;
 
             if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
@@ -173,6 +171,7 @@ impl BackwardUserIterator {
                         // We remark that we don't check `out_of_range` here as the other two cases
                         // covered all situation. 2(a)
                         self.just_met_new_key = true;
+                        self.stats.processed_key_count += 1;
                         return Ok(());
                     } else {
                         // 2(b)
@@ -184,6 +183,8 @@ impl BackwardUserIterator {
                             break;
                         }
                     }
+                } else {
+                    self.stats.skip_key_count += 1;
                 }
                 // TODO: Since the real world workload may follow power law or 20/80 rule, or
                 // whatever name. We may directly seek to the next key if we have

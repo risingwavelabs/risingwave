@@ -829,10 +829,7 @@ def section_hummock(panels):
         ]),
         panels.timeseries_ops("Iter keys flow", [
             panels.target(
-                "sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (instance)", "iter total key count - @ {{instance}}"
-            ),
-            panels.target(
-                "sum(rate(state_bloom_filter_check_counts[$__rate_interval])) by (instance)", "iter processed key count - @ {{instance}}"
+                "sum(rate(state_store_iter_scan_key_counts[$__rate_interval])) by (instance, type)", "iter keys flow - {{type}} @ {{instance}} "
             ),
         ]),
         panels.timeseries_percentage(" Filter-Cache Hit Rate", [
