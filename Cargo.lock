@@ -4793,6 +4793,7 @@ dependencies = [
  "risingwave_compute",
  "risingwave_frontend",
  "risingwave_meta",
+ "risingwave_sqlsmith",
  "sqllogictest",
  "tokio-postgres",
  "tracing",
