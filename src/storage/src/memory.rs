@@ -39,18 +39,12 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 /// so the memory usage will be high. At the same time, every time we create a new iterator on
 /// `BTreeMap`, it will fully clone the map, so as to act as a snapshot. Therefore, in-memory state
 /// store should never be used in production.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MemoryStateStore {
     /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
     inner: Arc<RwLock<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
     /// current largest committed epoch,
     epoch: Option<u64>,
-}
-
-impl Default for MemoryStateStore {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 fn to_bytes_range<R, B>(range: R) -> (Bound<KeyWithEpoch>, Bound<KeyWithEpoch>)
@@ -73,10 +67,7 @@ where
 
 impl MemoryStateStore {
     pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(BTreeMap::new())),
-            epoch: None,
-        }
+        Self::default()
     }
 
     pub fn shared() -> Self {
