@@ -95,3 +95,119 @@ impl Aggregator for Filter {
         self.child.output(builder)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_pb::expr::expr_node::Type as ProstType;
+
+    use super::*;
+    use crate::expr::expr_binary_nonnull::new_binary_expr;
+    use crate::expr::{Expression, InputRefExpression, LiteralExpression};
+
+    #[derive(Clone)]
+    struct MockAgg {
+        count: Arc<AtomicUsize>,
+    }
+
+    impl Aggregator for MockAgg {
+        fn return_type(&self) -> DataType {
+            DataType::Int64
+        }
+
+        fn update_single(&mut self, _input: &DataChunk, _row_id: usize) -> Result<()> {
+            self.count.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn update_multi(
+            &mut self,
+            _input: &DataChunk,
+            start_row_id: usize,
+            end_row_id: usize,
+        ) -> Result<()> {
+            self.count
+                .fetch_add(end_row_id - start_row_id, Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn output(&mut self, _builder: &mut ArrayBuilderImpl) -> Result<()> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn test_selective_agg_always_true() -> Result<()> {
+        let filter =
+            Arc::from(LiteralExpression::new(DataType::Boolean, Some(true.into())).boxed());
+        let agg_count = Arc::new(AtomicUsize::new(0));
+        let mut agg = Filter::new(
+            filter,
+            Box::new(MockAgg {
+                count: agg_count.clone(),
+            }),
+        );
+
+        let chunk = DataChunk::from_pretty(
+            "I
+             9
+             5
+             6
+             1",
+        );
+
+        agg.update_single(&chunk, 0)?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 1);
+
+        agg.update_multi(&chunk, 2, 4)?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 3);
+
+        agg.update_multi(&chunk, 0, chunk.capacity())?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 7);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_selective_agg() -> Result<()> {
+        // filter (where $1 > 5)
+        let filter = Arc::from(new_binary_expr(
+            ProstType::GreaterThan,
+            DataType::Boolean,
+            InputRefExpression::new(DataType::Int64, 0).boxed(),
+            LiteralExpression::new(DataType::Int64, Some((5 as i64).into())).boxed(),
+        ));
+        let agg_count = Arc::new(AtomicUsize::new(0));
+        let mut agg = Filter::new(
+            filter,
+            Box::new(MockAgg {
+                count: agg_count.clone(),
+            }),
+        );
+
+        let chunk = DataChunk::from_pretty(
+            "I
+             9
+             5
+             6
+             1",
+        );
+
+        agg.update_single(&chunk, 0)?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 1);
+
+        agg.update_single(&chunk, 1)?; // should be filtered out
+        assert_eq!(agg_count.load(Ordering::Relaxed), 1);
+
+        agg.update_multi(&chunk, 2, 4)?; // only 6 should be applied
+        assert_eq!(agg_count.load(Ordering::Relaxed), 2);
+
+        agg.update_multi(&chunk, 0, chunk.capacity())?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 4);
+
+        Ok(())
+    }
+}
