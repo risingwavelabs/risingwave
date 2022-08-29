@@ -176,8 +176,8 @@ impl LogicalTopN {
         let local_top_n = StreamGroupTopN::new(
             project.into(),
             vec![vnode_col_idx],
-            self.limit,
-            self.offset,
+            self.limit + self.offset,
+            0,
             self.order.clone(),
         );
         let exchange =
