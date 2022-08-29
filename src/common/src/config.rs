@@ -91,8 +91,8 @@ impl Default for BatchConfig {
 pub struct StreamingConfig {
     // #[serde(default = "default::chunk_size")]
     // pub chunk_size: u32,
-    #[serde(default = "default::checkpoint_interval_ms")]
-    pub checkpoint_interval_ms: u32,
+    #[serde(default = "default::barrier_interval_ms")]
+    pub barrier_interval_ms: u32,
 
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
@@ -312,7 +312,7 @@ mod default {
         "tempdisk".to_string()
     }
 
-    pub fn checkpoint_interval_ms() -> u32 {
+    pub fn barrier_interval_ms() -> u32 {
         250
     }
 

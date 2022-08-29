@@ -912,21 +912,21 @@ where
 
                 let mut notifiers = take(&mut node.notifiers);
                 let command_ctx = node.command_ctx.clone();
+
+                // Notify about collected without checkpoint.
+                notifiers.iter_mut().for_each(Notifier::notify_collected_no_checkpoint);
+                // Save rx about collected with checkpoint to wait a barrier(checkpoint = true)
                 let notifiers_collect = notifiers
                     .iter_mut()
                     .map(|notifier| {
-                        notifier.notify_collected_no_checkpoint();
                         notifier.take_collected()
                     })
                     .collect_vec();
 
+                // Save Notify about finished to wait a barrier(checkpoint = true)
                 let actors_to_finish = command_ctx.actors_to_track();
                 let mut finish_notifier = vec![];
-                if actors_to_finish.is_empty() {
-                    finish_notifier.push(notifiers.into_iter().collect_vec());
-                } else {
-                    tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers);
-                };
+                finish_notifier.push(tracker.add(command_ctx.curr_epoch, actors_to_finish, notifiers));
 
                 for progress in resps.iter().flat_map(|r| r.create_mview_progress.clone()) {
                     if let Some(notifier) = tracker.update(&progress) {
@@ -934,7 +934,8 @@ where
                     }
                 }
                 let finish_notifier = finish_notifier.into_iter().flatten().collect_vec();
-                if !finish_notifier.is_empty() || !notifiers_collect.is_empty() {
+
+                if (!finish_notifier.is_empty() || !notifiers_collect.is_empty()) && *checkpoint {
                     checkpoint_control.inject_checkpoint_in_next_barrier();
                 }
 

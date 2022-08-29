@@ -179,7 +179,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         };
         let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
         let checkpoint_interval =
-            Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+            Duration::from_millis(compute_config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
         let checkpoint_frequency = compute_config.streaming.checkpoint_frequency as usize;
