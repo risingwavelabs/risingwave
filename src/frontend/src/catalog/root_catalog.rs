@@ -45,7 +45,7 @@ pub struct Catalog {
     version: CatalogVersion,
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
-
+    /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, TableCatalog>,
 }
 
