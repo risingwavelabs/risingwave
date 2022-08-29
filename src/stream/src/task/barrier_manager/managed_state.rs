@@ -118,7 +118,7 @@ impl ManagedBarrierState {
 
     /// Remove stop barrier (epoch < `curr_epoch`), and send err.
     pub(crate) fn remove_stop_barrier(&mut self, curr_epoch: u64) {
-        self.epoch_barrier_state_map.retain(|k, _| k > &curr_epoch);
+        self.epoch_barrier_state_map.retain(|k, _| k >= &curr_epoch);
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
