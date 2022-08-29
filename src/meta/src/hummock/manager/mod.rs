@@ -651,11 +651,12 @@ where
                 compaction_group_id,
             );
 
-            tracing::trace!(
-                "TrivialMove for compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
+            tracing::info!(
+                "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
                 compact_task.input_ssts[0].level_idx,
+                compact_task.target_level,
                 start_time.elapsed()
             );
         } else {
