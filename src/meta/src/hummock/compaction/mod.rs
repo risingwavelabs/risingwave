@@ -19,6 +19,7 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 pub use tier_compaction_picker::TierCompactionPicker;
 mod base_level_compaction_picker;
 use std::collections::{HashMap, HashSet};
@@ -167,7 +168,7 @@ impl CompactStatus {
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
             gc_delete_keys: target_level_id == self.level_handlers.len() - 1 && select_level_id > 0,
-            task_status: false,
+            task_status: TaskStatus::Pending as i32,
             compaction_group_id,
             existing_table_ids: vec![],
             compression_algorithm,
@@ -228,7 +229,7 @@ impl CompactStatus {
         )
     }
 
-    /// Declares a task is either finished or canceled.
+    /// Declares a task as either succeeded, failed or canceled.
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
         for level in &compact_task.input_ssts {
             self.level_handlers[level.level_idx as usize].remove_task(compact_task.task_id);

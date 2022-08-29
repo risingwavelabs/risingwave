@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::pin_version_response::Payload;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
@@ -231,7 +232,7 @@ async fn test_hummock_compaction_task() {
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 3);
     // Finish the task and succeed.
-    compact_task.task_status = true;
+    compact_task.set_task_status(TaskStatus::Success);
 
     assert!(hummock_manager
         .report_compact_task(context_id, &compact_task)
