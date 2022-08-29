@@ -144,12 +144,12 @@ impl LogicalTopN {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
             Distribution::Broadcast => unreachable!(),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
-                self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
+                self.gen_vnode_two_phase_streaming_top_n_plan(stream_input, &dists)
             }
         }
     }
 
-    fn gen_vnode_two_phase_streaming_agg_plan(
+    fn gen_vnode_two_phase_streaming_top_n_plan(
         &self,
         stream_input: PlanRef,
         dist_key: &[usize],
