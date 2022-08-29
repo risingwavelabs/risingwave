@@ -33,7 +33,7 @@ pub use compaction_filter::{
 };
 pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
-use futures::{stream, FutureExt, StreamExt};
+use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -42,7 +42,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{get_epoch, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockEpoch, VersionedComparator};
+use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
@@ -53,29 +53,34 @@ pub use sstable_store::{
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::multi_builder::CapacitySplitTableBuilder;
-use super::{HummockResult, SstableBuilderOptions};
+use super::multi_builder::{CapacitySplitTableBuilder, UploadJoinHandle};
+use super::{HummockResult, SstableBuilderOptions, SstableWriterOptions};
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
-use crate::hummock::utils::{MemoryLimiter, MemoryTracker};
+use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, SstableStoreWrite,
+    validate_ssts, CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef,
     DEFAULT_ENTRY_SIZE,
 };
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub struct RemoteBuilderFactory {
     sstable_id_manager: SstableIdManagerRef,
+    sstable_store: SstableStoreRef,
     limiter: Arc<MemoryLimiter>,
     options: SstableBuilderOptions,
+    policy: CachePolicy,
     remote_rpc_cost: Arc<AtomicU64>,
     filter_key_extractor: Arc<FilterKeyExtractorImpl>,
 }
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for RemoteBuilderFactory {
-    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
+    async fn open_builder(&self) -> HummockResult<SstableBuilder<UploadJoinHandle>> {
+        // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
             .require_memory(
@@ -89,13 +94,29 @@ impl TableBuilderFactory for RemoteBuilderFactory {
         let table_id = self.sstable_id_manager.get_new_sst_id().await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
+        let mut writer_options = SstableWriterOptions::from(&self.options);
+        writer_options.tracker = Some(tracker);
+        let writer = self
+            .sstable_store
+            .clone()
+            .create_sst_writer(table_id, self.policy, writer_options)
+            .await?;
         let builder = SstableBuilder::new(
             table_id,
+            writer,
             self.options.clone(),
             self.filter_key_extractor.clone(),
         );
-        Ok((tracker, builder))
+        Ok(builder)
     }
+}
+
+#[derive(Clone)]
+pub struct TaskConfig {
+    pub key_range: KeyRange,
+    pub cache_policy: CachePolicy,
+    pub gc_delete_keys: bool,
+    pub watermark: u64,
 }
 
 #[derive(Clone)]
@@ -103,14 +124,8 @@ impl TableBuilderFactory for RemoteBuilderFactory {
 pub struct Compactor {
     /// The context of the compactor.
     context: Arc<Context>,
-
+    task_config: TaskConfig,
     options: SstableBuilderOptions,
-
-    sstable_store: Arc<dyn SstableStoreWrite>,
-    key_range: KeyRange,
-    cache_policy: CachePolicy,
-    gc_delete_keys: bool,
-    watermark: u64,
 }
 
 pub type CompactOutput = (usize, Vec<SstableInfo>);
@@ -416,6 +431,13 @@ impl Compactor {
                                         )
                                         .await;
                                     }
+                                    Task::ValidationTask(validation_task) => {
+                                        validate_ssts(
+                                            validation_task,
+                                            context.context.sstable_store.clone(),
+                                        )
+                                        .await;
+                                    }
                                 }
                             });
                         }
@@ -435,16 +457,18 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn compact_and_build_sst<T: TableBuilderFactory>(
-        sst_builder: &mut CapacitySplitTableBuilder<T>,
-        kr: &KeyRange,
+    pub async fn compact_and_build_sst<F>(
+        sst_builder: &mut CapacitySplitTableBuilder<F>,
+        task_config: &TaskConfig,
+        stats: Arc<StateStoreMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
-        gc_delete_keys: bool,
-        watermark: HummockEpoch,
         mut compaction_filter: impl CompactionFilter,
-    ) -> HummockResult<()> {
-        if !kr.left.is_empty() {
-            iter.seek(&kr.left).await?;
+    ) -> HummockResult<()>
+    where
+        F: TableBuilderFactory,
+    {
+        if !task_config.key_range.left.is_empty() {
+            iter.seek(&task_config.key_range.left).await?;
         } else {
             iter.rewind().await?;
         }
@@ -461,8 +485,8 @@ impl Compactor {
             let mut drop = false;
             let epoch = get_epoch(iter_key);
             if is_new_user_key {
-                if !kr.right.is_empty()
-                    && VersionedComparator::compare_key(iter_key, &kr.right)
+                if !task_config.key_range.right.is_empty()
+                    && VersionedComparator::compare_key(iter_key, &task_config.key_range.right)
                         != std::cmp::Ordering::Less
                 {
                     break;
@@ -479,8 +503,10 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= watermark && gc_delete_keys && iter.value().is_delete())
-                || (epoch < watermark && watermark_can_see_last_key)
+            if (epoch <= task_config.watermark
+                && task_config.gc_delete_keys
+                && iter.value().is_delete())
+                || (epoch < task_config.watermark && watermark_can_see_last_key)
             {
                 drop = true;
             }
@@ -489,7 +515,7 @@ impl Compactor {
                 drop = true;
             }
 
-            if epoch <= watermark {
+            if epoch <= task_config.watermark {
                 watermark_can_see_last_key = true;
             }
 
@@ -505,6 +531,9 @@ impl Compactor {
 
             iter.next().await?;
         }
+        let mut local_stats = StoreLocalStatistic::default();
+        iter.collect_local_statistic(&mut local_stats);
+        local_stats.report(stats.as_ref());
         Ok(())
     }
 }
@@ -514,7 +543,6 @@ impl Compactor {
     pub fn new(
         context: Arc<Context>,
         options: SstableBuilderOptions,
-        sstable_store: Arc<dyn SstableStoreWrite>,
         key_range: KeyRange,
         cache_policy: CachePolicy,
         gc_delete_keys: bool,
@@ -523,11 +551,12 @@ impl Compactor {
         Self {
             context,
             options,
-            sstable_store,
-            key_range,
-            cache_policy,
-            gc_delete_keys,
-            watermark,
+            task_config: TaskConfig {
+                key_range,
+                cache_policy,
+                gc_delete_keys,
+                watermark,
+            },
         }
     }
 
@@ -548,21 +577,20 @@ impl Compactor {
         if options.estimate_bloom_filter_capacity == 0 {
             options.estimate_bloom_filter_capacity = options.capacity / DEFAULT_ENTRY_SIZE;
         }
+
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
+            sstable_store: self.context.sstable_store.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options,
+            policy: self.task_config.cache_policy,
             remote_rpc_cost: get_id_time.clone(),
             filter_key_extractor,
         };
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let mut builder = CapacitySplitTableBuilder::new(
-            builder_factory,
-            self.cache_policy,
-            self.sstable_store.clone(),
-            self.context.stats.clone(),
-        );
+        let mut builder =
+            CapacitySplitTableBuilder::new(builder_factory, self.context.stats.clone());
 
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -573,31 +601,53 @@ impl Compactor {
 
         Compactor::compact_and_build_sst(
             &mut builder,
-            &self.key_range,
+            &self.task_config,
+            self.context.stats.clone(),
             iter,
-            self.gc_delete_keys,
-            self.watermark,
             compaction_filter,
         )
         .await?;
-        let builder_len = builder.len();
-        let sealed_builders = builder.finish();
+        let split_table_outputs = builder.finish()?;
         compact_timer.observe_duration();
 
-        let mut ssts = Vec::with_capacity(builder_len);
+        let mut ssts = Vec::with_capacity(split_table_outputs.len());
         let mut upload_join_handles = vec![];
-        for SealedSstableBuilder {
-            sst_info,
+
+        for SplitTableOutput {
+            sst_id,
+            meta,
             upload_join_handle,
             bloom_filter_size,
-        } in sealed_builders
+            table_ids,
+        } in split_table_outputs
         {
-            // bloomfilter occuppy per thousand keys
+            let sst_info = SstableInfo {
+                id: sst_id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: meta.smallest_key.clone(),
+                    right: meta.largest_key.clone(),
+                    inf: false,
+                }),
+                file_size: meta.estimated_size as u64,
+                table_ids,
+            };
+
+            // Bloom filter occuppy per thousand keys.
             self.context
                 .filter_key_extractor_manager
                 .update_bloom_filter_avg_size(sst_info.file_size as usize, bloom_filter_size);
             let sst_size = sst_info.file_size;
             ssts.push(sst_info);
+
+            // Upload metadata.
+            let sstable_store_cloned = self.context.sstable_store.clone();
+            let upload_join_handle = async move {
+                let upload_data_result = upload_join_handle.await;
+                upload_data_result.map_err(|e| {
+                    HummockError::other(format!("fail to upload sst data: {:?}", e))
+                })??;
+                sstable_store_cloned.put_sst_meta(sst_id, meta).await
+            };
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -610,17 +660,7 @@ impl Compactor {
             }
         }
 
-        // Wait for all upload to finish
-        try_join_all(upload_join_handles.into_iter().map(|join_handle| {
-            join_handle.map(|result| match result {
-                Ok(upload_result) => upload_result,
-                Err(e) => Err(HummockError::other(format!(
-                    "fail to receive from upload join handle: {:?}",
-                    e
-                ))),
-            })
-        }))
-        .await?;
+        try_join_all(upload_join_handles).await?;
 
         self.context
             .stats
