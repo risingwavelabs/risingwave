@@ -742,6 +742,7 @@ where
                     // TODO(chi): add distributed tracing
                     span: vec![],
                     checkpoint: true,
+                    passed_actors: vec![],
                 };
                 async move {
                     let client = self.env.stream_client_pool().get(node).await?;
