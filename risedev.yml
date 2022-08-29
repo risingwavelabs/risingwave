@@ -313,6 +313,7 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       enable-tiered-cache: true
     - use: frontend
@@ -324,6 +325,7 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
@@ -345,6 +347,7 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
