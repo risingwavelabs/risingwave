@@ -62,7 +62,8 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::MemoryLimiter;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef, DEFAULT_ENTRY_SIZE,
+    validate_ssts, CachePolicy, HummockError, SstableBuilder, SstableIdManagerRef,
+    DEFAULT_ENTRY_SIZE,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -427,6 +428,13 @@ impl Compactor {
                                             full_scan_task,
                                             context.context.sstable_store.clone(),
                                             meta_client,
+                                        )
+                                        .await;
+                                    }
+                                    Task::ValidationTask(validation_task) => {
+                                        validate_ssts(
+                                            validation_task,
+                                            context.context.sstable_store.clone(),
                                         )
                                         .await;
                                     }
