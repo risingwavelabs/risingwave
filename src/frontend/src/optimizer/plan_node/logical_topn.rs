@@ -140,6 +140,10 @@ impl LogicalTopN {
             .into())
         };
 
+        if stream_input.append_only() {
+            return gen_single_plan(stream_input);
+        }
+
         match input_dist {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
             Distribution::Broadcast => unreachable!(),
