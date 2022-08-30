@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use risingwave_cmd_all::playground;
 use risingwave_common::util::sync_point;
-use risingwave_common::util::sync_point::{Signal, WaitForSignal};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreImpl};
 use risingwave_pb::common::WorkerType;
@@ -39,13 +38,9 @@ pub fn setup_env() {
 
 pub async fn start_cluster() -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     wipe_object_store().await;
-    sync_point::activate_sync_point(
-        "CLUSTER_READY",
-        vec![sync_point::Action::EmitSignal(
-            "SIG_CLUSTER_READY".to_owned(),
-        )],
-        1,
-    );
+    sync_point::activate_once("CLUSTER_READY", || async {
+        sync_point::emit_signal("SIG_CLUSTER_READY").await
+    });
 
     let (tx, rx) = std::sync::mpsc::channel();
     let join_handle = std::thread::spawn(move || {
@@ -61,7 +56,7 @@ pub async fn start_cluster() -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     });
     // It will find "SIG_CLUSTER_READY" even when it is reached after "SIG_CLUSTER_READY" has been
     // emitted.
-    wait_now("SIG_CLUSTER_READY".to_owned(), Duration::from_secs(30))
+    sync_point::wait_for_signal("SIG_CLUSTER_READY", Duration::from_secs(30))
         .await
         .unwrap();
     (join_handle, tx)
@@ -99,7 +94,9 @@ pub fn get_object_store_bucket() -> String {
 }
 
 async fn wipe_object_store() {
-    // TODO: wipe content of object store
+    let url = std::env::var("OBJECT_STORE_URL").unwrap();
+    assert_eq!(url, "memory-shared");
+    risingwave_object_store::object::InMemObjectStore::reset_shared();
 }
 
 pub async fn get_meta_client() -> MetaClient {
@@ -113,41 +110,19 @@ pub async fn get_meta_client() -> MetaClient {
     client
 }
 
-pub async fn wait_now(signal: Signal, timeout: Duration) -> Result<(), sync_point::Error> {
-    sync_point::activate_sync_point(
-        "NOW",
-        vec![sync_point::Action::WaitForSignal(WaitForSignal {
-            signal,
-            relay_signal: false,
-            timeout,
-        })],
-        1,
-    );
-    sync_point::on_sync_point("NOW").await
-}
-
-pub async fn emit_now(signal: Signal) {
-    sync_point::activate_sync_point("NOW", vec![sync_point::Action::EmitSignal(signal)], 1);
-    sync_point::on_sync_point("NOW").await.unwrap();
-}
-
 #[tokio::test]
 #[serial]
+#[should_panic]
 async fn test_wait_for_signal_timeout() {
-    sync_point::activate_sync_point(
-        "TEST_SETUP_TIMEOUT",
-        vec![sync_point::Action::WaitForSignal(WaitForSignal {
-            signal: "SIG_NEVER_EMIT".to_owned(),
-            relay_signal: false,
-            timeout: Duration::from_secs(1),
-        })],
-        1,
-    );
+    sync_point::activate_once("TEST_SETUP_TIMEOUT", || async {
+        sync_point::wait_for_signal("SIG_NEVER_EMIT", Duration::from_secs(1))
+            .await
+            .unwrap();
+        Ok(())
+    });
 
     // timeout
-    sync_point::on_sync_point("TEST_SETUP_TIMEOUT")
-        .await
-        .unwrap_err();
+    sync_point::on("TEST_SETUP_TIMEOUT").await;
 }
 
 #[tokio::test]

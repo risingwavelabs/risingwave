@@ -19,13 +19,10 @@ pub use utils::*;
 
 #[cfg(not(sync_point_test))]
 #[inline(always)]
-#[expect(clippy::unused_async)]
-pub async fn on_sync_point(_sync_point: &str) -> Result<(), Error> {
-    Ok(())
-}
+pub async fn on_sync_point(_sync_point: &str) {}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Wait for signal {0} timeout")]
-    WaitForSignalTimeout(String),
+    WaitForSignalTimeout(&'static str),
 }

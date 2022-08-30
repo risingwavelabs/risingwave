@@ -5,7 +5,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bytes = { version = "1" }
+bytes = "1"
 itertools = "0.10"
 risingwave_cmd_all = { path = "../../cmd_all" }
 risingwave_common = { path = "../../common" }

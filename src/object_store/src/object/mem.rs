@@ -165,6 +165,10 @@ impl ObjectStore for InMemObjectStore {
     }
 }
 
+lazy_static::lazy_static! {
+    static ref SHARED: spin::Mutex<InMemObjectStore> = spin::Mutex::new(InMemObjectStore::new());
+}
+
 impl InMemObjectStore {
     pub fn new() -> Self {
         Self {
@@ -177,10 +181,12 @@ impl InMemObjectStore {
     /// Note: Should only be used for `risedev playground`, when there're multiple compute-nodes or
     /// compactors in the same process.
     pub(super) fn shared() -> Self {
-        lazy_static::lazy_static! {
-            static ref SHARED: InMemObjectStore = InMemObjectStore::new();
-        }
-        SHARED.clone()
+        SHARED.lock().clone()
+    }
+
+    /// Reset the shared in-memory object store.
+    pub fn reset_shared() {
+        *SHARED.lock() = InMemObjectStore::new();
     }
 
     async fn get_object<R, F>(&self, path: &str, f: F) -> ObjectResult<R>

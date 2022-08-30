@@ -14,46 +14,27 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::ops::DerefMut;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::BoxFuture;
+use futures::FutureExt;
+
 use crate::util::sync_point::Error;
 
-pub type SyncPoint = String;
-pub type Signal = String;
-
-#[derive(Clone)]
-pub enum Action {
-    WaitForSignal(WaitForSignal),
-    EmitSignal(Signal),
-}
-
-#[derive(Clone)]
-pub struct WaitForSignal {
-    /// The signal being waited for.
-    pub signal: Signal,
-    /// Whether to stop the signal from further propagation after receiving one.
-    ///
-    /// If true, the signal is relayed and another waiter is signalled right away.
-    ///
-    /// If false, other waiter needs to wait for another signal.
-    pub relay_signal: bool,
-    /// Max duration to wait for.
-    pub timeout: Duration,
-}
+pub type SyncPoint = &'static str;
+pub type Signal = &'static str;
+type Action = Arc<dyn Fn() -> BoxFuture<'static, Result<(), Error>> + Send + Sync>;
 
 lazy_static::lazy_static! {
-    static ref SYNC_FACILITY: SyncFacility = {
-        SyncFacility::new()
-    };
+    static ref SYNC_FACILITY: SyncFacility = SyncFacility::new();
 }
 
 /// A `SyncPoint` is activated by attaching a `SyncPointInfo` to it.
-#[derive(Clone)]
 struct SyncPointInfo {
     /// `Action`s to be executed when `SyncPoint` is triggered.
-    actions: Vec<Action>,
+    action: Action,
     /// The `SyncPoint` is deactivated after triggered `execute_times`.
     execute_times: u64,
 }
@@ -73,97 +54,107 @@ impl SyncFacility {
         }
     }
 
-    async fn wait_for_signal(&self, wait_for_signal: WaitForSignal) -> Result<(), Error> {
-        let entry = self
-            .signals
-            .lock()
-            .entry(wait_for_signal.signal.to_owned())
-            .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
-            .clone();
-        match tokio::time::timeout(wait_for_signal.timeout, entry.notified()).await {
-            Ok(_) => {
-                if wait_for_signal.relay_signal {
-                    entry.notify_one();
-                }
-            }
-            Err(_) => {
-                return Err(Error::WaitForSignalTimeout(wait_for_signal.signal));
-            }
+    async fn wait_for_signal(
+        &self,
+        signal: Signal,
+        timeout: Duration,
+        relay_signal: bool,
+    ) -> Result<(), Error> {
+        let entry = self.signals.lock().entry(signal).or_default().clone();
+        match tokio::time::timeout(timeout, entry.notified()).await {
+            Ok(_) if relay_signal => entry.notify_one(),
+            Ok(_) => {}
+            Err(_) => return Err(Error::WaitForSignalTimeout(signal)),
         }
         Ok(())
     }
 
     fn emit_signal(&self, signal: Signal) {
-        let entry = self
-            .signals
-            .lock()
-            .entry(signal)
-            .or_insert_with(|| Arc::new(tokio::sync::Notify::new()))
-            .clone();
-        entry.notify_one();
+        if let Some(notify) = self.signals.lock().get_mut(signal) {
+            notify.notify_one();
+        }
     }
 
-    fn set_actions(&self, sync_point: &str, actions: Vec<Action>, execute_times: u64) {
+    fn set_action(&self, sync_point: SyncPoint, action: Action, execute_times: u64) {
         if execute_times == 0 {
             return;
         }
-        let mut guard = self.sync_points.lock();
-        let sync_points = guard.deref_mut();
-        sync_points.insert(
-            sync_point.to_owned(),
+        self.sync_points.lock().insert(
+            sync_point,
             SyncPointInfo {
-                actions,
+                action,
                 execute_times,
             },
         );
     }
 
-    fn reset_actions(&self, sync_point: &str) {
+    fn reset_action(&self, sync_point: SyncPoint) {
         self.sync_points.lock().remove(sync_point);
     }
 
-    async fn on_sync_point(&self, sync_point: &str) -> Result<(), Error> {
-        let actions = {
+    async fn on(&self, sync_point: SyncPoint) {
+        let action = {
             let mut guard = self.sync_points.lock();
-            match guard.entry(sync_point.to_owned()) {
+            match guard.entry(sync_point) {
                 Entry::Occupied(mut o) => {
                     if o.get().execute_times == 1 {
                         // Deactivate the sync point and execute its actions for the last time.
-                        guard.remove(sync_point).unwrap().actions
+                        (o.remove().action)()
                     } else {
                         o.get_mut().execute_times -= 1;
-                        o.get().actions.clone()
+                        (o.get().action)()
                     }
                 }
-                Entry::Vacant(_) => {
-                    return Ok(());
-                }
+                Entry::Vacant(_) => return,
             }
         };
-        for action in actions {
-            match action {
-                Action::WaitForSignal(w) => {
-                    self.wait_for_signal(w.to_owned()).await?;
-                }
-                Action::EmitSignal(s) => {
-                    self.emit_signal(s.to_owned());
-                }
-            }
-        }
-        Ok(())
+        action.await.unwrap();
     }
 }
 
-/// The activation is reset after executed `execute_times`.
-pub fn activate_sync_point(sync_point: &str, actions: Vec<Action>, execute_times: u64) {
-    SYNC_FACILITY.set_actions(sync_point, actions, execute_times);
+/// Activate the sync point forever.
+pub fn activate<F, Fut>(sync_point: SyncPoint, action: F)
+where
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), Error>> + Send + Sync + 'static,
+{
+    activate_n(sync_point, u64::MAX, action);
 }
 
-pub fn deactivate_sync_point(sync_point: &str) {
-    SYNC_FACILITY.reset_actions(sync_point);
+/// Activate the sync point once.
+pub fn activate_once<F, Fut>(sync_point: SyncPoint, action: F)
+where
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), Error>> + Send + Sync + 'static,
+{
+    activate_n(sync_point, 1, action);
+}
+
+/// Activate the sync point and reset after executed `n` times.
+pub fn activate_n<F, Fut>(sync_point: SyncPoint, n: u64, action: F)
+where
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), Error>> + Send + Sync + 'static,
+{
+    let action = Arc::new(move || action().boxed());
+    SYNC_FACILITY.set_action(sync_point, action, n);
+}
+
+/// Deactivate the sync point.
+pub fn deactivate(sync_point: SyncPoint) {
+    SYNC_FACILITY.reset_action(sync_point);
 }
 
 /// The sync point is triggered
-pub async fn on_sync_point(sync_point: &str) -> Result<(), Error> {
-    SYNC_FACILITY.on_sync_point(sync_point).await
+pub async fn on(sync_point: SyncPoint) {
+    SYNC_FACILITY.on(sync_point).await;
+}
+
+pub async fn wait_for_signal(signal: Signal, timeout: Duration) -> Result<(), Error> {
+    SYNC_FACILITY.wait_for_signal(signal, timeout, false).await
+}
+
+pub async fn emit_signal(signal: Signal) -> Result<(), Error> {
+    SYNC_FACILITY.emit_signal(signal);
+    Ok(())
 }

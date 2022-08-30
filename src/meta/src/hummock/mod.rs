@@ -37,7 +37,7 @@ pub use compaction_scheduler::CompactionScheduler;
 pub use compactor_manager::*;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
-use risingwave_common::util::sync_point::on_sync_point;
+use risingwave_common::util::sync_point;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -173,7 +173,7 @@ where
             if let Err(err) = vacuum.vacuum_sst_data().await {
                 tracing::warn!("Vacuum SST error {:#?}", err);
             }
-            on_sync_point("AFTER_SCHEDULE_VACUUM").await.unwrap();
+            sync_point::on("AFTER_SCHEDULE_VACUUM").await;
         }
     });
     (join_handle, shutdown_tx)
