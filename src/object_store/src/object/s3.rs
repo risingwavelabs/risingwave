@@ -544,6 +544,7 @@ impl S3ObjectStore {
 }
 
 #[cfg(test)]
+#[cfg(not(madsim))]
 mod tests {
     use std::sync::Arc;
 
