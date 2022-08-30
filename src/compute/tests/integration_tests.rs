@@ -34,11 +34,12 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::storage_table::RowBasedStorageTable;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -190,6 +191,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id,
         source_manager.clone(),
         insert_inner,
+        "InsertExecutor".to_string(),
     ));
 
     tokio::spawn(async move {
@@ -211,7 +213,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = RowBasedStorageTable::new_for_test(
+    let table = StorageTable::new_for_test(
         memory_state_store.clone(),
         source_table_id,
         column_descs.clone(),
@@ -221,7 +223,11 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        vec![ScanType::BatchScan(
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await?,
+        )],
         1024,
         "RowSeqExecutor2".to_string(),
         Arc::new(BatchMetrics::for_test()),
@@ -279,7 +285,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        vec![ScanType::BatchScan(
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await?,
+        )],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::for_test()),
@@ -308,6 +318,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id,
         source_manager.clone(),
         delete_inner,
+        "DeleteExecutor".to_string(),
     ));
 
     tokio::spawn(async move {
@@ -346,7 +357,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::BatchScan(table.batch_iter(u64::MAX).await?)],
+        vec![ScanType::BatchScan(
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await?,
+        )],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::for_test()),
@@ -386,7 +401,7 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![OrderType::Ascending],
         vec![0_usize],
     );
-    let table = RowBasedStorageTable::new_for_test(
+    let table = StorageTable::new_for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -415,7 +430,10 @@ async fn test_row_seq_scan() -> Result<()> {
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
         vec![ScanType::BatchScan(
-            table.batch_iter(u64::MAX).await.unwrap(),
+            table
+                .batch_iter(HummockReadEpoch::Committed(u64::MAX))
+                .await
+                .unwrap(),
         )],
         1,
         "RowSeqScanExecutor2".to_string(),

@@ -223,11 +223,7 @@ where
             .await?;
         debug!("notify mapping info to frontends");
         for table_fragment in new_fragments {
-            for table_id in table_fragment
-                .internal_table_ids()
-                .into_iter()
-                .chain(std::iter::once(table_fragment.table_id().table_id))
-            {
+            for table_id in table_fragment.all_table_ids() {
                 let mapping = table_fragment
                     .get_table_hash_mapping(table_id)
                     .expect("no data distribution found");

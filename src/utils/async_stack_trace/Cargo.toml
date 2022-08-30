@@ -14,4 +14,6 @@ pin-project = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time"] }
 tracing = "0.1"
 triomphe = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }

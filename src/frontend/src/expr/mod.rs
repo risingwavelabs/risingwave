@@ -36,7 +36,7 @@ mod type_inference;
 mod utils;
 
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
-pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
+pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use function_call::{FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
@@ -164,7 +164,7 @@ impl ExprImpl {
     /// Evaluate the expression on the given input.
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
-    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/3479>
+    /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         backend_expr.eval_row(input).map_err(Into::into)
@@ -306,10 +306,11 @@ impl ExprImpl {
     /// assign absolute `correlated_id` for them.
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         struct Collector {
-            depth: usize,
+            depth: Depth,
             correlated_indices: Vec<usize>,
             correlated_id: CorrelatedId,
         }
@@ -342,7 +343,7 @@ impl ExprImpl {
         }
 
         let mut collector = Collector {
-            depth: 1,
+            depth,
             correlated_indices: vec![],
             correlated_id,
         };
@@ -376,6 +377,21 @@ impl ExprImpl {
     pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
             && function_call.get_expr_type() == ExprType::Equal
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+        {
+            if x.index() < y.index() {
+                Some((*x, *y))
+            } else {
+                Some((*y, *x))
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_is_not_distinct_from_cond(&self) -> Option<(InputRef, InputRef)> {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::IsNotDistinctFrom
             && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
         {
             if x.index() < y.index() {

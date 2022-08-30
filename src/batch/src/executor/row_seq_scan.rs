@@ -25,11 +25,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_storage::row_serde::RowBasedSerde;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
+use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -49,7 +49,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    BatchScan(StorageTableIter<S, RowBasedSerde>),
+    BatchScan(StorageTableIter<S>),
     PointGet(Option<Row>),
 }
 
@@ -180,7 +180,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
                 vnodes: Bitmap::from(vnodes).into(),
@@ -201,7 +200,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let batch_stats = source.context().stats().unwrap();
-            let table = RowBasedStorageTable::new_partial(
+            let table = StorageTable::new_partial(
                 state_store.clone(),
                 table_id,
                 column_descs,
@@ -214,7 +213,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
-                let iter = table.batch_iter(source.epoch).await?;
+                let iter = table
+                    .batch_iter(HummockReadEpoch::Committed(source.epoch))
+                    .await?;
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
                     vec![ScanType::BatchScan(iter)],
@@ -228,7 +229,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             for scan_range in &seq_scan_node.scan_ranges {
                 let scan_type = async {
                     let pk_types = pk_types.clone();
-                    let table = table.clone();
+                    let mut table = table.clone();
                     let keyspace = keyspace.clone();
 
                     let (pk_prefix_value, next_col_bounds) =
@@ -239,7 +240,10 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             unreachable!()
                         } else if pk_prefix_value.size() == pk_len {
                             let row = {
-                                keyspace.state_store().wait_epoch(source.epoch).await?;
+                                keyspace
+                                    .state_store()
+                                    .wait_epoch(HummockReadEpoch::Committed(source.epoch))
+                                    .await?;
                                 table.get_row(&pk_prefix_value, source.epoch).await?
                             };
                             ScanType::PointGet(row)
@@ -247,7 +251,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                             assert!(pk_prefix_value.size() < pk_len);
                             let iter = table
                                 .batch_iter_with_pk_bounds(
-                                    source.epoch,
+                                    HummockReadEpoch::Committed(source.epoch),
                                     &pk_prefix_value,
                                     next_col_bounds,
                                 )

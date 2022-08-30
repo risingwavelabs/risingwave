@@ -29,6 +29,7 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -502,7 +503,9 @@ enum BarrierEpochState {
     /// This barrier is current in-flight on the stream graph of compute nodes.
     InFlight,
 
-    /// This barrier is completed or failed. Whether this barrier can do checkpoint
+    /// This barrier is completed or failed. We use a bool to mark if this barrier needs to do
+    /// checkpoint, If it is false, we will just use `update_current_epoch` instead of
+    /// `commit_epoch`
     Completed((Vec<BarrierCompleteResponse>, bool)),
 }
 
@@ -544,7 +547,7 @@ where
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self) -> MetaResult<u64> {
+    pub async fn flush(&self) -> MetaResult<HummockSnapshot> {
         let start = Instant::now();
 
         debug!("start barrier flush");
@@ -553,8 +556,8 @@ where
         let elapsed = Instant::now().duration_since(start);
         debug!("barrier flushed in {:?}", elapsed);
 
-        let max_committed_epoch = self.hummock_manager.get_last_epoch()?.epoch;
-        Ok(max_committed_epoch)
+        let snapshot = self.hummock_manager.get_last_epoch()?;
+        Ok(snapshot)
     }
 
     pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {
@@ -718,6 +721,7 @@ where
                     // TODO(chi): add distributed tracing
                     span: vec![],
                     checkpoint: true,
+                    passed_actors: vec![],
                 };
                 async move {
                     let client = self.env.stream_client_pool().get(node).await?;
@@ -870,7 +874,7 @@ where
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
-                // See https://github.com/singularity-data/risingwave/issues/1251
+                // See https://github.com/risingwavelabs/risingwave/issues/1251
 
                 let notifiers = take(&mut node.notifiers);
                 let command_ctx = node.command_ctx.clone();
@@ -909,6 +913,10 @@ where
                             tracker.update(&progress);
                         }
                     }
+                } else if prev_epoch != INVALID_EPOCH {
+                    self.hummock_manager
+                        .update_current_epoch(prev_epoch)
+                        .await?;
                 }
                 node.timer.take().unwrap().observe_duration();
                 node.wait_commit_timer.take().unwrap().observe_duration();
