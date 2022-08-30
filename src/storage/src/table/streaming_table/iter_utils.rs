@@ -24,7 +24,7 @@ use crate::error::{StorageError, StorageResult};
 /// Merge two streams of primary key and rows into a single stream, sorted by primary key.
 /// We should ensure that the primary key from different streams are unique.
 #[try_stream(ok = (Cow<'a, Row>, Cow<'a, Row>), error = StorageError)]
-pub async fn merge_by_pk<'a, S>(
+pub async fn zip_by_order_key<'a, S>(
     stream1: S,
     pk_indices1: &'a [usize],
     stream2: S,

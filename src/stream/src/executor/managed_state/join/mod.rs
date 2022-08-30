@@ -30,7 +30,7 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
-use risingwave_storage::table::streaming_table::{merge_by_pk, state_table};
+use risingwave_storage::table::streaming_table::{state_table, zip_by_order_key};
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
@@ -376,7 +376,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         // We need this because ttl may remove some entries from table but leave the entries with
         // the same stream key in degree table.
-        let merged_iter = merge_by_pk(
+        let merged_iter = zip_by_order_key(
             table_iter,
             &self.state.pk_indices,
             degree_table_iter,

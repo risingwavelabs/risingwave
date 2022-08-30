@@ -15,7 +15,7 @@
 mod iter_utils;
 pub mod mem_table;
 pub mod state_table;
-pub use iter_utils::merge_by_pk;
+pub use iter_utils::zip_by_order_key;
 
 #[cfg(test)]
 pub mod test_streaming_table;
