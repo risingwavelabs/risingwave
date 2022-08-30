@@ -226,6 +226,11 @@ impl Bitmap {
         Ok(unsafe { self.is_set_unchecked(idx) })
     }
 
+    /// Check if the bitmap is all set to 1.
+    pub fn is_all_set(&self) -> bool {
+        self.num_high_bits == self.len()
+    }
+
     pub fn iter(&self) -> BitmapIter<'_> {
         BitmapIter {
             bits: &self.bits,
@@ -418,6 +423,7 @@ mod tests {
         let num_bits = 3;
         let bitmap = Bitmap::all_high_bits(num_bits);
         assert_eq!(bitmap.len(), num_bits);
+        assert!(bitmap.is_all_set());
         for i in 0..num_bits {
             assert!(bitmap.is_set(i).unwrap());
         }
