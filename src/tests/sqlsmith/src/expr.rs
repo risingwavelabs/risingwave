@@ -218,7 +218,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     // TODO: Gen implicit cast here.
-    // Tracked by: https://github.com/singularity-data/risingwave/issues/3896.
+    // Tracked by: https://github.com/risingwavelabs/risingwave/issues/3896.
     fn gen_concat_args(&mut self, can_agg: bool, inside_agg: bool) -> Vec<Expr> {
         let n = self.rng.gen_range(1..10);
         self.gen_n_exprs_with_type(n, DataTypeName::Varchar, can_agg, inside_agg)
@@ -260,7 +260,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
-        // TODO: workaround for <https://github.com/singularity-data/risingwave/issues/4508>
+        // TODO: workaround for <https://github.com/risingwavelabs/risingwave/issues/4508>
         if ret == DataTypeName::Interval {
             return self.gen_simple_scalar(ret);
         }
@@ -351,7 +351,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Md5 => Some(Expr::Function(make_simple_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_simple_func("to_char", &exprs))),
         E::SplitPart => Some(Expr::Function(make_simple_func("split_part", &exprs))),
-        // TODO: Tracking issue: https://github.com/singularity-data/risingwave/issues/112
+        // TODO: Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
         // E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
         E::Overlay => Some(make_overlay(exprs)),
         _ => None,
@@ -416,7 +416,7 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
-/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/singularity-data/risingwave/issues/3933>
+/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/risingwavelabs/risingwave/issues/3933>
 fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
     let args = exprs
         .iter()
@@ -424,7 +424,7 @@ fn make_agg_func(func_name: &str, exprs: &[Expr], _distinct: bool) -> Function {
         .collect();
 
     // Distinct Aggregate shall be workaround until the following issue is resolved
-    // https://github.com/singularity-data/risingwave/issues/4220
+    // https://github.com/risingwavelabs/risingwave/issues/4220
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,

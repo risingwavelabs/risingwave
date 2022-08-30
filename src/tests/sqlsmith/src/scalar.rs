@@ -81,8 +81,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             1 => 1,
             2 => max,
             // TODO: Negative numbers have a few issues.
-            // - Parsing, tracked by: <https://github.com/singularity-data/risingwave/issues/4344>.
-            // - Neg op with Interval, tracked by: <https://github.com/singularity-data/risingwave/issues/112>
+            // - Parsing, tracked by: <https://github.com/risingwavelabs/risingwave/issues/4344>.
+            // - Neg op with Interval, tracked by: <https://github.com/risingwavelabs/risingwave/issues/112>
             // 3 => i32::MIN as f64,
             3..=4 => self.rng.gen_range(1..max),
             _ => unreachable!(),
@@ -96,8 +96,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             1 => 1.0,
             2 => i32::MAX as f64,
             // TODO: Negative numbers have a few issues.
-            // - Parsing, tracked by: <https://github.com/singularity-data/risingwave/issues/4344>.
-            // - Neg op with Interval, tracked by: <https://github.com/singularity-data/risingwave/issues/112>
+            // - Parsing, tracked by: <https://github.com/risingwavelabs/risingwave/issues/4344>.
+            // - Neg op with Interval, tracked by: <https://github.com/risingwavelabs/risingwave/issues/112>
             // 3 => i32::MIN as f64,
             3..=4 => self.rng.gen_range(1.0..i32::MAX as f64),
             _ => unreachable!(),
@@ -114,9 +114,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let day = 24 * hour;
         let week = 7 * day;
         // `0` is not generated due to:
-        // Tracking issue: <https://github.com/singularity-data/risingwave/issues/4504>
+        // Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/4504>
         // It is tracked under refinements:
-        // <https://github.com/singularity-data/risingwave/issues/3896>
+        // <https://github.com/risingwavelabs/risingwave/issues/3896>
         let choices = [1, minute, hour, day, week, rand_secs];
         let secs = choices.choose(&mut self.rng).unwrap();
 

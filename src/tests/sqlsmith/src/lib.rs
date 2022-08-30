@@ -360,7 +360,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         if self.is_mview {
             // TODO: These constraints are workarounds required by mview.
-            // Tracked by: <https://github.com/singularity-data/risingwave/issues/4024>.
+            // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/4024>.
             assert!(!self.tables.is_empty());
             return from;
         }

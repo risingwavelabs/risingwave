@@ -20,7 +20,7 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 
 ```shell
 # Download the pre-built binary
-wget https://github.com/singularity-data/risingwave/releases/download/v0.1.11/risingwave-v0.1.11-x86_64-unknown-linux.tar.gz
+wget https://github.com/risingwavelabs/risingwave/releases/download/v0.1.11/risingwave-v0.1.11-x86_64-unknown-linux.tar.gz
 # Unzip the binary
 tar xvf risingwave-v0.1.11-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
@@ -40,7 +40,7 @@ docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/singularity-data/
 # Install Rust toolchain
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Clone the repo
-git clone https://github.com/singularity-data/risingwave.git && cd risingwave
+git clone https://github.com/risingwavelabs/risingwave.git && cd risingwave
 # Compile and start the playground
 ./risedev playground
 ```
