@@ -268,29 +268,30 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             }
         } else {
-            self.stream_source_splits = match self
-                .split_state_store
-                .load_split_assignment(epoch)
-                .await?
-            {
-                None => vec![],
-                Some(assignments) => {
-                    let mut mock_state = Vec::with_capacity(assignments.len());
-                    for split_id in assignments {
-                        let split_id = Arc::new(split_id);
-                        if let Some(recover_state) = self
-                            .split_state_store
-                            .try_recover_from_state_store(split_id.clone(), epoch)
-                            .await?
-                        {
-                            mock_state.push(recover_state);
-                        } else {
-                            tracing::warn!("load no split info for source_id {}, split_id: {}, skipping", self.source_id, split_id);
+            self.stream_source_splits =
+                match self.split_state_store.load_split_assignment(epoch).await? {
+                    None => vec![],
+                    Some(assignments) => {
+                        let mut mock_state = Vec::with_capacity(assignments.len());
+                        for split_id in assignments {
+                            let split_id = Arc::new(split_id);
+                            if let Some(recover_state) = self
+                                .split_state_store
+                                .try_recover_from_state_store(split_id.clone(), epoch)
+                                .await?
+                            {
+                                mock_state.push(recover_state);
+                            } else {
+                                tracing::warn!(
+                                    "load no split info for source_id {}, split_id: {}, skipping",
+                                    self.source_id,
+                                    split_id
+                                );
+                            }
                         }
+                        mock_state
                     }
-                    mock_state
-                }
-            };
+                };
         }
 
         let boot_state = self.stream_source_splits.clone();

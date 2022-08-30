@@ -112,7 +112,10 @@ impl<S: StateStore> SourceStateHandler<S> {
                 .collect::<Vec<Arc<String>>>())
             .to_string(),
         );
-        local_batch.put(ASSIGN_SPLIT_KEY, StorageValue::new_default_put(serialized.clone()));
+        local_batch.put(
+            ASSIGN_SPLIT_KEY,
+            StorageValue::new_default_put(serialized.clone()),
+        );
 
         // If an error is returned, the underlying state should be rollback
         write_batch.ingest().await.inspect_err(|e| {
@@ -121,7 +124,12 @@ impl<S: StateStore> SourceStateHandler<S> {
                 e
             );
         })?;
-        tracing::debug!("save assignment {:?}, table_id {}, epoch {}", serialized, self.keyspace.table_id(), epoch);
+        tracing::debug!(
+            "save assignment {:?}, table_id {}, epoch {}",
+            serialized,
+            self.keyspace.table_id(),
+            epoch
+        );
         Ok(())
     }
 
@@ -156,7 +164,12 @@ impl<S: StateStore> SourceStateHandler<S> {
             Some(bytes) => {
                 let deserialized: Vec<String> =
                     serde_json::from_slice(bytes.as_ref()).expect("parse assignment failed");
-                tracing::debug!("load prev assignment {:?}, source_id: {}, epoch: {}", deserialized, self.keyspace.table_id(), epoch);
+                tracing::debug!(
+                    "load prev assignment {:?}, source_id: {}, epoch: {}",
+                    deserialized,
+                    self.keyspace.table_id(),
+                    epoch
+                );
                 Ok(Some(deserialized))
             }
         }
