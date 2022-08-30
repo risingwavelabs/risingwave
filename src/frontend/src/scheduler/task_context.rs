@@ -83,7 +83,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         HashMap::default()
     }
 
-    fn register(&self, _c: Box<dyn Collector>) -> prometheus::Result<()> {
+    fn register(&self, _c: Box<dyn Collector>) -> Result<()> {
         Ok(())
     }
 

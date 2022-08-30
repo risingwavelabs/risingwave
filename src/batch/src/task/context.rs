@@ -76,7 +76,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     // QueryID, StageId, TaskId
     fn task_labels(&self) -> HashMap<String, String>;
 
-    fn register(&self, c: Box<dyn Collector>) -> prometheus::Result<()>;
+    fn register(&self, c: Box<dyn Collector>) -> Result<()>;
 
     fn unregister(&self, c: Box<dyn Collector>);
 
@@ -136,8 +136,9 @@ impl BatchTaskContext for ComputeNodeContext {
         ])
     }
 
-    fn register(&self, c: Box<dyn Collector>) -> prometheus::Result<()> {
-        self.task_metrics.register(c)
+    fn register(&self, c: Box<dyn Collector>) -> Result<()> {
+        self.task_metrics.register(c)?;
+        Ok(())
     }
 
     fn unregister(&self, c: Box<dyn Collector>) {

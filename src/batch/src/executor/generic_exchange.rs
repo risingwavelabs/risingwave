@@ -227,8 +227,8 @@ async fn data_chunk_stream<C: BatchTaskContext>(
         break;
     }
 
-    if counter.is_some() {
-        context.unregister(Box::new(counter.unwrap()));
+    if let Some(counter) = counter {
+        context.unregister(Box::new(counter));
     }
 }
 
