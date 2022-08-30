@@ -15,6 +15,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 crc32fast = "1"
 either = "1"
 farmhash = "1"
+fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"

@@ -23,6 +23,7 @@ use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
 use rand::seq::SliceRandom;
+use risingwave_common::types::VnodeMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -41,6 +42,8 @@ use tonic::Streaming;
 use tracing::{error, warn};
 use StageEvent::Failed;
 
+use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::TableId;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
@@ -102,6 +105,7 @@ pub struct StageExecution {
     /// We use `Vec` here since children's size is usually small.
     children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
+    catalog_reader: CatalogReader,
 }
 
 struct StageRunner {
@@ -114,6 +118,7 @@ struct StageRunner {
     msg_sender: Sender<QueryMessage>,
     children: Vec<Arc<StageExecution>>,
     compute_client_pool: ComputeClientPoolRef,
+    catalog_reader: CatalogReader,
 }
 
 impl TaskStatusHolder {
@@ -141,6 +146,7 @@ impl StageExecution {
         msg_sender: Sender<QueryMessage>,
         children: Vec<Arc<StageExecution>>,
         compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
     ) -> Self {
         let tasks = (0..stage.parallelism)
             .into_iter()
@@ -156,6 +162,7 @@ impl StageExecution {
             msg_sender,
             children,
             compute_client_pool,
+            catalog_reader,
         }
     }
 
@@ -173,6 +180,7 @@ impl StageExecution {
                     children: self.children.clone(),
                     state: self.state.clone(),
                     compute_client_pool: self.compute_client_pool.clone(),
+                    catalog_reader: self.catalog_reader.clone(),
                 };
 
                 // The channel used for shutdown signal messaging.
@@ -396,6 +404,19 @@ impl StageRunner {
         Ok(())
     }
 
+    #[inline(always)]
+    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<VnodeMapping> {
+        self.catalog_reader
+            .read_guard()
+            .get_table_by_id(table_id)
+            .map(|table| {
+                self.worker_node_manager
+                    .get_fragment_mapping(&table.fragment_id)
+            })
+            .ok()
+            .flatten()
+    }
+
     fn choose_worker(&self, plan_fragment: &PlanFragment) -> SchedulerResult<Option<WorkerNode>> {
         let node_body = plan_fragment
             .root
@@ -406,15 +427,9 @@ impl StageRunner {
             .expect("fail to get node body");
 
         let vnode_mapping = match node_body {
-            Insert(insert_node) => self
-                .worker_node_manager
-                .get_table_mapping(&insert_node.associated_mview_id.into()),
-            Update(update_node) => self
-                .worker_node_manager
-                .get_table_mapping(&update_node.associated_mview_id.into()),
-            Delete(delete_node) => self
-                .worker_node_manager
-                .get_table_mapping(&delete_node.associated_mview_id.into()),
+            Insert(insert_node) => self.get_vnode_mapping(&insert_node.associated_mview_id.into()),
+            Update(update_node) => self.get_vnode_mapping(&update_node.associated_mview_id.into()),
+            Delete(delete_node) => self.get_vnode_mapping(&delete_node.associated_mview_id.into()),
             _ => None,
         };
 
@@ -610,8 +625,7 @@ impl StageRunner {
                             .as_ref()
                             .expect("no side table desc");
                         node.probe_side_vnode_mapping = self
-                            .worker_node_manager
-                            .get_table_mapping(&side_table_desc.table_id.into())
+                            .get_vnode_mapping(&side_table_desc.table_id.into())
                             .unwrap_or_default();
                         node.worker_nodes = self.worker_node_manager.list_worker_nodes();
                     }
