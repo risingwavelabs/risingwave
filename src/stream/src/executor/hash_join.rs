@@ -587,8 +587,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     // Report metrics of cached join rows/entries
-                    let cached_rows_l: usize = self.side_l.ht.values().map(|e| e.size()).sum();
-                    let cached_rows_r: usize = self.side_r.ht.values().map(|e| e.size()).sum();
+                    let cached_rows_l: usize = self.side_l.ht.iter().map(|(_, e)| e.size()).sum();
+                    let cached_rows_r: usize = self.side_r.ht.iter().map(|(_, e)| e.size()).sum();
                     self.metrics
                         .join_cached_rows
                         .with_label_values(&[&actor_id_str, "left"])
@@ -617,11 +617,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         self.side_l.ht.flush().await?;
         self.side_r.ht.flush().await?;
 
-        // evict the LRU cache
-        // assert!(!self.side_l.is_dirty());
-        self.side_l.ht.evict_to_target_cap();
-        // assert!(!self.side_r.is_dirty());
-        self.side_r.ht.evict_to_target_cap();
+        // Note: the LRU cache is automatically evicted as we operate on it.
         Ok(())
     }
 

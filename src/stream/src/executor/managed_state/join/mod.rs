@@ -24,7 +24,6 @@ use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
-use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -148,8 +147,7 @@ type PkType = Row;
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
-type JoinHashMapInner<K> =
-    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+type JoinHashMapInner<K> = moka::unsync::Cache<K, HashValueType, PrecomputedBuildHasher>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -229,11 +227,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let alloc = StatsAlloc::new(Global).shared();
         Self {
-            inner: EvictableHashMap::with_hasher_in(
-                target_cap,
-                PrecomputedBuildHasher,
-                alloc.clone(),
-            ),
+            inner: moka::unsync::Cache::builder()
+                .weigher(|_, _v| 1)
+                .max_capacity(target_cap as u64)
+                .build_with_hasher(PrecomputedBuildHasher),
             join_key_data_types,
             col_data_types: data_types,
             pk_indices,
@@ -249,6 +246,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     // FIXME: Currently, only memory used in the hash map itself is counted.
     pub fn bytes_in_use(&self) -> usize {
         self.alloc.bytes_in_use()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.entry_count() as usize
     }
 
     pub fn update_epoch(&mut self, epoch: u64) {
@@ -302,7 +303,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         &mut self,
         key: &K,
     ) -> StreamExecutorResult<Option<HashValueType>> {
-        let state = self.inner.pop(key);
+        let state = self.inner.invalidate(key);
         self.metrics.total_lookup_count += 1;
         Ok(match state {
             Some(_) => state,
@@ -343,9 +344,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a key
     pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.insert(pk, value.encode()?);
-        }
+        let encoded_value = value.encode()?;
+        self.inner.update(join_key, |e| e.insert(pk, encoded_value));
 
         // If no cache maintained, only update the flush buffer.
         self.state_table.insert(value.into_row())?;
@@ -354,9 +354,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Delete a key
     pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.remove(pk);
-        }
+        self.inner.update(join_key, |e| e.remove(pk));
 
         // If no cache maintained, only update the flush buffer.
         self.state_table.delete(value.into_row())?;
@@ -365,7 +363,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a [`JoinEntryState`]
     pub fn insert_state(&mut self, key: &K, state: JoinEntryState) {
-        self.inner.put(key.clone(), state);
+        self.inner.insert(key.clone(), state);
     }
 
     pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {

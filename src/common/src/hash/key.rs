@@ -213,7 +213,7 @@ impl Hasher for PrecomputedHasher {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PrecomputedBuildHasher;
 
 impl BuildHasher for PrecomputedBuildHasher {
