@@ -81,3 +81,35 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use futures_async_stream::for_await;
+    use risingwave_common::types::ScalarImpl;
+
+    use super::*;
+    use crate::error::StorageResult;
+
+    fn gen_row(i: i64) -> StorageResult<Cow<'static, Row>> {
+        Ok(Cow::Owned(Row(vec![Some(ScalarImpl::Int64(i))])))
+    }
+
+    #[tokio::test]
+    async fn test_zip_by_order_key() {
+        let stream1 = futures::stream::iter(vec![gen_row(0), gen_row(3), gen_row(6), gen_row(9)]);
+
+        let stream2 = futures::stream::iter(vec![gen_row(2), gen_row(3), gen_row(9), gen_row(10)]);
+
+        let zipped = zip_by_order_key(stream1, &[0], stream2, &[0]);
+
+        let expected_results = vec![3, 9];
+
+        #[for_await]
+        for (i, result) in zipped.enumerate() {
+            let (res0, res1) = result.unwrap();
+            let expected_res = gen_row(expected_results[i]).unwrap();
+            assert_eq!(res0, expected_res);
+            assert_eq!(res1, expected_res);
+        }
+    }
+}
