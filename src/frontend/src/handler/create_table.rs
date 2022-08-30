@@ -152,11 +152,11 @@ pub fn bind_sql_table_constraints(
             // later.
             vec![]
         }
-        (Some(cid), true) => vec![ColumnId::new(cid.get_id())],
+        (Some(cid), true) => vec![cid],
         (None, false) => {
             let name_to_id = column_descs
                 .iter()
-                .map(|c| (c.name.as_str(), ColumnId::new(c.column_id.get_id())))
+                .map(|c| (c.name.as_str(), c.column_id))
                 .collect::<HashMap<_, _>>();
             pk_column_names
                 .iter()
