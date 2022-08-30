@@ -271,10 +271,8 @@ where
                 .select_table_fragments_by_table_id(&table_id)
                 .await
             {
-                option.internal_table_id = HashSet::from_iter(table_fragment.internal_table_ids());
+                option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
             }
-            option.internal_table_id.insert(request.table_id); // need to handle outer table_id
-                                                               // (mv)
         }
 
         assert!(option
