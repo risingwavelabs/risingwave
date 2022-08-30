@@ -86,7 +86,7 @@ impl QueryManager {
             Err(e) => {
                 self.hummock_snapshot_manager
                     .unpin_snapshot(epoch, &query_id)
-                    .await?;
+                    .await;
                 return Err(e);
             }
         };
