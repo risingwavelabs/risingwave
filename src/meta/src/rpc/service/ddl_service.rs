@@ -87,13 +87,8 @@ where
         request: Request<CreateDatabaseRequest>,
     ) -> Result<Response<CreateDatabaseResponse>, Status> {
         let req = request.into_inner();
-        let id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Database }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
-        let mut database = req.get_db().map_err(meta_error_to_tonic)?.clone();
+        let id = self.gen_unique_id::<{ IdCategory::Database }>().await?;
+        let mut database = req.get_db()?.clone();
         database.id = id;
         let version = self.catalog_manager.create_database(&database).await?;
 
@@ -122,13 +117,8 @@ where
         request: Request<CreateSchemaRequest>,
     ) -> Result<Response<CreateSchemaResponse>, Status> {
         let req = request.into_inner();
-        let id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Schema }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
-        let mut schema = req.get_schema().map_err(meta_error_to_tonic)?.clone();
+        let id = self.gen_unique_id::<{ IdCategory::Schema }>().await?;
+        let mut schema = req.get_schema()?.clone();
         schema.id = id;
         let version = self.catalog_manager.create_schema(&schema).await?;
 
@@ -157,18 +147,9 @@ where
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let _ddl_lock = self.ddl_lock.read().await;
-        let mut source = request
-            .into_inner()
-            .get_source()
-            .map_err(meta_error_to_tonic)?
-            .clone();
+        let mut source = request.into_inner().get_source()?.clone();
 
-        let id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Table }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         source.id = id;
 
         self.catalog_manager
@@ -221,11 +202,8 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let sink = req.get_sink().map_err(meta_error_to_tonic)?.clone();
-        let fragment_graph = req
-            .get_fragment_graph()
-            .map_err(meta_error_to_tonic)?
-            .clone();
+        let sink = req.get_sink()?.clone();
+        let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::Sink(sink);
         let version = self
@@ -269,14 +247,8 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let mview = req
-            .get_materialized_view()
-            .map_err(meta_error_to_tonic)?
-            .clone();
-        let fragment_graph = req
-            .get_fragment_graph()
-            .map_err(meta_error_to_tonic)?
-            .clone();
+        let mview = req.get_materialized_view()?.clone();
+        let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::MaterializedView(mview);
         let version = self
@@ -334,12 +306,9 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let index = req.get_index().map_err(meta_error_to_tonic)?.clone();
-        let index_table = req.get_index_table().map_err(meta_error_to_tonic)?.clone();
-        let fragment_graph = req
-            .get_fragment_graph()
-            .map_err(meta_error_to_tonic)?
-            .clone();
+        let index = req.get_index()?.clone();
+        let index_table = req.get_index_table()?.clone();
+        let fragment_graph = req.get_fragment_graph()?.clone();
 
         let mut stream_job = StreamingJob::Index(index, index_table);
         let version = self
@@ -433,9 +402,7 @@ where
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
         use crate::model::MetadataModel;
-        let tables = Table::list(self.env.meta_store())
-            .await
-            .map_err(meta_error_to_tonic)?;
+        let tables = Table::list(self.env.meta_store()).await?;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 }
@@ -487,11 +454,7 @@ where
         mut fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(CreateMaterializedViewContext, TableFragments)> {
         // 1. assign a new id to the stream job.
-        let id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Table }>()
-            .await? as u32;
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
 
         // 2. resolve the dependent relations.
@@ -705,11 +668,7 @@ where
         mut fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(SourceId, TableId, CatalogVersion)> {
         // Generate source id.
-        let source_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Table }>() // TODO: use source category
-            .await? as u32;
+        let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: use source category
         source.id = source_id;
 
         // Fill in the correct source id for stream node.
@@ -798,6 +757,11 @@ where
         self.source_manager.drop_source(source_id).await?;
 
         Ok(version)
+    }
+
+    async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
+        let id = self.env.id_gen_manager().generate::<C>().await? as u32;
+        Ok(id)
     }
 }
 
