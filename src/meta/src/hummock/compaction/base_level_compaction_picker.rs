@@ -87,7 +87,7 @@ impl CompactionPicker for LevelCompactionPicker {
             / cal_file_size(&input_levels[0].table_infos);
 
         // Pick the whole level to reduce write amplification.
-        if write_amplification >= MAX_WRITE_AMPLIFICATION {
+        if write_amplification > MAX_WRITE_AMPLIFICATION {
             // If there is any pending compact file in sub-level 0 or target level,
             //  we can not pick the whole level to compact.
             if is_l0_pending_compact
@@ -121,7 +121,7 @@ impl CompactionPicker for LevelCompactionPicker {
             let all_level_amplification =
                 cal_file_size(&levels.get_level(self.target_level).table_infos) * 100
                     / l0_total_file_size;
-            if write_amplification < all_level_amplification {
+            if all_level_amplification > MAX_WRITE_AMPLIFICATION {
                 return None;
             }
             // reverse because the ix of low sub-level is smaller.
@@ -285,8 +285,8 @@ pub mod tests {
         push_table_level0(&mut levels, generate_table(9, 1, 100, 400, 3));
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 8);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 9);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 9);
+        assert_eq!(ret.input_levels[1].table_infos[0].id, 8);
         ret.add_pending_task(2, &mut levels_handler);
 
         levels_handler[0].remove_task(1);
@@ -306,8 +306,11 @@ pub mod tests {
         );
         push_table_level0(&mut levels, generate_table(13, 1, 100, 400, 4));
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
-        assert_eq!(ret.input_levels.len(), 3);
+        assert_eq!(ret.input_levels.len(), 4);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 13);
         assert_eq!(ret.input_levels[1].table_infos.len(), 3);
+        assert_eq!(ret.input_levels[2].table_infos[0].id, 6);
+        assert_eq!(ret.input_levels[3].table_infos[0].id, 5);
     }
 
     #[test]
@@ -421,11 +424,11 @@ pub mod tests {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![generate_table(2, 1, 150, 300, 2)],
-                total_file_size: 0,
+                total_file_size: 150,
                 sub_level_id: 0,
             }],
             l0: Some(generate_l0_with_overlap(vec![generate_table(
-                1, 1, 200, 250, 2,
+                1, 1, 160, 280, 2,
             )])),
         };
 
@@ -437,11 +440,12 @@ pub mod tests {
 
         levels.l0.as_mut().unwrap().sub_levels[0].table_infos = vec![
             generate_table(3, 1, 100, 140, 3),
-            generate_table(1, 1, 200, 250, 2),
-            generate_table(4, 1, 400, 500, 3),
+            generate_table(1, 1, 160, 280, 2),
+            generate_table(5, 1, 290, 500, 3),
         ];
 
         let ret = picker.pick_compaction(&levels, &levels_handler).unwrap();
+        ret.add_pending_task(1, &mut levels_handler);
 
         // Will be trivial move. The second file can not be picked up because the range of files
         // [3,4] would be overlap with file [0]
@@ -455,6 +459,8 @@ pub mod tests {
                 .collect_vec(),
             vec![3]
         );
+        let ret = picker.pick_compaction(&levels, &levels_handler);
+        assert!(ret.is_none());
     }
 
     #[test]
@@ -498,7 +504,7 @@ pub mod tests {
                     generate_table(2, 1, 200, 500, 2),
                     generate_table(3, 1, 510, 600, 2),
                 ],
-                total_file_size: 0,
+                total_file_size: 590,
                 sub_level_id: 0,
             }],
             l0: Some(generate_l0_with_overlap(vec![])),
@@ -506,17 +512,17 @@ pub mod tests {
         push_tables_level0(
             &mut levels,
             vec![
-                generate_table(4, 1, 130, 180, 2),
+                generate_table(4, 1, 100, 180, 2),
                 generate_table(5, 1, 190, 250, 2),
-                generate_table(6, 1, 260, 300, 2),
+                generate_table(6, 1, 260, 400, 2),
             ],
         );
         push_tables_level0(
             &mut levels,
             vec![
-                generate_table(7, 1, 130, 180, 2),
+                generate_table(7, 1, 100, 180, 2),
                 generate_table(8, 1, 190, 250, 2),
-                generate_table(9, 1, 260, 300, 2),
+                generate_table(9, 1, 260, 400, 2),
             ],
         );
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
