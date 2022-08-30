@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{InternalError, self};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::sort_util::OrderType;
 
@@ -147,7 +147,7 @@ impl LogicalTopN {
 
         match input_dist {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
-            Distribution::Broadcast => unreachable!(),
+            Distribution::Broadcast => Err(RwError::from(ErrorCode::NotImplemented("top n not support Broadcast".to_string(), None.into()))),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
                 self.gen_vnode_two_phase_streaming_top_n_plan(stream_input, &dists)
             }
