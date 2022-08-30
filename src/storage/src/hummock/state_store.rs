@@ -23,6 +23,7 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
@@ -258,7 +259,6 @@ impl HummockStorage {
         // the union because the underlying merge iterator
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
-            self.stats.clone(),
             key_range,
             epoch,
             min_epoch,
@@ -661,10 +661,11 @@ impl StateStore for HummockStorage {
             // not check
         }
 
-        let span = self.tracing.new_tracer("hummock_iter");
-
-        self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options)
-            .in_span(span)
+        let iter = self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options);
+        #[cfg(not(madsim))]
+        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
+        #[cfg(madsim)]
+        iter
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -685,7 +686,7 @@ impl StateStore for HummockStorage {
         self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
     }
 

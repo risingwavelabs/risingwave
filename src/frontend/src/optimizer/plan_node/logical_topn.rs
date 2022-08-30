@@ -74,7 +74,7 @@ impl LogicalTopN {
     /// `topn_order` returns the order of the Top-N operator. This naming is because `order()`
     /// already exists and it was designed to return the operator's physical property order.
     ///
-    /// Note that `order()` and `topn_order()` may differ. For streaming query, `order()` which
+    /// Note that for streaming query, `order()` and `topn_order()` may differ. `order()` which
     /// implies the output ordering of an operator, is never guaranteed; while `topn_order()` must
     /// be non-null because it's a critical information for Top-N operators to work
     pub fn topn_order(&self) -> &Order {
@@ -225,19 +225,9 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
-        self.to_batch_with_order_required(&Order::any())
-    }
-
-    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        let ret = BatchTopN::new(new_logical).into();
-
-        if self.topn_order().satisfies(required_order) {
-            Ok(ret)
-        } else {
-            Ok(required_order.enforce(ret))
-        }
+        Ok(BatchTopN::new(new_logical).into())
     }
 }
 

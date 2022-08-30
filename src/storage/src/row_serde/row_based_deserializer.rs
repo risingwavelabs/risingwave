@@ -89,7 +89,7 @@ mod tests {
     use crate::row_serde::row_based_deserializer::RowBasedDeserializer;
     use crate::row_serde::row_based_serializer::RowBasedSerializer;
     use crate::row_serde::{ColumnDescMapping, RowDeserialize, RowSerialize};
-    use crate::table::storage_table::DEFAULT_VNODE;
+    use crate::table::DEFAULT_VNODE;
 
     #[test]
     fn test_row_based_serialize_and_deserialize_full_row() {

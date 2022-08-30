@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -59,6 +60,7 @@ pub async fn playground() -> Result<()> {
     } else {
         "playground".to_string()
     };
+    let force_shared_hummock_in_mem = std::env::var("FORCE_SHARED_HUMMOCK_IN_MEM").is_ok();
 
     // TODO: may allow specifying the config file for the playground.
     let apply_config_file = |cmd: &mut Command| {
@@ -94,13 +96,21 @@ pub async fn playground() -> Result<()> {
                         ComputeNodeService::apply_command_args(
                             &mut command,
                             c,
-                            if compute_node_count > 1 {
+                            if force_shared_hummock_in_mem || compute_node_count > 1 {
                                 HummockInMemoryStrategy::Shared
                             } else {
                                 HummockInMemoryStrategy::Isolated
                             },
                         )?;
                         apply_config_file(&mut command);
+                        if c.enable_tiered_cache {
+                            let prefix_data = env::var("PREFIX_DATA")?;
+                            command.arg("--file-cache-dir").arg(
+                                PathBuf::from(prefix_data)
+                                    .join("filecache")
+                                    .join(c.port.to_string()),
+                            );
+                        }
                         rw_services.push(RisingWaveService::Compute(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
@@ -187,6 +197,10 @@ pub async fn playground() -> Result<()> {
             }
         }
     }
+
+    risingwave_common::util::sync_point::on_sync_point("CLUSTER_READY")
+        .await
+        .unwrap();
 
     // TODO: should we join all handles?
     // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.

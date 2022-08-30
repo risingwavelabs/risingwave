@@ -12,12 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
-use std::time::Duration;
+#[cfg(sync_point_test)]
+mod utils;
+#[cfg(sync_point_test)]
+pub use utils::*;
 
-use tokio::sync::oneshot::Sender;
-use tokio::task::JoinHandle;
+#[cfg(not(sync_point_test))]
+#[inline(always)]
+#[expect(clippy::unused_async)]
+pub async fn on_sync_point(_sync_point: &str) -> Result<(), Error> {
+    Ok(())
+}
 
-use crate::manager::MetaOpts;
-use crate::rpc::server::MetaStoreBackend;
-use crate::AddressInfo;
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Wait for signal {0} timeout")]
+    WaitForSignalTimeout(String),
+}

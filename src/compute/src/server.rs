@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_batch::executor::monitor::BatchMetrics;
+use risingwave_batch::executor::BatchTaskMetricsManager;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{ComputeNodeConfig, MAX_CONNECTION_WINDOW_SIZE};
@@ -56,6 +57,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::server::StateStoreImpl::HummockStateStore;
 use crate::ComputeNodeOpts;
 
 fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
@@ -97,6 +99,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
+    let batch_task_metrics_mgr = Arc::new(BatchTaskMetricsManager::new(registry.clone()));
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
@@ -110,18 +113,6 @@ pub async fn compute_node_serve(
 
     let mut join_handle_vec = vec![];
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
-    // todo use ObserverManager
-    let observer_manager = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        Box::new(compute_observer_node),
-        WorkerType::ComputeNode,
-    )
-    .await;
-
-    let observer_join_handle = observer_manager.start().await.unwrap();
-    join_handle_vec.push(observer_join_handle);
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -135,6 +126,26 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    let local_version_manager = match &state_store {
+        HummockStateStore(monitored) => monitored.local_version_manager(),
+        _ => {
+            panic!();
+        }
+    };
+
+    let compute_observer_node =
+        ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
+    let observer_manager = ObserverManager::new(
+        meta_client.clone(),
+        client_addr.clone(),
+        Box::new(compute_observer_node),
+        WorkerType::ComputeNode,
+    )
+    .await;
+
+    let observer_join_handle = observer_manager.start().await.unwrap();
+    join_handle_vec.push(observer_join_handle);
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
@@ -207,6 +218,7 @@ pub async fn compute_node_serve(
         batch_config,
         worker_id,
         state_store.clone(),
+        batch_task_metrics_mgr.clone(),
         batch_metrics.clone(),
     );
 

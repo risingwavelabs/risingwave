@@ -43,14 +43,11 @@ use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{serialize, serialize_pk, streaming_deserialize};
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
-use crate::table::Distribution;
+use crate::table::{Distribution, DEFAULT_VNODE};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
-///
-/// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
-pub const DEFAULT_VNODE: VirtualNode = 0;
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     /// buffer row operations.
@@ -92,6 +89,9 @@ pub struct StateTable<S: StateStore> {
 
     /// Used for catalog table_properties
     table_option: TableOption,
+
+    /// If true, sanity check is disabled on this table.
+    disable_sanity_check: bool,
 }
 
 /// init Statetable
@@ -173,6 +173,7 @@ impl<S: StateStore> StateTable<S> {
             dist_key_in_pk_indices,
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
+            disable_sanity_check: false,
         }
     }
 
@@ -239,7 +240,13 @@ impl<S: StateStore> StateTable<S> {
             dist_key_in_pk_indices,
             vnodes,
             table_option: Default::default(),
+            disable_sanity_check: false,
         }
+    }
+
+    /// Disable sanity check on this storage table.
+    pub fn disable_sanity_check(&mut self) {
+        self.disable_sanity_check = true;
     }
 
     /// Get vnode value with `indices` on the given `row`. Should not be used directly.
@@ -292,7 +299,7 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 }
-
+const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 /// point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
@@ -346,6 +353,20 @@ impl<S: StateStore> StateTable<S> {
         output.put_slice(&self.compute_vnode_by_pk(pk).to_be_bytes());
         self.pk_serializer.serialize(pk, &mut output);
         output
+    }
+
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
+        assert!(
+            !self.is_dirty(),
+            "vnode bitmap should only be updated when state table is clean"
+        );
+        if self.dist_key_indices.is_empty() {
+            assert_eq!(
+                new_vnodes, self.vnodes,
+                "should not update vnode bitmap for singleton table"
+            );
+        }
+        self.vnodes = new_vnodes;
     }
 }
 
@@ -406,12 +427,67 @@ impl<S: StateStore> StateTable<S> {
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        // If we want to insert a row, it should not exist in storage.
+                        let storage_row = self
+                            .keyspace
+                            .get(&pk, false, self.get_read_option(epoch))
+                            .await?;
+
+                        // It's normal for some executors to fail this assert, you can use
+                        // `.disable_sanity_check()` on state table to disable this check.
+                        assert!(
+                            storage_row.is_none(),
+                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
+                            storage_row.unwrap(),
+                            row
+                        );
+                    }
                     local.put(pk, StorageValue::new_default_put(row));
                 }
-                RowOp::Delete(_) => {
+                RowOp::Delete(old_row) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        // If we want to delete a row, it should exist in storage, and should
+                        // have the same old_value as recorded.
+                        let storage_row = self
+                            .keyspace
+                            .get(&pk, false, self.get_read_option(epoch))
+                            .await?;
+                        // It's normal for some executors to fail this assert, you can use
+                        // `.disable_sanity_check()` on state table to disable this check.
+                        assert!(storage_row.is_some(), "deleting an non-existing row");
+                        assert!(
+                            storage_row.as_ref().unwrap() == &old_row,
+                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
+                            storage_row.as_ref().unwrap(),
+                            old_row
+                        );
+                    }
                     local.delete(pk);
                 }
-                RowOp::Update((_, new_row)) => {
+                RowOp::Update((old_row, new_row)) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        // If we want to update a row, it should exist in storage, and should
+                        // have the same old_value as recorded.
+                        let storage_row = self
+                            .keyspace
+                            .get(&pk, false, self.get_read_option(epoch))
+                            .await?;
+
+                        // It's normal for some executors to fail this assert, you can use
+                        // `.disable_sanity_check()` on state table to disable this check.
+                        assert!(
+                            storage_row.is_some(),
+                            "update a non-existing row: {:?}",
+                            old_row
+                        );
+                        assert!(
+                            storage_row.as_ref().unwrap() == &old_row,
+                            "value mismatch when updating row: {:?} != {:?}",
+                            storage_row,
+                            old_row
+                        );
+                    }
                     local.put(pk, StorageValue::new_default_put(new_row));
                 }
             }
@@ -440,7 +516,12 @@ impl<S: StateStore> StateTable<S> {
             let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
             let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
             let encoded_key_range = range_of_prefix(&encoded_prefix);
-            self.mem_table.iter(encoded_key_range)
+
+            let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
+            let vnode = vnode_hint.unwrap_or(0_u8);
+            let encoded_key_range_with_vnode =
+                prefixed_range(encoded_key_range, &vnode.to_be_bytes());
+            self.mem_table.iter(encoded_key_range_with_vnode)
         };
 
         Ok(
