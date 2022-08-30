@@ -762,7 +762,6 @@ mod tests {
 
     use super::*;
     use crate::barrier::GlobalBarrierManager;
-    use crate::error::meta_error_to_tonic;
     use crate::hummock::compaction_group::manager::CompactionGroupManager;
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{CatalogManager, ClusterManager, FragmentManager, MetaSrvEnv};
@@ -820,10 +819,7 @@ mod tests {
             let req = request.into_inner();
             let mut guard = self.inner.actor_infos.lock().unwrap();
             for info in req.get_info() {
-                guard.insert(
-                    info.get_actor_id(),
-                    info.get_host().map_err(meta_error_to_tonic)?.clone(),
-                );
+                guard.insert(info.get_actor_id(), info.get_host()?.clone());
             }
 
             Ok(Response::new(BroadcastActorInfoTableResponse {
