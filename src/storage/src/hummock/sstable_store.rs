@@ -390,15 +390,13 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn create_sst_writer(
+    pub fn create_sst_writer(
         self: Arc<Self>,
         sst_id: HummockSstableId,
         policy: CachePolicy,
         options: SstableWriterOptions,
-    ) -> HummockResult<Box<BatchUploadWriter>> {
-        Ok(Box::new(BatchUploadWriter::new(
-            sst_id, self, policy, options,
-        )))
+    ) -> Box<BatchUploadWriter> {
+        Box::new(BatchUploadWriter::new(sst_id, self, policy, options))
     }
 
     pub async fn put_sst_meta(
@@ -700,7 +698,7 @@ mod tests {
 
     use risingwave_hummock_sdk::HummockSstableId;
 
-    use super::{SstableStoreRef, SstableWriteMode, SstableWriterOptions};
+    use super::{SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::sstable::SstableIteratorReadOptions;

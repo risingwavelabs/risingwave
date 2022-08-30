@@ -221,8 +221,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
         let writer = self
             .sstable_store
             .clone()
-            .create_sst_writer(id, self.policy, writer_options)
-            .await?;
+            .create_sst_writer(id, self.policy, writer_options);
         let builder = SstableBuilder::new_for_test(id, writer, self.options.clone());
 
         Ok(builder)
@@ -248,7 +247,6 @@ mod tests {
             bloom_false_positive: 0.1,
             compression_algorithm: CompressionAlgorithm::None,
             estimate_bloom_filter_capacity: 0,
-            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::new_for_test(builder_factory);

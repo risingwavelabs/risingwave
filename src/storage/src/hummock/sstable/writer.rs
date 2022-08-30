@@ -71,7 +71,6 @@ impl SstableWriter for InMemWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
 
     use bytes::Bytes;
     use itertools::Itertools;

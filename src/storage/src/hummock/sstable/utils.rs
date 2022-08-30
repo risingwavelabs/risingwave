@@ -86,7 +86,7 @@ pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
     v
 }
 
-#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Deserialize, Clone, Copy, Debug, Eq)]
 pub enum CompressionAlgorithm {
     None,
     Lz4,

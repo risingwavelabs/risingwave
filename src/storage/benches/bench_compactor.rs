@@ -41,7 +41,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompactorSstableStore, CompressionAlgorithm, InMemWriter, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
-    SstableWriteMode, SstableWriterOptions, TieredCache,
+    SstableWriter, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -60,9 +60,9 @@ pub fn mock_sstable_store() -> SstableStoreRef {
 
 pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
-        mode: SstableWriteMode::Batch,
         capacity_hint: None,
         tracker: None,
+        policy: CachePolicy::Disable,
     }
 }
 
@@ -76,9 +76,7 @@ pub async fn put_sst(
 ) {
     let mut writer = sstable_store
         .clone()
-        .create_sst_writer(sst_id, policy, options)
-        .await
-        .unwrap();
+        .create_sst_writer(sst_id, policy, options);
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
@@ -184,7 +182,6 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
-        enable_sst_streaming_upload: false,
     };
     let mut builder = CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(
         32,
