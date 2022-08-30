@@ -162,8 +162,9 @@ impl StringAggOrdered {
             return None;
         }
         rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut result = rows[0].1.value.clone();
-        for (_, data) in rows.into_iter().skip(1) {
+        let mut rows_iter = rows.into_iter();
+        let mut result = rows_iter.next().unwrap().1.value;
+        for (_, data) in rows_iter {
             result.push_str(&data.delim);
             result.push_str(&data.value);
         }
