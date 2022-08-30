@@ -419,7 +419,6 @@ pub mod tests {
                 inf: false,
             }),
             file_size: (right - left + 1) as u64,
-            path_prefix: String::default(),
             table_ids: vec![],
         }
     }

@@ -83,7 +83,6 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
             inf: false,
         }),
         file_size: batches.len() as u64,
-        path_prefix: String::default(),
         table_ids: vec![],
     }
 }

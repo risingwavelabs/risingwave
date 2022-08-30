@@ -109,7 +109,6 @@ impl Sstable {
                 inf: false,
             }),
             file_size: self.meta.estimated_size as u64,
-            path_prefix: String::default(),
             table_ids: vec![],
         }
     }
