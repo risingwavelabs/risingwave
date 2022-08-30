@@ -244,7 +244,7 @@
     ) AS Q;
   binder_error: |-
     Feature is not yet implemented: aggregate function as over window function: avg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/4978
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4978
 - id: nexmark_q7
   before:
   - create_tables
@@ -376,7 +376,7 @@
     WHERE rownum <= 1;
   planner_error: |-
     Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/4847
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
 - id: nexmark_q10
   before:
   - create_tables
@@ -403,7 +403,7 @@
     GROUP BY B.bidder, SESSION(B.date_time, INTERVAL '10' SECOND);
   binder_error: |-
     Feature is not yet implemented: unsupported function: "session_start"
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q12
   before:
   - create_tables
@@ -417,7 +417,7 @@
     GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
   binder_error: |-
     Feature is not yet implemented: unsupported function: "proctime"
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q13
   before:
   - create_tables
@@ -597,7 +597,7 @@
     WHERE rank_number <= 1;
   planner_error: |-
     Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/4847
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
 - id: nexmark_q19
   before:
   - create_tables
@@ -607,7 +607,7 @@
     WHERE rank_number <= 10;
   planner_error: |-
     Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/4847
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
 - id: nexmark_q20
   before:
   - create_tables
@@ -653,7 +653,7 @@
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
   binder_error: |-
     Feature is not yet implemented: unsupported function: "regexp_extract"
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q22
   before:
   - create_tables

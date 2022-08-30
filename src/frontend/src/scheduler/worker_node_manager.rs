@@ -17,11 +17,11 @@ use std::sync::{Arc, RwLock};
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::catalog::TableId;
 use risingwave_common::types::{ParallelUnitId, VnodeMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
+use crate::catalog::FragmentId;
 use crate::scheduler::{SchedulerError, SchedulerResult};
 
 /// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
@@ -32,8 +32,8 @@ pub struct WorkerNodeManager {
 #[derive(Default)]
 struct WorkerNodeManagerInner {
     worker_nodes: Vec<WorkerNode>,
-    /// table vnode mapping info.
-    table_vnode_mapping: HashMap<TableId, VnodeMapping>,
+    /// fragment vnode mapping info.
+    fragment_vnode_mapping: HashMap<FragmentId, VnodeMapping>,
 }
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
@@ -55,7 +55,7 @@ impl WorkerNodeManager {
     pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
         let inner = RwLock::new(WorkerNodeManagerInner {
             worker_nodes,
-            table_vnode_mapping: HashMap::new(),
+            fragment_vnode_mapping: HashMap::new(),
         });
         Self { inner }
     }
@@ -76,10 +76,10 @@ impl WorkerNodeManager {
             .retain(|x| *x != node);
     }
 
-    pub fn refresh(&self, nodes: Vec<WorkerNode>, mapping: HashMap<TableId, VnodeMapping>) {
+    pub fn refresh(&self, nodes: Vec<WorkerNode>, mapping: HashMap<FragmentId, VnodeMapping>) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes = nodes;
-        write_guard.table_vnode_mapping = mapping;
+        write_guard.fragment_vnode_mapping = mapping;
     }
 
     /// Get a random worker node.
@@ -126,39 +126,39 @@ impl WorkerNodeManager {
         Ok(workers)
     }
 
-    pub fn get_table_mapping(&self, table_id: &TableId) -> Option<VnodeMapping> {
+    pub fn get_fragment_mapping(&self, fragment_id: &FragmentId) -> Option<VnodeMapping> {
         self.inner
             .read()
             .unwrap()
-            .table_vnode_mapping
-            .get(table_id)
+            .fragment_vnode_mapping
+            .get(fragment_id)
             .cloned()
     }
 
-    pub fn insert_table_mapping(&self, table_id: TableId, vnode_mapping: VnodeMapping) {
+    pub fn insert_fragment_mapping(&self, fragment_id: FragmentId, vnode_mapping: VnodeMapping) {
         self.inner
             .write()
             .unwrap()
-            .table_vnode_mapping
-            .try_insert(table_id, vnode_mapping)
+            .fragment_vnode_mapping
+            .try_insert(fragment_id, vnode_mapping)
             .unwrap();
     }
 
-    pub fn update_table_mapping(&self, table_id: TableId, vnode_mapping: VnodeMapping) {
+    pub fn update_fragment_mapping(&self, fragment_id: FragmentId, vnode_mapping: VnodeMapping) {
         self.inner
             .write()
             .unwrap()
-            .table_vnode_mapping
-            .insert(table_id, vnode_mapping)
+            .fragment_vnode_mapping
+            .insert(fragment_id, vnode_mapping)
             .unwrap();
     }
 
-    pub fn remove_table_mapping(&self, table_id: &TableId) {
+    pub fn remove_fragment_mapping(&self, fragment_id: &FragmentId) {
         self.inner
             .write()
             .unwrap()
-            .table_vnode_mapping
-            .remove(table_id)
+            .fragment_vnode_mapping
+            .remove(fragment_id)
             .unwrap();
     }
 }
