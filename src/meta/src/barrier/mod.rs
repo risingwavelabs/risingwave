@@ -691,7 +691,9 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
-            if !matches!(command, Command::Plain(_)) {
+            let need_collected_checkpoint =
+                notifiers.iter().any(Notifier::need_collected_checkpoint);
+            if !matches!(command, Command::Plain(_)) || need_collected_checkpoint {
                 checkpoint_control.inject_checkpoint_in_next_barrier();
             }
             let checkpoint = checkpoint_control.try_get_checkpoint();
@@ -948,7 +950,7 @@ where
                 // If we need to wait for a barrier (checkpoint) to post-process, we will inject
                 // checkpoint in next barrier.
                 if (!finish_notifiers.is_empty() || !collect_notifiers_checkpoint.is_empty())
-                    && *checkpoint
+                    && !*checkpoint
                 {
                     checkpoint_control.inject_checkpoint_in_next_barrier();
                 }

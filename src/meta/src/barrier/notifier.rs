@@ -59,6 +59,10 @@ impl Notifier {
         }
     }
 
+    pub fn need_collected_checkpoint(&self) -> bool {
+        self.collected_checkpoint.is_some()
+    }
+
     /// Notify when we failed to collect(checkpoint = true) a barrier. This function consumes
     /// `self`.
     pub fn notify_collection_checkpoint_failed(mut self, err: MetaError) {

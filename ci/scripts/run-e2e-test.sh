@@ -40,7 +40,7 @@ cargo make link-all-in-one-binaries
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
 # Please make sure the regression is expected before increasing the timeout.
-timeout 3m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+timeout 4m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
