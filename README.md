@@ -31,7 +31,7 @@ tar xvf risingwave-v0.1.11-x86_64-unknown-linux.tar.gz
 
 ```shell
 # Start RisingWave in single-binary playground mode
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/singularity-data/risingwave:v0.1.11 playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.1.11 playground
 ```
 
 **Compile from Source with [RiseDev](docs/developer-guide.md#set-up-the-development-environment) (Linux and macOS)**
