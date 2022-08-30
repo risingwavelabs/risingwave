@@ -539,7 +539,9 @@ impl Expr for ExprImpl {
             ExprImpl::TableFunction(_e) => {
                 unreachable!("Table function should not be converted to ExprNode")
             }
-            ExprImpl::WindowFunction(_e) => todo!(),
+            ExprImpl::WindowFunction(_e) => {
+                unreachable!("Window function should not be converted to ExprNode")
+            }
         }
     }
 }

@@ -116,27 +116,27 @@ impl std::fmt::Debug for WindowFunction {
             });
             builder.finish()?;
 
-            if !self.partition_by.is_empty() || !self.order_by.is_empty() {
-                let mut delim = "";
-                f.write_str("OVER(")?;
-                if !self.partition_by.is_empty() {
-                    delim = " ";
-                    let mut builder = f.debug_tuple("PARTITION BY");
-                    self.partition_by.iter().for_each(|child| {
-                        builder.field(child);
-                    });
-                    builder.finish()?;
-                }
-                if !self.partition_by.is_empty() {
-                    f.write_str(delim)?;
-                    let mut builder = f.debug_tuple("PARTITION BY");
-                    self.partition_by.iter().for_each(|child| {
-                        builder.field(child);
-                    });
-                    builder.finish()?;
-                }
-                f.write_str(")")?;
+            f.write_str("OVER(")?;
+
+            let mut delim = "";
+            if !self.partition_by.is_empty() {
+                delim = " ";
+                let mut builder = f.debug_tuple("PARTITION BY");
+                self.partition_by.iter().for_each(|child| {
+                    builder.field(child);
+                });
+                builder.finish()?;
             }
+            if !self.order_by.is_empty() {
+                f.write_str(delim)?;
+                let mut builder = f.debug_tuple("ORDER BY");
+                self.order_by.iter().for_each(|child| {
+                    builder.field(child);
+                });
+                builder.finish()?;
+            }
+            f.write_str(")")?;
+
             Ok(())
         }
     }

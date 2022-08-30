@@ -83,33 +83,8 @@ impl Binder {
             .try_collect()?;
 
         // window function
-        if let Some(WindowSpec {
-            partition_by,
-            order_by,
-            window_frame,
-        }) = f.over
-        {
-            self.ensure_window_function_allowed()?;
-            if let Some(window_frame) = window_frame {
-                return Err(ErrorCode::NotImplemented(
-                    format!("window frame: {}", window_frame),
-                    None.into(),
-                )
-                .into());
-            }
-            let window_function_type = WindowFunctionType::from_str(&function_name)?;
-            let partition_by = partition_by
-                .into_iter()
-                .map(|arg| self.bind_expr(arg))
-                .try_collect()?;
-
-            let order_by = order_by
-                .into_iter()
-                .map(|order_by_expr| self.bind_order_by_expr_in_over(order_by_expr))
-                .collect::<Result<_>>()?;
-            return Ok(
-                WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into(),
-            );
+        if let Some(window_spec) = f.over {
+            return self.bind_window_function(window_spec, function_name, inputs);
         }
 
         // table function
@@ -306,6 +281,37 @@ impl Binder {
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
             kind, inputs, f.distinct, order_by, filter,
         )?)))
+    }
+
+    pub(super) fn bind_window_function(
+        &mut self,
+        WindowSpec {
+            partition_by,
+            order_by,
+            window_frame,
+        }: WindowSpec,
+        function_name: String,
+        inputs: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        self.ensure_window_function_allowed()?;
+        if let Some(window_frame) = window_frame {
+            return Err(ErrorCode::NotImplemented(
+                format!("window frame: {}", window_frame),
+                None.into(),
+            )
+            .into());
+        }
+        let window_function_type = WindowFunctionType::from_str(&function_name)?;
+        let partition_by = partition_by
+            .into_iter()
+            .map(|arg| self.bind_expr(arg))
+            .try_collect()?;
+
+        let order_by = order_by
+            .into_iter()
+            .map(|order_by_expr| self.bind_order_by_expr_in_over(order_by_expr))
+            .collect::<Result<_>>()?;
+        Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
     }
 
     fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
