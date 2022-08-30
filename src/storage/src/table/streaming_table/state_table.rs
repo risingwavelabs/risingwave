@@ -43,14 +43,11 @@ use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{serialize, serialize_pk, streaming_deserialize};
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
-use crate::table::Distribution;
+use crate::table::{Distribution, DEFAULT_VNODE};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
-///
-/// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
-pub const DEFAULT_VNODE: VirtualNode = 0;
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     /// buffer row operations.

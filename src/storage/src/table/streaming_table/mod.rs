@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod iter_utils;
 pub mod mem_table;
 pub mod state_table;
+pub use iter_utils::merge_by_pk;
+
 #[cfg(test)]
 pub mod test_streaming_table;

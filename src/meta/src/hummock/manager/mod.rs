@@ -31,12 +31,13 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
     HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
 };
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     pin_version_response, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta,
-    LevelType, OverlappingLevel,
+    LevelType, OverlappingLevel, ValidationTask,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -233,7 +234,7 @@ where
             for compaction_group in self.compaction_group_manager.compaction_groups().await {
                 let compact_status = CompactStatus::new(
                     compaction_group.group_id(),
-                    Arc::new(compaction_group.compaction_config().clone()),
+                    compaction_group.compaction_config().max_level,
                 );
                 compaction_statuses.insert(compact_status.compaction_group_id(), compact_status);
             }
@@ -606,6 +607,7 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
             manual_compaction_option,
+            self.get_compaction_config(compaction_group_id).await,
         );
         let mut compact_task = match compact_task {
             None => {
@@ -622,27 +624,35 @@ where
 
             // need to regain the newest version ynder the protection of a write lock, otherwise the
             // old version may be used to overwrite the new one
-            let current_version = versioning_guard.current_version.clone();
-            let new_version_id = current_version.id + 1;
             let versioning = versioning_guard.deref_mut();
+            let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            apply_version_delta(
+            let version_delta = apply_version_delta(
                 &mut hummock_version_deltas,
-                &current_version,
+                current_version,
                 &compact_task,
                 true,
             );
 
-            // FIXME: refactor the implementation of `apply_compact_result` by using
-            // `hummock_version_deltas`
-            let mut new_version =
-                CompactStatus::apply_compact_result(&compact_task, current_version);
-            new_version.id = new_version_id;
             commit_multi_var!(self, None, hummock_version_deltas)?;
-            // this task has been finished and does not need to be schedule.
-            compact_task.task_status = true;
-            versioning.current_version = new_version;
+            current_version.apply_version_delta(&version_delta);
+
+            // this task has been finished and `trivial_move_task` does not need to be schedule.
+            compact_task.set_task_status(TaskStatus::Success);
+            self.env
+                .notification_manager()
+                .notify_compute_asynchronously(
+                    Operation::Add,
+                    Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
+                        version_deltas: vec![versioning
+                            .hummock_version_deltas
+                            .last_key_value()
+                            .unwrap()
+                            .1
+                            .clone()],
+                    }),
+                );
             trigger_sst_stat(
                 &self.metrics,
                 Some(
@@ -653,6 +663,15 @@ where
                 ),
                 &versioning.current_version,
                 compaction_group_id,
+            );
+
+            tracing::info!(
+                "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
+                compaction_group_id,
+                compact_task.input_ssts[0].table_infos.len(),
+                compact_task.input_ssts[0].level_idx,
+                compact_task.target_level,
+                start_time.elapsed()
             );
         } else {
             let existing_table_ids_from_meta = self
@@ -693,18 +712,15 @@ where
                 .collect();
             compact_task.current_epoch_time = Epoch::now().0;
 
-            compact_task.compaction_filter_mask =
-                compact_status.compaction_config.compaction_filter_mask;
+            compact_task.compaction_filter_mask = self
+                .get_compaction_config(compact_status.compaction_group_id())
+                .await
+                .compaction_filter_mask;
             commit_multi_var!(self, None, compact_status)?;
-            tracing::trace!(
-                    "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
-                    compaction_group_id,
-                    compact_task.input_ssts[0].table_infos.len(),
-                    compact_task.input_ssts[0].level_idx,
-                    start_time.elapsed()
-                );
+
             // this task has been finished.
-            compact_task.task_status = false;
+            compact_task.set_task_status(TaskStatus::Pending);
+
             trigger_sst_stat(
                 &self.metrics,
                 Some(
@@ -715,6 +731,14 @@ where
                 ),
                 &current_version,
                 compaction_group_id,
+            );
+
+            tracing::trace!(
+                "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
+                compaction_group_id,
+                compact_task.input_ssts[0].table_infos.len(),
+                compact_task.input_ssts[0].level_idx,
+                start_time.elapsed()
             );
         }
         #[cfg(test)]
@@ -728,7 +752,7 @@ where
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
     pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
-        compact_task.task_status = false;
+        compact_task.set_task_status(TaskStatus::Canceled);
         self.report_compact_task_impl(None, compact_task).await
     }
 
@@ -740,7 +764,7 @@ where
             .get_compact_task_impl(compaction_group_id, None)
             .await?
         {
-            if !task.task_status {
+            if let TaskStatus::Pending = task.task_status() {
                 return Ok(Some(task));
             }
             assert!(CompactStatus::is_trivial_move_task(&task));
@@ -858,22 +882,25 @@ where
             }
         }
         compact_status.report_compact_task(compact_task);
-        if compact_task.task_status {
+        let task_status = compact_task.task_status();
+        debug_assert!(
+            task_status != TaskStatus::Pending,
+            "report pending compaction task"
+        );
+        if let TaskStatus::Success = task_status {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
-            let old_version = versioning_guard.current_version.clone();
             let versioning = versioning_guard.deref_mut();
+            let current_version = &mut versioning.current_version;
             let mut hummock_version_deltas =
                 BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
-            apply_version_delta(
+            let version_delta = apply_version_delta(
                 &mut hummock_version_deltas,
-                &old_version,
+                current_version,
                 compact_task,
                 false,
             );
-            let new_version_id = old_version.id + 1;
-            let mut new_version = CompactStatus::apply_compact_result(compact_task, old_version);
-            new_version.id = new_version_id;
+
             commit_multi_var!(
                 self,
                 context_id,
@@ -881,7 +908,8 @@ where
                 compact_task_assignment,
                 hummock_version_deltas
             )?;
-            versioning.current_version = new_version;
+
+            current_version.apply_version_delta(&version_delta);
 
             self.env
                 .notification_manager()
@@ -897,9 +925,21 @@ where
                     }),
                 );
         } else {
-            // The compaction task is cancelled.
+            // The compaction task is cancelled or failed.
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
+
+        // Update compaaction task count.
+        let task_label = match task_status {
+            TaskStatus::Success => "success",
+            TaskStatus::Failed => "failed",
+            TaskStatus::Canceled => "canceled",
+            _ => unreachable!(),
+        };
+        self.metrics
+            .compact_frequency
+            .with_label_values(&[&compact_task.compaction_group_id.to_string(), task_label])
+            .inc();
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",
@@ -986,6 +1026,42 @@ where
                     compaction_group_id
                 );
             }
+        }
+
+        if self.env.opts.enable_committed_sst_sanity_check {
+            async {
+                if sstables.is_empty() {
+                    return;
+                }
+                let epoch = match epoch {
+                    EpochType::CommittedEpoch(epoch) => epoch,
+                    EpochType::CurrentEpoch(_) => {
+                        return;
+                    }
+                };
+                let compactor = match self.compactor_manager.random_compactor() {
+                    None => {
+                        tracing::warn!(
+                            "Skip committed SST sanity check due to no available worker"
+                        );
+                        return;
+                    }
+                    Some(compactor) => compactor,
+                };
+                let sst_ids = sstables.iter().map(|(_, sst_id)| sst_id.id).collect_vec();
+                if compactor
+                    .send_task(Task::ValidationTask(ValidationTask {
+                        sst_ids,
+                        sst_id_to_worker_id: sst_to_context.clone(),
+                        epoch,
+                    }))
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("Skip committed SST sanity check due to send failure");
+                }
+            }
+            .await;
         }
 
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1252,7 +1328,7 @@ where
     }
 
     #[named]
-    pub(crate) async fn get_read_guard(&self) -> RwLockReadGuard<Versioning> {
+    pub async fn get_read_guard(&self) -> RwLockReadGuard<Versioning> {
         read_lock!(self, versioning).await
     }
 
@@ -1428,7 +1504,7 @@ fn apply_version_delta<'a>(
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,
-) {
+) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
@@ -1458,5 +1534,7 @@ fn apply_version_delta<'a>(
     level_deltas.push(level_delta);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     version_delta.id = old_version.id + 1;
-    txn.insert(version_delta.id, version_delta);
+    txn.insert(version_delta.id, version_delta.clone());
+
+    version_delta
 }

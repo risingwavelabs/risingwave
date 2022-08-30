@@ -68,7 +68,6 @@ impl StreamGroupTopN {
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         let schema = &self.base.schema;
-        let dist_keys = self.base.dist.dist_column_indices().to_vec();
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
@@ -107,7 +106,7 @@ impl StreamGroupTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(dist_keys, self.base.append_only)
+        internal_table_catalog_builder.build(vec![], self.base.append_only)
     }
 }
 
@@ -143,7 +142,7 @@ impl fmt::Display for StreamGroupTopN {
             &format!(
                 "{}",
                 OrderDisplay {
-                    order: self.order(),
+                    order: &self.order,
                     input_schema
                 }
             ),

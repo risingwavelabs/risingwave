@@ -29,9 +29,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_storage::table::storage_table::merge_by_pk;
-use risingwave_storage::table::streaming_table::state_table;
 use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_storage::table::streaming_table::{merge_by_pk, state_table};
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
