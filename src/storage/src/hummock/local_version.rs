@@ -238,7 +238,7 @@ impl LocalVersion {
 
         self.version_ids_in_use.insert(new_pinned_version.id);
 
-        let new_pinned_version = self.pinned_version.pin_new_version(new_pinned_version);
+        let new_pinned_version = self.pinned_version.new_pin_version(new_pinned_version);
 
         let cleaned_epoch =
             match version_deltas {
@@ -485,6 +485,7 @@ impl LocalVersion {
         }
         version.id = version_delta.id;
         version.max_committed_epoch = version_delta.max_committed_epoch;
+        version.max_current_epoch = version_delta.max_current_epoch;
         version.safe_epoch = version_delta.safe_epoch;
 
         clean_epochs
@@ -520,7 +521,7 @@ impl PinnedVersion {
         }
     }
 
-    fn pin_new_version(&self, version: HummockVersion) -> Self {
+    fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
             version.id > self.version.id,
             "pinning a older version {}. Current is {}",
