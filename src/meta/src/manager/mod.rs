@@ -18,6 +18,7 @@ mod env;
 mod id;
 mod idle;
 mod notification;
+pub use notification::MessageStatus;
 mod relation;
 
 pub use catalog::*;

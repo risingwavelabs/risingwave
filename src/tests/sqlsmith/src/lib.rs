@@ -28,6 +28,7 @@ use risingwave_sqlparser::parser::Parser;
 mod expr;
 pub use expr::print_function_table;
 mod relation;
+pub mod runner;
 mod scalar;
 mod time_window;
 mod utils;

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
@@ -25,7 +25,6 @@ use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
-use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -108,7 +107,7 @@ impl InsertExecutor {
         // Wait for all chunks to be taken / written.
         let rows_inserted = try_join_all(notifiers)
             .await
-            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
+            .context("failed to wait chunks to be written")?
             .into_iter()
             .sum::<usize>();
 
@@ -145,7 +144,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
+                .context("source manager not found")?,
             child,
             source.plan_node().get_identity().clone(),
         )))
