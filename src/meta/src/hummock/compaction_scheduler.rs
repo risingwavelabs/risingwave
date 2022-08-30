@@ -161,14 +161,13 @@ where
                     let current_compactor_tasks =
                         self.hummock_manager.list_assigned_tasks_number().await;
                     tracing::warn!("No idle compactor available. The assigned task number for every compactor is (context_id, count):\n {:?}", current_compactor_tasks);
-                    compact_task.task_status = false;
                     tokio::time::sleep(Duration::from_secs(
                         self.compactor_selection_retry_interval_sec,
                     ))
                     .await;
                     match self
                         .hummock_manager
-                        .cancel_compact_task(&compact_task)
+                        .cancel_compact_task(&mut compact_task)
                         .await
                     {
                         Ok(_) => return false,
@@ -220,10 +219,9 @@ where
                     e
                 );
                 // Cancel the task at best effort
-                compact_task.task_status = false;
                 if let Err(e) = self
                     .hummock_manager
-                    .report_compact_task(compactor.context_id(), &compact_task)
+                    .cancel_compact_task(&mut compact_task)
                     .await
                 {
                     tracing::error!("Failed to cancel task {}. {:#?}", compact_task.task_id, e);

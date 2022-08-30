@@ -18,7 +18,7 @@ use std::ops::DerefMut;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::CompactTaskAssignment;
+use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::{Error, Result};
@@ -111,6 +111,17 @@ where
             .into_iter()
             .map(|(k, v)| (k, v.count()))
             .collect_vec()
+    }
+
+    pub async fn get_compaction_config(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> CompactionConfig {
+        self.compaction_group_manager
+            .compaction_group(compaction_group_id)
+            .await
+            .expect("compaction group exists")
+            .compaction_config()
     }
 
     #[named]
