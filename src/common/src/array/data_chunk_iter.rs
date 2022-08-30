@@ -267,6 +267,10 @@ impl Row {
         self.0.len()
     }
 
+    pub fn estimate_size(&self) -> usize {
+        self.0.capacity() * std::mem::size_of::<Datum>() + std::mem::size_of::<Self>()
+    }
+
     pub fn values(&self) -> impl Iterator<Item = &Datum> {
         self.0.iter()
     }

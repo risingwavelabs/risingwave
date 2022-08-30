@@ -143,6 +143,8 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()>;
 
     fn has_null(&self) -> bool;
+
+    fn estimate_size(&self) -> usize;
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
@@ -160,7 +162,7 @@ pub struct FixedSizeKey<const N: usize> {
 /// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct SerializedKey {
-    key: Vec<Datum>,
+    key: Row,
     hash_code: u64,
     has_null: bool,
 }
@@ -565,7 +567,7 @@ impl HashKeySerializer for SerializedKeySerializer {
 
     fn into_hash_key(self) -> SerializedKey {
         SerializedKey {
-            key: self.buffer,
+            key: Row(self.buffer),
             hash_code: self.hash_code,
             has_null: self.has_null,
         }
@@ -638,16 +640,19 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
     fn has_null(&self) -> bool {
         self.null_bitmap != 0xFF
     }
+
+    fn estimate_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
 }
 
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
-        ensure!(self.key.len() == array_builders.len());
         array_builders
             .iter_mut()
-            .zip_eq(self.key)
+            .zip_eq(self.key.0)
             .try_for_each(|(array_builder, key)| {
                 array_builder.append_datum(&key).map_err(Into::into)
             })
@@ -655,6 +660,10 @@ impl HashKey for SerializedKey {
 
     fn has_null(&self) -> bool {
         self.has_null
+    }
+
+    fn estimate_size(&self) -> usize {
+        self.key.estimate_size() + std::mem::size_of::<Self>()
     }
 }
 

@@ -32,45 +32,67 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 /// join key will be presented in the cache.
 pub struct JoinEntryState {
     /// The full copy of the state. If evicted, it will be `None`.
-    cached: BTreeMap<PkType, StateValueType>,
+    cached: BTreeMap<PkType, StateValueType, SharedStatsAlloc<Global>>,
+
+    allocator: SharedStatsAlloc<Global>,
+
+    content_estimate_size: usize,
+}
+
+impl Default for JoinEntryState {
+    fn default() -> Self {
+        let allocator = StatsAlloc::new(Global).shared();
+        Self {
+            cached: BTreeMap::new_in(allocator.clone()),
+            allocator,
+            content_estimate_size: 0,
+        }
+    }
 }
 
 impl JoinEntryState {
-    pub fn with_cached(cached: BTreeMap<PkType, StateValueType>) -> Self {
-        Self { cached }
-    }
-
     // Insert into the cache and flush buffer.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
+        self.content_estimate_size += key.estimate_size() + value.estimate_size();
         self.cached.insert(key, value);
     }
 
     pub fn remove(&mut self, pk: PkType) {
-        self.cached.remove(&pk);
+        if let Some(value) = self.cached.remove(&pk) {
+            self.content_estimate_size = self
+                .content_estimate_size
+                .saturating_sub(pk.estimate_size() + value.estimate_size())
+        }
     }
 
     #[expect(dead_code)]
-    pub fn iter(&mut self) -> JoinEntryStateIter<'_> {
+    pub fn iter(&self) -> JoinEntryStateIter<'_> {
         self.cached.iter()
     }
 
     #[expect(dead_code)]
-    pub fn values(&mut self) -> JoinEntryStateValues<'_> {
+    pub fn values(&self) -> JoinEntryStateValues<'_> {
         self.cached.values()
     }
 
+    /// Note: To make the estimcate size correct, the caller should ensure that it does not mutate
+    /// the estimate size of the [`StateValueType`].
     pub fn values_mut<'a, 'b: 'a>(
         &'a mut self,
         data_types: &'b [DataType],
-    ) -> impl Iterator<Item = (&'a mut EncodedJoinRow, StreamExecutorResult<JoinRow>)> + 'a {
+    ) -> impl Iterator<Item = (&'a mut StateValueType, StreamExecutorResult<JoinRow>)> + 'a {
         self.cached.values_mut().map(|encoded| {
             let decoded = encoded.decode(data_types);
             (encoded, decoded)
         })
     }
 
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.cached.len()
+    }
+
+    pub fn estimate_size(&self) -> usize {
+        self.content_estimate_size + self.allocator.bytes_in_use() + std::mem::size_of::<Self>()
     }
 }
 
@@ -83,7 +105,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_all_or_none_state() {
-        let mut managed_state = JoinEntryState::with_cached(BTreeMap::new());
+        let mut managed_state = JoinEntryState::default();
         let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];

@@ -38,8 +38,10 @@ use super::{
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
-/// Limit number of the cached entries (one per join key) on each side
-pub const JOIN_CACHE_SIZE: usize = 1 << 16;
+/// Limit capacity of the cached entries (one per join key) on each side, in bytes.
+/// It's currently a constant of 256 MiB, which is expected to be dynamically adjusted in the
+/// future.
+pub const JOIN_CACHE_CAP_BYTES: usize = 256 * 1024 * 1024;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -464,7 +466,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_SIZE,
+                    JOIN_CACHE_CAP_BYTES,
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
@@ -480,7 +482,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_SIZE,
+                    JOIN_CACHE_CAP_BYTES,
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
@@ -587,8 +589,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     // Report metrics of cached join rows/entries
-                    let cached_rows_l: usize = self.side_l.ht.iter().map(|(_, e)| e.size()).sum();
-                    let cached_rows_r: usize = self.side_r.ht.iter().map(|(_, e)| e.size()).sum();
+                    let cached_rows_l: usize = self.side_l.ht.iter().map(|(_, e)| e.len()).sum();
+                    let cached_rows_r: usize = self.side_r.ht.iter().map(|(_, e)| e.len()).sum();
                     self.metrics
                         .join_cached_rows
                         .with_label_values(&[&actor_id_str, "left"])
@@ -711,7 +713,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             let key = &keys[idx];
             let value = row.to_owned_row();
             let pk = row.row_by_indices(&side_update.pk_indices);
-            let matched_rows = Self::hash_eq_match(key, &mut side_match.ht).await?;
+            let matched_rows: Option<HashValueType> =
+                Self::hash_eq_match(key, &mut side_match.ht).await?;
             match *op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;

@@ -14,7 +14,6 @@
 
 mod join_entry_state;
 use std::alloc::Global;
-use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
@@ -140,6 +139,10 @@ impl EncodedJoinRow {
         self.degree -= 1;
         Ok(self.degree)
     }
+
+    pub fn estimate_size(&self) -> usize {
+        self.row.capacity() * std::mem::size_of::<u8>() + std::mem::size_of::<Self>()
+    }
 }
 
 type PkType = Row;
@@ -211,7 +214,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        target_cap: usize,
+        target_cap_bytes: usize,
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         data_types: Vec<DataType>,
@@ -228,8 +231,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let alloc = StatsAlloc::new(Global).shared();
         Self {
             inner: moka::unsync::Cache::builder()
-                .weigher(|_, _v| 1)
-                .max_capacity(target_cap as u64)
+                .weigher(|k: &K, v: &JoinEntryState| (k.estimate_size() + v.estimate_size()) as u32)
+                .max_capacity(target_cap_bytes as u64)
                 .build_with_hasher(PrecomputedBuildHasher),
             join_key_data_types,
             col_data_types: data_types,
@@ -325,15 +328,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .await?;
         pin_mut!(table_iter);
 
-        let mut cached = BTreeMap::new();
+        let mut entry_state = JoinEntryState::default();
         #[for_await]
         for row in table_iter {
             let row = row?.into_owned();
             let pk = row.by_indices(&self.pk_indices);
 
-            cached.insert(pk, JoinRow::from_row(row).encode()?);
+            entry_state.insert(pk, JoinRow::from_row(row).encode()?);
         }
-        Ok(JoinEntryState::with_cached(cached))
+        Ok(entry_state)
     }
 
     pub async fn flush(&mut self) -> StreamExecutorResult<()> {
