@@ -21,34 +21,36 @@ use super::BoxedAggState;
 use crate::expr::ExpressionRef;
 use crate::Result;
 
+/// A special aggregator that filters out rows that do not satisfy the given _condition_
+/// and feeds the rows that satisfy to the _inner_ aggregator.
 #[derive(Clone)]
 pub struct Filter {
-    filter: ExpressionRef,
-    child: BoxedAggState,
+    condition: ExpressionRef,
+    inner: BoxedAggState,
 }
 
 impl Filter {
-    pub fn new(filter: ExpressionRef, child: BoxedAggState) -> Self {
-        assert_eq!(filter.return_type(), DataType::Boolean);
-        Self { filter, child }
+    pub fn new(condition: ExpressionRef, inner: BoxedAggState) -> Self {
+        assert_eq!(condition.return_type(), DataType::Boolean);
+        Self { condition, inner }
     }
 }
 
 impl Aggregator for Filter {
     fn return_type(&self) -> DataType {
-        self.child.return_type()
+        self.inner.return_type()
     }
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         let (row_ref, vis) = input.row_at(row_id)?;
-        assert!(vis);
+        assert!(vis); // cuz the input chunk is supposed to be compacted
         if self
-            .filter
+            .condition
             .eval_row(&row_ref.to_owned_row())?
             .expect("filter must have non-null result")
             .into_bool()
         {
-            self.child.update_single(input, row_id)?;
+            self.inner.update_single(input, row_id)?;
         }
         Ok(())
     }
@@ -61,15 +63,15 @@ impl Aggregator for Filter {
     ) -> Result<()> {
         let bitmap = if start_row_id == 0 && end_row_id == input.capacity() {
             // if the input if the whole chunk, use `eval` to speed up
-            self.filter.eval(input)?.as_bool().to_bitmap()
+            self.condition.eval(input)?.as_bool().to_bitmap()
         } else {
             // otherwise, run `eval_row` on each row
             (start_row_id..end_row_id)
                 .map(|row_id| -> Result<bool> {
                     let (row_ref, vis) = input.row_at(row_id)?;
-                    assert!(vis);
+                    assert!(vis); // cuz the input chunk is supposed to be compacted
                     Ok(self
-                        .filter
+                        .condition
                         .eval_row(&row_ref.to_owned_row())?
                         .expect("filter must have non-null result")
                         .into_bool())
@@ -79,20 +81,20 @@ impl Aggregator for Filter {
         if bitmap.is_all_set() {
             // if the bitmap is all set, meaning all rows satisfy the filter,
             // call `update_multi` for potential optimization
-            self.child.update_multi(input, start_row_id, end_row_id)
+            self.inner.update_multi(input, start_row_id, end_row_id)
         } else {
             for (_, row_id) in (start_row_id..end_row_id)
                 .enumerate()
                 .filter(|(i, _)| bitmap.is_set(*i).unwrap())
             {
-                self.child.update_single(input, row_id)?;
+                self.inner.update_single(input, row_id)?;
             }
             Ok(())
         }
     }
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        self.child.output(builder)
+        self.inner.output(builder)
     }
 }
 
@@ -141,11 +143,11 @@ mod tests {
 
     #[test]
     fn test_selective_agg_always_true() -> Result<()> {
-        let filter =
+        let condition =
             Arc::from(LiteralExpression::new(DataType::Boolean, Some(true.into())).boxed());
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
-            filter,
+            condition,
             Box::new(MockAgg {
                 count: agg_count.clone(),
             }),
@@ -174,7 +176,7 @@ mod tests {
     #[test]
     fn test_selective_agg() -> Result<()> {
         // filter (where $1 > 5)
-        let filter = Arc::from(new_binary_expr(
+        let condition = Arc::from(new_binary_expr(
             ProstType::GreaterThan,
             DataType::Boolean,
             InputRefExpression::new(DataType::Int64, 0).boxed(),
@@ -182,7 +184,7 @@ mod tests {
         ));
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
-            filter,
+            condition,
             Box::new(MockAgg {
                 count: agg_count.clone(),
             }),
