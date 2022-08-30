@@ -399,4 +399,3 @@ message UpdateCompactionConfigRequest {
 message UpdateCompactionConfigResponse {
   common.Status status = 1;
 }
-
