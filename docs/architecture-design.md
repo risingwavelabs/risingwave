@@ -16,7 +16,7 @@ There are currently 3 types of nodes in the cluster:
 
 The topmost component is the Postgres client. It issues queries through [TCP-based Postgres wire protocol](https://www.postgresql.org/docs/current/protocol.html).
 
-The leftmost component is the streaming data source. [Kafka](https://kafka.apache.org) is the most representative system for streaming sources. Alternatively, [Redpanda](https://redpanda.com/), [Apache Pulsar](https://pulsar.apache.org/), [AWS Kinesis](aws.amazon.com/kinesis), [Google Pub/Sub](https://cloud.google.com/pubsub/docs/overview) are also widely-used. Streams from Kafka will be consumed and processed through the pipeline in the database. 
+The leftmost component is the streaming data source. [Kafka](https://kafka.apache.org) is the most representative system for streaming sources. Alternatively, [Redpanda](https://redpanda.com/), [Apache Pulsar](https://pulsar.apache.org/), [AWS Kinesis](https://aws.amazon.com/kinesis), [Google Pub/Sub](https://cloud.google.com/pubsub/docs/overview) are also widely-used. Streams from Kafka will be consumed and processed through the pipeline in the database. 
 
 The bottom-most component is AWS S3, or MinIO (an open-sourced s3-compatible system). We employed disaggregated architecture in order to elastically scale the compute-nodes without migrating the storage.
 
