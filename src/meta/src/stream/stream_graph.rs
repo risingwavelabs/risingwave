@@ -534,6 +534,7 @@ impl StreamGraphBuilder {
                 table.id,
                 table_type_name,
             );
+            table.fragment_id = fragment_id.as_global_id();
             check_and_fill_internal_table(table.id, Some(table.clone()));
         };
 
@@ -739,7 +740,7 @@ pub struct ActorGraphBuilder {
 impl ActorGraphBuilder {
     pub async fn new<S>(
         id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_graph: &StreamFragmentGraphProto,
+        fragment_graph: StreamFragmentGraphProto,
         default_parallelism: u32,
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<Self>
@@ -765,6 +766,37 @@ impl ActorGraphBuilder {
             default_parallelism,
             fragment_graph,
         })
+    }
+
+    pub fn fill_mview_id(&mut self, table: &mut Table) {
+        // Fill in the correct mview id for stream node.
+        fn fill_mview_id(stream_node: &mut StreamNode, mview_id: u32) -> usize {
+            let mut mview_count = 0;
+            if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
+            {
+                materialize_node.table_id = mview_id;
+                materialize_node.table.as_mut().unwrap().id = mview_id;
+                mview_count += 1;
+            }
+            for input in &mut stream_node.input {
+                mview_count += fill_mview_id(input, mview_id);
+            }
+            mview_count
+        }
+
+        let mut mview_count = 0;
+        for fragment in self.fragment_graph.fragments_mut().values_mut() {
+            let delta = fill_mview_id(fragment.node.as_mut().unwrap(), table.id);
+            mview_count += delta;
+            if delta != 0 {
+                table.fragment_id = fragment.fragment_id
+            }
+        }
+
+        assert_eq!(
+            mview_count, 1,
+            "require exactly 1 materialize node when creating materialized view"
+        );
     }
 
     pub async fn generate_graph<S>(
@@ -865,7 +897,7 @@ impl ActorGraphBuilder {
         let mut downstream_cnts = HashMap::new();
 
         // Iterate all fragments
-        for (fragment_id, _) in fragment_graph.fragments().iter() {
+        for fragment_id in fragment_graph.fragments().keys() {
             // Count how many downstreams we have for a given fragment
             let downstream_cnt = fragment_graph.get_downstreams(*fragment_id).len();
             if downstream_cnt == 0 {
@@ -1110,6 +1142,10 @@ impl StreamFragmentGraph {
 
     pub fn fragments(&self) -> &HashMap<GlobalFragmentId, StreamFragment> {
         &self.fragments
+    }
+
+    pub fn fragments_mut(&mut self) -> &mut HashMap<GlobalFragmentId, StreamFragment> {
+        &mut self.fragments
     }
 
     pub fn get_fragment(&self, fragment_id: GlobalFragmentId) -> Option<&StreamFragment> {
