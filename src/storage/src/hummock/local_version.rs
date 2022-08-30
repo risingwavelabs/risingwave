@@ -64,24 +64,26 @@ impl SyncUncommittedData {
         B: AsRef<[u8]>,
     {
         match self {
-            SyncUncommittedData::Syncing(task) => {
-                vec![task
-                    .iter()
-                    .flatten()
-                    .filter(|data| match data {
-                        UncommittedData::Batch(batch) => {
-                            batch.epoch() <= epoch
-                                && range_overlap(
-                                    key_range,
-                                    batch.start_user_key(),
-                                    batch.end_user_key(),
-                                )
-                        }
-                        UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
-                    })
-                    .cloned()
-                    .collect_vec()]
-            }
+            SyncUncommittedData::Syncing(task) => task
+                .iter()
+                .map(|order_vec_data| {
+                    order_vec_data
+                        .iter()
+                        .filter(|data| match data {
+                            UncommittedData::Batch(batch) => {
+                                batch.epoch() <= epoch
+                                    && range_overlap(
+                                        key_range,
+                                        batch.start_user_key(),
+                                        batch.end_user_key(),
+                                    )
+                            }
+                            UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                        })
+                        .cloned()
+                        .collect_vec()
+                })
+                .collect_vec(),
             SyncUncommittedData::Synced(ssts) => vec![ssts
                 .iter()
                 .filter(|(_, info)| filter_single_sst(info, key_range))
