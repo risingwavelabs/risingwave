@@ -509,13 +509,16 @@
     /* filter clause + subquery */
     create table t(a int, b int);
     select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
-  binder_error: 'Invalid input syntax: subquery in filter clause is not supported'
+  binder_error: |-
+    Feature is not yet implemented: subquery in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* aggregation in filter clause */
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a < avg(b)) AS avga from t;
-  binder_error: 'Invalid input syntax: aggregation function in filter clause is not
-    supported'
+  binder_error: |-
+    Feature is not yet implemented: aggregation function in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* filter clause + non-boolean function */
     create table t(a int, b int);
@@ -664,7 +667,9 @@
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) filter (where (select true)) from a;
-  binder_error: 'Invalid input syntax: subquery in filter clause is not supported'
+  binder_error: |-
+    Feature is not yet implemented: subquery in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* agg filter: agg */
     /* This case is valid in PostgreSQL */
@@ -673,14 +678,17 @@
     select 1 from a having exists(
       select count(b1) filter (where min(a1) < 3) from b
     );
-  binder_error: 'Invalid input syntax: aggregation function in filter clause is not
-    supported'
+  binder_error: |-
+    Feature is not yet implemented: aggregation function in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* agg filter: table function */
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) filter (where unnest(array[1]) < 1) from a;
-  binder_error: 'Invalid input syntax: table function in filter clause is not supported'
+  binder_error: |-
+    Feature is not yet implemented: table function in filter clause
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* agg order by: subquery */
     /* This case is valid in PostgreSQL */
