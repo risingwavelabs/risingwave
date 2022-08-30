@@ -217,7 +217,6 @@ message LevelHandler {
 message CompactStatus {
   uint64 compaction_group_id = 1;
   repeated LevelHandler level_handlers = 2;
-  CompactionConfig compaction_config = 3;
 }
 
 message CompactionGroup {

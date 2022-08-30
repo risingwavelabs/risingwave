@@ -14,6 +14,9 @@ statement ok
 create materialized view mv2 as select string_agg(a, b::varchar order by b) as res from t group by c;
 
 statement ok
+create materialized view mv3 as select string_agg(a, '' order by b) filter (where c != 0) as res from t;
+
+statement ok
 flush;
 
 query T
@@ -27,8 +30,13 @@ select * from mv2 order by res;
 a
 b
 
+query T
+select * from mv3;
+----
+ab
+
 statement ok
-insert into t values ('c', 2, 2), ('d', 3, 6);
+insert into t values ('c', 2, 2), ('d', 3, 0), (NULL, 4, 5);
 
 query T
 select * from mv1;
@@ -39,13 +47,23 @@ query T
 select * from mv2 order by res;
 ----
 a2c
-d4b
+b
+d
+NULL
+
+query T
+select * from mv3;
+----
+acb
 
 statement ok
 drop materialized view mv1;
 
 statement ok
 drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
 
 statement ok
 drop table t;

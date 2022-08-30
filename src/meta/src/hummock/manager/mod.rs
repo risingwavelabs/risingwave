@@ -234,7 +234,7 @@ where
             for compaction_group in self.compaction_group_manager.compaction_groups().await {
                 let compact_status = CompactStatus::new(
                     compaction_group.group_id(),
-                    Arc::new(compaction_group.compaction_config().clone()),
+                    compaction_group.compaction_config().max_level,
                 );
                 compaction_statuses.insert(compact_status.compaction_group_id(), compact_status);
             }
@@ -607,6 +607,7 @@ where
             task_id as HummockCompactionTaskId,
             compaction_group_id,
             manual_compaction_option,
+            self.get_compaction_config(compaction_group_id).await,
         );
         let mut compact_task = match compact_task {
             None => {
@@ -711,8 +712,10 @@ where
                 .collect();
             compact_task.current_epoch_time = Epoch::now().0;
 
-            compact_task.compaction_filter_mask =
-                compact_status.compaction_config.compaction_filter_mask;
+            compact_task.compaction_filter_mask = self
+                .get_compaction_config(compact_status.compaction_group_id())
+                .await
+                .compaction_filter_mask;
             commit_multi_var!(self, None, compact_status)?;
 
             // this task has been finished.
