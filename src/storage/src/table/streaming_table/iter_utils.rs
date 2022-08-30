@@ -24,12 +24,8 @@ use crate::error::{StorageError, StorageResult};
 /// Merge two streams of primary key and rows into a single stream, sorted by primary key.
 /// We should ensure that the primary key from different streams are unique.
 #[try_stream(ok = (Cow<'a, Row>, Cow<'a, Row>), error = StorageError)]
-pub async fn zip_by_order_key<'a, S>(
-    stream1: S,
-    pk_indices1: &'a [usize],
-    stream2: S,
-    pk_indices2: &'a [usize],
-) where
+pub async fn zip_by_order_key<'a, S>(stream1: S, key1: &'a [usize], stream2: S, key2: &'a [usize])
+where
     S: Stream<Item = StorageResult<Cow<'a, Row>>> + 'a,
 {
     pin_mut!(stream1);
@@ -57,7 +53,7 @@ pub async fn zip_by_order_key<'a, S>(
                     match right_row {
                         Some(row) => {
                             let right_row = row?;
-                            if Row::eq_by_pk(&left_row, pk_indices1, &right_row, pk_indices2) {
+                            if Row::eq_by_pk(&left_row, key1, &right_row, key2) {
                                 yield (left_row, right_row);
                                 break 'inner;
                             }
@@ -73,7 +69,7 @@ pub async fn zip_by_order_key<'a, S>(
                     match left_row {
                         Some(row) => {
                             let left_row = row?;
-                            if Row::eq_by_pk(&left_row, pk_indices1, &right_row, pk_indices2) {
+                            if Row::eq_by_pk(&left_row, key1, &right_row, key2) {
                                 yield (left_row, right_row);
                                 break 'inner;
                             }
