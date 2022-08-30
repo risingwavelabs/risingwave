@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
@@ -24,7 +23,7 @@ use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
-use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManager};
+use crate::hummock::{CompactorManagerRef, HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -36,7 +35,7 @@ where
 {
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    vacuum_manager: Arc<VacuumManager<S>>,
+    vacuum_manager: VacuumManagerRef<S>,
     compaction_group_manager: CompactionGroupManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -48,7 +47,7 @@ where
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
         compactor_manager: CompactorManagerRef,
-        vacuum_trigger: Arc<VacuumManager<S>>,
+        vacuum_trigger: VacuumManagerRef<S>,
         compaction_group_manager: CompactionGroupManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {

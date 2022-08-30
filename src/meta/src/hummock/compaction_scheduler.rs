@@ -24,6 +24,7 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
+use super::CompactionScheduleStrategy;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
@@ -154,7 +155,7 @@ where
             // 2.1 Select a compactor.
             let compactor = match self
                 .compactor_manager
-                .next_idle_compactor(&self.hummock_manager)
+                .next_idle_compactor(&self.hummock_manager, Some(&compact_task))
                 .await
             {
                 None => {

@@ -53,7 +53,7 @@ use crate::MetaOpts;
 pub async fn start_hummock_workers<S>(
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    vacuum_manager: Arc<VacuumManager<S>>,
+    vacuum_manager: VacuumManagerRef<S>,
     notification_manager: NotificationManagerRef,
     compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
@@ -79,7 +79,7 @@ where
 /// Starts a task to handle cluster membership change.
 pub async fn subscribe_cluster_membership_change<S>(
     hummock_manager: Arc<HummockManager<S>>,
-    compactor_manager: Arc<CompactorManager>,
+    compactor_manager: CompactorManagerRef,
     notification_manager: NotificationManagerRef,
 ) -> (JoinHandle<()>, Sender<()>)
 where
@@ -146,7 +146,7 @@ where
 
 /// Starts a task to periodically vacuum hummock.
 pub fn start_vacuum_scheduler<S>(
-    vacuum: Arc<VacuumManager<S>>,
+    vacuum: VacuumManagerRef<S>,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>)
 where
@@ -183,7 +183,7 @@ where
 // this auto full GC scheduler is not used for now.
 #[allow(unused)]
 pub fn start_full_gc_scheduler<S>(
-    vacuum: Arc<VacuumManager<S>>,
+    vacuum: VacuumManagerRef<S>,
     interval: Duration,
     sst_retention_time: Duration,
 ) -> (JoinHandle<()>, Sender<()>)

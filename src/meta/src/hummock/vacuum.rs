@@ -24,17 +24,20 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
+use super::CompactorManagerRef;
 use crate::hummock::error::{Error, Result};
-use crate::hummock::{CompactorManager, HummockManagerRef};
+use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
+
+pub type VacuumManagerRef<S> = Arc<VacuumManager<S>>;
 
 pub struct VacuumManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
-    compactor_manager: Arc<CompactorManager>,
+    compactor_manager: CompactorManagerRef,
     /// SST ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_sst_ids: parking_lot::RwLock<HashSet<HummockSstableId>>,
 }
@@ -46,7 +49,7 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: Arc<CompactorManager>,
+        compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {
             env,
@@ -113,7 +116,7 @@ where
                 .cloned()
                 .collect_vec();
             // 1. Pick a worker.
-            let compactor = match self.compactor_manager.next_compactor() {
+            let compactor = match self.compactor_manager.next_compactor(None) {
                 None => {
                     tracing::warn!("No vacuum worker is available.");
                     break;
@@ -191,7 +194,7 @@ where
         );
         let compactor = match self
             .compactor_manager
-            .next_idle_compactor(&self.hummock_manager)
+            .next_idle_compactor(&self.hummock_manager, None)
             .await
         {
             None => {
