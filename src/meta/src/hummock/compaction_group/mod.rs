@@ -51,8 +51,8 @@ impl CompactionGroup {
         &self.member_table_ids
     }
 
-    pub fn compaction_config(&self) -> &CompactionConfig {
-        &self.compaction_config
+    pub fn compaction_config(&self) -> CompactionConfig {
+        self.compaction_config.clone()
     }
 
     pub fn table_id_to_options(&self) -> &HashMap<u32, TableOption> {

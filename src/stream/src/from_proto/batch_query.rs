@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_storage::table::storage_table::RowBasedStorageTable;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -69,7 +69,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
         let distribution = match params.vnode_bitmap {
             Some(vnodes) => Distribution {
                 dist_key_indices,
@@ -86,7 +85,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
         };
 
-        let table = RowBasedStorageTable::new_partial(
+        let table = StorageTable::new_partial(
             state_store,
             table_id,
             column_descs,

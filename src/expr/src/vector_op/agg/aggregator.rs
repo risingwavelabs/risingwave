@@ -23,15 +23,13 @@ use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::array_agg::create_array_agg_state;
-use super::string_agg::StringAgg;
-use crate::expr::{
-    build_from_prost, AggKind, Expression, ExpressionRef, InputRefExpression, LiteralExpression,
-};
+use crate::expr::{build_from_prost, AggKind, Expression, ExpressionRef, LiteralExpression};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
@@ -110,20 +108,9 @@ impl AggStateFactory {
                     DataType::from(delim_arg.get_type().unwrap()),
                     DataType::Varchar
                 );
-                let input_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
-                let delim_expr = Arc::from(
-                    InputRefExpression::new(
-                        DataType::Varchar,
-                        delim_arg.get_input()?.get_column_idx() as usize,
-                    )
-                    .boxed(),
-                );
-                Box::new(StringAgg::new(
-                    input_col_idx,
-                    delim_expr,
-                    order_pairs,
-                    order_col_types,
-                ))
+                let agg_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
+                let delim_col_idx = delim_arg.get_input()?.get_column_idx() as usize;
+                create_string_agg_state(agg_col_idx, delim_col_idx, order_pairs)?
             }
             (AggKind::ArrayAgg, [arg]) => {
                 let agg_col_idx = arg.get_input()?.get_column_idx() as usize;

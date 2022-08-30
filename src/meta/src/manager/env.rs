@@ -81,6 +81,8 @@ pub struct MetaOpts {
     pub compactor_selection_retry_interval_sec: u64,
     /// The spin interval when collecting global GC watermark in hummock
     pub collect_gc_watermark_spin_interval_sec: u64,
+    /// Enable sanity check when SSTs are committed
+    pub enable_committed_sst_sanity_check: bool,
 }
 
 impl Default for MetaOpts {
@@ -95,6 +97,7 @@ impl Default for MetaOpts {
             min_sst_retention_time_sec: 3600 * 24 * 7,
             compactor_selection_retry_interval_sec: 5,
             collect_gc_watermark_spin_interval_sec: 5,
+            enable_committed_sst_sanity_check: false,
         }
     }
 }
