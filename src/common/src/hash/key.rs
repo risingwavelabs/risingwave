@@ -19,6 +19,7 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::array::{
@@ -142,7 +143,70 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()>;
 
-    fn has_null(&self) -> bool;
+    fn has_null(&self) -> bool {
+        !self.null_bitmap().is_clear()
+    }
+
+    fn null_bitmap(&self) -> &FixedBitSet;
+}
+
+pub struct JoinHashKey<'a, K> {
+    key: K,
+    null_matched: &'a FixedBitSet,
+}
+
+impl<'a, K: HashKey> JoinHashKey<'a, K> {
+    pub fn build(
+        column_idxes: &[usize],
+        data_chunk: &DataChunk,
+        null_matched: &'a FixedBitSet,
+    ) -> ArrayResult<Vec<Self>> {
+        let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
+        Ok(Self::build_from_hash_code(
+            column_idxes,
+            data_chunk,
+            hash_codes,
+            null_matched,
+        ))
+    }
+
+    fn build_from_hash_code(
+        column_idxes: &[usize],
+        data_chunk: &DataChunk,
+        hash_codes: Vec<HashCode>,
+        null_matched: &'a FixedBitSet,
+    ) -> Vec<Self> {
+        let mut serializers: Vec<K::S> = hash_codes.into_iter().map(K::S::from_hash_code).collect();
+
+        for column_idx in column_idxes {
+            data_chunk
+                .column_at(*column_idx)
+                .array_ref()
+                .serialize_to_hash_key(&mut serializers[..]);
+        }
+
+        serializers
+            .into_iter()
+            .map(|ser| Self {
+                key: ser.into_hash_key(),
+                null_matched,
+            })
+            .collect()
+    }
+}
+
+impl<'a, K: HashKey> PartialEq for JoinHashKey<'a, K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key && self.key.null_bitmap().is_subset(&self.null_matched)
+    }
+}
+
+impl<'a, K: HashKey> Eq for JoinHashKey<'a, K> {}
+
+impl<'a, K: HashKey> Hash for JoinHashKey<'a, K> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state)
+    }
 }
 
 /// Designed for hash keys with at most `N` serialized bytes.
@@ -152,7 +216,7 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 pub struct FixedSizeKey<const N: usize> {
     hash_code: u64,
     key: [u8; N],
-    null_bitmap: u8,
+    null_bitmap: FixedBitSet,
 }
 
 /// Designed for hash keys which can't be represented by [`FixedSizeKey`].
@@ -162,7 +226,7 @@ pub struct FixedSizeKey<const N: usize> {
 pub struct SerializedKey {
     key: Vec<Datum>,
     hash_code: u64,
-    has_null: bool,
+    null_bitmap: FixedBitSet,
 }
 
 /// Fix clippy warning.
@@ -449,7 +513,7 @@ impl<'a> HashKeySerDe<'a> for ListRef<'a> {
 
 pub struct FixedSizeKeySerializer<const N: usize> {
     buffer: [u8; N],
-    null_bitmap: u8,
+    null_bitmap: FixedBitSet,
     null_bitmap_idx: usize,
     data_len: usize,
     hash_code: u64,
@@ -467,7 +531,7 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
     fn from_hash_code(hash_code: HashCode) -> Self {
         Self {
             buffer: [0u8; N],
-            null_bitmap: 0xFFu8,
+            null_bitmap: FixedBitSet::with_capacity(u8::BITS as usize),
             null_bitmap_idx: 0,
             data_len: 0,
             hash_code: hash_code.0,
@@ -478,18 +542,13 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
         assert!(self.null_bitmap_idx < 8);
         match data {
             Some(v) => {
-                let mask = 1u8 << self.null_bitmap_idx;
-                self.null_bitmap |= mask;
                 let data = v.serialize();
                 let ret = data.as_ref();
                 assert!(self.left_size() >= ret.len());
                 self.buffer[self.data_len..(self.data_len + ret.len())].copy_from_slice(ret);
                 self.data_len += ret.len();
             }
-            None => {
-                let mask = !(1u8 << self.null_bitmap_idx);
-                self.null_bitmap &= mask;
-            }
+            None => self.null_bitmap.insert(self.null_bitmap_idx),
         };
         self.null_bitmap_idx += 1;
     }
@@ -505,7 +564,7 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
 
 pub struct FixedSizeKeyDeserializer<const N: usize> {
     cursor: Cursor<[u8; N]>,
-    null_bitmap: u8,
+    null_bitmap: FixedBitSet,
     null_bitmap_idx: usize,
 }
 
@@ -522,8 +581,7 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
 
     fn deserialize<'a, D: HashKeySerDe<'a>>(&mut self) -> ArrayResult<Option<D>> {
         ensure!(self.null_bitmap_idx < 8);
-        let mask = 1u8 << self.null_bitmap_idx;
-        let is_null = (self.null_bitmap & mask) == 0u8;
+        let is_null = self.null_bitmap.contains(self.null_bitmap_idx);
         self.null_bitmap_idx += 1;
         if is_null {
             Ok(None)
@@ -537,7 +595,7 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
 pub struct SerializedKeySerializer {
     buffer: Vec<Datum>,
     hash_code: u64,
-    has_null: bool,
+    null_bitmap: FixedBitSet,
 }
 
 impl HashKeySerializer for SerializedKeySerializer {
@@ -547,18 +605,20 @@ impl HashKeySerializer for SerializedKeySerializer {
         Self {
             buffer: Vec::new(),
             hash_code: hash_code.0,
-            has_null: false,
+            null_bitmap: FixedBitSet::new(),
         }
     }
 
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) {
+        let len_bitmap = self.null_bitmap.len();
+        self.null_bitmap.grow(len_bitmap + 1);
         match data {
             Some(v) => {
                 self.buffer.push(Some(v.to_owned_scalar().into()));
             }
             None => {
                 self.buffer.push(None);
-                self.has_null = true;
+                self.null_bitmap.insert(len_bitmap);
             }
         }
     }
@@ -567,7 +627,7 @@ impl HashKeySerializer for SerializedKeySerializer {
         SerializedKey {
             key: self.buffer,
             hash_code: self.hash_code,
-            has_null: self.has_null,
+            null_bitmap: self.null_bitmap,
         }
     }
 }
@@ -635,8 +695,8 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
         })
     }
 
-    fn has_null(&self) -> bool {
-        self.null_bitmap != 0xFF
+    fn null_bitmap(&self) -> &FixedBitSet {
+        &self.null_bitmap
     }
 }
 
@@ -653,8 +713,8 @@ impl HashKey for SerializedKey {
             })
     }
 
-    fn has_null(&self) -> bool {
-        self.has_null
+    fn null_bitmap(&self) -> &FixedBitSet {
+        &self.null_bitmap
     }
 }
 
