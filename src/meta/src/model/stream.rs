@@ -456,6 +456,13 @@ impl TableFragments {
             .collect_vec()
     }
 
+    /// Returns all internal table ids including the mview table.
+    pub fn all_table_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.clone())
+    }
+
     /// Get the table mapping info from the fragment it belongs to.
     pub fn get_table_hash_mapping(&self, table_id: u32) -> Option<ParallelUnitMapping> {
         self.table_to_fragment_map.get(&table_id).map(|f| {

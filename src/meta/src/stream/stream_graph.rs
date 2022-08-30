@@ -20,7 +20,7 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{generate_intertable_name_with_type, TableId};
+use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -33,10 +33,8 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::CreateMaterializedViewContext;
-use crate::manager::{
-    BuildGraphInfo, FragmentManagerRef, IdCategory, IdGeneratorManagerRef, WorkerId,
-};
-use crate::model::{ActorId, FragmentId};
+use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -333,19 +331,9 @@ impl StreamActorBuilder {
 #[derive(Default)]
 struct StreamGraphBuilder {
     actor_builders: BTreeMap<LocalActorId, StreamActorBuilder>,
-
-    table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-
-    table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
 }
 
 impl StreamGraphBuilder {
-    /// Resolve infos at first to avoid blocking call inside.
-    pub fn fill_info(&mut self, info: BuildGraphInfo) {
-        self.table_node_actors = info.table_node_actors;
-        self.table_sink_actor_ids = info.table_sink_actor_ids;
-    }
-
     /// Insert new generated actor.
     pub fn add_actor(
         &mut self,
@@ -378,7 +366,7 @@ impl StreamGraphBuilder {
             assert_eq!(
                 upstream_actor_ids.len(),
                 downstream_actor_ids.len(),
-                "mismatched length when procssing no-shuffle exchange: {:?} -> {:?} on exchange {}",
+                "mismatched length when processing no-shuffle exchange: {:?} -> {:?} on exchange {}",
                 upstream_actor_ids,
                 downstream_actor_ids,
                 exchange_operator_id
@@ -540,7 +528,7 @@ impl StreamGraphBuilder {
             table.id += table_id_offset;
             table.schema_id = ctx.schema_id;
             table.database_id = ctx.database_id;
-            table.name = generate_intertable_name_with_type(
+            table.name = generate_internal_table_name_with_type(
                 &ctx.mview_name,
                 fragment_id.as_global_id(),
                 table.id,
@@ -758,13 +746,6 @@ impl ActorGraphBuilder {
     where
         S: MetaStore,
     {
-        // save dependent table ids in ctx
-        ctx.dependent_table_ids = fragment_graph
-            .dependent_table_ids
-            .iter()
-            .map(|table_id| TableId::new(*table_id))
-            .collect();
-
         let fragment_len = fragment_graph.fragments.len() as u32;
         let offset = id_gen_manager
             .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
@@ -787,17 +768,14 @@ impl ActorGraphBuilder {
     }
 
     pub async fn generate_graph<S>(
-        &mut self,
+        &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
     {
-        let mut graph = self
-            .generate_graph_inner(id_gen_manager, fragment_manager, ctx)
-            .await?;
+        let mut graph = self.generate_graph_inner(id_gen_manager, ctx).await?;
 
         // Record internal state table ids.
         for fragment in graph.values_mut() {
@@ -814,7 +792,6 @@ impl ActorGraphBuilder {
     async fn generate_graph_inner<S>(
         &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
@@ -827,14 +804,6 @@ impl ActorGraphBuilder {
                 ..
             } = {
                 let mut state = BuildActorGraphState::default();
-                // resolve upstream table infos first
-                // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
-                // stream manager and remove dependency on fragment manager.
-                let info = fragment_manager
-                    .get_build_graph_info(&ctx.dependent_table_ids)
-                    .await?;
-                ctx.table_sink_map = info.table_sink_actor_ids.clone();
-                state.stream_graph_builder.fill_info(info);
 
                 // Generate actors of the streaming plan
                 self.build_actor_graph(&mut state, &self.fragment_graph, ctx)?;
