@@ -222,7 +222,11 @@ impl Binder {
 
         let filter = match f.filter {
             Some(filter) => {
+                let mut clause = Some(Clause::Filter);
+                std::mem::swap(&mut self.context.clause, &mut clause);
                 let expr = self.bind_expr(*filter)?;
+                self.context.clause = clause;
+
                 if expr.return_type() != DataType::Boolean {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "the type of filter clause should be boolean, but found {:?}",
@@ -354,7 +358,11 @@ impl Binder {
     fn ensure_window_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::GroupBy | Clause::Having => {
+                Clause::Where
+                | Clause::Values
+                | Clause::GroupBy
+                | Clause::Having
+                | Clause::Filter => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
                         clause
@@ -369,14 +377,14 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values | Clause::GroupBy => {
+                Clause::Where | Clause::Values => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
                     ))
                     .into())
                 }
-                Clause::Having => {}
+                Clause::Having | Clause::Filter | Clause::GroupBy => {}
             }
         }
         Ok(())
@@ -384,12 +392,15 @@ impl Binder {
 
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
-            if clause == Clause::Values || clause == Clause::Where {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "table functions are not allowed in {}",
-                    clause
-                ))
-                .into());
+            match clause {
+                Clause::Where | Clause::Values => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "table functions are not allowed in {}",
+                        clause
+                    ))
+                    .into());
+                }
+                Clause::GroupBy | Clause::Having | Clause::Filter => {}
             }
         }
         Ok(())

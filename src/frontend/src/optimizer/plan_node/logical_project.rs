@@ -53,6 +53,9 @@ impl LogicalProjectBuilder {
         if expr.has_table_function() {
             return Err("table function");
         }
+        if expr.has_window_function() {
+            return Err("window function");
+        }
         if let Some(idx) = self.exprs_index.get(expr) {
             Ok(*idx)
         } else {

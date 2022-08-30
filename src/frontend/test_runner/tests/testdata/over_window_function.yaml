@@ -45,3 +45,7 @@
     create table t(x int);
     select x from t where (row_number(x) over() > 1);
   binder_error: 'Invalid input syntax: window functions are not allowed in WHERE'
+- sql: |
+    create table t(x int);
+    select sum(x) filter (where row_number() over () > 1) from t;
+  binder_error: 'Invalid input syntax: window functions are not allowed in Filter'
