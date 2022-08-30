@@ -154,11 +154,11 @@
     values(1, (select 1));
   binder_error: |-
     Feature is not yet implemented: Subquery in VALUES
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* disallow correlated_input_ref in values */
     create table t(v1 int);
     select v1 from t where exists (values(v1));
   binder_error: |-
     Feature is not yet implemented: CorrelatedInputRef in VALUES
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
