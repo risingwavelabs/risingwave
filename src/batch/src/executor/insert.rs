@@ -188,8 +188,9 @@ mod tests {
         let mut mock_executor = MockExecutor::new(schema.clone());
 
         // Schema of the table
-        let mut schema = schema_test_utils::iii();
+        let mut schema = schema_test_utils::ii();
         schema.fields.push(struct_field);
+        schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
         let table_columns: Vec<_> = schema
             .fields
             .iter()
@@ -219,8 +220,10 @@ mod tests {
         let col3 = Column::new(array);
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
-        let row_id_index = None;
-        let pk_column_ids = vec![1];
+
+        // To match the row_id column in the schema
+        let row_id_index = Some(3);
+        let pk_column_ids = vec![3];
 
         // Create the table.
         let table_id = TableId::new(0);
