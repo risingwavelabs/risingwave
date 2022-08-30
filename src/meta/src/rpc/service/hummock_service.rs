@@ -199,6 +199,10 @@ where
             return Err(anyhow::anyhow!("invalid hummock context {}", context_id))
                 .map_err(meta_error_to_tonic);
         }
+        self.hummock_manager
+            .cancel_assigned_tasks_for_context_ids(context_id)
+            .await
+            .map_err(meta_error_to_tonic)?;
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
@@ -271,10 +275,8 @@ where
                 .select_table_fragments_by_table_id(&table_id)
                 .await
             {
-                option.internal_table_id = HashSet::from_iter(table_fragment.internal_table_ids());
+                option.internal_table_id = HashSet::from_iter(table_fragment.all_table_ids());
             }
-            option.internal_table_id.insert(request.table_id); // need to handle outer table_id
-                                                               // (mv)
         }
 
         assert!(option

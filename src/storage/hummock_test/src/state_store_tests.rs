@@ -435,7 +435,7 @@ async fn test_state_store_sync() {
         .unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
-    // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
+    // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
     // shared buffer threshold size should have been reached and will trigger a flush
     // then ingest the batch
     // assert_eq!(
@@ -460,7 +460,7 @@ async fn test_state_store_sync() {
         .unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
-    // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
+    // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
     // 16B in total with 8B epoch appended to the key
     // assert_eq!(
     //     16 as u64,
@@ -472,7 +472,7 @@ async fn test_state_store_sync() {
     hummock_storage.sync(epoch).await.unwrap();
 
     // TODO: Uncomment the following lines after flushed sstable can be accessed.
-    // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
+    // FYI: https://github.com/risingwavelabs/risingwave/pull/1928#discussion_r852698719
     // assert_eq!(0, hummock_storage.shared_buffer_manager().size());
 }
 

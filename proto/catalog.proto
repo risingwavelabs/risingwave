@@ -83,6 +83,7 @@ message Table {
   bool appendonly = 14;
   uint32 owner = 15;
   map<string, string> properties = 16;
+  uint32 fragment_id = 17;
 }
 
 message Schema {

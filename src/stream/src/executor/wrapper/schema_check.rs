@@ -15,9 +15,6 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::for_all_variants;
-use tracing::event;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
@@ -31,44 +28,11 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
         let message = message?;
 
         if let Message::Chunk(chunk) = &message {
-            event!(
-                tracing::Level::TRACE,
-                "input schema = \n{:#?}\nexpected schema = \n{:#?}",
-                chunk
-                    .columns()
-                    .iter()
-                    .map(|col| col.array_ref().get_ident())
-                    .collect_vec(),
-                info.schema.fields()
-            );
-
-            for (i, pair) in chunk
-                .columns()
-                .iter()
-                .zip_longest(info.schema.fields())
-                .enumerate()
-            {
-                let array = pair.as_ref().left().map(|c| c.array_ref());
-                let builder = pair
-                    .as_ref()
-                    .right()
-                    .map(|f| f.data_type.create_array_builder(0)); // TODO: check `data_type` directly
-
-                macro_rules! check_schema {
-                    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                        use risingwave_common::array::ArrayBuilderImpl;
-                        use risingwave_common::array::ArrayImpl;
-
-                        match (array, &builder) {
-                            $( (Some(ArrayImpl::$variant_name(_)), Some(ArrayBuilderImpl::$variant_name(_))) => {} ),*
-                            _ => panic!("schema check failed on {}: column {} should be {:?}, while stream chunk gives {:?}",
-                                        info.identity, i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
-                        }
-                    };
-                }
-
-                for_all_variants! { check_schema };
-            }
+            risingwave_common::util::schema_check::schema_check(
+                info.schema.fields().iter().map(|f| &f.data_type),
+                chunk.columns(),
+            )
+            .unwrap_or_else(|e| panic!("schema check failed on {}: {}", info.identity, e));
         }
 
         yield message;

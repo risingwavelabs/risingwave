@@ -874,7 +874,7 @@ where
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
-                // See https://github.com/singularity-data/risingwave/issues/1251
+                // See https://github.com/risingwavelabs/risingwave/issues/1251
 
                 let notifiers = take(&mut node.notifiers);
                 let command_ctx = node.command_ctx.clone();
