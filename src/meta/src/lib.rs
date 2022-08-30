@@ -218,7 +218,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 pub struct MetaNodeConfig {
     // Below for streaming.
     #[serde(default)]
