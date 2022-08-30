@@ -24,6 +24,7 @@ extern crate num_derive;
 use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
 pub mod compact;
+pub mod compaction_config;
 pub mod compaction_group;
 pub mod filter_key_extractor;
 pub mod key;

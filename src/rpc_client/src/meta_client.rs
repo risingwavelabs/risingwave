@@ -21,7 +21,8 @@ use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    SstIdRange,
 };
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
@@ -437,6 +438,36 @@ impl MetaClient {
         let resp = self.inner.get_cluster_info(request).await?;
         Ok(resp)
     }
+
+    pub async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+        self.inner
+            .trigger_full_gc(TriggerFullGcRequest {
+                sst_retention_time_sec,
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn list_compaction_group(&self) -> Result<Vec<CompactionGroup>> {
+        self.inner
+            .list_compaction_group(ListCompactionGroupRequest {})
+            .await
+            .map(|resp| resp.compaction_groups)
+    }
+
+    pub async fn update_compaction_config(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        compaction_config: CompactionConfig,
+    ) -> Result<()> {
+        self.inner
+            .update_compaction_config(UpdateCompactionConfigRequest {
+                compaction_group_id,
+                compaction_config: Some(compaction_config),
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -579,15 +610,6 @@ impl HummockMetaClient for MetaClient {
         self.inner.trigger_manual_compaction(req).await?;
         Ok(())
     }
-
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
-        self.inner
-            .trigger_full_gc(TriggerFullGcRequest {
-                sst_retention_time_sec,
-            })
-            .await?;
-        Ok(())
-    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -694,6 +716,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
+            ,{ hummock_client, list_compaction_group, ListCompactionGroupRequest, ListCompactionGroupResponse }
+            ,{ hummock_client, update_compaction_config, UpdateCompactionConfigRequest, UpdateCompactionConfigResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

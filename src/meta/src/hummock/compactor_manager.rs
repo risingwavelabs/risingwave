@@ -182,13 +182,13 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::try_match_expand;
+    use risingwave_hummock_sdk::compaction_config::CompactionConfigBuilder;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::compact_task::TaskStatus;
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
-    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::test_utils::{
         commit_from_meta_node, generate_test_tables, get_sst_ids,
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,

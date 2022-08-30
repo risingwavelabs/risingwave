@@ -57,5 +57,4 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         level: u32,
     ) -> Result<()>;
     async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()>;
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
 }

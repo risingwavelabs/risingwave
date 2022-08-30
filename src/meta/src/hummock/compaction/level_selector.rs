@@ -20,13 +20,13 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_config::CompactionConfigBuilder;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, VersionedComparator};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, KeyRange};
 
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
@@ -376,7 +376,6 @@ pub mod tests {
     use risingwave_pb::hummock::{Level, LevelType, OverlappingLevel, SstableInfo};
 
     use super::*;
-    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 

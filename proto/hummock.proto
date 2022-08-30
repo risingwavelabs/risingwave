@@ -358,6 +358,8 @@ service HummockManagerService {
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
+  rpc ListCompactionGroup(ListCompactionGroupRequest) returns (ListCompactionGroupResponse);
+  rpc UpdateCompactionConfig(UpdateCompactionConfigRequest) returns (UpdateCompactionConfigResponse);
 }
 
 service CompactorService {}
@@ -381,3 +383,20 @@ message CompactionConfig {
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
 }
+
+message ListCompactionGroupRequest {}
+
+message ListCompactionGroupResponse {
+  common.Status status = 1;
+  repeated CompactionGroup compaction_groups = 2;
+}
+
+message UpdateCompactionConfigRequest {
+  uint64 compaction_group_id = 1;
+  CompactionConfig compaction_config = 2;
+}
+
+message UpdateCompactionConfigResponse {
+  common.Status status = 1;
+}
+

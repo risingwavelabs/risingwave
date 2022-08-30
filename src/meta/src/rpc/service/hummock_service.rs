@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_common::util::sync_point::on_sync_point;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
@@ -349,5 +350,39 @@ where
             .map_err(MetaError::from)
             .map_err(meta_error_to_tonic)?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
+    }
+
+    async fn list_compaction_group(
+        &self,
+        _request: Request<ListCompactionGroupRequest>,
+    ) -> Result<Response<ListCompactionGroupResponse>, Status> {
+        let compaction_groups = self
+            .compaction_group_manager
+            .compaction_groups()
+            .await
+            .iter()
+            .map(|cg| cg.into())
+            .collect_vec();
+        Ok(Response::new(ListCompactionGroupResponse {
+            status: None,
+            compaction_groups,
+        }))
+    }
+
+    async fn update_compaction_config(
+        &self,
+        request: Request<UpdateCompactionConfigRequest>,
+    ) -> Result<Response<UpdateCompactionConfigResponse>, Status> {
+        let request = request.into_inner();
+        self.compaction_group_manager
+            .update_compaction_config(
+                request.compaction_group_id,
+                request.compaction_config.unwrap(),
+            )
+            .await
+            .map_err(meta_error_to_tonic)?;
+        Ok(Response::new(UpdateCompactionConfigResponse {
+            status: None,
+        }))
     }
 }

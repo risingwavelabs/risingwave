@@ -17,16 +17,18 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::compaction_config::CompactionConfigBuilder;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 use tokio::sync::RwLock;
 
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
 use crate::manager::{MetaSrvEnv, SourceId};
-use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
+use crate::model::{
+    BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction, VarTransaction,
+};
 use crate::storage::{MetaStore, Transaction};
 
 pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
@@ -99,22 +101,12 @@ impl<S: MetaStore> CompactionGroupManager<S> {
                 table_option,
             ));
         }
-        self.inner
-            .write()
-            .await
-            .register(&pairs, self.env.meta_store())
-            .await
+        self.register_table_ids(&pairs).await
     }
 
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
-        self.inner
-            .write()
-            .await
-            .unregister(
-                &table_fragments.all_table_ids().collect_vec(),
-                self.env.meta_store(),
-            )
+        self.unregister_table_ids(&table_fragments.all_table_ids().collect_vec())
             .await
     }
 
@@ -124,26 +116,16 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         table_properties: &HashMap<String, String>,
     ) -> Result<Vec<StateTableId>> {
         let table_option = TableOption::build_table_option(table_properties);
-        self.inner
-            .write()
-            .await
-            .register(
-                &[(
-                    source_id,
-                    StaticCompactionGroupId::StateDefault.into(),
-                    table_option,
-                )],
-                self.env.meta_store(),
-            )
-            .await
+        self.register_table_ids(&[(
+            source_id,
+            StaticCompactionGroupId::StateDefault.into(),
+            table_option,
+        )])
+        .await
     }
 
     pub async fn unregister_source(&self, source_id: u32) -> Result<()> {
-        self.inner
-            .write()
-            .await
-            .unregister(&[source_id], self.env.meta_store())
-            .await
+        self.unregister_table_ids(&[source_id]).await
     }
 
     /// Unregisters stale members
@@ -217,6 +199,22 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     ) -> Result<TableOption> {
         let inner = self.inner.read().await;
         inner.table_option_by_table_id(id, table_id)
+    }
+
+    pub async fn update_compaction_config(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        compaction_config: CompactionConfig,
+    ) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .update_compaction_config(
+                compaction_group_id,
+                compaction_config,
+                self.env.meta_store(),
+            )
+            .await
     }
 }
 
@@ -327,9 +325,17 @@ impl CompactionGroupManagerInner {
         Ok(())
     }
 
-    fn compaction_group(&self, compaction_group_id: u64) -> Result<CompactionGroup> {
+    fn compaction_group(&self, compaction_group_id: u64) -> Result<&CompactionGroup> {
         match self.compaction_groups.get(&compaction_group_id) {
-            Some(compaction_group) => Ok(compaction_group.clone()),
+            Some(compaction_group) => Ok(compaction_group),
+
+            None => Err(Error::InvalidCompactionGroup(compaction_group_id)),
+        }
+    }
+
+    fn compaction_group_mut(&mut self, compaction_group_id: u64) -> Result<&mut CompactionGroup> {
+        match self.compaction_groups.get_mut(&compaction_group_id) {
+            Some(compaction_group) => Ok(compaction_group),
 
             None => Err(Error::InvalidCompactionGroup(compaction_group_id)),
         }
@@ -340,7 +346,7 @@ impl CompactionGroupManagerInner {
         compaction_group_id: u64,
     ) -> Result<HashSet<StateTableId>> {
         let compaction_group = self.compaction_group(compaction_group_id)?;
-        Ok(compaction_group.member_table_ids)
+        Ok(compaction_group.member_table_ids.clone())
     }
 
     pub fn table_option_by_table_id(
@@ -354,6 +360,22 @@ impl CompactionGroupManagerInner {
 
             None => Ok(TableOption::default()),
         }
+    }
+
+    pub async fn update_compaction_config<S: MetaStore>(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        compaction_config: CompactionConfig,
+        meta_store: &S,
+    ) -> Result<()> {
+        let compaction_group = self.compaction_group_mut(compaction_group_id)?;
+        let mut trx = Transaction::default();
+        let mut var = VarTransaction::new(compaction_group);
+        var.set_compaction_config(compaction_config);
+        var.apply_to_txn(&mut trx)?;
+        meta_store.txn(trx).await?;
+        var.commit();
+        Ok(())
     }
 }
 

@@ -193,9 +193,9 @@ impl LevelCompactionPicker {
 #[cfg(test)]
 pub mod tests {
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_config::CompactionConfigBuilder;
 
     use super::*;
-    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
         generate_l0_with_overlap, generate_level, generate_table, push_table_level0,
         push_tables_level0,

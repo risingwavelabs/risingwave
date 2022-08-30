@@ -58,6 +58,23 @@ impl CompactionGroup {
     pub fn table_id_to_options(&self) -> &HashMap<u32, TableOption> {
         &self.table_id_to_options
     }
+
+    pub fn set_compaction_config(&mut self, compaction_config: CompactionConfig) {
+        // These configs cannot be modified since created.
+        assert_eq!(
+            self.compaction_config.max_level,
+            compaction_config.max_level,
+        );
+        assert_eq!(
+            self.compaction_config.compaction_mode,
+            compaction_config.compaction_mode,
+        );
+        assert_eq!(
+            self.compaction_config.compression_algorithm,
+            compaction_config.compression_algorithm,
+        );
+        self.compaction_config = compaction_config;
+    }
 }
 
 impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {

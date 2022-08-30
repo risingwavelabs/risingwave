@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod compaction_config;
 mod level_selector;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
