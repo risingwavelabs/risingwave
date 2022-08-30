@@ -13,7 +13,7 @@ Almost all components of RisingWave are developed in rust, and they are split to
 9. `cmd` contains all binaries, and `cmd_all` contains the all-in-one binary `risingwave`.
 10. `risedevtool` is an awesome developer tool for RisingWave, read [RiseDev Guide][risedev] for more details.
 
-[stream-engine]: https://github.com/singularity-data/risingwave/blob/main/docs/streaming-overview.md
-[state-store]: https://github.com/singularity-data/risingwave/blob/main/docs/state-store-overview.md
-[meta-service]: https://github.com/singularity-data/risingwave/blob/main/docs/meta-service.md
-[risedev]: https://github.com/singularity-data/risingwave/tree/main/src/risedevtool
+[stream-engine]: https://github.com/risingwavelabs/risingwave/blob/main/docs/streaming-overview.md
+[state-store]: https://github.com/risingwavelabs/risingwave/blob/main/docs/state-store-overview.md
+[meta-service]: https://github.com/risingwavelabs/risingwave/blob/main/docs/meta-service.md
+[risedev]: https://github.com/risingwavelabs/risingwave/tree/main/src/risedevtool

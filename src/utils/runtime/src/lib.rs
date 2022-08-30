@@ -115,7 +115,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     };
 
     if settings.enable_jaeger_tracing {
-        todo!("jaeger tracing is not supported for now, and it will be replaced with minitrace jaeger tracing. Tracking issue: https://github.com/singularity-data/risingwave/issues/4120");
+        todo!("jaeger tracing is not supported for now, and it will be replaced with minitrace jaeger tracing. Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4120");
     }
 
     let tokio_console_layer = if settings.enable_tokio_console {

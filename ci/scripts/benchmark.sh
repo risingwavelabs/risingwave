@@ -85,7 +85,7 @@ cat ~/risingwave-deploy/tpch-bench-args-frontend
 cat ~/risingwave-deploy/tpch-bench-args-kafka
 
 echo "--- Clone Tpch-Bench Repo"
-git clone https://"$GITHUB_TOKEN"@github.com/singularity-data/tpch-bench.git
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/tpch-bench.git
 
 echo "--- Run Tpch-Bench"
 cd tpch-bench/
