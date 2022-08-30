@@ -25,10 +25,9 @@ use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSp
 use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{
-    AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
-    TableFunction, TableFunctionType, WindowFunction, WindowFunctionType,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, TableFunction,
+    TableFunctionType, WindowFunction, WindowFunctionType,
 };
-use crate::optimizer::property::Direction;
 use crate::utils::Condition;
 
 impl Binder {
@@ -256,26 +255,10 @@ impl Binder {
             )
             .into());
         }
-        let order_by = AggOrderBy::new(
+        let order_by = OrderBy::new(
             f.order_by
                 .into_iter()
-                .map(|e| -> Result<AggOrderByExpr> {
-                    let expr = self.bind_expr(e.expr)?;
-                    let direction = match e.asc {
-                        None | Some(true) => Direction::Asc,
-                        Some(false) => Direction::Desc,
-                    };
-                    let nulls_first = e.nulls_first.unwrap_or_else(|| match direction {
-                        Direction::Asc => false,
-                        Direction::Desc => true,
-                        Direction::Any => unreachable!(),
-                    });
-                    Ok(AggOrderByExpr {
-                        expr,
-                        direction,
-                        nulls_first,
-                    })
-                })
+                .map(|e| self.bind_order_by_expr(e))
                 .try_collect()?,
         );
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
@@ -307,10 +290,12 @@ impl Binder {
             .map(|arg| self.bind_expr(arg))
             .try_collect()?;
 
-        let order_by = order_by
-            .into_iter()
-            .map(|order_by_expr| self.bind_order_by_expr_in_over(order_by_expr))
-            .collect::<Result<_>>()?;
+        let order_by = OrderBy::new(
+            order_by
+                .into_iter()
+                .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
+                .collect::<Result<_>>()?,
+        );
         Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
     }
 

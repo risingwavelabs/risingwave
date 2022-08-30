@@ -30,13 +30,16 @@ mod subquery;
 mod table_function;
 mod window_function;
 
+mod order_by_expr;
+pub use order_by_expr::{OrderBy, OrderByExpr};
+
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
 mod type_inference;
 mod utils;
 
-pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
+pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
 pub use function_call::{FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
@@ -103,7 +106,7 @@ impl ExprImpl {
             AggKind::Count,
             vec![],
             false,
-            AggOrderBy::any(),
+            OrderBy::any(),
             Condition::true_cond(),
         )
         .unwrap()

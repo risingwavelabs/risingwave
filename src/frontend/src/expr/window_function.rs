@@ -17,8 +17,7 @@ use std::str::FromStr;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 
-use super::{Expr, ExprImpl, Result};
-use crate::optimizer::property::Direction;
+use super::{Expr, ExprImpl, OrderBy, Result};
 
 /// A window function performs a calculation across a set of table rows that are somehow related to
 /// the current row, according to the window spec `OVER (PARTITION BY .. ORDER BY ..)`.
@@ -32,7 +31,7 @@ pub struct WindowFunction {
     pub return_type: DataType,
     pub function_type: WindowFunctionType,
     pub partition_by: Vec<ExprImpl>,
-    pub order_by: Vec<(ExprImpl, Direction)>,
+    pub order_by: OrderBy,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -77,7 +76,7 @@ impl WindowFunction {
     pub fn new(
         function_type: WindowFunctionType,
         partition_by: Vec<ExprImpl>,
-        order_by: Vec<(ExprImpl, Direction)>,
+        order_by: OrderBy,
         args: Vec<ExprImpl>,
     ) -> Result<Self> {
         if !args.is_empty() {
@@ -127,10 +126,10 @@ impl std::fmt::Debug for WindowFunction {
                 });
                 builder.finish()?;
             }
-            if !self.order_by.is_empty() {
+            if !self.order_by.sort_exprs.is_empty() {
                 f.write_str(delim)?;
                 let mut builder = f.debug_tuple("ORDER BY");
-                self.order_by.iter().for_each(|child| {
+                self.order_by.sort_exprs.iter().for_each(|child| {
                     builder.field(child);
                 });
                 builder.finish()?;
