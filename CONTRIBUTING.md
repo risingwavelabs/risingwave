@@ -11,7 +11,7 @@ To report bugs, create a [GitHub issue](https://github.com/singularity-data/risi
 
 ## Table of contents
 
-  - [Tests and miscellaneous checks](#misc-check)
+  - [Tests and miscellaneous checks](#tests-and-miscellaneous-checks)
   - [Submit a PR](#submit-a-pr)
     - [Pull Request title](#pull-request-title)
     - [Pull Request description](#pull-request-description)

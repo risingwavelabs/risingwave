@@ -183,6 +183,7 @@ mod tests {
 
     use risingwave_common::try_match_expand;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::hummock::compact_task::TaskStatus;
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
@@ -225,7 +226,7 @@ mod tests {
             task_id,
             target_level: 0,
             gc_delete_keys: false,
-            task_status: false,
+            task_status: TaskStatus::Pending as i32,
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
             compression_algorithm: 0,
