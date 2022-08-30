@@ -140,6 +140,7 @@ impl LogicalTopN {
             .into())
         };
 
+        // if it is append only, for now we don't generate 2-phase rules
         if stream_input.append_only() {
             return gen_single_plan(stream_input);
         }
@@ -160,6 +161,7 @@ impl LogicalTopN {
     ) -> Result<PlanRef> {
         let input_fields = stream_input.schema().fields();
 
+        // use projectiton to add a column for vnode, and use this column as group key.
         let mut exprs: Vec<_> = input_fields
             .iter()
             .enumerate()
@@ -192,6 +194,8 @@ impl LogicalTopN {
             self.offset,
             self.order.clone(),
         ));
+
+        // use another projectiton to remove the column we added before.
         exprs.pop();
         let project = StreamProject::new(LogicalProject::new(global_top_n.into(), exprs));
         Ok(project.into())
