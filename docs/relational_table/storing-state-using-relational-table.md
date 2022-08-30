@@ -65,6 +65,6 @@ Get(pk = 3): [3, 3333, 3333]
 ```
 
 #### Scan
-Scan on relational table is implemented by `StateTableIter`, which is a merge iterator of `MemTableIter` and `StorageIter`. If a pk exist in both KV state store (StorageTable) and memory (MemTable), result of `MemTableIter` is returned. For example, in the  following figure, `StateTableIter` will generate `1->4->5->6` in order.
+Scan on relational table is implemented by `StateTableIter`, which is a merge iterator of `MemTableIter` and `StorageIter`. If a pk exist in both KV state store (shared storage) and memory (MemTable), result of `MemTableIter` is returned. For example, in the  following figure, `StateTableIter` will generate `1->4->5->6` in order.
 
 ![Scan example](../images/relational-table-layer/relational-table-02.svg)
