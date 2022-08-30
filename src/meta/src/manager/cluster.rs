@@ -29,6 +29,7 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
@@ -63,13 +64,26 @@ pub struct ClusterManager<S: MetaStore> {
     max_heartbeat_interval: Duration,
 
     core: RwLock<ClusterManagerCore>,
+
+    metrics: Arc<MetaMetrics>,
 }
 
 impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
+    pub async fn new_for_test(
+        env: MetaSrvEnv<S>,
+        max_heartbeat_interval: Duration,
+    ) -> MetaResult<Self> {
+        Self::new(env, max_heartbeat_interval, Arc::new(MetaMetrics::new())).await
+    }
+
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        max_heartbeat_interval: Duration,
+        metrics: Arc<MetaMetrics>,
+    ) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
 
@@ -77,6 +91,7 @@ where
             env,
             max_heartbeat_interval,
             core: RwLock::new(core),
+            metrics,
         })
     }
 
@@ -146,8 +161,14 @@ where
 
         core.update_worker_node(worker.clone());
 
+        // Update node metrics.
+        let worker_type = worker.worker_type();
+        if let Some(node_label) = Self::map_to_node_label(worker_type) {
+            self.metrics.node_num.with_label_values(&[node_label]).inc();
+        }
+
         // Notify frontends of new compute node.
-        if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
+        if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
@@ -168,6 +189,11 @@ where
 
         // Update core.
         core.delete_worker_node(worker);
+
+        // Update node metrics.
+        if let Some(node_label) = Self::map_to_node_label(worker_type) {
+            self.metrics.node_num.with_label_values(&[node_label]).dec();
+        }
 
         // Notify frontends to delete compute node.
         if worker_type == WorkerType::ComputeNode {
@@ -324,6 +350,15 @@ where
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
     }
+
+    fn map_to_node_label(worker_type: WorkerType) -> Option<&'static str> {
+        match worker_type {
+            WorkerType::Frontend => Some("frontend"),
+            WorkerType::ComputeNode => Some("compute"),
+            WorkerType::Compactor => Some("compactor"),
+            _ => None,
+        }
+    }
 }
 
 pub struct ClusterManagerCore {
@@ -429,7 +464,7 @@ mod tests {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), Duration::new(0, 0))
+            ClusterManager::new_for_test(env.clone(), Duration::new(0, 0))
                 .await
                 .unwrap(),
         );

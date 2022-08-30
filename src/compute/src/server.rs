@@ -57,6 +57,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::server::StateStoreImpl::HummockStateStore;
 use crate::ComputeNodeOpts;
 
 fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
@@ -112,18 +113,6 @@ pub async fn compute_node_serve(
 
     let mut join_handle_vec = vec![];
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
-    // todo use ObserverManager
-    let observer_manager = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        Box::new(compute_observer_node),
-        WorkerType::ComputeNode,
-    )
-    .await;
-
-    let observer_join_handle = observer_manager.start().await.unwrap();
-    join_handle_vec.push(observer_join_handle);
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -137,6 +126,26 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+
+    let local_version_manager = match &state_store {
+        HummockStateStore(monitored) => monitored.local_version_manager(),
+        _ => {
+            panic!();
+        }
+    };
+
+    let compute_observer_node =
+        ComputeObserverNode::new(filter_key_extractor_manager.clone(), local_version_manager);
+    let observer_manager = ObserverManager::new(
+        meta_client.clone(),
+        client_addr.clone(),
+        Box::new(compute_observer_node),
+        WorkerType::ComputeNode,
+    )
+    .await;
+
+    let observer_join_handle = observer_manager.start().await.unwrap();
+    join_handle_vec.push(observer_join_handle);
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {

@@ -120,3 +120,6 @@ harness = false
 name = "bench_compactor"
 harness = false
 
+[[bench]]
+name = "bench_multi_builder"
+harness = false
