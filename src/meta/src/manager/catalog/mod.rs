@@ -563,13 +563,8 @@ where
             source.insert(self.env.meta_store()).await?;
             core.add_source(source);
 
-            // stream_manager handle the materialized only (mview, table, index,
-            // materialized_source) so we need to notify all_node for this case.
-            // FIXME: only need to notify frontends after source executor internal table introduced: https://github.com/singularity-data/risingwave/issues/4817
             let version = self
-                .env
-                .notification_manager()
-                .notify_all_node(Operation::Add, Info::Source(source.to_owned()))
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
                 .await;
 
             Ok(version)

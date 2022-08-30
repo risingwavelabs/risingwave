@@ -593,17 +593,9 @@ where
             })
             .collect_vec();
         match stream_job {
-            StreamingJob::MaterializedView(table) | StreamingJob::Index(_, table) => {
-                creating_tables.push(table.clone())
-            }
-            StreamingJob::MaterializedSource(source, table) => {
-                creating_tables.push(table.clone());
-                // FIXME: remove this after source executor internal table introduced: https://github.com/singularity-data/risingwave/issues/4817
-                creating_tables.push(Table {
-                    id: source.id,
-                    ..Default::default()
-                });
-            }
+            StreamingJob::MaterializedView(table)
+            | StreamingJob::Index(_, table)
+            | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
             _ => {}
         }
 
@@ -624,6 +616,7 @@ where
         // 1. cancel create procedure.
         match stream_job {
             StreamingJob::MaterializedView(table) => {
+                creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .cancel_create_table_procedure(table)
                     .await?;
@@ -634,19 +627,18 @@ where
                     .await?;
             }
             StreamingJob::MaterializedSource(source, table) => {
+                creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .cancel_create_materialized_source_procedure(source, table)
                     .await?;
-                // FIXME: remove this after source executor internal table introduced: https://github.com/singularity-data/risingwave/issues/4817
-                creating_internal_table_ids.push(source.id);
             }
             StreamingJob::Index(index, table) => {
+                creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .cancel_create_index_procedure(index, table)
                     .await?;
             }
         }
-        creating_internal_table_ids.push(stream_job.id());
         // 2. unmark creating tables.
         self.catalog_manager
             .unmark_creating_tables(&creating_internal_table_ids, true)
@@ -668,11 +660,11 @@ where
 
         // 2. finish procedure.
         let mut creating_internal_table_ids = ctx.internal_table_ids();
-        let internal_state_tables = ctx.internal_tables();
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
+                creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .finish_create_table_procedure(internal_state_tables, table)
+                    .finish_create_table_procedure(ctx.internal_tables(), table)
                     .await?
             }
             StreamingJob::Sink(sink) => {
@@ -681,19 +673,19 @@ where
                     .await?
             }
             StreamingJob::MaterializedSource(source, table) => {
-                // FIXME: remove this after source executor internal table introduced: https://github.com/singularity-data/risingwave/issues/4817
-                creating_internal_table_ids.push(source.id);
+                creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .finish_create_materialized_source_procedure(
                         source,
                         table,
-                        internal_state_tables,
+                        ctx.internal_tables(),
                     )
                     .await?
             }
             StreamingJob::Index(index, table) => {
+                creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .finish_create_index_procedure(index, internal_state_tables, table)
+                    .finish_create_index_procedure(index, ctx.internal_tables(), table)
                     .await?
             }
         };
