@@ -15,12 +15,10 @@ use std::time::Duration;
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use prometheus::core::{AtomicF64, Collector, GenericGauge};
-use prometheus::{
-    exponential_buckets, histogram_opts, opts, register_gauge_with_registry,
-    register_histogram_with_registry, Histogram, Registry,
-};
+use prometheus::{opts, register_gauge_with_registry, Registry};
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::error::BatchError;
 use crate::task::TaskId;
 
 // When execution is done, it need to call clear_record() in BatchTaskMetrics.
@@ -44,7 +42,7 @@ impl BatchTaskMetricsManager {
             tokio::sync::mpsc::unbounded_channel::<Box<dyn Collector>>();
         let deletor_registry = registry.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval = tokio::time::interval(Duration::from_secs(180));
             let mut delete_cache: Vec<Box<dyn Collector>> = Vec::new();
             let mut connect = true;
             while connect {
@@ -235,7 +233,7 @@ impl BatchTaskMetrics {
         Self::new(prometheus::Registry::new(), TaskId::default(), None)
     }
 
-    pub fn register(&self, c: Box<dyn Collector>) -> Result<(), prometheus::Error> {
+    pub fn register(&self, c: Box<dyn Collector>) -> Result<(), BatchError> {
         self.registry.register(c)?;
         Ok(())
     }
@@ -249,26 +247,15 @@ impl BatchTaskMetrics {
     }
 }
 
-pub struct BatchMetrics {
-    pub row_seq_scan_next_duration: Histogram,
-}
+pub struct BatchMetrics {}
 
 impl BatchMetrics {
-    pub fn new(registry: Registry) -> Self {
-        let opts = histogram_opts!(
-            "batch_row_seq_scan_next_duration",
-            "Time spent deserializing into a row in cell based table.",
-            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
-        );
-        let row_seq_scan_next_duration = register_histogram_with_registry!(opts, registry).unwrap();
-
-        Self {
-            row_seq_scan_next_duration,
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 
     /// Create a new `BatchMetrics` instance used in tests or other places.
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        Self::new()
     }
 }

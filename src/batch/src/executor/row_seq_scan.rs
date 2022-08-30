@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::ops::{Bound, RangeBounds};
-use std::sync::Arc;
 
 use futures::future::try_join_all;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::{exponential_buckets, Histogram, HistogramOpts};
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
@@ -33,18 +33,17 @@ use risingwave_storage::table::batch_table::storage_table::{StorageTable, Storag
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
-use crate::executor::monitor::BatchMetrics;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
-pub struct RowSeqScanExecutor<S: StateStore> {
+pub struct RowSeqScanExecutor<S: StateStore, C: BatchTaskContext> {
     chunk_size: usize,
     schema: Schema,
     identity: String,
-    stats: Arc<BatchMetrics>,
+    context: Option<C>,
     scan_types: Vec<ScanType<S>>,
 }
 
@@ -53,19 +52,19 @@ pub enum ScanType<S: StateStore> {
     PointGet(Option<Row>),
 }
 
-impl<S: StateStore> RowSeqScanExecutor<S> {
+impl<S: StateStore, C: BatchTaskContext> RowSeqScanExecutor<S, C> {
     pub fn new(
         schema: Schema,
         scan_types: Vec<ScanType<S>>,
         chunk_size: usize,
         identity: String,
-        stats: Arc<BatchMetrics>,
+        context: Option<C>,
     ) -> Self {
         Self {
             chunk_size,
             schema,
             identity,
-            stats,
+            context,
             scan_types,
         }
     }
@@ -199,7 +198,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
-            let batch_stats = source.context().stats().unwrap();
+            let context = source.context().clone();
             let table = StorageTable::new_partial(
                 state_store.clone(),
                 table_id,
@@ -221,7 +220,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                     vec![ScanType::BatchScan(iter)],
                     RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                     source.plan_node().get_identity().clone(),
-                    batch_stats,
+                    Some(context),
                 )));
             }
 
@@ -271,13 +270,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_types?,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                 source.plan_node().get_identity().clone(),
-                batch_stats,
+                Some(context),
             )))
         })
     }
 }
 
-impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
+impl<S: StateStore, C: BatchTaskContext> Executor for RowSeqScanExecutor<S, C> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -290,43 +289,77 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         let Self {
             chunk_size,
             schema,
-            identity: _,
-            stats,
+            identity,
+            context,
             scan_types,
         } = *self;
         let streams = scan_types
             .into_iter()
-            .map(|scan_type| Self::do_execute(scan_type, stats.clone(), schema.clone(), chunk_size))
+            .map(|scan_type| {
+                Self::do_execute(
+                    scan_type,
+                    context.clone(),
+                    schema.clone(),
+                    chunk_size,
+                    identity.clone(),
+                )
+            })
             .collect();
         select_all(streams).boxed()
     }
 }
 
-impl<S: StateStore> RowSeqScanExecutor<S> {
+impl<S: StateStore, C: BatchTaskContext> RowSeqScanExecutor<S, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(
         scan_type: ScanType<S>,
-        stats: Arc<BatchMetrics>,
+        context: Option<C>,
         schema: Schema,
         chunk_size: usize,
+        identity: String,
     ) {
         match scan_type {
             ScanType::BatchScan(iter) => {
+                // create collector
+                let histogram = if let Some(ref context) = context {
+                    let mut labels = context.task_labels();
+                    labels.insert("executor_id".to_string(), identity);
+                    let opts = HistogramOpts::new(
+                        "batch_row_seq_scan_next_duration",
+                        "Time spent deserializing into a row in cell based table.",
+                    )
+                    .buckets(exponential_buckets(0.0001, 2.0, 20).unwrap())
+                    .const_labels(labels);
+                    let histogram = Histogram::with_opts(opts).unwrap();
+                    match context.register(Box::new(histogram.clone())) {
+                        Ok(_) => Some(histogram),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
                 pin_mut!(iter);
                 loop {
-                    let timer = stats.row_seq_scan_next_duration.start_timer();
+                    // let timer = stats.row_seq_scan_next_duration.start_timer();
+                    let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
                     let chunk = iter
                         .collect_data_chunk(&schema, Some(chunk_size))
                         .await
                         .map_err(RwError::from)?;
-                    timer.observe_duration();
+
+                    if let Some(timer) = timer {
+                        timer.observe_duration()
+                    }
 
                     if let Some(chunk) = chunk {
                         yield chunk
                     } else {
                         break;
                     }
+                }
+                if let (Some(histogram), Some(ref context)) = (histogram, context) {
+                    context.unregister(Box::new(histogram));
                 }
             }
             ScanType::PointGet(row) => {
