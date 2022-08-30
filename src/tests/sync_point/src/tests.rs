@@ -39,23 +39,17 @@ async fn test_gc_watermark() {
     let object_store_client = get_object_store_client().await;
     let meta_client = get_meta_client().await;
 
-    // Activate predefined sync points with customized actions
-    sync_point::activate_once("BEFORE_COMPACT_REPORT", || async {
-        sync_point::emit_signal("SIG_DONE_COMPACT_UPLOAD").await?;
-        sync_point::wait_for_signal("SIG_START_COMPACT_REPORT", Duration::from_secs(3600)).await
-    });
-    sync_point::activate_once("AFTER_COMPACT_REPORT", || async {
-        sync_point::emit_signal("SIG_DONE_COMPACT_REPORT").await
-    });
-    sync_point::activate_n("AFTER_REPORT_VACUUM", 2, || async {
-        sync_point::emit_signal("SIG_DONE_REPORT_VACUUM").await
-    });
-    sync_point::activate("AFTER_SCHEDULE_VACUUM", || async {
-        sync_point::emit_signal("SIG_DONE_SCHEDULE_VACUUM").await
+    sync_point::hook("BEFORE_COMPACT_REPORT", || async {
+        sync_point::on("SIG_DONE_COMPACT_UPLOAD").await;
+        sync_point::wait("START_COMPACT_REPORT", Duration::from_secs(3600))
+            .await
+            .unwrap();
     });
     // Block compaction scheduler so that we can control scheduling explicitly
-    sync_point::activate("BEFORE_SCHEDULE_COMPACTION_TASK", || async {
-        sync_point::wait_for_signal("SIG_SCHEDULE_COMPACTION_TASK", Duration::from_secs(3600)).await
+    sync_point::hook("BEFORE_SCHEDULE_COMPACTION_TASK", || async {
+        sync_point::wait("SIG_SCHEDULE_COMPACTION_TASK", Duration::from_secs(3600))
+            .await
+            .unwrap();
     });
 
     // Import data
@@ -66,12 +60,10 @@ async fn test_gc_watermark() {
     assert!(!before_compaction.is_empty());
 
     // Schedule a compaction task
-    sync_point::emit_signal("SIG_SCHEDULE_COMPACTION_TASK")
-        .await
-        .unwrap();
+    sync_point::on("SIG_SCHEDULE_COMPACTION_TASK").await;
 
     // Wait until SSTs have been written to object store
-    sync_point::wait_for_signal("SIG_DONE_COMPACT_UPLOAD", Duration::from_secs(10))
+    sync_point::wait("SIG_DONE_COMPACT_UPLOAD", Duration::from_secs(10))
         .await
         .unwrap();
 
@@ -105,36 +97,34 @@ async fn test_gc_watermark() {
     meta_client.trigger_full_gc(0).await.unwrap();
     // Wait until VACUUM is scheduled and reported
     for _ in 0..2 {
-        sync_point::wait_for_signal("SIG_DONE_SCHEDULE_VACUUM", Duration::from_secs(10))
+        sync_point::wait("AFTER_SCHEDULE_VACUUM", Duration::from_secs(10))
             .await
             .unwrap();
     }
     // Expect timeout aka no SST is deleted, because the garbage SST has greater id than watermark,
     // which is held by the on-going compaction.
-    sync_point::wait_for_signal("SIG_DONE_REPORT_VACUUM", Duration::from_secs(10))
+    sync_point::wait("AFTER_REPORT_VACUUM", Duration::from_secs(10))
         .await
         .unwrap_err();
     let after_gc = object_store_client.list("").await.unwrap();
     assert_eq!(after_gc.len(), after_compaction_upload.len() + 1);
 
     // Signal to continue compaction report
-    sync_point::emit_signal("SIG_START_COMPACT_REPORT")
-        .await
-        .unwrap();
+    sync_point::on("START_COMPACT_REPORT").await;
 
     // Wait until SSts have been written to hummock version
-    sync_point::wait_for_signal("SIG_DONE_COMPACT_REPORT", Duration::from_secs(10))
+    sync_point::wait("AFTER_COMPACT_REPORT", Duration::from_secs(10))
         .await
         .unwrap();
 
     // Wait until VACUUM is scheduled and reported
     for _ in 0..2 {
-        sync_point::wait_for_signal("SIG_DONE_SCHEDULE_VACUUM", Duration::from_secs(10))
+        sync_point::wait("AFTER_SCHEDULE_VACUUM", Duration::from_secs(10))
             .await
             .unwrap();
     }
     // Expect some stale SSTs as the result of compaction are deleted.
-    sync_point::wait_for_signal("SIG_DONE_REPORT_VACUUM", Duration::from_secs(10))
+    sync_point::wait("AFTER_REPORT_VACUUM", Duration::from_secs(10))
         .await
         .unwrap();
     let after_gc = object_store_client.list("").await.unwrap();
@@ -143,12 +133,12 @@ async fn test_gc_watermark() {
     meta_client.trigger_full_gc(0).await.unwrap();
     // Wait until VACUUM is scheduled and reported
     for _ in 0..2 {
-        sync_point::wait_for_signal("SIG_DONE_SCHEDULE_VACUUM", Duration::from_secs(10))
+        sync_point::wait("AFTER_SCHEDULE_VACUUM", Duration::from_secs(10))
             .await
             .unwrap();
     }
     // Expect the garbage SST is deleted.
-    sync_point::wait_for_signal("SIG_DONE_REPORT_VACUUM", Duration::from_secs(10))
+    sync_point::wait("AFTER_REPORT_VACUUM", Duration::from_secs(10))
         .await
         .unwrap();
     let after_gc_2 = object_store_client.list("").await.unwrap();
@@ -165,14 +155,6 @@ async fn test_gc_sst_retention_time() {
     let (join_handle, tx) = start_cluster().await;
     let object_store_client = get_object_store_client().await;
     let meta_client = get_meta_client().await;
-
-    sync_point::activate("AFTER_SCHEDULE_VACUUM", || async {
-        sync_point::emit_signal("SIG_DONE_SCHEDULE_VACUUM").await
-    });
-    // Activate predefined sync points with customized actions
-    sync_point::activate_once("AFTER_REPORT_VACUUM", || async {
-        sync_point::emit_signal("SIG_DONE_REPORT_VACUUM").await
-    });
 
     let before_garbage_upload = object_store_client.list("").await.unwrap();
     assert_eq!(before_garbage_upload.len(), 0);
@@ -193,13 +175,13 @@ async fn test_gc_sst_retention_time() {
     meta_client.trigger_full_gc(3600).await.unwrap();
     // Wait until VACUUM is scheduled and reported
     for _ in 0..2 {
-        sync_point::wait_for_signal("SIG_DONE_SCHEDULE_VACUUM", Duration::from_secs(10))
+        sync_point::wait("AFTER_SCHEDULE_VACUUM", Duration::from_secs(10))
             .await
             .unwrap();
     }
     // Expect timeout aka no SST is deleted, because all SSTs are within sst_retention_time, even
     // the garbage one.
-    sync_point::wait_for_signal("SIG_DONE_REPORT_VACUUM", Duration::from_secs(10))
+    sync_point::wait("AFTER_REPORT_VACUUM", Duration::from_secs(10))
         .await
         .unwrap_err();
     let after_gc = object_store_client.list("").await.unwrap();
@@ -212,11 +194,11 @@ async fn test_gc_sst_retention_time() {
     meta_client.trigger_full_gc(0).await.unwrap();
     // Wait until VACUUM is scheduled and reported
     for _ in 0..2 {
-        sync_point::wait_for_signal("SIG_DONE_SCHEDULE_VACUUM", Duration::from_secs(10))
+        sync_point::wait("AFTER_SCHEDULE_VACUUM", Duration::from_secs(10))
             .await
             .unwrap();
     }
-    sync_point::wait_for_signal("SIG_DONE_REPORT_VACUUM", Duration::from_secs(10))
+    sync_point::wait("AFTER_REPORT_VACUUM", Duration::from_secs(10))
         .await
         .unwrap();
     let after_gc = object_store_client.list("").await.unwrap();

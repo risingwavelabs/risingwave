@@ -26,6 +26,7 @@ use risingwave_rpc_client::MetaClient;
 use serial_test::serial;
 
 pub fn setup_env() {
+    sync_point::reset();
     let current_dir =
         std::env::var("RW_WORKSPACE").expect("set env RW_WORKSPACE to project root path");
     std::env::set_current_dir(current_dir).unwrap();
@@ -38,9 +39,6 @@ pub fn setup_env() {
 
 pub async fn start_cluster() -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     wipe_object_store().await;
-    sync_point::activate_once("CLUSTER_READY", || async {
-        sync_point::emit_signal("SIG_CLUSTER_READY").await
-    });
 
     let (tx, rx) = std::sync::mpsc::channel();
     let join_handle = std::thread::spawn(move || {
@@ -54,9 +52,8 @@ pub async fn start_cluster() -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
             rx.recv().unwrap();
         });
     });
-    // It will find "SIG_CLUSTER_READY" even when it is reached after "SIG_CLUSTER_READY" has been
-    // emitted.
-    sync_point::wait_for_signal("SIG_CLUSTER_READY", Duration::from_secs(30))
+    // It will find "CLUSTER_READY" even when it is reached after "CLUSTER_READY" has been emitted.
+    sync_point::wait("CLUSTER_READY", Duration::from_secs(30))
         .await
         .unwrap();
     (join_handle, tx)
@@ -113,12 +110,11 @@ pub async fn get_meta_client() -> MetaClient {
 #[tokio::test]
 #[serial]
 #[should_panic]
-async fn test_wait_for_signal_timeout() {
-    sync_point::activate_once("TEST_SETUP_TIMEOUT", || async {
-        sync_point::wait_for_signal("SIG_NEVER_EMIT", Duration::from_secs(1))
+async fn test_wait_timeout() {
+    sync_point::hook("TEST_SETUP_TIMEOUT", || async {
+        sync_point::wait("SIG_NEVER_EMIT", Duration::from_secs(1))
             .await
             .unwrap();
-        Ok(())
     });
 
     // timeout

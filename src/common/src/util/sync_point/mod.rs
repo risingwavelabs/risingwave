@@ -19,7 +19,7 @@ pub use utils::*;
 
 #[cfg(not(sync_point_test))]
 #[inline(always)]
-pub async fn on_sync_point(_sync_point: &str) {}
+pub async fn on(_sync_point: &str) {}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
