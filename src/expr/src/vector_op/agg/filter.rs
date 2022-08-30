@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::aggregator::Aggregator;
 use super::BoxedAggState;
@@ -47,8 +47,8 @@ impl Aggregator for Filter {
         if self
             .condition
             .eval_row(&row_ref.to_owned_row())?
-            .expect("filter must have non-null result")
-            .into_bool()
+            .map(ScalarImpl::into_bool)
+            .unwrap_or(false)
         {
             self.inner.update_single(input, row_id)?;
         }
@@ -73,8 +73,8 @@ impl Aggregator for Filter {
                     Ok(self
                         .condition
                         .eval_row(&row_ref.to_owned_row())?
-                        .expect("filter must have non-null result")
-                        .into_bool())
+                        .map(ScalarImpl::into_bool)
+                        .unwrap_or(false))
                 })
                 .try_collect::<Bitmap>()?
         };
@@ -209,6 +209,42 @@ mod tests {
 
         agg.update_multi(&chunk, 0, chunk.capacity())?;
         assert_eq!(agg_count.load(Ordering::Relaxed), 4);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_selective_agg_null_condition() -> Result<()> {
+        let condition = Arc::from(new_binary_expr(
+            ProstType::Equal,
+            DataType::Boolean,
+            InputRefExpression::new(DataType::Int64, 0).boxed(),
+            LiteralExpression::new(DataType::Int64, None).boxed(),
+        ));
+        let agg_count = Arc::new(AtomicUsize::new(0));
+        let mut agg = Filter::new(
+            condition,
+            Box::new(MockAgg {
+                count: agg_count.clone(),
+            }),
+        );
+
+        let chunk = DataChunk::from_pretty(
+            "I
+             9
+             5
+             6
+             1",
+        );
+
+        agg.update_single(&chunk, 0)?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 0);
+
+        agg.update_multi(&chunk, 2, 4)?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 0);
+
+        agg.update_multi(&chunk, 0, chunk.capacity())?;
+        assert_eq!(agg_count.load(Ordering::Relaxed), 0);
 
         Ok(())
     }
