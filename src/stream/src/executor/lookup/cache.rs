@@ -17,7 +17,8 @@ use std::collections::BTreeSet;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::collection::evictable::EvictableHashMap;
 
-use crate::executor::JOIN_CACHE_CAP_BYTES;
+/// Limit number of the cached entries (one per join key) on each side
+const JOIN_CACHE_SIZE: usize = 1 << 16;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
@@ -61,7 +62,7 @@ impl LookupCache {
 
     pub fn new() -> Self {
         Self {
-            data: EvictableHashMap::new(JOIN_CACHE_CAP_BYTES),
+            data: EvictableHashMap::new(JOIN_CACHE_SIZE),
         }
     }
 }
