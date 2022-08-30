@@ -140,7 +140,7 @@ impl fmt::Display for StreamGroupTopN {
             &format!(
                 "{}",
                 OrderDisplay {
-                    order: self.order(),
+                    order: &self.order,
                     input_schema
                 }
             ),

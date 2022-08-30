@@ -25,9 +25,12 @@
     select v1 from t1 order by v1 limit 3 offset 3;
   stream_plan: |
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id], order_descs: [v1, t1._row_id] }
-      StreamAppendOnlyTopN { order: "[t1.v1 ASC]", limit: 3, offset: 3 }
-        StreamExchange { dist: Single }
-          StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
+      StreamProject { exprs: [t1.v1, t1._row_id] }
+        StreamTopN { order: "[t1.v1 ASC]", limit: 3, offset: 3 }
+          StreamExchange { dist: Single }
+            StreamGroupTopN { order: "[t1.v1 ASC]", limit: 6, offset: 0, group_key: [2] }
+              StreamProject { exprs: [t1.v1, t1._row_id, Vnode(t1._row_id)] }
+                StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], distribution: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t1 (v1 int, v2 int) with (appendonly = true);
     select max(v1) as max_v1 from t1;
