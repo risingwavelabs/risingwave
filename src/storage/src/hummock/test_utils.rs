@@ -22,15 +22,15 @@ use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{
-    CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriteMode,
-    SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
+    CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
+    DEFAULT_RESTART_INTERVAL,
 };
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef,
+    SstableStoreRef, SstableWriter,
 };
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
@@ -103,9 +103,9 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
 
 pub fn default_writer_opt_for_test() -> SstableWriterOptions {
     SstableWriterOptions {
-        mode: SstableWriteMode::Batch,
         capacity_hint: None,
         tracker: None,
+        policy: CachePolicy::Disable,
     }
 }
 
@@ -157,9 +157,9 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let writer_opts = SstableWriterOptions {
-        mode: SstableWriteMode::Batch,
         capacity_hint: None,
         tracker: None,
+        policy: CachePolicy::Disable,
     };
     let writer = sstable_store
         .clone()

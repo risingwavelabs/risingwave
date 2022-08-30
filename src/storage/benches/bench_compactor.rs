@@ -106,7 +106,6 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
         bloom_false_positive: 0.01,
         compression_algorithm: CompressionAlgorithm::None,
         estimate_bloom_filter_capacity: 1024 * 1024,
-        enable_sst_streaming_upload: false,
     };
     let writer = Box::new(InMemWriter::from(&opt));
     let mut builder = SstableBuilder::new_for_test(sstable_id, writer, opt);
