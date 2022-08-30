@@ -43,7 +43,7 @@ use crate::optimizer::property::{
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
-/// See also [`crate::expr::AggOrderByExpr`]
+/// See also [`crate::expr::OrderByExpr`]
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
 #[derive(Clone)]
 pub struct PlanAggOrderByField {
