@@ -150,6 +150,17 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
     fn null_bitmap(&self) -> &FixedBitSet;
 }
 
+/// A wrapper over `HashKey` to support null-safe, i.e., 'IS NOT DISTINCT FROM' semantics. This
+/// should be used in batch/stream hash join executors.
+///
+/// For example, given `null_matched = [false, true]`, we should match the first column by equal
+/// semantics (null != null) and the second column by null-safe semantics (null == null).
+///
+/// | left | right | matched |
+/// | --- | --- | --- |
+/// | (1, null) | (1, null) | true |
+/// | (null, 1) | (null, 1) | false |
+/// | (null, null) | (null, null) | false |
 pub struct JoinHashKey<'a, K> {
     key: K,
     null_matched: &'a FixedBitSet,
@@ -197,7 +208,7 @@ impl<'a, K: HashKey> JoinHashKey<'a, K> {
 
 impl<'a, K: HashKey> PartialEq for JoinHashKey<'a, K> {
     fn eq(&self, other: &Self) -> bool {
-        self.key == other.key && self.key.null_bitmap().is_subset(&self.null_matched)
+        self.key == other.key && self.key.null_bitmap().is_subset(self.null_matched)
     }
 }
 

@@ -4117,6 +4117,7 @@ dependencies = [
  "criterion",
  "either",
  "farmhash",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "itertools",

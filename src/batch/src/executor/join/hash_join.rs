@@ -17,6 +17,7 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
 use risingwave_common::array::column::Column;
@@ -25,7 +26,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{
-    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
+    calc_hash_key_kind, HashKey, HashKeyDispatcher, JoinHashKey, PrecomputedBuildHasher,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -66,8 +67,9 @@ pub struct HashJoinExecutor<K> {
     build_key_idxs: Vec<usize>,
     /// Non-equi join condition (optional)
     cond: Option<BoxedExpression>,
-    /// Whether or not to find matched build rows for probe rows with NULL keys
-    match_null: bool,
+    /// Whether or not to enable 'IS NOT DISTINCT FROM' semantics for a specific probe/build key
+    /// column
+    null_matched: Vec<bool>,
     identity: String,
     _phantom: PhantomData<K>,
 }
@@ -118,7 +120,7 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 ///
 /// This can be seen as an implicit linked list. For convenience, we use `RowIdIter` to iterate all
 /// build side row ids with the given key.
-type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
+type JoinHashMap<'a, K> = HashMap<JoinHashKey<'a, K>, RowId, PrecomputedBuildHasher>;
 
 struct RowIdIter<'a> {
     current_row_id: Option<RowId>,
@@ -145,14 +147,15 @@ impl<'a> Iterator for RowIdIter<'a> {
     }
 }
 
-struct EquiJoinParams<K> {
+struct EquiJoinParams<'a, K> {
     probe_side: BoxedExecutor,
     probe_data_types: Vec<DataType>,
     probe_key_idxs: Vec<usize>,
     build_side: Vec<DataChunk>,
     build_data_types: Vec<DataType>,
     full_data_types: Vec<DataType>,
-    hash_map: JoinHashMap<K>,
+    hash_map: JoinHashMap<'a, K>,
+    null_matched: &'a FixedBitSet,
     next_build_row_with_same_key: ChunkedData<Option<RowId>>,
 }
 
@@ -201,15 +204,19 @@ impl<K: HashKey> HashJoinExecutor<K> {
             JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
+        let null_matched = &{
+            let mut null_matched = FixedBitSet::with_capacity(self.null_matched.len());
+            for (idx, col_null_matched) in self.null_matched.into_iter().enumerate() {
+                null_matched.set(idx, col_null_matched);
+            }
+            null_matched
+        };
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
-            let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
-            for (build_row_id, build_key) in build_keys
-                .into_iter()
-                .enumerate()
-                .filter(|(_, key)| self.match_null || !key.has_null())
-            {
+            let build_keys = JoinHashKey::build(&self.build_key_idxs, build_chunk, null_matched)?;
+
+            for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
                 let row_id = RowId::new(build_chunk_id, build_row_id);
                 next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
             }
@@ -223,6 +230,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
         };
 
@@ -281,22 +289,23 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_inner_join(
+    async fn do_inner_join<'a>(
         EquiJoinParams {
             probe_side,
             probe_key_idxs,
             build_side,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -320,8 +329,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_inner_join_with_non_equi_condition(
-        params: EquiJoinParams<K>,
+    async fn do_inner_join_with_non_equi_condition<'a>(
+        params: EquiJoinParams<'a, K>,
         cond: BoxedExpression,
     ) {
         #[for_await]
@@ -333,7 +342,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_left_outer_join(
+    async fn do_left_outer_join<'a>(
         EquiJoinParams {
             probe_side,
             probe_key_idxs,
@@ -341,15 +350,16 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
@@ -384,7 +394,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_left_outer_join_with_non_equi_condition(
+    async fn do_left_outer_join_with_non_equi_condition<'a>(
         EquiJoinParams {
             probe_side,
             probe_data_types,
@@ -393,9 +403,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
         cond: BoxedExpression,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
@@ -407,7 +418,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 non_equi_state.found_matched = false;
                 non_equi_state
@@ -458,20 +469,21 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_left_semi_anti_join<const ANTI_JOIN: bool>(
+    async fn do_left_semi_anti_join<'a, const ANTI_JOIN: bool>(
         EquiJoinParams {
             probe_side,
             probe_data_types,
             probe_key_idxs,
             hash_map,
+            null_matched,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(probe_data_types);
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 if !ANTI_JOIN {
                     if hash_map.get(probe_key).is_some() {
@@ -498,16 +510,17 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_left_semi_join_with_non_equi_condition(
+    async fn do_left_semi_join_with_non_equi_condition<'a>(
         EquiJoinParams {
             probe_side,
             probe_key_idxs,
             build_side,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
         cond: BoxedExpression,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
@@ -516,7 +529,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 non_equi_state
                     .first_output_row_id
@@ -554,7 +567,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_left_anti_join_with_non_equi_condition(
+    async fn do_left_anti_join_with_non_equi_condition<'a>(
         EquiJoinParams {
             probe_side,
             probe_data_types,
@@ -562,9 +575,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
         cond: BoxedExpression,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
@@ -574,7 +588,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
@@ -625,7 +639,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_right_outer_join(
+    async fn do_right_outer_join<'a>(
         EquiJoinParams {
             probe_side,
             probe_data_types,
@@ -633,9 +647,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
         let mut build_row_matched =
@@ -644,7 +659,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -675,7 +690,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_right_outer_join_with_non_equi_condition(
+    async fn do_right_outer_join_with_non_equi_condition<'a>(
         EquiJoinParams {
             probe_side,
             probe_data_types,
@@ -683,9 +698,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
         cond: BoxedExpression,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
@@ -699,7 +715,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -741,16 +757,17 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_right_semi_anti_join<const ANTI_JOIN: bool>(
+    async fn do_right_semi_anti_join<'a, const ANTI_JOIN: bool>(
         EquiJoinParams {
             probe_side,
             probe_key_idxs,
             build_side,
             build_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(build_data_types);
         let mut build_row_matched =
@@ -759,7 +776,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for probe_key in &probe_keys {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -779,7 +796,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_right_semi_anti_join_with_non_equi_condition<const ANTI_JOIN: bool>(
+    async fn do_right_semi_anti_join_with_non_equi_condition<'a, const ANTI_JOIN: bool>(
         EquiJoinParams {
             probe_side,
             probe_key_idxs,
@@ -787,9 +804,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
         cond: BoxedExpression,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
@@ -804,7 +822,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
                     next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
@@ -845,7 +863,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_full_outer_join(
+    async fn do_full_outer_join<'a>(
         EquiJoinParams {
             probe_side,
             probe_data_types,
@@ -854,9 +872,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
         let mut build_row_matched =
@@ -865,7 +884,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
@@ -907,7 +926,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_full_outer_join_with_non_equi_condition(
+    async fn do_full_outer_join_with_non_equi_condition<'a>(
         EquiJoinParams {
             probe_side,
             probe_data_types,
@@ -916,9 +935,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_data_types,
             full_data_types,
             hash_map,
+            null_matched,
             next_build_row_with_same_key,
             ..
-        }: EquiJoinParams<K>,
+        }: EquiJoinParams<'a, K>,
         cond: BoxedExpression,
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types.clone());
@@ -937,7 +957,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
-            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            let probe_keys = JoinHashKey::build(&probe_key_idxs, &probe_chunk, null_matched)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 left_non_equi_state.found_matched = false;
                 if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
@@ -1619,7 +1639,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
                 left_key_idxs,
                 right_key_idxs,
                 // TODO: frontend should pass match_null in plan node
-                false,
+                vec![false; hash_join_node.get_left_key().len()],
                 cond,
                 context.plan_node().get_identity().clone(),
             ),
@@ -1639,7 +1659,7 @@ impl HashKeyDispatcher for HashJoinExecutor<()> {
             input.build_side_source,
             input.probe_key_idxs,
             input.build_key_idxs,
-            input.match_null,
+            input.null_matched,
             input.cond,
             input.identity,
         ))
@@ -1655,10 +1675,12 @@ impl<K> HashJoinExecutor<K> {
         build_side_source: BoxedExecutor,
         probe_key_idxs: Vec<usize>,
         build_key_idxs: Vec<usize>,
-        match_null: bool,
+        null_matched: Vec<bool>,
         cond: Option<BoxedExpression>,
         identity: String,
     ) -> Self {
+        assert_eq!(probe_key_idxs.len(), build_key_idxs.len());
+        assert_eq!(probe_key_idxs.len(), null_matched.len());
         let original_schema = match join_type {
             JoinType::LeftSemi | JoinType::LeftAnti => probe_side_source.schema().clone(),
             JoinType::RightSemi | JoinType::RightAnti => build_side_source.schema().clone(),
@@ -1685,7 +1707,7 @@ impl<K> HashJoinExecutor<K> {
             build_side_source,
             probe_key_idxs,
             build_key_idxs,
-            match_null,
+            null_matched,
             cond,
             identity,
             _phantom: PhantomData,
@@ -1926,7 +1948,7 @@ mod tests {
                 right_child,
                 vec![0],
                 vec![0],
-                false,
+                vec![false],
                 cond,
                 "HashJoinExecutor".to_string(),
             ))
