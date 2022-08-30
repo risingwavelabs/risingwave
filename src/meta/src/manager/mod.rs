@@ -18,7 +18,7 @@ mod env;
 mod id;
 mod idle;
 mod notification;
-mod relation;
+mod streaming_job;
 
 pub use catalog::*;
 pub use cluster::*;
@@ -26,4 +26,4 @@ pub use env::*;
 pub use id::*;
 pub use idle::*;
 pub use notification::*;
-pub use relation::*;
+pub use streaming_job::*;

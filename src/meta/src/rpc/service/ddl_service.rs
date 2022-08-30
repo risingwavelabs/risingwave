@@ -278,7 +278,7 @@ where
             .map_err(meta_error_to_tonic)?
             .clone();
 
-        let mut stream_job = StreamingJob::Table(mview);
+        let mut stream_job = StreamingJob::MaterializedView(mview);
         let version = self
             .create_stream_job(&mut stream_job, fragment_graph)
             .await?;
@@ -510,7 +510,7 @@ where
         // 4. fill correct table id in fragment graph.
         use risingwave_common::catalog::TableId;
         match stream_job {
-            StreamingJob::Table(_)
+            StreamingJob::MaterializedView(_)
             | StreamingJob::Index(..)
             | StreamingJob::MaterializedSource(..) => {
                 // Fill in the correct mview id for stream node.
@@ -593,7 +593,7 @@ where
             })
             .collect_vec();
         match stream_job {
-            StreamingJob::Table(table) | StreamingJob::Index(_, table) => {
+            StreamingJob::MaterializedView(table) | StreamingJob::Index(_, table) => {
                 creating_tables.push(table.clone())
             }
             StreamingJob::MaterializedSource(source, table) => {
@@ -623,7 +623,7 @@ where
         let mut creating_internal_table_ids = ctx.internal_table_ids();
         // 1. cancel create procedure.
         match stream_job {
-            StreamingJob::Table(table) => {
+            StreamingJob::MaterializedView(table) => {
                 self.catalog_manager
                     .cancel_create_table_procedure(table)
                     .await?;
@@ -670,7 +670,7 @@ where
         let mut creating_internal_table_ids = ctx.internal_table_ids();
         let internal_state_tables = ctx.internal_tables();
         let version = match stream_job {
-            StreamingJob::Table(table) => {
+            StreamingJob::MaterializedView(table) => {
                 self.catalog_manager
                     .finish_create_table_procedure(internal_state_tables, table)
                     .await?

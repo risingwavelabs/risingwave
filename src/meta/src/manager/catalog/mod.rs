@@ -276,7 +276,7 @@ where
         stream_job: &StreamingJob,
     ) -> MetaResult<()> {
         match stream_job {
-            StreamingJob::Table(table) => self.start_create_table_procedure(table).await,
+            StreamingJob::MaterializedView(table) => self.start_create_table_procedure(table).await,
             StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
