@@ -22,5 +22,10 @@ select string_agg(v1, v3::varchar order by v2 asc, v3 desc) from t
 ----
 ccc2bbb4ddd1aaa
 
+query T
+select string_agg(v1, ',' order by v3) filter (where v2 > 0) from t
+----
+aaa,ddd
+
 statement ok
 drop table t

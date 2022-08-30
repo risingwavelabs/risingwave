@@ -1093,18 +1093,21 @@ impl Parser {
     }
 
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let index = self.parse_expr()?;
+        let index = Box::new(self.parse_expr()?);
         self.expect_token(&Token::RBracket)?;
-        let mut indices: Vec<Expr> = vec![index];
-        while self.consume_token(&Token::LBracket) {
-            let index = self.parse_expr()?;
-            self.expect_token(&Token::RBracket)?;
-            indices.push(index);
-        }
-        Ok(Expr::ArrayIndex {
+
+        // Create ArrayIndex
+        let array_index = Expr::ArrayIndex {
             obj: Box::new(expr),
-            indices,
-        })
+            index,
+        };
+
+        // Return ArrayIndex Expr after after recursively checking for more indices
+        if self.consume_token(&Token::LBracket) {
+            self.parse_array_index(array_index)
+        } else {
+            Ok(array_index)
+        }
     }
 
     /// Parses the parens following the `[ NOT ] IN` operator
