@@ -12,5 +12,5 @@ jobs:
       uses: cgetc/automatically-set-milestone-to-issue@v0.1.2
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        version-prefix: 'version-'
+        version-prefix: 'release-'
         version-separator: '.'
