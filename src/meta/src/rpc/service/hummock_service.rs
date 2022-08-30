@@ -199,6 +199,10 @@ where
             return Err(anyhow::anyhow!("invalid hummock context {}", context_id))
                 .map_err(meta_error_to_tonic);
         }
+        self.hummock_manager
+            .cancel_assigned_tasks_for_context_ids(context_id)
+            .await
+            .map_err(meta_error_to_tonic)?;
         let rx = self
             .compactor_manager
             .add_compactor(context_id, req.max_concurrent_task_number);
