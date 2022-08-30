@@ -78,6 +78,13 @@ impl TableSourceV2 {
                 .clone()
         };
 
+        #[cfg(debug_assertions)]
+        risingwave_common::util::schema_check::schema_check(
+            self.column_descs.iter().map(|c| &c.data_type),
+            chunk.columns(),
+        )
+        .expect("table source write chunk schema check failed");
+
         let (notifier_tx, notifier_rx) = oneshot::channel();
         tx.send((chunk, notifier_tx))
             .expect("table reader in streaming source executor closed");

@@ -1,5 +1,5 @@
 # Test compute errors are replaced with NULLs.
-# See also <https://github.com/singularity-data/risingwave/issues/4625>
+# See also <https://github.com/risingwavelabs/risingwave/issues/4625>
 
 statement ok
 create table t(x int);

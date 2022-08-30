@@ -198,7 +198,7 @@ impl Condition {
         self,
         left_col_num: usize,
         right_col_num: usize,
-    ) -> (Vec<(InputRef, InputRef)>, Self) {
+    ) -> (Vec<(InputRef, InputRef, bool)>, Self) {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
@@ -208,7 +208,9 @@ impl Condition {
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
             } else if let Some(columns) = expr.as_eq_cond() {
-                eq_keys.push(columns);
+                eq_keys.push((columns.0, columns.1, false));
+            } else if let Some(columns) = expr.as_is_not_distinct_from_cond() {
+                eq_keys.push((columns.0, columns.1, true));
             } else {
                 others.push(expr)
             }
