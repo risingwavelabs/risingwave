@@ -52,7 +52,6 @@ pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
 }
 
 /// used for streaming table serialize
-/// todo(wcy-fdu): remove `RowSerde` trait after all executors using streaming table.
 pub fn serialize(row: Row) -> Result<Vec<u8>> {
     let mut value_bytes = vec![];
     for cell in &row.0 {
@@ -62,6 +61,7 @@ pub fn serialize(row: Row) -> Result<Vec<u8>> {
     Ok(res)
 }
 
+/// used for batch table deserialize
 pub fn batch_deserialize(
     column_mapping: Arc<ColumnDescMapping>,
     value: impl AsRef<[u8]>,
