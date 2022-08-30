@@ -275,7 +275,7 @@ impl StageRunner {
 
     /// Send stage event to listener.
     async fn send_event(&self, event: QueryMessage) {
-        if let Err(e) = self.msg_sender.send(event).await {
+        if let Err(_e) = self.msg_sender.send(event).await {
             warn!("Failed to send event to Query Runner, may be killed by previous failed event");
         }
     }
