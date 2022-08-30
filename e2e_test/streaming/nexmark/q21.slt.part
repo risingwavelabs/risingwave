@@ -1,4 +1,4 @@
-query ITIIIIIIRI rowsort
+query IIITT rowsort
 SELECT * FROM nexmark_q21
 ----
 1000 1001     1940 channel-9319 433848320

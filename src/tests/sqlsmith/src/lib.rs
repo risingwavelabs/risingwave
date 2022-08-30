@@ -28,6 +28,7 @@ use risingwave_sqlparser::parser::Parser;
 mod expr;
 pub use expr::print_function_table;
 mod relation;
+pub mod runner;
 mod scalar;
 mod time_window;
 mod utils;
@@ -359,7 +360,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         if self.is_mview {
             // TODO: These constraints are workarounds required by mview.
-            // Tracked by: <https://github.com/singularity-data/risingwave/issues/4024>.
+            // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/4024>.
             assert!(!self.tables.is_empty());
             return from;
         }

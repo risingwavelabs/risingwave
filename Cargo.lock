@@ -73,7 +73,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/singularity-data/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
+source = "git+https://github.com/risingwavelabs/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -2608,7 +2608,7 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
-source = "git+https://github.com/singularity-data/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
 dependencies = [
  "hashbrown 0.11.2",
 ]
@@ -4800,6 +4800,7 @@ dependencies = [
  "risingwave_compute",
  "risingwave_frontend",
  "risingwave_meta",
+ "risingwave_sqlsmith",
  "sqllogictest",
  "tokio-postgres",
  "tracing",

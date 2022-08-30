@@ -26,7 +26,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::compactor::{
-    Compactor, ConcatSstableIterator, DummyCompactionFilter,
+    Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig,
 };
 use risingwave_storage::hummock::iterator::{
     ConcatIterator, Forward, HummockIterator, HummockIteratorUnion, MultiSstIterator,
@@ -41,7 +41,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompactorSstableStore, CompressionAlgorithm, InMemWriter, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
-    SstableStoreWrite, SstableWriteMode, SstableWriterOptions, TieredCache,
+    SstableWriteMode, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -177,10 +177,7 @@ fn bench_table_scan(c: &mut Criterion) {
     });
 }
 
-async fn compact<I: HummockIterator<Direction = Forward>>(
-    iter: I,
-    sstable_store: Arc<CompactorSstableStore>,
-) {
+async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store: SstableStoreRef) {
     let opt = SstableBuilderOptions {
         capacity: 32 * 1024 * 1024,
         block_capacity: 64 * 1024,
@@ -196,12 +193,17 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
         opt,
     ));
 
+    let task_config = TaskConfig {
+        key_range: KeyRange::inf(),
+        cache_policy: CachePolicy::Disable,
+        gc_delete_keys: false,
+        watermark: 0,
+    };
     Compactor::compact_and_build_sst(
         &mut builder,
-        &KeyRange::inf(),
+        &task_config,
+        Arc::new(StateStoreMetrics::unused()),
         iter,
-        false,
-        0,
         DummyCompactionFilter,
     )
     .await
@@ -281,7 +283,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_union_merge_iterator", |b| {
-        let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
@@ -296,26 +297,21 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     read_options.clone(),
                 )),
             ];
-            let iter = MultiSstIterator::for_compactor(sub_iters, stats.clone());
-            let sstable_store = Arc::new(CompactorSstableStore::new(
-                sstable_store1,
-                MemoryLimiter::unlimit(),
-            ));
-            async move { compact(iter, sstable_store).await }
+            let iter = MultiSstIterator::for_compactor(sub_iters);
+            async move { compact(iter, sstable_store1).await }
         });
     });
-    let sstable_store = Arc::new(CompactorSstableStore::new(
+    let compact_store = Arc::new(CompactorSstableStore::new(
         sstable_store.clone(),
         MemoryLimiter::unlimit(),
     ));
     c.bench_function("bench_merge_iterator", |b| {
-        let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {
             let sub_iters = vec![
-                ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), sstable_store.clone()),
-                ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), sstable_store.clone()),
+                ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), compact_store.clone()),
+                ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), compact_store.clone()),
             ];
-            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters, stats.clone());
+            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
             let sstable_store1 = sstable_store.clone();
             async move { compact(iter, sstable_store1).await }
         });

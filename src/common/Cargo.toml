@@ -22,7 +22,7 @@ futures-async-stream = "0.2"
 humantime = "2.1"
 itertools = "0.10"
 lazy_static = "1"
-lru = { git = "https://github.com/singularity-data/lru-rs.git", rev = "e0e9ddaf8e4a51c244a03676734437e68a336b30" }
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "e0e9ddaf8e4a51c244a03676734437e68a336b30" }
 memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.3"
 num-traits = "0.2"
