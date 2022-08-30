@@ -211,9 +211,10 @@ message HashJoinNode {
   catalog.Table right_degree_table = 9;
   // The output indices of current node
   repeated uint32 output_indices = 10;
+  repeated bool null_safe = 11;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 11;
+  bool is_append_only = 12;
 }
 
 message DynamicFilterNode {

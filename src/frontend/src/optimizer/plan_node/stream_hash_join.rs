@@ -206,10 +206,14 @@ impl ToStreamProst for StreamHashJoin {
             infer_internal_and_degree_table_catalog(self.left(), left_key_indices);
         let (right_table, right_degree_table) =
             infer_internal_and_degree_table_catalog(self.right(), right_key_indices);
+
+        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: left_key_indices_prost,
             right_key: right_key_indices_prost,
+            null_safe: null_safe_prost,
             condition: self
                 .eq_join_predicate
                 .other_cond()
