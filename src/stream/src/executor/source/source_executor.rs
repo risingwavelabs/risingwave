@@ -245,27 +245,56 @@ impl<S: StateStore> SourceExecutor<S> {
             .stack_trace("source_recv_first_barrier")
             .await
             .unwrap();
+        let epoch = barrier.epoch.prev;
 
         if let Some(mutation) = barrier.mutation.as_ref() {
             if let Mutation::Add { splits, .. } = mutation.as_ref() {
                 if let Some(splits) = splits.get(&self.ctx.id) {
                     self.stream_source_splits = splits.clone();
+                    for split_impl in &mut self.stream_source_splits {
+                        if let Some(recover_state) = self
+                            .split_state_store
+                            .try_recover_from_state_store(split_impl.id(), epoch)
+                            .await?
+                        {
+                            *split_impl = recover_state;
+                        }
+                    }
+
+                    // save source_id -> [split_id] to state store
+                    self.split_state_store
+                        .save_split_assignment(splits, epoch)
+                        .await?;
                 }
             }
-        }
-
-        let epoch = barrier.epoch.prev;
-
-        let mut boot_state = self.stream_source_splits.clone();
-        for ele in &mut boot_state {
-            if let Some(recover_state) = self
+        } else {
+            self.stream_source_splits = match self
                 .split_state_store
-                .try_recover_from_state_store(ele, epoch)
+                .load_split_assignment(epoch)
                 .await?
             {
-                *ele = recover_state;
-            }
+                None => vec![],
+                Some(assignments) => {
+                    let mut mock_state = Vec::with_capacity(assignments.len());
+                    for split_id in assignments {
+                        let split_id = Arc::new(split_id);
+                        if let Some(recover_state) = self
+                            .split_state_store
+                            .try_recover_from_state_store(split_id.clone(), epoch)
+                            .await?
+                        {
+                            mock_state.push(recover_state);
+                        } else {
+                            tracing::warn!("load no split info for source_id {}, split_id: {}, skipping", self.source_id, split_id);
+                        }
+                    }
+                    mock_state
+                }
+            };
         }
+
+        let boot_state = self.stream_source_splits.clone();
+        tracing::info!("exec start with {:?}", boot_state);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
 
@@ -307,6 +336,12 @@ impl<S: StateStore> SourceExecutor<S> {
                                         stream.replace_source_chunk_reader(reader);
 
                                         self.stream_source_splits = target_state;
+                                        self.split_state_store
+                                            .save_split_assignment(
+                                                &self.stream_source_splits,
+                                                epoch,
+                                            )
+                                            .await?;
                                     }
                                 }
                             }

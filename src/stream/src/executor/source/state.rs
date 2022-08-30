@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::bail;
@@ -20,9 +21,13 @@ use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
+use serde_json::json;
 use tracing::error;
 
+use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
+
+const ASSIGN_SPLIT_KEY: &str = "AssignSplit";
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -84,6 +89,79 @@ impl<S: StateStore> SourceStateHandler<S> {
         }
     }
 
+    /// This function offers the ability to persist the split assignment relation for each actor and
+    /// should be called when any split assignment change occurs.
+    pub async fn save_split_assignment(
+        &self,
+        assignment: &Vec<SplitImpl>,
+        epoch: u64,
+    ) -> StreamExecutorResult<()> {
+        if assignment.is_empty() {
+            bail!("assignment require not null");
+        }
+        let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            epoch,
+            table_id: self.keyspace.table_id(),
+        });
+        let mut local_batch = write_batch.prefixify(&self.keyspace);
+
+        let serialized = Bytes::from(
+            json!(assignment
+                .iter()
+                .map(|split_impl| split_impl.id())
+                .collect::<Vec<Arc<String>>>())
+            .to_string(),
+        );
+        local_batch.put(ASSIGN_SPLIT_KEY, StorageValue::new_default_put(serialized.clone()));
+
+        // If an error is returned, the underlying state should be rollback
+        write_batch.ingest().await.inspect_err(|e| {
+            error!(
+                "SourceStateHandler save_split_assignment() batch.ingest Error,cause by {:?}",
+                e
+            );
+        })?;
+        tracing::debug!("save assignment {:?}, table_id {}, epoch {}", serialized, self.keyspace.table_id(), epoch);
+        Ok(())
+    }
+
+    /// This function offers the ability to load prev assignment from state store and should be
+    /// called anytime a boot or rollback occurs
+    pub async fn load_split_assignment(
+        &self,
+        epoch: u64,
+    ) -> StreamExecutorResult<Option<Vec<String>>> {
+        match self
+            .keyspace
+            .get(
+                ASSIGN_SPLIT_KEY,
+                true,
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.keyspace.table_id()),
+                    retention_seconds: None,
+                },
+            )
+            .await
+            .map_err(StreamExecutorError::from)?
+        {
+            None => {
+                tracing::info!(
+                    "load no assignment from state store, source_id: {}, epoch: {}",
+                    self.keyspace.table_id(),
+                    epoch
+                );
+                Ok(None)
+            }
+            Some(bytes) => {
+                let deserialized: Vec<String> =
+                    serde_json::from_slice(bytes.as_ref()).expect("parse assignment failed");
+                tracing::debug!("load prev assignment {:?}, source_id: {}, epoch: {}", deserialized, self.keyspace.table_id(), epoch);
+                Ok(Some(deserialized))
+            }
+        }
+    }
+
     /// Retrieves the state of the specified ``state_identifier``
     /// Returns None if it does not exist (e.g., the first accessible source).
     ///
@@ -109,11 +187,12 @@ impl<S: StateStore> SourceStateHandler<S> {
 
     pub async fn try_recover_from_state_store(
         &self,
-        stream_source_split: &SplitImpl,
+        identifier: SplitId,
         epoch: u64,
     ) -> StreamExecutorResult<Option<SplitImpl>> {
         // let connector_type = stream_source_split.get_type();
-        let s = self.restore_states(stream_source_split.id(), epoch).await?;
+        let s = self.restore_states(identifier.clone(), epoch).await?;
+        tracing::debug!("restore split {} at epoch {}: {:?}", identifier, epoch, s);
 
         let split = match s {
             Some(s) => Some(SplitImpl::restore_from_bytes(&s)?),
@@ -128,6 +207,7 @@ impl<S: StateStore> SourceStateHandler<S> {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
+    use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::ReadOptions;
     use serde::{Deserialize, Serialize};
@@ -262,5 +342,29 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[tokio::test]
+    async fn test_assignment_restore() -> StreamExecutorResult<()> {
+        let epoch = 100_u64;
+        let state_store_handler = SourceStateHandler::new(new_test_keyspace());
+        state_store_handler
+            .save_split_assignment(
+                &vec![
+                    SplitImpl::Kafka(KafkaSplit::new(0, None, None, "test".to_string())),
+                    SplitImpl::Kafka(KafkaSplit::new(1, None, None, "test".to_string())),
+                ],
+                epoch,
+            )
+            .await
+            .unwrap();
+
+        let x = state_store_handler
+            .load_split_assignment(epoch)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(x, vec!["0".to_string(), "1".to_string()]);
+        Ok(())
     }
 }
