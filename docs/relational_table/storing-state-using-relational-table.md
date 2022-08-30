@@ -38,7 +38,7 @@ For the detailed schema, please check [doc](relational-table-schema.md)
 
 <!-- Todo: link cconsistence hash doc and state table agg doc -->
 ## Relational Table Layer
-[source code](https://github.com/singularity-data/risingwave/blob/4e66ca3d41435c64af26b5e0003258c4f7116822/src/storage/src/table/state_table.rs)
+[source code](https://github.com/risingwavelabs/risingwave/blob/4e66ca3d41435c64af26b5e0003258c4f7116822/src/storage/src/table/state_table.rs)
 
 In this part, we will introduce how stateful executors interact with KV state store through the relational table layer.
 

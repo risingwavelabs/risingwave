@@ -330,7 +330,7 @@
     select * from a join lateral (select * from b where a1 = b1);
   binder_error: |-
     Feature is not yet implemented: lateral subqueries are not yet supported
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/3815
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3815
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);

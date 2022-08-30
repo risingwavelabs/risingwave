@@ -37,7 +37,7 @@ SELECT a, test.b, c FROM test, test2 WHERE test.b=test2.b AND test.a-1=test2.c;
 11	1	10
 
 # use join columns in subquery
-# This query will cause a panic (https://github.com/singularity-data/risingwave/issues/4311)
+# This query will cause a panic (https://github.com/risingwavelabs/risingwave/issues/4311)
 # query III
 # SELECT a, (SELECT test.a), c FROM test, test2 WHERE test.b = test2.b ORDER BY c;
 # ----
