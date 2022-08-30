@@ -393,10 +393,9 @@ impl SstableStore {
     pub fn create_sst_writer(
         self: Arc<Self>,
         sst_id: HummockSstableId,
-        policy: CachePolicy,
         options: SstableWriterOptions,
     ) -> Box<BatchUploadWriter> {
-        Box::new(BatchUploadWriter::new(sst_id, self, policy, options))
+        Box::new(BatchUploadWriter::new(sst_id, self, options))
     }
 
     pub async fn put_sst_meta(
@@ -432,13 +431,6 @@ impl MemoryCollector for SstableStore {
     fn get_total_memory_usage(&self) -> u64 {
         0
     }
-}
-
-pub type BoxedSstableWriter = Box<dyn SstableWriter<Output = JoinHandle<HummockResult<()>>>>;
-
-pub enum SstableWriteMode {
-    Batch,
-    Streaming,
 }
 
 pub struct SstableWriterOptions {
@@ -481,7 +473,6 @@ impl SstableWriterFactory for BatchSstableWriterFactory {
         Ok(Box::new(BatchUploadWriter::new(
             sst_id,
             self.sstable_store.clone(),
-            options.policy,
             options,
         )))
     }
@@ -502,13 +493,12 @@ impl BatchUploadWriter {
     pub fn new(
         sst_id: HummockSstableId,
         sstable_store: Arc<SstableStore>,
-        policy: CachePolicy,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
             sst_id,
             sstable_store,
-            policy,
+            policy: options.policy,
             buf: BytesMut::with_capacity(options.capacity_hint.unwrap_or(0)),
             block_info: Vec::new(),
             tracker: options.tracker,
@@ -577,7 +567,7 @@ pub struct StreamingUploadWriter {
     /// Data are uploaded block by block, except for the size footer.
     object_uploader: ObjectStreamingUploader,
     /// Compressed blocks to refill block or meta cache. Keep the uncompressed capacity for decode.
-    blocks: Vec<Box<Block>>,
+    blocks: Vec<Block>,
     data_len: usize,
     tracker: Option<MemoryTracker>,
 }
@@ -586,14 +576,13 @@ impl StreamingUploadWriter {
     pub fn new(
         sst_id: HummockSstableId,
         sstable_store: SstableStoreRef,
-        policy: CachePolicy,
         object_uploader: ObjectStreamingUploader,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
             sst_id,
             sstable_store,
-            policy,
+            policy: options.policy,
             object_uploader,
             blocks: Vec::new(),
             data_len: 0,
@@ -609,10 +598,7 @@ impl SstableWriter for StreamingUploadWriter {
         self.data_len += block_data.len();
         let block_data = Bytes::from(block_data.to_vec());
         if let CachePolicy::Fill = self.policy {
-            let block = Box::new(Block::decode(
-                block_data.clone(),
-                meta.uncompressed_size as usize,
-            )?);
+            let block = Block::decode(block_data.clone(), meta.uncompressed_size as usize)?;
             self.blocks.push(block);
         }
         self.object_uploader
@@ -648,7 +634,7 @@ impl SstableWriter for StreamingUploadWriter {
                 debug_assert!(!self.blocks.is_empty());
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
                     self.sstable_store.block_cache
-                        .insert(self.sst_id, block_idx as u64, block);
+                        .insert(self.sst_id, block_idx as u64, Box::new(block));
                 }
             }
             drop(tracker);
@@ -684,7 +670,6 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
         Ok(Box::new(StreamingUploadWriter::new(
             sst_id,
             self.sstable_store.clone(),
-            options.policy,
             uploader,
             options,
         )))

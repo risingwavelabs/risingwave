@@ -62,7 +62,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Disable,
+        policy: CachePolicy::Fill,
     }
 }
 
@@ -72,11 +72,8 @@ pub async fn put_sst(
     meta: SstableMeta,
     sstable_store: SstableStoreRef,
     options: SstableWriterOptions,
-    policy: CachePolicy,
 ) {
-    let mut writer = sstable_store
-        .clone()
-        .create_sst_writer(sst_id, policy, options);
+    let mut writer = sstable_store.clone().create_sst_writer(sst_id, options);
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
@@ -151,15 +148,9 @@ fn bench_table_scan(c: &mut Criterion) {
         .unwrap();
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
-        put_sst(
-            1,
-            data,
-            meta,
-            sstable_store1,
-            default_writer_opts(),
-            CachePolicy::NotFill,
-        )
-        .await;
+        let mut opts = default_writer_opts();
+        opts.policy = CachePolicy::NotFill;
+        put_sst(1, data, meta, sstable_store1, opts).await;
     });
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
@@ -239,7 +230,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta1,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
         put_sst(
@@ -248,7 +238,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta2,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
     });
@@ -264,7 +253,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta1,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
         put_sst(
@@ -273,7 +261,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             meta2,
             sstable_store1.clone(),
             default_writer_opts(),
-            CachePolicy::Fill,
         )
         .await;
     });
