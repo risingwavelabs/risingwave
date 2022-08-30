@@ -18,10 +18,11 @@ use crate::array::column::Column;
 use crate::types::DataType;
 
 /// Check if the schema of `columns` matches the expected `data_types`. Used for debugging.
-pub fn schema_check(
-    data_types: impl IntoIterator<Item = &'_ DataType> + Clone,
-    columns: impl IntoIterator<Item = &'_ Column> + Clone,
-) -> Result<(), String> {
+pub fn schema_check<'a, T, C>(data_types: T, columns: C) -> Result<(), String>
+where
+    T: IntoIterator<Item = &'a DataType> + Clone,
+    C: IntoIterator<Item = &'a Column> + Clone,
+{
     tracing::event!(
         tracing::Level::TRACE,
         "input schema = \n{:#?}\nexpected schema = \n{:#?}",
