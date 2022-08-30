@@ -11,6 +11,8 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 tempfile = "3"
 walkdir = "2"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [build-dependencies]

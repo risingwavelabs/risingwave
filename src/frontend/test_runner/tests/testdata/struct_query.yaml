@@ -256,7 +256,7 @@
     select (country + country) from t;
   binder_error: |-
     Feature is not yet implemented: Add[Struct, Struct]
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/112
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
   create_source:
     row_format: protobuf
     name: s

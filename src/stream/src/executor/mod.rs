@@ -51,7 +51,6 @@ pub mod monitor;
 pub mod aggregation;
 mod batch_query;
 mod chain;
-mod debug;
 mod dispatch;
 mod dynamic_filter;
 mod error;
@@ -79,6 +78,7 @@ mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
 mod union;
+mod wrapper;
 
 #[cfg(test)]
 mod integration_tests;
@@ -88,7 +88,6 @@ mod test_utils;
 pub use actor::{Actor, ActorContext, ActorContextRef};
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
-pub use debug::DebugExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::StreamExecutorResult;
@@ -115,6 +114,7 @@ pub use source::*;
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use union::UnionExecutor;
+pub use wrapper::WrapperExecutor;
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
@@ -247,6 +247,8 @@ pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
+
+    pub passed_actors: Vec<ActorId>,
 }
 
 impl Barrier {
@@ -476,6 +478,7 @@ impl Barrier {
             epoch,
             mutation,
             checkpoint,
+            passed_actors,
             ..
         }: Barrier = self.clone();
         ProstBarrier {
@@ -486,6 +489,7 @@ impl Barrier {
             mutation: mutation.map(|mutation| mutation.to_protobuf()),
             span: vec![],
             checkpoint,
+            passed_actors,
         }
     }
 
@@ -501,6 +505,7 @@ impl Barrier {
             checkpoint: prost.checkpoint,
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
+            passed_actors: prost.get_passed_actors().clone(),
         })
     }
 }

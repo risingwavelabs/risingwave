@@ -556,6 +556,12 @@ impl StreamGraphBuilder {
                         }
                     }
 
+                    NodeBody::Source(node) => {
+                        node.state_table_id += table_id_offset;
+                        // fill internal table for source node with None catalog.
+                        check_and_fill_internal_table(node.state_table_id, None);
+                    }
+
                     NodeBody::Lookup(node) => {
                         if let Some(ArrangementTableId::TableId(table_id)) =
                             &mut node.arrangement_table_id
@@ -985,6 +991,9 @@ impl ActorGraphBuilder {
             NodeBody::Materialize(node) => {
                 let table_id = node.get_table_id();
                 fragment.state_table_ids.push(table_id);
+            }
+            NodeBody::Source(node) => {
+                fragment.state_table_ids.push(node.state_table_id);
             }
             NodeBody::Arrange(node) => {
                 let table_id = node.table.as_ref().unwrap().id;

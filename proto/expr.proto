@@ -86,6 +86,7 @@ message ExprNode {
     IS_NULL = 305;
     IS_NOT_NULL = 306;
     IS_DISTINCT_FROM = 307;
+    IS_NOT_DISTINCT_FROM = 308;
     // Unary operators
     NEG = 401;
     // Nested selection operators

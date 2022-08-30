@@ -19,7 +19,6 @@ mod id;
 mod idle;
 mod notification;
 mod streaming_job;
-
 pub use catalog::*;
 pub use cluster::*;
 pub use env::*;
