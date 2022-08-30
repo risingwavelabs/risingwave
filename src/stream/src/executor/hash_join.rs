@@ -632,7 +632,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         if key.has_null() {
             Ok(None)
         } else {
-            ht.remove_state(key).await
+            ht.remove_state(key).await.map(Some)
         }
     }
 
@@ -666,7 +666,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         append_only_optimize: bool,
     ) {
         let chunk = chunk.compact()?;
-        let (data_chunk, ops) = chunk.into_parts();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)
@@ -708,14 +707,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             Ok(cond_match)
         };
 
-        let keys = K::build(&side_update.key_indices, &data_chunk)?;
-        for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
-            let key = &keys[idx];
+        let keys = K::build(&side_update.key_indices, chunk.data_chunk())?;
+        for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
             let value = row.to_owned_row();
             let pk = row.row_by_indices(&side_update.pk_indices);
             let matched_rows: Option<HashValueType> =
                 Self::hash_eq_match(key, &mut side_match.ht).await?;
-            match *op {
+            match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
                     let mut append_only_matched_rows = Vec::with_capacity(1);
@@ -745,19 +743,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                                hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                             {
                                 yield Message::Chunk(chunk);
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, &row)?
                         {
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.insert_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                        hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
                         yield Message::Chunk(chunk);
                     }
@@ -802,19 +800,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                                hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                             {
                                 yield Message::Chunk(chunk);
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, &row)?
                         {
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.insert_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                        hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
                         yield Message::Chunk(chunk);
                     }

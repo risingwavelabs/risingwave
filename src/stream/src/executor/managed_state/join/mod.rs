@@ -302,17 +302,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
     /// WARNING: This will NOT remove anything from remote storage.
-    pub async fn remove_state<'a>(
-        &mut self,
-        key: &K,
-    ) -> StreamExecutorResult<Option<HashValueType>> {
+    pub async fn remove_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
         let state = self.inner.invalidate(key);
         self.metrics.total_lookup_count += 1;
         Ok(match state {
-            Some(_) => state,
+            Some(state) => state,
             None => {
                 self.metrics.lookup_miss_count += 1;
-                Some(self.fetch_cached_state(key).await?)
+                self.fetch_cached_state(key).await?
             }
         })
     }

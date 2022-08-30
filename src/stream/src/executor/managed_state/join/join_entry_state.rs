@@ -51,30 +51,24 @@ impl Default for JoinEntryState {
 }
 
 impl JoinEntryState {
-    // Insert into the cache and flush buffer.
+    /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        let estimate_sizes = (key.estimate_size(), value.estimate_size());
+        self.content_estimate_size = self
+            .content_estimate_size
+            .saturating_add(key.estimate_size())
+            .saturating_add(value.estimate_size());
 
-        if let Some(old_value) = self.cached.insert(key, value) {
-            self.content_estimate_size = self
-                .content_estimate_size
-                .saturating_add(estimate_sizes.1)
-                .saturating_sub(old_value.estimate_size());
-        } else {
-            self.content_estimate_size = self
-                .content_estimate_size
-                .saturating_add(estimate_sizes.0)
-                .saturating_sub(estimate_sizes.1);
-        }
+        self.cached.try_insert(key, value).unwrap();
     }
 
+    /// Delete from the cache.
     pub fn remove(&mut self, pk: PkType) {
-        if let Some(value) = self.cached.remove(&pk) {
-            self.content_estimate_size = self
-                .content_estimate_size
-                .saturating_sub(pk.estimate_size())
-                .saturating_sub(value.estimate_size())
-        }
+        let value = self.cached.remove(&pk).unwrap();
+
+        self.content_estimate_size = self
+            .content_estimate_size
+            .saturating_sub(pk.estimate_size())
+            .saturating_sub(value.estimate_size());
     }
 
     #[expect(dead_code)]
