@@ -101,6 +101,10 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            // This limitation would keep our write-amplification no more than
+            // ln(max_compaction_bytes/flush_level_bytes) /
+            // ln(self.config.level0_tier_compact_file_number/2) Here we only use half
+            // of level0_tier_compact_file_number just for convenient.
             let is_write_amp_large =
                 max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
 
