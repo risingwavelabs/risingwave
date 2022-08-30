@@ -345,6 +345,7 @@ where
                 .for_each(|(actor_id, status)| {
                     if let Some(new_node_id) = migrate_map.get(actor_id) {
                         if let Some(ref old_parallel_unit) = status.parallel_unit {
+                            flag = true;
                             if let Entry::Vacant(e) =
                                 parallel_unit_migrate_map.entry(old_parallel_unit.id)
                             {
@@ -352,7 +353,6 @@ where
                                     pu_map.get_mut(new_node_id).unwrap().pop().unwrap();
                                 e.insert(new_parallel_unit.clone());
                                 status.parallel_unit = Some(new_parallel_unit.clone());
-                                flag = true;
                             } else {
                                 status.parallel_unit = Some(
                                     parallel_unit_migrate_map
