@@ -143,6 +143,10 @@ pub struct MetaNodeOpts {
     /// The spin interval when collecting global GC watermark in hummock
     #[clap(long, default_value = "5")]
     collect_gc_watermark_spin_interval_sec: u64,
+
+    /// Enable sanity check when SSTs are committed. By default disabled.
+    #[clap(long)]
+    enable_committed_sst_sanity_check: bool,
 }
 
 fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
@@ -205,6 +209,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
+                enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
             },
         )
         .await

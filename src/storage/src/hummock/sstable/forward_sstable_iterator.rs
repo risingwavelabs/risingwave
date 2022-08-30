@@ -112,7 +112,7 @@ impl HummockIterator for SstableIterator {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            self.stats.scan_key_count += 1;
+            self.stats.skip_key_count += 1;
             let block_iter = self.block_iter.as_mut().expect("no block iter");
             block_iter.next();
 
@@ -196,9 +196,8 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        gen_test_sstable_data, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::{CachePolicy, SstableStoreWrite};
 
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -318,11 +317,13 @@ mod tests {
         // when upload data is successful, but upload meta is fail and delete is fail
         let kv_iter =
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-        let (data, meta, _) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
-        sstable_store
-            .put_sst(0, meta, data, CachePolicy::NotFill)
-            .await
-            .unwrap();
+        let _ = gen_test_sstable(
+            default_builder_opt_for_test(),
+            0,
+            kv_iter,
+            sstable_store.clone(),
+        )
+        .await;
 
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
