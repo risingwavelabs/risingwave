@@ -37,25 +37,17 @@ pub struct FragmentManagerCore {
 }
 
 impl FragmentManagerCore {
-    /// List all table vnode mapping info according to the fragment vnode mapping info.
-    pub fn all_table_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
+    /// List all fragment vnode mapping info.
+    pub fn all_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
         self.table_fragments.values().flat_map(|table_fragments| {
-            table_fragments
-                .fragments
-                .values()
-                .flat_map(|fragment| {
-                    let parallel_unit_mapping = fragment.vnode_mapping.as_ref().unwrap();
-                    fragment
-                        .state_table_ids
-                        .iter()
-                        .map(|internal_table_id| ParallelUnitMapping {
-                            table_id: *internal_table_id,
-                            original_indices: parallel_unit_mapping.original_indices.clone(),
-                            data: parallel_unit_mapping.data.clone(),
-                        })
-                        .collect_vec()
-                })
-                .collect_vec()
+            table_fragments.fragments.values().map(|fragment| {
+                let parallel_unit_mapping = fragment.vnode_mapping.as_ref().unwrap();
+                ParallelUnitMapping {
+                    fragment_id: fragment.fragment_id,
+                    original_indices: parallel_unit_mapping.original_indices.clone(),
+                    data: parallel_unit_mapping.data.clone(),
+                }
+            })
         })
     }
 }
@@ -85,7 +77,6 @@ pub struct FragmentVNodeInfo {
 
 #[derive(Default)]
 pub struct BuildGraphInfo {
-    pub table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
     pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
 }
 
@@ -520,8 +511,6 @@ where
         for table_id in table_ids {
             match map.get(table_id) {
                 Some(table_fragment) => {
-                    info.table_node_actors
-                        .insert(*table_id, table_fragment.worker_actor_ids());
                     info.table_sink_actor_ids
                         .insert(*table_id, table_fragment.sink_actor_ids());
                 }
