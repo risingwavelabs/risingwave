@@ -164,7 +164,7 @@ impl ExprImpl {
     /// Evaluate the expression on the given input.
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
-    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/3479>
+    /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         backend_expr.eval_row(input).map_err(Into::into)
