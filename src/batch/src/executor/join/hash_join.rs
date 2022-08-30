@@ -1638,8 +1638,7 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
                 right_child,
                 left_key_idxs,
                 right_key_idxs,
-                // TODO: frontend should pass match_null in plan node
-                vec![false; hash_join_node.get_left_key().len()],
+                hash_join_node.get_null_safe().clone(),
                 cond,
                 context.plan_node().get_identity().clone(),
             ),
