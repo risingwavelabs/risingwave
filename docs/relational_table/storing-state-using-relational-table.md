@@ -12,19 +12,7 @@
 
 ## Cell-based Encoding
 
-RisingWave adapts a relational data model. Relational tables, including tables and materialized views, consist of a list of named, strong-typed columns. All streaming executors store their data into a KV state store, which is backed by a service called Hummock. There are two choices to save a relational row into key-value pairs: cell-based format and row-based format. We choose cell-based format for these two reasons:
-
-1. **Reduce the Overhead of DMLs**.
-Cell-based encoding can significantly reduce write amplification since we can partially update some fields in a row. Considering the following streaming aggregation query: 
-```
-select sum(a), count(b), min(c), string_agg(d order by e) from t
-```
-- `sum(a)`, `count(b)` are trivial.
-- `min(c)` is a little difficult. To get the next minimum once the current minimum is deleted, we have to keep all the `c` values, which would be a long list in the row-based format and it performs badly for inserts or deletes.
-- `string_agg(d order by e)` is more difficult. we must keep all the `d` as well as their sort key `e`, and support random inserts or deletes. Again, a flatten list saved in a row would be a bad choice.
-
-
-2. **Better support Semi-structured Data**. RisingWave may support semi-structured data in the future. Semi-structured data consists of nested structures and arrays, which are hard to flatten into row format, but much more simple under cell-based format, simply replace the `column id` to the JSONPath to such field.
+RisingWave adapts a relational data model. Relational tables, including tables and materialized views, consist of a list of named, strong-typed columns. All streaming executors store their data into a KV state store, which is backed by a service called Hummock. There are two choices to save a relational row into key-value pairs: cell-based format and row-based format. We choose row-based format because internal states always read and write the whole row, don't need to partially update some fields in a row. And row-based encoding has better performance than cell-based encoding, which reduce the number of read and write kv pairs. Compared with cell-based encoding, internal tables or materialized views with more columns benefit more from row-based encoding.
 
 We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantics. As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. In short, a cell instead of a whole row is stored as a key-value pair. For example, encoding of some stateful executors in cell-based format is as follows:
 | state | key | value |
