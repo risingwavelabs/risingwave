@@ -40,7 +40,6 @@ const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
 const S3_PART_SIZE: usize = 16 * 1024 * 1024;
 // TODO: we should do some benchmark to determine the proper part size for MinIO
 const MINIO_PART_SIZE: usize = 16 * 1024 * 1024;
-const MAX_S3_PREFIX_BYTE_LEN: u32 = 4;
 
 /// S3 multipart upload handle.
 /// Reference: <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html>
@@ -276,7 +275,7 @@ fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
 pub struct S3ObjectStore {
     client: Client,
     bucket: String,
-    prefix_bytes_len: u32,
+    num_prefixes: u32,
     part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
@@ -285,14 +284,11 @@ pub struct S3ObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
     fn get_object_prefix(&self, obj_id: u64) -> String {
-        if self.prefix_bytes_len == 0 {
+        if self.num_prefixes == 0 {
             return String::default();
         }
-        // pick a prefix from the prefix pool
-        let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());
-        debug_assert!(self.prefix_bytes_len <= MAX_S3_PREFIX_BYTE_LEN);
-        let shifted_hash = crc_hash >> (8 * (MAX_S3_PREFIX_BYTE_LEN - self.prefix_bytes_len));
-        let mut obj_prefix = shifted_hash.to_string();
+        let prefix = crc32fast::hash(&obj_id.to_be_bytes()) % self.num_prefixes;
+        let mut obj_prefix = prefix.to_string();
         obj_prefix.push('/');
         obj_prefix
     }
@@ -500,26 +496,25 @@ impl S3ObjectStore {
     /// Creates an S3 object store from environment variable.
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
-    pub async fn new(
-        bucket: String,
-        prefix_bytes_len: u32,
-        metrics: Arc<ObjectStoreMetrics>,
-    ) -> Self {
+    pub async fn new(bucket: String, num_prefixes: u32, metrics: Arc<ObjectStoreMetrics>) -> Self {
         let shared_config = aws_config::load_from_env().await;
         let client = Client::new(&shared_config);
-        assert!(prefix_bytes_len <= MAX_S3_PREFIX_BYTE_LEN);
 
         Self {
             client,
             bucket,
-            prefix_bytes_len,
+            num_prefixes,
             part_size: S3_PART_SIZE,
             metrics,
         }
     }
 
     /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
-    pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    pub async fn with_minio(
+        server: &str,
+        num_prefixes: u32,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
@@ -541,7 +536,7 @@ impl S3ObjectStore {
         Self {
             client,
             bucket: bucket.to_string(),
-            prefix_bytes_len: 0,
+            num_prefixes,
             part_size: MINIO_PART_SIZE,
             metrics,
         }
@@ -555,32 +550,23 @@ mod tests {
     use crate::object::object_metrics::ObjectStoreMetrics;
     use crate::object::{ObjectStore, S3ObjectStore};
 
-    fn get_hash_of_object(obj_id: u64, prefix_bytes_len: usize) -> u32 {
+    fn get_hash_of_object(obj_id: u64, num_prefixes: u32) -> u32 {
         let crc_hash = crc32fast::hash(&obj_id.to_be_bytes());
-        let bytes = crc_hash.to_be_bytes();
-
-        let hash_bytes = &bytes[0..prefix_bytes_len];
-        let mut hash: u32 = 0;
-
-        for b in hash_bytes {
-            hash <<= 8;
-            hash |= *b as u32;
-        }
-        hash
+        crc_hash % num_prefixes
     }
 
     #[tokio::test]
     async fn test_get_object_prefix() {
-        let prefix_bytes_len = 1;
+        let num_prefixes = 256;
         let store = S3ObjectStore::new(
             "mybucket".to_string(),
-            prefix_bytes_len,
+            num_prefixes,
             Arc::new(ObjectStoreMetrics::unused()),
         )
         .await;
 
         for obj_id in 0..99999 {
-            let hash = get_hash_of_object(obj_id, prefix_bytes_len as usize);
+            let hash = get_hash_of_object(obj_id, num_prefixes);
             let prefix = store.get_object_prefix(obj_id);
             assert_eq!(format!("{}/", hash), prefix);
         }
@@ -591,7 +577,6 @@ mod tests {
             Arc::new(ObjectStoreMetrics::unused()),
         )
         .await;
-
         let obj_id = 101;
         let prefix = store2.get_object_prefix(obj_id);
         assert!(prefix.is_empty());
@@ -599,9 +584,5 @@ mod tests {
         let obj_prefix = String::default();
         let path = format!("{}/{}{}.data", "hummock_001", obj_prefix, 101);
         assert_eq!("hummock_001/101.data", path);
-
-        let obj_prefix = "126/".to_string();
-        let path = format!("{}/{}{}.data", "hummock_001", obj_prefix, 101);
-        assert_eq!("hummock_001/126/101.data", path);
     }
 }

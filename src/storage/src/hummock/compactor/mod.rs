@@ -615,6 +615,7 @@ impl Compactor {
                     inf: false,
                 }),
                 file_size: meta.estimated_size as u64,
+                path_prefix: "".to_string(),
                 table_ids,
             };
 

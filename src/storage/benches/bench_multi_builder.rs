@@ -89,7 +89,7 @@ fn bench_builder(
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
     let object_store = runtime.block_on(async {
-        S3ObjectStore::new(bucket.to_string(), metrics.clone())
+        S3ObjectStore::new(bucket.to_string(), 256, metrics.clone())
             .await
             .monitored(metrics)
     });

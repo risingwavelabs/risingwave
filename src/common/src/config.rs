@@ -144,8 +144,9 @@ pub struct StorageConfig {
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
 
-    #[serde(default = "default::s3_prefix_bytes_len")]
-    pub s3_prefix_bytes_len: u32,
+    /// The number of S3 bucket prefixes
+    #[serde(default = "default::s3_num_prefixes")]
+    pub s3_num_prefixes: u32,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::write_conflict_detection_enabled")]
@@ -283,8 +284,8 @@ mod default {
         "hummock_001".to_string()
     }
 
-    pub fn s3_prefix_bytes_len() -> u32 {
-        1
+    pub fn s3_num_prefixes() -> u32 {
+        256
     }
 
     pub fn write_conflict_detection_enabled() -> bool {

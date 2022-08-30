@@ -36,7 +36,6 @@ pub trait TableBuilderFactory {
 }
 
 pub struct SplitTableOutput {
-    pub sst_size: usize,
     pub sst_id: HummockSstableId,
     pub meta: SstableMeta,
     pub upload_join_handle: UploadJoinHandle,
@@ -151,7 +150,6 @@ where
             let meta = builder_output.meta;
 
             let bloom_filter_size = meta.bloom_filter.len();
-            let sst_size: usize = meta.estimated_size as usize;
 
             if bloom_filter_size != 0 {
                 self.stats
@@ -164,7 +162,6 @@ where
                 .observe(meta.encoded_size() as _);
 
             self.sst_outputs.push(SplitTableOutput {
-                sst_size,
                 sst_id: builder_output.sstable_id,
                 meta,
                 upload_join_handle: builder_output.writer_output,
@@ -172,40 +169,6 @@ where
                 table_ids: builder_output.table_ids,
             });
         }
-
-        // TODO
-        // let upload_join_handle = tokio::spawn(async move {
-        //     if !tracker.try_increase_memory(data.capacity() as u64 + meta.encoded_size() as
-        // u64)     {
-        //         tracing::debug!("failed to allocate increase memory for meta file, sst id:
-        // {}, file size: {}, meta size: {}",             sst_id, data.capacity(),
-        // meta.encoded_size());     }
-        //     let mut sst_info = SstableInfo {
-        //         id: sst_id,
-        //         key_range: Some(risingwave_pb::hummock::KeyRange {
-        //             left: meta.smallest_key.clone(),
-        //             right: meta.largest_key.clone(),
-        //             inf: false,
-        //         }),
-        //         file_size: meta.estimated_size as u64,
-        //         path_prefix: String::default(),
-        //         table_ids,
-        //     };
-        //     let ret = sstable_store.put_sst(sst_id, meta, data, policy).await;
-        //     drop(tracker);
-        //     match ret {
-        //         Ok(path) => {
-        //             let file_name = format!("{}.data", sst_id);
-        //             sst_info.path_prefix = path
-        //                 .strip_suffix(&file_name)
-        //                 .expect("SST file path should have prefix")
-        //                 .to_string();
-        //             Ok(sst_info)
-        //         }
-        //         Err(e) => Err(e),
-        //     }
-        // });
-
         Ok(())
     }
 

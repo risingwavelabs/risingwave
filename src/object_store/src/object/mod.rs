@@ -544,21 +544,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
 pub async fn parse_remote_object_store(
     url: &str,
-    s3_prefix_bytes_len: u32,
+    num_prefixes: u32,
     metrics: Arc<ObjectStoreMetrics>,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
             S3ObjectStore::new(
                 s3.strip_prefix("s3://").unwrap().to_string(),
-                s3_prefix_bytes_len,
+                num_prefixes,
                 metrics.clone(),
             )
             .await
             .monitored(metrics),
         ),
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
-            S3ObjectStore::with_minio(minio, metrics.clone())
+            S3ObjectStore::with_minio(minio, num_prefixes, metrics.clone())
                 .await
                 .monitored(metrics),
         ),
