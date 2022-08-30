@@ -38,7 +38,7 @@ use tokio::spawn;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
-use tracing::error;
+use tracing::{error, warn};
 use StageEvent::Failed;
 
 use crate::optimizer::plan_node::PlanNodeType;
@@ -275,10 +275,9 @@ impl StageRunner {
 
     /// Send stage event to listener.
     async fn send_event(&self, event: QueryMessage) {
-        self.msg_sender
-            .send(event)
-            .await
-            .expect("Always expect that the channel should be able to send event")
+        if let Err(e) = self.msg_sender.send(event).await {
+            warn!("Failed to send event to Query Runner, may be killed by previous failed event");
+        }
     }
 
     /// Schedule all tasks to CN and wait process all status messages from RPC. Note that when all
