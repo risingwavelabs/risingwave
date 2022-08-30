@@ -278,42 +278,42 @@
     select min(v1), (select max(v2)) from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t group by v2;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated agg column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select max(v2));
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t group by v2 having min(v1) > (select v2);
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select v2);
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated agg column belongs to outer query */
     create table t (v1 int, v2 int);
@@ -324,7 +324,7 @@
     from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* uncorrelated subquery in HAVING */
     create table a (a1 int, a2 int);
@@ -358,7 +358,7 @@
     );
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated column with depth>1 in HAVING */
     create table a (a1 int, a2 int);
@@ -371,7 +371,7 @@
     );
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);

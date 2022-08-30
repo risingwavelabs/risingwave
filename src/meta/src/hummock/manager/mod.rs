@@ -31,6 +31,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
     HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
 };
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -635,11 +636,10 @@ where
             );
 
             commit_multi_var!(self, None, hummock_version_deltas)?;
-
             current_version.apply_version_delta(&version_delta);
 
             // this task has been finished and `trivial_move_task` does not need to be schedule.
-            compact_task.task_status = true;
+            compact_task.set_task_status(TaskStatus::Success);
             self.env
                 .notification_manager()
                 .notify_compute_asynchronously(
@@ -717,8 +717,10 @@ where
                 .await
                 .compaction_filter_mask;
             commit_multi_var!(self, None, compact_status)?;
+
             // this task has been finished.
-            compact_task.task_status = false;
+            compact_task.set_task_status(TaskStatus::Pending);
+
             trigger_sst_stat(
                 &self.metrics,
                 Some(
@@ -750,7 +752,7 @@ where
 
     /// Cancels a compaction task no matter it's assigned or unassigned.
     pub async fn cancel_compact_task(&self, compact_task: &mut CompactTask) -> Result<bool> {
-        compact_task.task_status = false;
+        compact_task.set_task_status(TaskStatus::Canceled);
         self.report_compact_task_impl(None, compact_task).await
     }
 
@@ -762,7 +764,7 @@ where
             .get_compact_task_impl(compaction_group_id, None)
             .await?
         {
-            if !task.task_status {
+            if let TaskStatus::Pending = task.task_status() {
                 return Ok(Some(task));
             }
             assert!(CompactStatus::is_trivial_move_task(&task));
@@ -880,7 +882,12 @@ where
             }
         }
         compact_status.report_compact_task(compact_task);
-        if compact_task.task_status {
+        let task_status = compact_task.task_status();
+        debug_assert!(
+            task_status != TaskStatus::Pending,
+            "report pending compaction task"
+        );
+        if let TaskStatus::Success = task_status {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
             let versioning = versioning_guard.deref_mut();
@@ -918,9 +925,21 @@ where
                     }),
                 );
         } else {
-            // The compaction task is cancelled.
+            // The compaction task is cancelled or failed.
             commit_multi_var!(self, context_id, compact_status, compact_task_assignment)?;
         }
+
+        // Update compaaction task count.
+        let task_label = match task_status {
+            TaskStatus::Success => "success",
+            TaskStatus::Failed => "failed",
+            TaskStatus::Canceled => "canceled",
+            _ => unreachable!(),
+        };
+        self.metrics
+            .compact_frequency
+            .with_label_values(&[&compact_task.compaction_group_id.to_string(), task_label])
+            .inc();
 
         tracing::trace!(
             "Reported compaction task. {}. cost time: {:?}",

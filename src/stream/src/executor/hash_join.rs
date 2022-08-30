@@ -394,7 +394,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        // TODO: enable sanity check for hash join executor <https://github.com/singularity-data/risingwave/issues/3887>
+        // TODO: enable sanity check for hash join executor <https://github.com/risingwavelabs/risingwave/issues/3887>
         state_table_l.disable_sanity_check();
         state_table_r.disable_sanity_check();
 

@@ -170,6 +170,12 @@ message TableOption {
 }
 
 message CompactTask {
+  enum TaskStatus {
+    PENDING = 0;
+    SUCCESS = 1;
+    FAILED = 2;
+    CANCELED = 3;
+  }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
   // In ideal case, the compaction will generate `splits.len()` tables which have key range
@@ -184,7 +190,7 @@ message CompactTask {
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
-  bool task_status = 9;
+  TaskStatus task_status = 9;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;
   // existing_table_ids for compaction drop key
