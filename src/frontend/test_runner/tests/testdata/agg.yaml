@@ -124,7 +124,7 @@
     select avg(sum(v1 + v2)) from t group by v1 + v2;
   planner_error: |-
     Feature is not yet implemented: aggregate function inside aggregation calls
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     /* test logical_agg with complex select expression */
     create table t(v1 int, v2 int);
@@ -659,3 +659,106 @@
         LogicalProject { exprs: [t.x, t.y, flag] }
           LogicalExpand { column_subsets: [[t.x], [t.y]] }
             LogicalScan { table: t, columns: [t.x, t.y] }
+- sql: |
+    /* agg filter: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) filter (where (select true)) from a;
+  binder_error: 'Invalid input syntax: subquery in filter clause is not supported'
+- sql: |
+    /* agg filter: agg */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    select 1 from a having exists(
+      select count(b1) filter (where min(a1) < 3) from b
+    );
+  binder_error: 'Invalid input syntax: aggregation function in filter clause is not
+    supported'
+- sql: |
+    /* agg filter: table function */
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) filter (where unnest(array[1]) < 1) from a;
+  binder_error: 'Invalid input syntax: table function in filter clause is not supported'
+- sql: |
+    /* agg order by: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select string_agg('', '' order by (select true)) from a;
+  planner_error: |-
+    Feature is not yet implemented: subquery inside aggregation calls order by
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg order by: agg */
+    create table a (a1 int, a2 int);
+    create table sb (b1 varchar, b2 varchar);
+    select 1 from a having exists(
+      select string_agg(b1, '' order by min(a1)) from sb -- valid in PostgreSQL
+      -- select string_agg('', '' order by min(a1)) from sb -- NOT valid in PostgreSQL
+    );
+  planner_error: |-
+    Feature is not yet implemented: aggregate function inside aggregation calls order by
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg order by: table function */
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select string_agg('', '' order by unnest(array[1])) from a;
+  planner_error: |-
+    Feature is not yet implemented: table function inside aggregation calls order by
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg input: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1 + (select 1)) from a;
+  planner_error: |-
+    Feature is not yet implemented: subquery inside aggregation calls
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* agg input: agg */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    select 1 from a having exists(
+      select count(b1 + min(a1)) from b
+    );
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+- sql: |
+    /* agg input: table function */
+    /* This case is NOT valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1 + unnest(array[1])) from a;
+  planner_error: |-
+    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
+- sql: |
+    /* group by: subquery */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) from a group by (select true);
+  planner_error: |-
+    Feature is not yet implemented: subquery inside GROUP BY
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    /* group by: agg */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    create table b (b1 int, b2 int);
+    select 1 from a having exists(
+      select count(b1) from b group by min(a1)
+    );
+  planner_error: |-
+    Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
+- sql: |
+    /* group by: table function */
+    /* This case is valid in PostgreSQL */
+    create table a (a1 int, a2 int);
+    select count(a1) from a group by unnest(array[1]);
+  planner_error: |-
+    Feature is not yet implemented: Table functions in agg call or group by is not supported yet
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/3814
