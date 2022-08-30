@@ -1921,7 +1921,7 @@ mod tests {
             )
         }
 
-        fn create_join_executor(&self, has_non_equi_cond: bool) -> BoxedExecutor {
+        fn create_join_executor(&self, has_non_equi_cond: bool, null_safe: bool) -> BoxedExecutor {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -1947,14 +1947,14 @@ mod tests {
                 right_child,
                 vec![0],
                 vec![0],
-                vec![false],
+                vec![null_safe],
                 cond,
                 "HashJoinExecutor".to_string(),
             ))
         }
 
-        async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool) {
-            let join_executor = self.create_join_executor(has_non_equi_cond);
+        async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool, null_safe: bool) {
+            let join_executor = self.create_join_executor(has_non_equi_cond, null_safe);
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
@@ -2005,7 +2005,52 @@ mod tests {
              3   .   3   .",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select * from t1 join t2 on t1.v1 is not distinct from t2.v1;
+    /// ```
+    #[tokio::test]
+    async fn test_null_safe_inner_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::Inner);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             2    .  2     .
+             .  8.4  .  8.18
+             .  8.4  .  9.6
+             .  8.4  .  9.1
+             .  8.4  .  8
+             .  8.4  .  3.5
+             .  8.4  .  8.9
+             3  3.9  3  3.7
+             3  3.9  3     .
+             .    .  .  8.18
+             .    .  .  9.6
+             .    .  .  9.1
+             .    .  .  8
+             .    .  .  3.5
+             .    .  .  8.9
+             4  6.6  4  7.5
+             3    .  3  3.7
+             3    .  3     .
+             .  0.7  .  8.18
+             .  0.7  .  9.6
+             .  0.7  .  9.1
+             .  0.7  .  8
+             .  0.7  .  3.5
+             .  0.7  .  8.9
+             .  5.5  .  8.18
+             .  5.5  .  9.6
+             .  5.5  .  9.1
+             .  5.5  .  8
+             .  5.5  .  3.5
+             .  5.5  .  8.9",
+        );
+
+        test_fixture.do_test(expected_chunk, false, true).await;
     }
 
     /// Sql:
@@ -2021,7 +2066,7 @@ mod tests {
              4   6.6 4   7.5",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     /// Sql:
@@ -2048,7 +2093,7 @@ mod tests {
              .   5.5 .   .",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
     }
 
     /// Sql:
@@ -2073,7 +2118,7 @@ mod tests {
              .   5.5 .   .",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     /// Sql:
@@ -2108,7 +2153,7 @@ mod tests {
              .   .   200 .",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
     }
 
     /// Sql:
@@ -2141,7 +2186,7 @@ mod tests {
              .   .   200 .",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     /// ```sql
@@ -2181,7 +2226,7 @@ mod tests {
              .   .   200 .",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
     }
 
     /// ```sql
@@ -2222,7 +2267,7 @@ mod tests {
              .   .   200 .",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     #[tokio::test]
@@ -2239,7 +2284,7 @@ mod tests {
              .   5.5",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
     }
 
     #[tokio::test]
@@ -2259,7 +2304,7 @@ mod tests {
              .   5.5",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     #[tokio::test]
@@ -2274,7 +2319,7 @@ mod tests {
              3   .",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
     }
 
     #[tokio::test]
@@ -2286,7 +2331,7 @@ mod tests {
              4   6.6",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     #[tokio::test]
@@ -2311,7 +2356,7 @@ mod tests {
              200 .",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
     }
 
     #[tokio::test]
@@ -2339,7 +2384,7 @@ mod tests {
              200 .",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     #[tokio::test]
@@ -2354,7 +2399,7 @@ mod tests {
              3   3.7",
         );
 
-        test_fixture.do_test(expected_chunk, false).await;
+        test_fixture.do_test(expected_chunk, false, false).await;
     }
 
     #[tokio::test]
@@ -2366,7 +2411,7 @@ mod tests {
              4   7.5",
         );
 
-        test_fixture.do_test(expected_chunk, true).await;
+        test_fixture.do_test(expected_chunk, true, false).await;
     }
 
     #[tokio::test]
