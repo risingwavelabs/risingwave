@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
 use risingwave_common::types::*;
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
+use crate::Result;
 
+#[derive(Clone)]
 pub struct CountStar {
     return_type: DataType,
     filter: ExpressionRef,
@@ -102,7 +104,7 @@ impl Aggregator for CountStar {
         let res = std::mem::replace(&mut self.result, 0) as i64;
         match builder {
             ArrayBuilderImpl::Int64(b) => b.append(Some(res)).map_err(Into::into),
-            _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
+            _ => bail!("Unexpected builder for count(*)."),
         }
     }
 }

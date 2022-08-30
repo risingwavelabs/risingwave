@@ -8,11 +8,14 @@ edition = "2021"
 async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
+itertools = "0.10"
 regex = "1.5"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
 tracing = "0.1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
-tokio-postgres = { version = "0.2", package = "madsim-tokio-postgres" }
+tokio-postgres = "0.7.7"

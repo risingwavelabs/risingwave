@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod mem_table;
-pub mod state_table;
-pub mod storage_table;
-
-#[cfg(test)]
-pub mod test_relational_table;
+// pub mod storage_table;
+pub mod batch_table;
+pub mod streaming_table;
 
 use std::sync::Arc;
 
@@ -26,10 +23,11 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 
 use crate::error::StorageResult;
-use crate::table::storage_table::DEFAULT_VNODE;
+/// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
+pub const DEFAULT_VNODE: VirtualNode = 0;
 
 /// Represents the distribution for a specific table instance.
 #[derive(Debug)]

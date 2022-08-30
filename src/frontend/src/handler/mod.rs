@@ -60,9 +60,9 @@ pub async fn handle(
     match stmt {
         Statement::Explain {
             statement,
-            verbose,
-            trace,
-            ..
+            describe_alias: _,
+            analyze,
+            options,
         } => {
             match statement.as_ref() {
                 Statement::CreateTable { with_options, .. }
@@ -74,7 +74,7 @@ pub async fn handle(
                 _ => {}
             }
 
-            explain::handle_explain(context, *statement, verbose, trace)
+            explain::handle_explain(context, *statement, options, analyze)
         }
         Statement::CreateSource {
             is_materialized,

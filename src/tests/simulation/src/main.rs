@@ -13,7 +13,9 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
+#![feature(once_cell)]
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use clap::Parser;
@@ -48,20 +50,42 @@ pub struct Args {
     #[clap(long, default_value = "3")]
     compute_nodes: usize,
 
+    /// The number of compactor nodes.
+    #[clap(long, default_value = "1")]
+    compactor_nodes: usize,
+
     /// The number of CPU cores for each compute node.
     ///
     /// This determines worker_node_parallelism.
     #[clap(long, default_value = "2")]
     compute_node_cores: usize,
 
+    /// The number of clients to run simultaneously.
+    ///
+    /// If this argument is set, the runner will implicitly create a database for each test file.
     #[clap(short, long)]
     jobs: Option<usize>,
+
+    /// Randomly kill a compute node after each query.
+    ///
+    /// Only available when `-j` is not set.
+    #[clap(long)]
+    kill_node: bool,
+
+    /// The number of sqlsmith test cases to generate.
+    ///
+    /// If this argument is set, the `files` argument refers to a directory containing sqlsmith
+    /// test data.
+    #[clap(long)]
+    sqlsmith: Option<usize>,
 }
+
+static ARGS: LazyLock<Args> = LazyLock::new(Args::parse);
 
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
-    let args = Args::parse();
+    let args = &*ARGS;
 
     let handle = madsim::runtime::Handle::current();
     println!("seed = {}", handle.seed());
@@ -75,6 +99,8 @@ async fn main() {
         .init(|| async {
             let opts = risingwave_meta::MetaNodeOpts::parse_from([
                 "meta-node",
+                // "--config-path",
+                // "src/config/risingwave.toml",
                 "--listen-addr",
                 "0.0.0.0:5690",
             ]);
@@ -109,7 +135,7 @@ async fn main() {
 
     // compute node
     for i in 1..=args.compute_nodes {
-        handle
+        let mut builder = handle
             .create_node()
             .name(format!("compute-{i}"))
             .ip([192, 168, 3, i as u8].into())
@@ -117,6 +143,8 @@ async fn main() {
             .init(move || async move {
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from([
                     "compute-node",
+                    // "--config-path",
+                    // "src/config/risingwave.toml",
                     "--host",
                     "0.0.0.0:5688",
                     "--client-address",
@@ -127,9 +155,38 @@ async fn main() {
                     "hummock+memory-shared",
                 ]);
                 risingwave_compute::start(opts).await
+            });
+        if args.kill_node {
+            builder = builder.restart_on_panic();
+        }
+        builder.build();
+    }
+
+    // compactor node
+    for i in 1..=args.compactor_nodes {
+        handle
+            .create_node()
+            .name(format!("compactor-{i}"))
+            .ip([192, 168, 4, i as u8].into())
+            .init(move || async move {
+                let opts = risingwave_compactor::CompactorOpts::parse_from([
+                    "compactor-node",
+                    // "--config-path",
+                    // "src/config/risingwave.toml",
+                    "--host",
+                    "0.0.0.0:6660",
+                    "--client-address",
+                    &format!("192.168.4.{i}:6660"),
+                    "--meta-address",
+                    "192.168.1.1:5690",
+                    "--state-store",
+                    "hummock+memory-shared",
+                ]);
+                risingwave_compactor::start(opts).await
             })
             .build();
     }
+
     // wait for the service to be ready
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     // client
@@ -138,6 +195,20 @@ async fn main() {
         .name("client")
         .ip([192, 168, 100, 1].into())
         .build();
+
+    if let Some(count) = args.sqlsmith {
+        client_node
+            .spawn(async move {
+                let i = rand::thread_rng().gen_range(0..frontend_ip.len());
+                let host = frontend_ip[i].clone();
+                let rw = Risingwave::connect(host, "dev".into()).await;
+                risingwave_sqlsmith::runner::run(&rw.client, &args.files, count).await;
+            })
+            .await
+            .unwrap();
+        return;
+    }
+
     client_node
         .spawn(async move {
             let glob = &args.files;
@@ -154,9 +225,59 @@ async fn main() {
         .unwrap();
 }
 
+#[cfg(madsim)]
+async fn kill_node() {
+    if rand::thread_rng().gen_range(0.0..1.0) < 0.0 {
+        // kill a frontend (disabled)
+        // FIXME: handle postgres connection error
+        let i = rand::thread_rng().gen_range(1..=ARGS.frontend_nodes);
+        let name = format!("frontend-{}", i);
+        tracing::info!("restart {name}");
+        madsim::runtime::Handle::current().restart(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    } else {
+        // kill a compute node
+        let i = rand::thread_rng().gen_range(1..=ARGS.compute_nodes);
+        let name = format!("compute-{}", i);
+        tracing::info!("kill {name}");
+        madsim::runtime::Handle::current().kill(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        tracing::info!("restart {name}");
+        madsim::runtime::Handle::current().restart(&name);
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    }
+}
+
+#[cfg(not(madsim))]
+async fn kill_node() {}
+
+struct HookImpl;
+
+#[async_trait::async_trait]
+impl sqllogictest::Hook for HookImpl {
+    async fn on_stmt_complete(&mut self, _sql: &str) {
+        kill_node().await;
+    }
+
+    async fn on_query_complete(&mut self, _sql: &str) {
+        kill_node().await;
+    }
+}
+
 async fn run_slt_task(glob: &str, host: &str) {
-    let mut tester =
-        sqllogictest::Runner::new(Postgres::connect(host.to_string(), "dev".to_string()).await);
+    let risingwave = Risingwave::connect(host.to_string(), "dev".to_string()).await;
+    if ARGS.kill_node {
+        risingwave
+            .client
+            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
+            .await
+            .expect("failed to set");
+    }
+    let mut tester = sqllogictest::Runner::new(risingwave);
+    if ARGS.kill_node {
+        tester.set_hook(HookImpl);
+    }
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         let file = file.unwrap();
@@ -172,19 +293,19 @@ async fn run_parallel_slt_task(
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
     let i = rand::thread_rng().gen_range(0..hosts.len());
-    let db = Postgres::connect(hosts[i].clone(), "dev".to_string()).await;
+    let db = Risingwave::connect(hosts[i].clone(), "dev".to_string()).await;
     let mut tester = sqllogictest::Runner::new(db);
     tester
-        .run_parallel_async(glob, hosts.to_vec(), Postgres::connect, jobs)
+        .run_parallel_async(glob, hosts.to_vec(), Risingwave::connect, jobs)
         .await
 }
 
-struct Postgres {
+struct Risingwave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
 }
 
-impl Postgres {
+impl Risingwave {
     async fn connect(host: String, dbname: String) -> Self {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
@@ -198,18 +319,18 @@ impl Postgres {
         let task = tokio::spawn(async move {
             connection.await.expect("Postgres connection error");
         });
-        Postgres { client, task }
+        Risingwave { client, task }
     }
 }
 
-impl Drop for Postgres {
+impl Drop for Risingwave {
     fn drop(&mut self) {
         self.task.abort();
     }
 }
 
 #[async_trait::async_trait]
-impl sqllogictest::AsyncDB for Postgres {
+impl sqllogictest::AsyncDB for Risingwave {
     type Error = tokio_postgres::error::Error;
 
     async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {

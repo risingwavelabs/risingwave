@@ -49,14 +49,16 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod store;
 pub mod vacuum;
+mod validator;
 pub mod value;
-
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+pub use validator::*;
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -89,6 +91,7 @@ pub struct HummockStorage {
 
     sstable_id_manager: SstableIdManagerRef,
 
+    #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
@@ -149,6 +152,7 @@ impl HummockStorage {
             stats,
             compaction_group_client,
             sstable_id_manager,
+            #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
         };
         Ok(instance)

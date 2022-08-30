@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
 use crate::hummock::local_version_manager::SyncResult;
@@ -193,7 +194,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 
     /// Waits until the epoch is committed and its data is ready to read.
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_>;
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.
     /// If the epoch is None, all buffered data will be synced.

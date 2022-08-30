@@ -21,13 +21,16 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
-use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
+use super::{
+    CompressionAlgorithm, HummockResult, InMemWriter, SstableMeta, SstableWriteMode,
+    SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
+};
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef, SstableStoreWrite,
+    SstableStoreRef,
 };
 use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
@@ -98,17 +101,51 @@ pub fn default_builder_opt_for_test() -> SstableBuilderOptions {
     }
 }
 
+pub fn default_writer_opt_for_test() -> SstableWriterOptions {
+    SstableWriterOptions {
+        mode: SstableWriteMode::Batch,
+        capacity_hint: None,
+        tracker: None,
+    }
+}
+
+pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> Box<InMemWriter> {
+    Box::new(InMemWriter::from(opt))
+}
+
 /// Generates sstable data and metadata from given `kv_iter`
 pub fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta, Vec<u32>) {
-    let mut b = SstableBuilder::new_for_test(0, opts);
+    let mut b = SstableBuilder::new_for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key, value.as_slice())
+        b.add(&key, value.as_slice()).unwrap();
     }
-    let (_, data, meta, table_ids) = b.finish();
-    (data, meta, table_ids)
+    let output = b.finish().unwrap();
+    (output.writer_output, output.meta, output.table_ids)
+}
+
+/// Write the data and meta to `sstable_store`.
+pub async fn put_sst(
+    sst_id: HummockSstableId,
+    data: Bytes,
+    meta: SstableMeta,
+    sstable_store: SstableStoreRef,
+    options: SstableWriterOptions,
+) -> HummockResult<()> {
+    let mut writer = sstable_store
+        .clone()
+        .create_sst_writer(sst_id, CachePolicy::NotFill, options)
+        .await?;
+    for block_meta in &meta.block_metas {
+        let offset = block_meta.offset as usize;
+        let end_offset = offset + block_meta.len as usize;
+        writer.write_block(&data[offset..end_offset], block_meta)?;
+    }
+    let writer_output = writer.finish(meta.block_metas.len() as u32)?;
+    writer_output.await.unwrap()?;
+    sstable_store.put_sst_meta(sst_id, meta).await
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -119,10 +156,25 @@ pub async fn gen_test_sstable_inner(
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
 ) -> Sstable {
-    let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable::new(sst_id, meta.clone());
+    let writer_opts = SstableWriterOptions {
+        mode: SstableWriteMode::Batch,
+        capacity_hint: None,
+        tracker: None,
+    };
+    let writer = sstable_store
+        .clone()
+        .create_sst_writer(sst_id, policy, writer_opts)
+        .await
+        .unwrap();
+    let mut b = SstableBuilder::new_for_test(sst_id, writer, opts);
+    for (key, value) in kv_iter {
+        b.add(&key, value.as_slice()).unwrap();
+    }
+    let output = b.finish().unwrap();
+    output.writer_output.await.unwrap().unwrap();
+    let sst = Sstable::new(sst_id, output.meta.clone());
     sstable_store
-        .put_sst(sst_id, meta, data, policy)
+        .put_sst_meta(sst_id, output.meta)
         .await
         .unwrap();
     sst

@@ -34,7 +34,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
 
-        let source_id = TableId::new(node.table_id);
+        let source_id = TableId::new(node.source_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
         let column_ids: Vec<_> = node
@@ -52,7 +52,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             Field::with_name(column_desc.data_type.clone(), column_desc.name.clone())
         }));
         let schema = Schema::new(fields);
-        let keyspace = Keyspace::table_root(store, &source_id);
+        let keyspace = Keyspace::table_root(store, &TableId::new(node.state_table_id));
         let vnodes = params
             .vnode_bitmap
             .expect("vnodes not set for source executor");
