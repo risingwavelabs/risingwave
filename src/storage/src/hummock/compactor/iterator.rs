@@ -259,11 +259,54 @@ impl SstableStreamIterator {
     }
 }
 
+/// Extension of default [`Option`] type so that we can use two different types of iterators.
+enum SstIterOption {
+    None,
+    Prefetch(SstablePrefetchIterator),
+    Stream(SstableStreamIterator),
+}
+
+impl SstIterOption {
+    async fn next(&mut self) -> HummockResult<()> {
+        match self {
+            Self::None => panic!("no table iter"),
+            Self::Prefetch(iter) => iter.next(),
+            Self::Stream(iter) => iter.next().await,
+        }
+    }
+
+    fn key(&self) -> &[u8] {
+        match self {
+            Self::None => panic!("no table iter"),
+            Self::Prefetch(iter) => iter.key(),
+            Self::Stream(iter) => iter.key(),
+        }
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        match self {
+            Self::None => panic!("no table iter"),
+            Self::Prefetch(iter) => iter.value(),
+            Self::Stream(iter) => iter.value(),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        match self {
+            Self::None => false,
+            Self::Prefetch(iter) => iter.is_valid(),
+            Self::Stream(iter) => iter.is_valid(),
+        }
+    }
+}
+
+/// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
+/// be consecutive and non-overlapping.
 pub struct ConcatSstableIterator {
     key_range: KeyRange,
 
     /// The iterator of the current table.
-    sstable_iter: Option<SstablePrefetchIterator>,
+    sstable_iter: SstIterOption,
 
     /// Current table index.
     cur_idx: usize,
@@ -287,7 +330,7 @@ impl ConcatSstableIterator {
     ) -> Self {
         Self {
             key_range,
-            sstable_iter: None,
+            sstable_iter: SstIterOption::None,
             cur_idx: 0,
             tables,
             sstable_store,
@@ -297,10 +340,9 @@ impl ConcatSstableIterator {
 
     /// Seeks to a table, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.tables.len() {
-            self.sstable_iter = None;
-        } else {
-            self.sstable_iter.take();
+        self.sstable_iter = SstIterOption::None;
+
+        if idx < self.tables.len() {
             let table = self
                 .sstable_store
                 .sstable(self.tables[idx].id, &mut self.stats)
@@ -354,8 +396,8 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
-            let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next()?;
+            let sstable_iter = sstable_iter.as_mut().expect("no table iter");
+            self.sstable_iter.next()?;
 
             if sstable_iter.is_valid() {
                 Ok(())
@@ -375,11 +417,11 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     fn key(&self) -> &[u8] {
-        self.sstable_iter.as_ref().expect("no table iter").key()
+        self.sstable_iter.key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        self.sstable_iter.as_ref().expect("no table iter").value()
+        self.sstable_iter.value()
     }
 
     fn is_valid(&self) -> bool {
