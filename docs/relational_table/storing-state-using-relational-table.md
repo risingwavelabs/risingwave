@@ -1,7 +1,7 @@
 # Storing State Using Relational Table
 
 - [Storing State Using Relational Table](#storing-state-using-relational-table)
-  - [Cell-based Encoding](#cell-based-encoding)
+  - [Row-based Encoding](#cell-based-encoding)
   - [Relational Table Layer](#relational-table-layer)
     - [Write Path](#write-path)
     - [Read Path](#read-path)
@@ -10,17 +10,17 @@
 
 <!-- Created by https://github.com/ekalinin/github-markdown-toc -->
 
-## Cell-based Encoding
+## Row-based Encoding
 
-RisingWave adapts a relational data model. Relational tables, including tables and materialized views, consist of a list of named, strong-typed columns. All streaming executors store their data into a KV state store, which is backed by a service called Hummock. There are two choices to save a relational row into key-value pairs: cell-based format and row-based format. We choose row-based format because internal states always read and write the whole row, don't need to partially update some fields in a row. And row-based encoding has better performance than cell-based encoding, which reduce the number of read and write kv pairs. Compared with cell-based encoding, internal tables or materialized views with more columns benefit more from row-based encoding.
+RisingWave adapts a relational data model. Relational tables, including tables and materialized views, consist of a list of named, strong-typed columns. All streaming executors store their data into a KV state store, which is backed by a service called Hummock. There are two choices to save a relational row into key-value pairs: cell-based format and row-based format. We choose row-based format because internal states always read and write the whole row, and don't need to partially update some fields in a row. Row-based encoding has better performance than cell-based encoding, which reduce the number of read and write kv pairs. Compared with cell-based encoding, internal tables or materialized views with more columns benefit more from row-based encoding.
 
-We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantics. As the executor state's key encoding is very similar to a cell-based table, each kind of state is stored as a cell-based relational table first. In short, a cell instead of a whole row is stored as a key-value pair. For example, encoding of some stateful executors in cell-based format is as follows:
+We implement a relational table layer as the bridge between stateful executors and KV state store, which provides the interfaces accessing KV data in relational semantics. As the executor state's key encoding is very similar to a row-based table, each kind of state is stored as a row-based relational table first. In short, one row is stored as a key-value pair. For example, encoding of some stateful executors in row-based format is as follows:
 | state | key | value |
 | ------ | --------------------- | ------ |
-| mv     | table_id \| sort key \| pk \| col_id| materialized value |
-| top n | table_id \| sort key \| pk \| col_id | materialized value |
-| join     | table_id \| join_key \| pk \| col_id| materialized value |
-| agg | table_id \| group_key \| col_id| agg_value |
+| mv     | table_id \| sort key \| pk | materialized value |
+| top n | table_id \| sort key \| pk| materialized value |
+| join     | table_id \| join_key \| pk | materialized value |
+| agg | table_id \| group_key | agg_value |
 
 For the detailed schema, please check [doc](relational-table-schema.md)
 
@@ -30,7 +30,7 @@ For the detailed schema, please check [doc](relational-table-schema.md)
 
 In this part, we will introduce how stateful executors interact with KV state store through the relational table layer.
 
-Relational table layer consists of State Table, Mem Table and Storage Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, which are the read and write interfaces for executors. The Mem Table is an in-memory buffer for caching table operations during one epoch, and the Storage Table is responsible for writing row operations into kv pairs, which performs serialization and deserialization between cell-based encoding and KV encoding.
+Relational table layer consists of State Table, Mem Table and Storage Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, which are the read and write interfaces for streaming executors. The Mem Table is an in-memory buffer for caching table operations during one epoch. The Storage Table is read only, and used in batch mode.
 
 
 ![Overview of Relational Table](../images/relational-table-layer/relational-table-01.svg)
