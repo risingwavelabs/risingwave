@@ -210,6 +210,7 @@ message HashJoinNode {
   bool is_append_only = 8;
   // The output indices of current node
   repeated uint32 output_indices = 9;
+  repeated bool null_safe = 10;
 }
 
 message DynamicFilterNode {
