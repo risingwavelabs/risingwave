@@ -53,15 +53,27 @@ impl Default for JoinEntryState {
 impl JoinEntryState {
     // Insert into the cache and flush buffer.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        self.content_estimate_size += key.estimate_size() + value.estimate_size();
-        self.cached.insert(key, value);
+        let estimate_sizes = (key.estimate_size(), value.estimate_size());
+
+        if let Some(old_value) = self.cached.insert(key, value) {
+            self.content_estimate_size = self
+                .content_estimate_size
+                .saturating_add(estimate_sizes.1)
+                .saturating_sub(old_value.estimate_size());
+        } else {
+            self.content_estimate_size = self
+                .content_estimate_size
+                .saturating_add(estimate_sizes.0)
+                .saturating_sub(estimate_sizes.1);
+        }
     }
 
     pub fn remove(&mut self, pk: PkType) {
         if let Some(value) = self.cached.remove(&pk) {
             self.content_estimate_size = self
                 .content_estimate_size
-                .saturating_sub(pk.estimate_size() + value.estimate_size())
+                .saturating_sub(pk.estimate_size())
+                .saturating_sub(value.estimate_size())
         }
     }
 
@@ -75,7 +87,7 @@ impl JoinEntryState {
         self.cached.values()
     }
 
-    /// Note: To make the estimcate size correct, the caller should ensure that it does not mutate
+    /// Note: To make the estimcate size accurate, the caller should ensure that it does not mutate
     /// the estimate size of the [`StateValueType`].
     pub fn values_mut<'a, 'b: 'a>(
         &'a mut self,
