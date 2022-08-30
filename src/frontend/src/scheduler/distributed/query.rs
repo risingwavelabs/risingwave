@@ -433,6 +433,7 @@ mod tests {
                             index: 2,
                             data_type: DataType::Int32,
                         },
+                        false,
                     ),
                     (
                         InputRef {
@@ -443,6 +444,7 @@ mod tests {
                             index: 3,
                             data_type: DataType::Float64,
                         },
+                        false,
                     ),
                 ],
                 2,

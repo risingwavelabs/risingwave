@@ -389,6 +389,21 @@ impl ExprImpl {
         }
     }
 
+    pub fn as_is_not_distinct_from_cond(&self) -> Option<(InputRef, InputRef)> {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::IsNotDistinctFrom
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+        {
+            if x.index() < y.index() {
+                Some((*x, *y))
+            } else {
+                Some((*y, *x))
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
         fn reverse_comparison(comparison: ExprType) -> ExprType {
             match comparison {
