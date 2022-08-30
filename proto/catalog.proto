@@ -7,6 +7,9 @@ import "plan_common.proto";
 
 option optimize_for = SPEED;
 
+// The rust prost library always treats uint64 as required and message as optional.
+// In order to allow `row_id_index` as optional field in `StreamSourceInfo` and `TableSourceInfo`,
+// we wrap uint64 inside this message.
 message ColumnIndex {
   uint64 index = 1;
 }

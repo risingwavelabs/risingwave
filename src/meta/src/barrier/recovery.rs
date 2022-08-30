@@ -79,12 +79,10 @@ where
             let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
-            {
-                // Migrate expired actors to newly joined node by changing actor_map
-                let migrated = self.migrate_actors(&info).await?;
-                if migrated {
-                    info = self.resolve_actor_info_for_recovery().await;
-                }
+            // Migrate expired actors to newly joined node by changing actor_map
+            let migrated = self.migrate_actors(&info).await?;
+            if migrated {
+                info = self.resolve_actor_info_for_recovery().await;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
