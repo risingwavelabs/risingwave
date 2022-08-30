@@ -83,6 +83,9 @@ impl Aggregator for Filter {
             // call `update_multi` for potential optimization
             self.inner.update_multi(input, start_row_id, end_row_id)
         } else {
+            // TODO(yuchao): we might want to pass visibility bitmap to the
+            // inner aggregator, or re-compact the input chunk after filtering.
+            // https://github.com/risingwavelabs/risingwave/pull/4972#discussion_r958013816
             for (_, row_id) in (start_row_id..end_row_id)
                 .enumerate()
                 .filter(|(i, _)| bitmap.is_set(*i).unwrap())
