@@ -24,7 +24,7 @@ pub struct StoreLocalStatistic {
     pub cache_meta_block_total: u64,
 
     // include multiple versions of one key.
-    pub scan_key_count: u64,
+    pub skip_key_count: u64,
     pub processed_key_count: u64,
     pub bloom_filter_true_negative_count: u64,
     pub remote_io_time: Arc<AtomicU64>,
@@ -39,7 +39,7 @@ impl StoreLocalStatistic {
         self.cache_data_block_miss += other.cache_data_block_miss;
         self.cache_data_block_total += other.cache_data_block_total;
 
-        self.scan_key_count += other.scan_key_count;
+        self.skip_key_count += other.skip_key_count;
         self.processed_key_count += other.processed_key_count;
         self.bloom_filter_true_negative_count += other.bloom_filter_true_negative_count;
         self.remote_io_time.fetch_add(
@@ -93,6 +93,18 @@ impl StoreLocalStatistic {
             metrics
                 .bloom_filter_check_counts
                 .inc_by(self.bloom_filter_check_counts);
+        }
+        if self.processed_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&["processed"])
+                .inc_by(self.processed_key_count);
+        }
+        if self.skip_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&["skip"])
+                .inc_by(self.skip_key_count);
         }
     }
 }

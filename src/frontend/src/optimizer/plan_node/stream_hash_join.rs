@@ -201,10 +201,12 @@ impl ToStreamProst for StreamHashJoin {
             .iter()
             .map(|idx| *idx as i32)
             .collect_vec();
+        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: left_key_indices_prost,
             right_key: right_key_indices_prost,
+            null_safe: null_safe_prost,
             condition: self
                 .eq_join_predicate
                 .other_cond()

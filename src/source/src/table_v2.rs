@@ -14,6 +14,7 @@
 
 use std::sync::RwLock;
 
+use anyhow::Context;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
@@ -63,24 +64,34 @@ impl TableSourceV2 {
     pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
         let tx = {
             let core = self.core.read().unwrap();
+
+            // The `changes_txs` should not be empty normally, since we ensured that the channels
+            // between the `TableSourceV2` and the `SourceExecutor`s are ready before we making the
+            // table catalog visible to the users. However, when we're recovering, it's possible
+            // that the streaming executors are not ready when the frontend is able to schedule DML
+            // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
+            // error instead of asserting here.
+            // TODO: may reject DML when streaming executors are not recovered.
             core.changes_txs
                 .choose(&mut rand::thread_rng())
-                .expect("no table reader exists")
+                .context("no available table reader in streaming source executors")?
                 .clone()
         };
 
+        #[cfg(debug_assertions)]
+        risingwave_common::util::schema_check::schema_check(
+            self.column_descs.iter().map(|c| &c.data_type),
+            chunk.columns(),
+        )
+        .expect("table source write chunk schema check failed");
+
         let (notifier_tx, notifier_rx) = oneshot::channel();
         tx.send((chunk, notifier_tx))
-            .expect("write chunk to table reader failed");
+            .expect("table reader in streaming source executor closed");
 
         Ok(notifier_rx)
     }
 }
-
-// TODO: Currently batch read directly calls api from `ScannableTable` instead of using
-// `BatchReader`.
-#[derive(Debug)]
-pub struct TableV2BatchReader;
 
 /// [`TableV2StreamReader`] reads changes from a certain table continuously.
 /// This struct should be only used for associated materialize task, thus the reader should be

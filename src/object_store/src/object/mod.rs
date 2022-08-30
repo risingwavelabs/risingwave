@@ -77,6 +77,24 @@ pub fn parse_object_store_path(path: &str) -> ObjectStorePath<'_> {
     }
 }
 
+/// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
+/// the second contains all remote paths.
+pub fn partition_object_store_paths(paths: &[String]) -> (Vec<String>, Vec<String>) {
+    // ToDo: Currently the result is a copy of the input. Would it be worth it to use an in-place
+    //       partition instead?
+    let mut vec_loc = vec![];
+    let mut vec_rem = vec![];
+
+    for path in paths {
+        match path.strip_prefix(LOCAL_OBJECT_STORE_PATH_PREFIX) {
+            Some(path) => vec_loc.push(path.to_string()),
+            None => vec_rem.push(path.to_string()),
+        };
+    }
+
+    (vec_loc, vec_rem)
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct BlockLocation {
     pub offset: usize,
@@ -104,10 +122,12 @@ impl BlockLocation {
 }
 
 #[async_trait::async_trait]
-pub trait StreamingUploader: Send {
+pub trait StreamingUploader: Send + Sync {
     fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
     async fn finish(self: Box<Self>) -> ObjectResult<()>;
+
+    fn get_memory_usage(&self) -> u64;
 }
 
 /// The implementation must be thread-safe.
@@ -131,6 +151,10 @@ pub trait ObjectStore: Send + Sync {
 
     /// Deletes blob permanently.
     async fn delete(&self, path: &str) -> ObjectResult<()>;
+
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()>;
 
     fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
     where
@@ -210,6 +234,55 @@ macro_rules! object_store_impl_method_body {
     };
 }
 
+/// This macro routes the object store operation to the real implementation by the ObjectStoreImpl
+/// enum type and the `paths`. It is a modification of the macro above to work with a slice of
+/// strings instead of just a single one.
+///
+/// If an entry in `paths` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
+/// operation should be performed on the local object store, and otherwise the operation should be
+/// performed on remote object store.
+macro_rules! object_store_impl_method_body_slice {
+    ($object_store:expr, $method_name:ident, $paths:expr $(, $args:expr)*) => {
+        {
+            let (paths_loc, paths_rem) = partition_object_store_paths($paths);
+            match $object_store {
+                ObjectStoreImpl::InMem(in_mem) => {
+                    assert!(paths_loc.is_empty(), "get local path in pure in-mem object store: {:?}", $paths);
+                    in_mem.$method_name(&paths_rem $(, $args)*).await
+                },
+                ObjectStoreImpl::Disk(disk) => {
+                    assert!(paths_loc.is_empty(), "get local path in pure disk object store: {:?}", $paths);
+                    disk.$method_name(&paths_rem $(, $args)*).await
+                },
+                ObjectStoreImpl::S3(s3) => {
+                    assert!(paths_loc.is_empty(), "get local path in pure s3 object store: {:?}", $paths);
+                    s3.$method_name(&paths_rem $(, $args)*).await
+                },
+                ObjectStoreImpl::Hybrid {
+                    local: local,
+                    remote: remote,
+                } => {
+                    // Process local paths.
+                    match local.as_ref() {
+                        ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(&paths_loc $(, $args)*).await?,
+                        ObjectStoreImpl::Disk(disk) => disk.$method_name(&paths_loc $(, $args)*).await?,
+                        ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
+                        ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
+                    };
+
+                    // Process remote paths.
+                    match remote.as_ref() {
+                        ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(&paths_rem $(, $args)*).await,
+                        ObjectStoreImpl::Disk(disk) => disk.$method_name(&paths_rem $(, $args)*).await,
+                        ObjectStoreImpl::S3(s3) => s3.$method_name(&paths_rem $(, $args)*).await,
+                        ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
+                    }
+                }
+            }
+        }
+    };
+}
+
 impl ObjectStoreImpl {
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         object_store_impl_method_body!(self, upload, path, obj)
@@ -237,6 +310,15 @@ impl ObjectStoreImpl {
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
         object_store_impl_method_body!(self, delete, path)
+    }
+
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    ///
+    /// If a hybrid storage is used, the method will first attempt to delete objects in local
+    /// storage. Only if that is successful, it will remove objects from remote storage.
+    pub async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        object_store_impl_method_body_slice!(self, delete_objects, paths)
     }
 
     pub async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
@@ -287,6 +369,10 @@ impl MonitoredStreamingUploader {
             .with_label_values(&["streaming_upload"])
             .observe(self.operation_size as f64);
         self.inner.finish().await
+    }
+
+    pub fn get_memory_usage(&self) -> u64 {
+        self.inner.get_memory_usage()
     }
 }
 
@@ -407,6 +493,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         self.inner
             .delete(path)
             .stack_trace("object_store_delete")
+            .await
+    }
+
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[self.media_type(), "delete_objects"])
+            .start_timer();
+        self.inner
+            .delete_objects(paths)
+            .stack_trace("object_store_delete_objects")
             .await
     }
 

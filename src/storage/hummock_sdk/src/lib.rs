@@ -57,6 +57,26 @@ pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
     id & LOCAL_SST_ID_MASK == 0
 }
 
+/// Package read epoch of hummock, it be used for `wait_epoch`
+#[derive(Debug, Clone)]
+pub enum HummockReadEpoch {
+    /// We need to wait the `max_committed_epoch`
+    Committed(HummockEpoch),
+    /// We need to wait the `max_current_epoch`
+    Current(HummockEpoch),
+    /// We don't need to wait epoch, we usually do stream reading with it.
+    NoWait(HummockEpoch),
+}
+
+impl HummockReadEpoch {
+    pub fn get_epoch(&self) -> HummockEpoch {
+        *match self {
+            HummockReadEpoch::Committed(epoch) => epoch,
+            HummockReadEpoch::Current(epoch) => epoch,
+            HummockReadEpoch::NoWait(epoch) => epoch,
+        }
+    }
+}
 pub struct SstIdRange {
     // inclusive
     pub start_id: HummockSstableId,

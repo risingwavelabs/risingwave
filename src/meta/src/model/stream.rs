@@ -196,7 +196,7 @@ impl TableFragments {
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
-                return Some(s.table_id);
+                return Some(s.source_id);
             }
         }
 
@@ -454,6 +454,13 @@ impl TableFragments {
             .flat_map(|f| f.state_table_ids.clone())
             .filter(|&t| t != self.table_id.table_id)
             .collect_vec()
+    }
+
+    /// Returns all internal table ids including the mview table.
+    pub fn all_table_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.fragments
+            .values()
+            .flat_map(|f| f.state_table_ids.clone())
     }
 
     /// Get the table mapping info from the fragment it belongs to.

@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::env;
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -102,6 +103,14 @@ pub async fn playground() -> Result<()> {
                             },
                         )?;
                         apply_config_file(&mut command);
+                        if c.enable_tiered_cache {
+                            let prefix_data = env::var("PREFIX_DATA")?;
+                            command.arg("--file-cache-dir").arg(
+                                PathBuf::from(prefix_data)
+                                    .join("filecache")
+                                    .join(c.port.to_string()),
+                            );
+                        }
                         rw_services.push(RisingWaveService::Compute(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
