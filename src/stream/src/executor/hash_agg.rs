@@ -40,7 +40,7 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message, PkIndices, PROCESSING_WINDOW_SIZE};
 
 /// Limit number of cached entries (one per group key)
-const HASH_AGG_CACHE_SIZE: usize = 1 << 16;
+const HASH_AGG_CACHE_SIZE: usize = 0;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
