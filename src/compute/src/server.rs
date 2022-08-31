@@ -20,7 +20,7 @@ use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::BatchTaskMetricsManager;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::{ComputeNodeConfig, MAX_CONNECTION_WINDOW_SIZE};
+use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -58,11 +58,7 @@ use crate::rpc::service::monitor_service::{
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::server::StateStoreImpl::HummockStateStore;
-use crate::ComputeNodeOpts;
-
-fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
-    risingwave_common::config::load_config(&opts.config_path)
-}
+use crate::{ComputeNodeConfig, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -71,7 +67,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts);
+    let config: ComputeNodeConfig = load_config(&opts.config_path).unwrap();
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,
