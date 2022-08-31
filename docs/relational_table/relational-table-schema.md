@@ -1,6 +1,6 @@
 # Relational Table Schema
 
-We introduce the rough row-based encoding format in [relational states](storing-state-using-relational-table.md#cell-based-encoding)
+We introduce the rough row-based encoding format in [relational states](storing-state-using-relational-table.md#row-based-encoding)
 
 In this doc, we will take HashAgg with extreme state (`max`, `min`) or value state (`sum`, `count`) for example, and introduce a more detailed design for the internal table schema.
 
