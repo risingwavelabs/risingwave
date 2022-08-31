@@ -174,6 +174,10 @@ impl DiskObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for DiskObjectStore {
+    fn get_object_prefix(&self, _obj_id: u64) -> String {
+        String::default()
+    }
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         if obj.is_empty() {
             Err(ObjectError::internal("upload empty object"))
