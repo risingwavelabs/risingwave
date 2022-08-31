@@ -24,7 +24,6 @@ use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
-use risingwave_rpc_client::ComputeClientPool;
 
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
@@ -206,8 +205,8 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
 
         let exchange_node = sort_merge_node.get_exchange()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
-        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
-        let source_creators = vec![DefaultCreateSource::new(client_pool); proto_sources.len()];
+        let source_creators =
+            vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
         ensure!(!exchange_node.get_sources().is_empty());
         let fields = exchange_node
             .get_input_schema()

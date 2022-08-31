@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,7 +21,7 @@ use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
-use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef};
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
@@ -125,8 +123,8 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
 
         ensure!(!node.get_sources().is_empty());
         let prost_sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
-        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
-        let source_creators = vec![DefaultCreateSource::new(client_pool); prost_sources.len()];
+        let source_creators =
+            vec![DefaultCreateSource::new(source.context().client_pool()); prost_sources.len()];
         let mut sources: Vec<ExchangeSourceImpl> = vec![];
 
         for (prost_source, source_creator) in prost_sources.iter().zip_eq(source_creators) {
