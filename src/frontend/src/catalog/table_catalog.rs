@@ -21,7 +21,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, SchemaId};
+use super::{DatabaseId, FragmentId, SchemaId};
 use crate::catalog::TableId;
 use crate::optimizer::property::FieldOrder;
 
@@ -51,7 +51,7 @@ use crate::optimizer::property::FieldOrder;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -82,6 +82,8 @@ pub struct TableCatalog {
     pub owner: u32,
 
     pub properties: HashMap<String, String>,
+
+    pub fragment_id: FragmentId,
 }
 
 impl TableCatalog {
@@ -169,6 +171,7 @@ impl TableCatalog {
             appendonly: self.appendonly,
             owner: self.owner,
             properties: self.properties.clone(),
+            fragment_id: self.fragment_id,
         }
     }
 }
@@ -215,6 +218,7 @@ impl From<ProstTable> for TableCatalog {
             appendonly: tb.appendonly,
             owner: tb.owner,
             properties: tb.properties,
+            fragment_id: tb.fragment_id,
         }
     }
 }
@@ -295,6 +299,7 @@ mod tests {
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
             )]),
+            fragment_id: 0,
         }
         .into();
 
@@ -348,6 +353,7 @@ mod tests {
                     String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                     String::from("300")
                 )]),
+                fragment_id: 0,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

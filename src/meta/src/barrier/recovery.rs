@@ -79,12 +79,10 @@ where
             let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
-            {
-                // Migrate expired actors to newly joined node by changing actor_map
-                let migrated = self.migrate_actors(&info).await?;
-                if migrated {
-                    info = self.resolve_actor_info_for_recovery().await;
-                }
+            // Migrate expired actors to newly joined node by changing actor_map
+            let migrated = self.migrate_actors(&info).await?;
+            if migrated {
+                info = self.resolve_actor_info_for_recovery().await;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
@@ -223,14 +221,18 @@ where
             .await?;
         debug!("notify mapping info to frontends");
         for table_fragment in new_fragments {
-            for table_id in table_fragment.all_table_ids() {
-                let mapping = table_fragment
-                    .get_table_hash_mapping(table_id)
-                    .expect("no data distribution found");
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
-                    .await;
+            for fragment in table_fragment.fragments.values() {
+                if !fragment.state_table_ids.is_empty() {
+                    let mut mapping = fragment
+                        .vnode_mapping
+                        .clone()
+                        .expect("no data distribution found");
+                    mapping.fragment_id = fragment.fragment_id;
+                    self.env
+                        .notification_manager()
+                        .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                        .await;
+                }
             }
         }
         debug!("migrate actors succeed.");

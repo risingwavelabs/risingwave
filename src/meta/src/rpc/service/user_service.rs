@@ -23,7 +23,6 @@ use risingwave_pb::user::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
@@ -108,9 +107,8 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::User }>()
-            .await
-            .map_err(meta_error_to_tonic)? as u32;
-        let mut user = req.get_user().map_err(meta_error_to_tonic)?.clone();
+            .await? as u32;
+        let mut user = req.get_user()?.clone();
         user.id = id;
         let version = self.catalog_manager.create_user(&user).await?;
 
@@ -145,7 +143,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .iter()
             .map(|i| UpdateField::from_i32(*i).unwrap())
             .collect_vec();
-        let user = req.get_user().map_err(meta_error_to_tonic)?.clone();
+        let user = req.get_user()?.clone();
         let version = self
             .catalog_manager
             .update_user(&user, &update_fields)
