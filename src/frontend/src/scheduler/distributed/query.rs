@@ -20,9 +20,9 @@ use anyhow::anyhow;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, warn};
-use tokio::sync::oneshot::Sender;
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;

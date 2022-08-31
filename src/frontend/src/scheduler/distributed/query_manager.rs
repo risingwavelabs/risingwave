@@ -14,25 +14,24 @@
 
 use std::fmt::{Debug, Formatter};
 use std::task::Poll;
-use anyhow::anyhow;
 
+use anyhow::anyhow;
+use async_stream::stream;
 use futures::{Stream, StreamExt};
-// use futures_async_stream::try_stream;
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::Receiver;
+use futures_async_stream::try_stream;
+use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{internal_err, RwError};
-use risingwave_common::error::Result;
+use risingwave_common::error::{internal_err, Result, RwError};
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
+// use futures_async_stream::try_stream;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::Receiver;
 use tracing::debug;
-use futures_async_stream::{try_stream};
-use async_stream::stream;
-use risingwave_batch::executor::BoxedDataChunkStream;
+
 // use async_stream::try_stream;
 // use futures::stream;
-
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::Query;
@@ -108,7 +107,7 @@ impl QueryManager {
             }
         };
 
-        Ok(query_result_fetcher.run_wrapper(shutdown_rx))
+        Ok(query_result_fetcher.run_wrapper(shutdown_rx).await)
     }
 }
 
@@ -128,7 +127,6 @@ impl QueryResultFetcher {
             compute_client_pool,
         }
     }
-
 
     // fn run(self, shutdown_rx: Receiver<u8>) -> impl Stream<Item= Result<DataChunk>>{
     #[try_stream(ok = DataChunk, error = RwError)]
@@ -170,7 +168,7 @@ impl QueryResultFetcher {
                     }
                 };
             }
-        };
+        }
     }
 }
 
