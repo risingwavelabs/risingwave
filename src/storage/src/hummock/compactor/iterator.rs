@@ -265,7 +265,6 @@ impl HummockIterator for ConcatSstableIterator {
                     ord == Ordering::Less || ord == Ordering::Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
-            self.sstable_iter.take();
             self.seek_idx(table_idx, Some(key)).await?;
             if self.sstable_iter.is_none() && table_idx + 1 < self.tables.len() {
                 self.seek_idx(table_idx + 1, Some(key)).await?;
