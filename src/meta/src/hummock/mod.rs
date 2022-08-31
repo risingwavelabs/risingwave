@@ -14,8 +14,9 @@
 
 pub mod compaction;
 pub mod compaction_group;
+mod compaction_schedule_policy;
 mod compaction_scheduler;
-mod compactor_manager;
+pub mod compactor_manager;
 pub mod error;
 mod manager;
 pub use manager::*;
@@ -104,7 +105,7 @@ where
                     return;
                 }
             };
-            compactor_manager.remove_compactor(worker_node.id);
+            compactor_manager.remove_compactor(worker_node.id).await;
 
             // Retry only happens when meta store is undergoing failure.
             let retry_strategy = ExponentialBackoff::from_millis(10)

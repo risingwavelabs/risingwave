@@ -933,7 +933,7 @@ mod tests {
             let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
-            let compactor_manager = Arc::new(CompactorManager::new());
+            let compactor_manager = Arc::new(CompactorManager::new_for_test());
 
             let hummock_manager = Arc::new(
                 HummockManager::new(
