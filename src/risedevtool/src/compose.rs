@@ -230,13 +230,16 @@ impl Compose for FrontendConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("frontend-node");
         FrontendService::apply_command_args(&mut command, self)?;
+        command.arg("--config-path").arg("/risingwave.toml");
         let command = get_cmd_args(&command, true)?;
-
         let provide_meta_node = self.provide_meta_node.as_ref().unwrap();
 
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment: [("RUST_BACKTRACE".to_string(), "1".to_string())]
+                .into_iter()
+                .collect(),
+            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
                 .into_iter()
                 .collect(),
             command,
