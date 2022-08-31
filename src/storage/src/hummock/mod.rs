@@ -189,7 +189,7 @@ impl HummockStorage {
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
         let value = match key::user_key(iter.key()) == ukey {
-            true => Some(iter.value().to_owned_bytes_value()),
+            true => Some(iter.value().to_bytes()),
             false => None,
         };
         iter.collect_local_statistic(stats);

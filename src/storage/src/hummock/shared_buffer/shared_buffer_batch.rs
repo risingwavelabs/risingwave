@@ -384,7 +384,7 @@ mod tests {
         iter.rewind().await.unwrap();
         let mut output = vec![];
         while iter.is_valid() {
-            output.push((iter.key().to_owned(), iter.value().to_owned_bytes_value()));
+            output.push((iter.key().to_owned(), iter.value().to_bytes()));
             iter.next().await.unwrap();
         }
         assert_eq!(output, shared_buffer_items);
@@ -396,7 +396,7 @@ mod tests {
         while backward_iter.is_valid() {
             output.push((
                 backward_iter.key().to_owned(),
-                backward_iter.value().to_owned_bytes_value(),
+                backward_iter.value().to_bytes(),
             ));
             backward_iter.next().await.unwrap();
         }
