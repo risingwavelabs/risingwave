@@ -90,6 +90,7 @@ impl CompactionInput {
 pub struct CompactionTask {
     pub input: CompactionInput,
     pub compression_algorithm: String,
+    pub input_file_size: u64,
     pub target_file_size: u64,
     pub splits: Vec<KeyRange>,
 }
@@ -171,6 +172,7 @@ impl CompactStatus {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
+            input_file_size: ret.input_file_size,
         };
         Some(compact_task)
     }

@@ -872,13 +872,13 @@ async fn test_trigger_manual_compaction() {
 
     {
         let option = ManualCompactionOption::default();
-        // to check no compactor
+        // to check no compaction task
         let result = hummock_manager
             .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
             .await;
 
         assert_eq!(
-            "trigger_manual_compaction No compactor is available. compaction_group 2",
+            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
             result.err().unwrap().to_string()
         );
     }

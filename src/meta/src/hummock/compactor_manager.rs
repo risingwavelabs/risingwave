@@ -67,19 +67,19 @@ pub trait CompactionScheduleStrategy: Send + Sync {
     /// Get next compactor to assign task.
     fn next_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>>;
 
+    fn random_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>>;
+
     fn add_compactor(
         &mut self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>>;
 
-    fn random_compactor(&self) -> Option<Arc<Compactor>>;
-
     fn remove_compactor(&mut self, context_id: HummockContextId);
 
     /// Notify the `CompactorManagerInner` of the completion of a task to adjust the next compactor
     /// to schedule.
-    fn report_compact_task(&self, context_id: HummockContextId, task: &CompactTask);
+    fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask);
 }
 
 // This strategy is retained just for reference, it is not used.
@@ -121,7 +121,7 @@ impl CompactionScheduleStrategy for RoundRobinStrategy {
                     if hummock_manager
                         .get_assigned_tasks_number(compactor.context_id())
                         .await
-                        <= compactor.max_concurrent_task_number()
+                        < compactor.max_concurrent_task_number()
                     {
                         return Some(compactor);
                     }
@@ -157,7 +157,7 @@ impl CompactionScheduleStrategy for RoundRobinStrategy {
         rx
     }
 
-    fn random_compactor(&self) -> Option<Arc<Compactor>> {
+    fn random_compactor(&mut self, _compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
         if self.compactors.is_empty() {
             return None;
         }
@@ -172,7 +172,7 @@ impl CompactionScheduleStrategy for RoundRobinStrategy {
         tracing::info!("Removed compactor session {}", context_id);
     }
 
-    fn report_compact_task(&self, _context_id: HummockContextId, _task: &CompactTask) {}
+    fn report_compact_task(&mut self, _context_id: HummockContextId, _task: &CompactTask) {}
 }
 
 #[derive(Default)]
@@ -196,9 +196,18 @@ impl LeastPendingBytesStrategy {
         context_id: HummockContextId,
         old_bytes: usize,
         compact_task: Option<&CompactTask>,
+        assign_task: bool,
     ) -> Arc<Compactor> {
-        // TODO(zhidong): update pending bytes of the task
-        let new_bytes = old_bytes;
+        let task_pending_bytes = match compact_task {
+            Some(task) => task.input_file_size as usize,
+            None => 0,
+        };
+        let new_bytes = if assign_task {
+            old_bytes + task_pending_bytes
+        } else {
+            debug_assert!(old_bytes >= task_pending_bytes);
+            old_bytes - task_pending_bytes
+        };
         // The element must exist.
         let compactor = self
             .pending_bytes_to_compactor
@@ -224,7 +233,7 @@ impl CompactionScheduleStrategy for LeastPendingBytesStrategy {
         let mut next_idle_compactor = None;
         for ((pending_bytes, context_id), compactor) in &self.pending_bytes_to_compactor {
             if hummock_manager.get_assigned_tasks_number(*context_id).await
-                <= compactor.max_concurrent_task_number()
+                < compactor.max_concurrent_task_number()
             {
                 next_idle_compactor = Some((*pending_bytes, *context_id));
                 break;
@@ -232,7 +241,7 @@ impl CompactionScheduleStrategy for LeastPendingBytesStrategy {
         }
 
         if let Some((pending_bytes, context_id)) = next_idle_compactor {
-            let compactor = self.update_compactor(context_id, pending_bytes, compact_task);
+            let compactor = self.update_compactor(context_id, pending_bytes, compact_task, true);
             Some(compactor)
         } else {
             None
@@ -250,14 +259,14 @@ impl CompactionScheduleStrategy for LeastPendingBytesStrategy {
         }
 
         if let Some((pending_bytes, context_id)) = next_compactor {
-            let compactor = self.update_compactor(context_id, pending_bytes, compact_task);
+            let compactor = self.update_compactor(context_id, pending_bytes, compact_task, true);
             Some(compactor)
         } else {
             None
         }
     }
 
-    fn random_compactor(&self) -> Option<Arc<Compactor>> {
+    fn random_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
         if self.pending_bytes_to_compactor.is_empty() {
             return None;
         }
@@ -271,10 +280,8 @@ impl CompactionScheduleStrategy for LeastPendingBytesStrategy {
             .iter()
             .nth(compactor_index)
             .unwrap();
-        let compactor = self
-            .pending_bytes_to_compactor
-            .get(&(*pending_bytes, *context_id))
-            .unwrap();
+
+        let compactor = self.update_compactor(*context_id, *pending_bytes, compact_task, true);
         Some(compactor.clone())
     }
 
@@ -297,6 +304,7 @@ impl CompactionScheduleStrategy for LeastPendingBytesStrategy {
                 max_concurrent_task_number,
             }),
         );
+        self.compactor_to_pending_bytes.insert(context_id, 0);
         tracing::info!("Added compactor session {}", context_id);
         rx
     }
@@ -310,8 +318,10 @@ impl CompactionScheduleStrategy for LeastPendingBytesStrategy {
         tracing::info!("Removed compactor session {}", context_id);
     }
 
-    fn report_compact_task(&self, context_id: HummockContextId, task: &CompactTask) {
-        todo!();
+    fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask) {
+        if let Some(pending_bytes) = self.compactor_to_pending_bytes.get(&context_id) {
+            self.update_compactor(context_id, *pending_bytes, Some(task), false);
+        }
     }
 }
 
@@ -339,10 +349,6 @@ impl CompactorManager {
         Self {
             inner: parking_lot::RwLock::new(LeastPendingBytesStrategy::new()),
         }
-    }
-
-    pub fn new_with_least_pending_bytes() -> Self {
-        todo!();
     }
 
     pub async fn next_idle_compactor<S>(
@@ -381,8 +387,8 @@ impl CompactorManager {
         self.inner.write().next_compactor(compact_task)
     }
 
-    pub fn random_compactor(&self) -> Option<Arc<Compactor>> {
-        self.inner.read().random_compactor()
+    pub fn random_compactor(&self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
+        self.inner.write().random_compactor(compact_task)
     }
 
     pub fn add_compactor(
@@ -399,7 +405,9 @@ impl CompactorManager {
         self.inner.write().remove_compactor(context_id);
     }
 
-    pub fn report_compact_task(&self, _context_id: HummockContextId, _task: &CompactTask) {}
+    pub fn report_compact_task(&self, context_id: HummockContextId, task: &CompactTask) {
+        self.inner.write().report_compact_task(context_id, task);
+    }
 }
 
 #[cfg(test)]
@@ -420,7 +428,7 @@ mod tests {
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::{CompactionScheduleStrategy, HummockManager};
+    use crate::hummock::{CompactionScheduleStrategy, HummockManager, LeastPendingBytesStrategy};
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -443,7 +451,7 @@ mod tests {
         .unwrap();
     }
 
-    fn dummy_compact_task(task_id: u64) -> CompactTask {
+    fn dummy_compact_task(task_id: u64, input_file_size: u64) -> CompactTask {
         CompactTask {
             input_ssts: vec![],
             splits: vec![],
@@ -461,6 +469,7 @@ mod tests {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: 0,
+            input_file_size,
         }
     }
 
@@ -483,7 +492,7 @@ mod tests {
             TryRecvError::Empty
         ));
 
-        let task = dummy_compact_task(123);
+        let task = dummy_compact_task(123, 0);
         let compactor = compactor_manager.compactors.first().unwrap().clone();
         compactor
             .send_task(Task::CompactTask(task.clone()))
@@ -559,5 +568,200 @@ mod tests {
             let compactor = compactor_manager.next_compactor(None).unwrap();
             assert_eq!(compactor.context_id as usize, i % receivers.len());
         }
+    }
+
+    #[tokio::test]
+    async fn test_least_pending_bytes_add_remove_compactor() {
+        let mut compactor_manager = LeastPendingBytesStrategy::new();
+        // No compactors by default.
+        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 0);
+        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 0);
+
+        let mut receiver = compactor_manager.add_compactor(1, u64::MAX);
+        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 1);
+        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 1);
+        let _receiver_2 = compactor_manager.add_compactor(2, u64::MAX);
+        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 2);
+        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 2);
+        compactor_manager.remove_compactor(2);
+        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 1);
+        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 1);
+
+        // Pending bytes are initialized correctly.
+        assert_eq!(
+            *compactor_manager
+                .compactor_to_pending_bytes
+                .get(&1)
+                .unwrap(),
+            0
+        );
+        assert!(compactor_manager
+            .pending_bytes_to_compactor
+            .contains_key(&(0, 1)));
+
+        // No compact task there.
+        assert!(matches!(
+            receiver.try_recv().unwrap_err(),
+            TryRecvError::Empty
+        ));
+
+        let task = dummy_compact_task(123, 0);
+        let compactor = compactor_manager
+            .pending_bytes_to_compactor
+            .first_entry()
+            .unwrap()
+            .get()
+            .clone();
+        compactor
+            .send_task(Task::CompactTask(task.clone()))
+            .await
+            .unwrap();
+        // Receive a compact task.
+        let received_task = receiver.try_recv().unwrap().unwrap().task.unwrap();
+        let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();
+        assert_eq!(received_compact_task, task);
+
+        compactor_manager.remove_compactor(compactor.context_id);
+        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 0);
+        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 0);
+        drop(compactor);
+        assert!(matches!(
+            receiver.try_recv().unwrap_err(),
+            TryRecvError::Disconnected
+        ));
+    }
+
+    #[test]
+    fn test_least_pending_bytes_next_compactor() {
+        let mut compactor_manager = LeastPendingBytesStrategy::new();
+
+        // No compactor available.
+        assert!(compactor_manager.next_compactor(None).is_none());
+
+        // Add 3 compactors.
+        for context_id in 0..3 {
+            compactor_manager.add_compactor(context_id, u64::MAX);
+        }
+
+        let task1 = dummy_compact_task(0, 5);
+        let task2 = dummy_compact_task(1, 10);
+        let task3 = dummy_compact_task(2, 7);
+        let task4 = dummy_compact_task(3, 1);
+
+        // Now the compactors should be (0, 0), (0, 1), (0, 2).
+        let compactor = compactor_manager.next_compactor(Some(&task1)).unwrap();
+        assert_eq!(compactor.context_id, 0);
+        assert_eq!(
+            *compactor_manager
+                .compactor_to_pending_bytes
+                .get(&0)
+                .unwrap(),
+            5
+        );
+        assert!(compactor_manager
+            .pending_bytes_to_compactor
+            .contains_key(&(5, 0)));
+
+        // (0, 1), (0, 2), (5, 0).
+        let compactor = compactor_manager.next_compactor(Some(&task2)).unwrap();
+        assert_eq!(compactor.context_id, 1);
+        assert_eq!(
+            *compactor_manager
+                .compactor_to_pending_bytes
+                .get(&1)
+                .unwrap(),
+            10
+        );
+        assert!(compactor_manager
+            .pending_bytes_to_compactor
+            .contains_key(&(10, 1)));
+
+        // (0, 2), (5, 0), (10, 1).
+        let compactor = compactor_manager.next_compactor(Some(&task3)).unwrap();
+        assert_eq!(compactor.context_id, 2);
+        assert_eq!(
+            *compactor_manager
+                .compactor_to_pending_bytes
+                .get(&2)
+                .unwrap(),
+            7
+        );
+        assert!(compactor_manager
+            .pending_bytes_to_compactor
+            .contains_key(&(10, 1)));
+
+        // (5, 0), (7, 2), (10, 1).
+        compactor_manager.report_compact_task(1, &task2);
+        assert_eq!(
+            *compactor_manager
+                .compactor_to_pending_bytes
+                .get(&1)
+                .unwrap(),
+            0
+        );
+        assert!(compactor_manager
+            .pending_bytes_to_compactor
+            .contains_key(&(0, 1)));
+
+        // (0, 1), (5, 0), (7, 2).
+        let compactor = compactor_manager.next_compactor(Some(&task4)).unwrap();
+        assert_eq!(compactor.context_id, 1);
+        assert_eq!(
+            *compactor_manager
+                .compactor_to_pending_bytes
+                .get(&1)
+                .unwrap(),
+            1
+        );
+        assert!(compactor_manager
+            .pending_bytes_to_compactor
+            .contains_key(&(1, 1)));
+    }
+
+    #[tokio::test]
+    async fn test_least_pending_bytes_next_idle_compactor() {
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(1)
+            .max_bytes_for_level_base(1)
+            .build();
+        let (_, hummock_manager, _, _) = setup_compute_env_with_config(80, config).await;
+        let mut compactor_manager = LeastPendingBytesStrategy::new();
+
+        // Add 2 compactors.
+        for context_id in 0..2 {
+            compactor_manager.add_compactor(context_id, 2);
+        }
+
+        let task1 = dummy_compact_task(0, 1);
+        let task2 = dummy_compact_task(1, 1);
+        let task3 = dummy_compact_task(2, 5);
+
+        // Fill compactor 0 with small tasks.
+        let compactor = compactor_manager.next_compactor(Some(&task1)).unwrap();
+        assert_eq!(compactor.context_id, 0);
+        let compactor = compactor_manager.next_compactor(Some(&task3)).unwrap();
+        assert_eq!(compactor.context_id, 1);
+        let compactor = compactor_manager.next_compactor(Some(&task2)).unwrap();
+        assert_eq!(compactor.context_id, 0);
+
+        hummock_manager
+            .assign_compaction_task(&task1, 0)
+            .await
+            .unwrap();
+        hummock_manager
+            .assign_compaction_task(&task2, 0)
+            .await
+            .unwrap();
+        hummock_manager
+            .assign_compaction_task(&task3, 1)
+            .await
+            .unwrap();
+
+        // Next compactor should be compactor 1.
+        let compactor = compactor_manager
+            .next_idle_compactor(&hummock_manager, None)
+            .await
+            .unwrap();
+        assert_eq!(compactor.context_id, 1);
     }
 }

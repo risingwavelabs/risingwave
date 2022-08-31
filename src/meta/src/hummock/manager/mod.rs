@@ -882,6 +882,10 @@ where
             }
         }
         compact_status.report_compact_task(compact_task);
+        if let Some(context_id) = context_id {
+            self.compactor_manager
+                .report_compact_task(context_id, compact_task);
+        }
         let task_status = compact_task.task_status();
         debug_assert!(
             task_status != TaskStatus::Pending,
@@ -1039,7 +1043,7 @@ where
                         return;
                     }
                 };
-                let compactor = match self.compactor_manager.random_compactor() {
+                let compactor = match self.compactor_manager.random_compactor(None) {
                     None => {
                         tracing::warn!(
                             "Skip committed SST sanity check due to no available worker"
@@ -1385,22 +1389,7 @@ where
     ) -> Result<()> {
         let start_time = Instant::now();
 
-        // 1. select_compactor
-        let compactor = self.compactor_manager.random_compactor();
-        let compactor = match compactor {
-            None => {
-                tracing::warn!("trigger_manual_compaction No compactor is available.");
-                return Err(anyhow::anyhow!(
-                    "trigger_manual_compaction No compactor is available. compaction_group {}",
-                    compaction_group
-                )
-                .into());
-            }
-
-            Some(compactor) => compactor,
-        };
-
-        // 2. manual_get_compact_task
+        // 1. manual_get_compact_task
         let compact_task = self
             .manual_get_compact_task(compaction_group, manual_compaction_option)
             .await;
@@ -1422,6 +1411,21 @@ where
                 )
                 .into());
             }
+        };
+
+        // 2. select_compactor
+        let compactor = self.compactor_manager.random_compactor(Some(&compact_task));
+        let compactor = match compactor {
+            None => {
+                tracing::warn!("trigger_manual_compaction No compactor is available.");
+                return Err(anyhow::anyhow!(
+                    "trigger_manual_compaction No compactor is available. compaction_group {}",
+                    compaction_group
+                )
+                .into());
+            }
+
+            Some(compactor) => compactor,
         };
 
         let mut is_failed = false;

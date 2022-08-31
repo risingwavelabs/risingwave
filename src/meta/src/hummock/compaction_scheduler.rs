@@ -24,7 +24,6 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
-use super::CompactionScheduleStrategy;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::MetaSrvEnv;
