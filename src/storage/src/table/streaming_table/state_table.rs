@@ -21,7 +21,6 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
-use bytes::BufMut;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -30,7 +29,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::{DataType, VirtualNode};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, prefixed_range, range_of_prefix};
@@ -45,7 +43,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
-use crate::table::{check_vnode_is_set, compute_vnode, Distribution, DEFAULT_VNODE};
+use crate::table::{compute_vnode, Distribution};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
@@ -285,7 +283,7 @@ impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk =
-            serialize_pk_with_vnode(&pk, &self.pk_serializer, &self.compute_vnode_by_pk(&pk));
+            serialize_pk_with_vnode(pk, &self.pk_serializer, &self.compute_vnode_by_pk(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
         let read_options = self.get_read_option(epoch);

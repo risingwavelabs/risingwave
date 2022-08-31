@@ -25,7 +25,6 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use tracing::trace;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
@@ -131,7 +130,7 @@ fn compute_vnode(
 
     // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
     if !indices.is_empty() {
-        check_vnode_is_set(vnode, vnodes.clone(), &table_columns, &dist_key_indices);
+        check_vnode_is_set(vnode, vnodes, table_columns, dist_key_indices);
     }
     vnode
 }

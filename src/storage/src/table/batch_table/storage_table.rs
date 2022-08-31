@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
-use bytes::BufMut;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -28,7 +27,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
@@ -44,7 +42,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::ColumnDescMapping;
 use crate::store::ReadOptions;
-use crate::table::{check_vnode_is_set, compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
+use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -291,7 +289,7 @@ impl<S: StateStore> StorageTable<S> {
     /// Get a single row by point get
     pub async fn get_row(&mut self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk =
-            serialize_pk_with_vnode(&pk, &self.pk_serializer, &self.compute_vnode_by_pk(&pk));
+            serialize_pk_with_vnode(pk, &self.pk_serializer, &self.compute_vnode_by_pk(pk));
         let read_options = self.get_read_option(epoch);
         assert!(pk.size() <= self.pk_indices.len());
         let key_indices = (0..pk.size())
