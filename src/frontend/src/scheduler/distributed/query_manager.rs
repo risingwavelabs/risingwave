@@ -13,15 +13,25 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::task::Poll;
+use anyhow::anyhow;
 
-use futures::StreamExt;
-use futures_async_stream::try_stream;
+use futures::{Stream, StreamExt};
+// use futures_async_stream::try_stream;
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::Receiver;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::RwError;
+use risingwave_common::error::{internal_err, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tracing::debug;
+use futures_async_stream::{try_stream};
+use async_stream::stream;
+use risingwave_batch::executor::BoxedDataChunkStream;
+// use async_stream::try_stream;
+// use futures::stream;
 
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
@@ -86,7 +96,9 @@ impl QueryManager {
             self.catalog_reader.clone(),
         );
 
-        let query_result_fetcher = match query_execution.start().await {
+        // Create a oneshot channel for QueryResultFetcher to get failed event.
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
@@ -96,7 +108,7 @@ impl QueryManager {
             }
         };
 
-        Ok(query_result_fetcher.run())
+        Ok(query_result_fetcher.run_wrapper(shutdown_rx))
     }
 }
 
@@ -117,8 +129,10 @@ impl QueryResultFetcher {
         }
     }
 
+
+    // fn run(self, shutdown_rx: Receiver<u8>) -> impl Stream<Item= Result<DataChunk>>{
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run(self) {
+    async fn run_inner(self) {
         debug!(
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
@@ -131,6 +145,32 @@ impl QueryResultFetcher {
         while let Some(response) = stream.next().await {
             yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
         }
+    }
+
+    fn run(self) -> BoxedDataChunkStream {
+        Box::pin(self.run_inner())
+    }
+
+    // #[try_stream(ok = DataChunk, error = RwError)]
+    async fn run_wrapper(self, shutdown_rx: Receiver<u8>) -> impl DataChunkStream {
+        let mut shutdown_rx = shutdown_rx;
+        let mut stream = self.run();
+        stream! {
+                 loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut shutdown_rx => {
+                            yield Err(internal_err(anyhow!("Execution fail")));
+                        }
+
+                    stream_res = stream.next() => {
+                        if let Some(response) = stream_res {
+                            yield response;
+                        }
+                    }
+                };
+            }
+        };
     }
 }
 

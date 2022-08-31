@@ -22,6 +22,7 @@ use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, warn};
+use tokio::sync::oneshot::Sender;
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
@@ -137,7 +138,7 @@ impl QueryExecution {
     }
 
     /// Start execution of this query.
-    pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
+    pub async fn start(&self, shutdown_tx: Sender<u8>) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
@@ -160,7 +161,7 @@ impl QueryExecution {
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run().await });
+                tokio::spawn(async move { runner.run(shutdown_tx).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -188,7 +189,7 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self) {
+    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<u8>) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -261,6 +262,10 @@ impl QueryRunner {
                     for (_stage_id, stage_execution) in self.stage_executions.iter() {
                         // The stop is return immediately so no need to spawn tasks.
                         stage_execution.stop().await;
+                    }
+
+                    if shutdown_tx.send(0).is_err() {
+                        warn!("Sending error fail");
                     }
 
                     // One stage failed, not necessary to execute schedule stages.
