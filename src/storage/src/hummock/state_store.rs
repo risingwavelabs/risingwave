@@ -23,13 +23,13 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
-use risingwave_hummock_sdk::{key, HummockReadEpoch};
+use risingwave_hummock_sdk::{can_concat, key, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
-use super::utils::{can_concat, search_sst_idx, validate_epoch};
+use super::utils::{search_sst_idx, validate_epoch};
 use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
