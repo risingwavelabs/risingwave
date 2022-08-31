@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::epoch::Epoch;
 
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_FAMILY};
 
@@ -36,7 +36,7 @@ impl BarrierManagerState {
             .await
         {
             Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()).into(),
-            Err(MetaStoreError::ItemNotFound(_)) => INVALID_EPOCH.into(),
+            Err(MetaStoreError::ItemNotFound(_)) => Epoch::now(),
             Err(e) => panic!("{:?}", e),
         };
         Self {
