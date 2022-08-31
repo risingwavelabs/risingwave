@@ -199,7 +199,8 @@ where
                     match err {
                         Error::InvalidContext(_) | Error::CompactorUnreachable(_) => {
                             self.compactor_manager
-                                .remove_compactor(compactor.context_id());
+                                .remove_compactor(compactor.context_id())
+                                .await;
                         }
                         _ => {}
                     }

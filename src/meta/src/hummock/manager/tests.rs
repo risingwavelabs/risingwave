@@ -885,17 +885,9 @@ async fn test_trigger_manual_compaction() {
 
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
-    let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
-    {
-        let option = ManualCompactionOption::default();
-        let result = hummock_manager
-            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault.into(), option)
-            .await;
-        assert_eq!(
-            "trigger_manual_compaction No compaction_task is available. compaction_group 2",
-            result.err().unwrap().to_string()
-        );
-    }
+    let receiver = compactor_manager_ref
+        .add_compactor(context_id, u64::MAX)
+        .await;
 
     let _ = add_test_tables(&hummock_manager, context_id).await;
     {
@@ -910,8 +902,10 @@ async fn test_trigger_manual_compaction() {
         }
     }
 
-    compactor_manager_ref.remove_compactor(context_id);
-    let _receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
+    compactor_manager_ref.remove_compactor(context_id).await;
+    let _receiver = compactor_manager_ref
+        .add_compactor(context_id, u64::MAX)
+        .await;
 
     {
         let option = ManualCompactionOption {

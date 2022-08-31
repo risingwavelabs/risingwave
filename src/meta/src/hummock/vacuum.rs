@@ -116,7 +116,7 @@ where
                 .cloned()
                 .collect_vec();
             // 1. Pick a worker.
-            let compactor = match self.compactor_manager.next_compactor(None) {
+            let compactor = match self.compactor_manager.next_compactor(None).await {
                 None => {
                     tracing::warn!("No vacuum worker is available.");
                     break;
@@ -149,7 +149,8 @@ where
                         err
                     );
                     self.compactor_manager
-                        .remove_compactor(compactor.context_id());
+                        .remove_compactor(compactor.context_id())
+                        .await;
                 }
             }
         }
@@ -317,7 +318,7 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_vacuum() {
         let (env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::new());
+        let compactor_manager = Arc::new(CompactorManager::new_for_test());
         let vacuum = Arc::new(VacuumManager::new(env, hummock_manager, compactor_manager));
         let (join_handle, shutdown_sender) =
             start_vacuum_scheduler(vacuum, Duration::from_secs(60));
@@ -335,7 +336,7 @@ mod tests {
             hummock_manager.clone(),
             compactor_manager.clone(),
         ));
-        let _receiver = compactor_manager.add_compactor(0, u64::MAX);
+        let _receiver = compactor_manager.add_compactor(0, u64::MAX).await;
 
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
 
