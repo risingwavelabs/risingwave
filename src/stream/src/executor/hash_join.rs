@@ -602,11 +602,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     self.metrics
                         .join_cached_entries
                         .with_label_values(&[&actor_id_str, "left"])
-                        .set(self.side_l.ht.len() as i64);
+                        .set(self.side_l.ht.entry_count() as i64);
                     self.metrics
                         .join_cached_entries
                         .with_label_values(&[&actor_id_str, "right"])
-                        .set(self.side_r.ht.len() as i64);
+                        .set(self.side_r.ht.entry_count() as i64);
 
                     yield Message::Barrier(barrier);
                 }

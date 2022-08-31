@@ -251,10 +251,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.alloc.bytes_in_use()
     }
 
-    pub fn len(&self) -> usize {
-        self.inner.entry_count() as usize
-    }
-
     pub fn update_epoch(&mut self, epoch: u64) {
         self.current_epoch = epoch;
     }
