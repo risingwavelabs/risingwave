@@ -95,7 +95,7 @@ mod tests {
             options,
             sstable_store,
             hummock_meta_client,
-            filter_key_extractor_manager.clone(),
+            filter_key_extractor_manager,
         )
         .unwrap()
     }
