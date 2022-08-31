@@ -39,6 +39,7 @@ pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
+pub(crate) type FragmentId = u32;
 
 /// Check if the column name does not conflict with the internally reserved column name.
 pub fn check_valid_column_name(column_name: &str) -> Result<()> {

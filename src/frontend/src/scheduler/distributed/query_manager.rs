@@ -24,6 +24,7 @@ use risingwave_rpc_client::ComputeClientPoolRef;
 use tracing::debug;
 
 use super::QueryExecution;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
@@ -46,6 +47,7 @@ pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
+    catalog_reader: CatalogReader,
 }
 
 impl QueryManager {
@@ -53,11 +55,13 @@ impl QueryManager {
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
     ) -> Self {
         Self {
             worker_node_manager,
             hummock_snapshot_manager,
             compute_client_pool,
+            catalog_reader,
         }
     }
 
@@ -79,6 +83,7 @@ impl QueryManager {
             self.worker_node_manager.clone(),
             self.hummock_snapshot_manager.clone(),
             self.compute_client_pool.clone(),
+            self.catalog_reader.clone(),
         );
 
         let query_result_fetcher = match query_execution.start().await {
@@ -86,7 +91,7 @@ impl QueryManager {
             Err(e) => {
                 self.hummock_snapshot_manager
                     .unpin_snapshot(epoch, &query_id)
-                    .await?;
+                    .await;
                 return Err(e);
             }
         };

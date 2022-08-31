@@ -217,6 +217,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         Self {
@@ -279,6 +280,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             hummock_snapshot_manager.clone(),
             compute_client_pool,
+            catalog_reader.clone(),
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
