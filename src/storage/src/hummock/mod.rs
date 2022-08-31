@@ -14,12 +14,17 @@
 
 //! Hummock is the state store of the streaming system.
 
+use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use parking_lot::Mutex;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::*;
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 mod block_cache;
 pub use block_cache::*;
@@ -96,6 +101,10 @@ pub struct HummockStorage {
 
     #[cfg(not(madsim))]
     tracing: Arc<risingwave_tracing::RwTracingService>,
+
+    hummock_event_tx: UnboundedSender<HummockEvent>,
+
+    next_local_instance_id: Arc<AtomicU64>,
 }
 
 impl HummockStorage {
@@ -147,6 +156,26 @@ impl HummockStorage {
         )
         .await;
 
+        let (tx, mut rx) = unbounded_channel();
+        tokio::spawn(async move {
+            let mut control_msg_tx_holder = HashMap::new();
+            while let Some(event) = rx.recv().await {
+                match event {
+                    HummockEvent::NewInstance {
+                        local_instance_id,
+                        control_msg_tx,
+                    } => {
+                        assert!(control_msg_tx_holder
+                            .insert(local_instance_id, control_msg_tx)
+                            .is_none());
+                    }
+                    HummockEvent::InstanceDropped { local_instance_id } => {
+                        assert!(control_msg_tx_holder.remove(&local_instance_id).is_some());
+                    }
+                }
+            }
+        });
+
         let instance = Self {
             options: options.clone(),
             local_version_manager,
@@ -157,6 +186,8 @@ impl HummockStorage {
             sstable_id_manager,
             #[cfg(not(madsim))]
             tracing: Arc::new(risingwave_tracing::RwTracingService::new()),
+            hummock_event_tx: tx,
+            next_local_instance_id: Arc::new(AtomicU64::new(0)),
         };
         Ok(instance)
     }
@@ -235,5 +266,115 @@ impl HummockStorage {
         }
 
         !surely_not_have
+    }
+
+    pub fn start_local_state_store(&self) -> LocalHummockStorageWrapper {
+        let local_instance = self.new_local_state_store_inner();
+        LocalHummockStorageWrapper {
+            inner: Arc::new(local_instance),
+            instance_collector: Arc::new(Default::default()),
+        }
+    }
+
+    fn new_local_state_store_inner(&self) -> LocalHummockStorageInner {
+        let local_instance_id = self.next_local_instance_id.fetch_add(1, Relaxed);
+        let (control_tx, control_rx) = unbounded_channel();
+        let _ = self.hummock_event_tx.send(HummockEvent::NewInstance {
+            local_instance_id,
+            control_msg_tx: control_tx,
+        });
+
+        LocalHummockStorageInner {
+            local_instance_id,
+            event_tx: self.hummock_event_tx.clone(),
+            global_instance: self.clone(),
+            control_msg_rx_holder: Some(control_rx),
+        }
+    }
+}
+
+pub(crate) enum HummockEvent {
+    NewInstance {
+        local_instance_id: u64,
+        control_msg_tx: UnboundedSender<StorageControlMsg>,
+    },
+    InstanceDropped {
+        local_instance_id: u64,
+    },
+}
+
+pub struct LocalHummockStorageInner {
+    local_instance_id: u64,
+    event_tx: UnboundedSender<HummockEvent>,
+    // TODO: use the local state store
+    // This a just a temporary way to access data.
+    // Will be replaced after we implement local state store
+    global_instance: HummockStorage,
+    control_msg_rx_holder: Option<UnboundedReceiver<StorageControlMsg>>,
+}
+
+impl LocalHummockStorageInner {
+    pub fn apply_control_msg(&self, msg: StorageControlMsg) {
+        match msg {}
+    }
+}
+
+impl Drop for LocalHummockStorageInner {
+    fn drop(&mut self) {
+        let _ = self.event_tx.send(HummockEvent::InstanceDropped {
+            local_instance_id: self.local_instance_id,
+        });
+    }
+}
+
+pub struct LocalHummockStorageWrapper {
+    inner: Arc<LocalHummockStorageInner>,
+    #[allow(clippy::type_complexity)]
+    instance_collector: Arc<
+        Mutex<
+            Option<
+                Vec<(
+                    Arc<LocalHummockStorageInner>,
+                    UnboundedReceiver<StorageControlMsg>,
+                )>,
+            >,
+        >,
+    >,
+}
+
+impl LocalHummockStorageWrapper {
+    pub fn collect_local_state_store_instance(
+        &self,
+    ) -> Vec<(
+        Arc<LocalHummockStorageInner>,
+        UnboundedReceiver<StorageControlMsg>,
+    )> {
+        self.instance_collector
+            .try_lock()
+            .expect("should not have any contention")
+            .take()
+            .expect("should be some when collecting instance")
+    }
+}
+
+impl Clone for LocalHummockStorageWrapper {
+    fn clone(&self) -> Self {
+        let mut new_local_instance = self.inner.global_instance.new_local_state_store_inner();
+        let control_rx = new_local_instance
+            .control_msg_rx_holder
+            .take()
+            .expect("should be some when the local instance is just created");
+        let new_local_instance = Arc::new(new_local_instance);
+
+        self.instance_collector
+            .try_lock()
+            .expect("should not have any contention")
+            .as_mut()
+            .expect("should be some when we are still creating new local instance")
+            .push((new_local_instance.clone(), control_rx));
+        Self {
+            inner: new_local_instance,
+            instance_collector: self.instance_collector.clone(),
+        }
     }
 }

@@ -19,7 +19,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_stack_trace::{StackTraceManager, StackTraceReport};
-use futures::Future;
+use futures::future::{select, Either};
+use futures::{Future, FutureExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
@@ -29,7 +30,10 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use risingwave_storage::store_impl::LocalStateStoreImpl;
+use risingwave_storage::{
+    dispatch_local_state_store, dispatch_state_store, StateStore, StateStoreImpl,
+};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -38,8 +42,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
-    ActorId, ActorLocalStreamEnvironment, FragmentId, SharedContext, StreamEnvironment,
-    UpDownActorIds, LOCAL_OUTPUT_CHANNEL_SIZE,
+    ActorId, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
+    LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
 #[cfg(test)]
@@ -86,7 +90,7 @@ pub struct LocalStreamManager {
 }
 
 pub struct ExecutorParams {
-    pub env: ActorLocalStreamEnvironment,
+    pub env: StreamEnvironment,
 
     /// Indices of primary keys
     pub pk_indices: PkIndices,
@@ -438,7 +442,6 @@ impl LocalStreamManagerCore {
         input: BoxedExecutor,
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
-        actor_control_msg_rx: ActorControlMsgReceiver,
     ) -> Result<impl StreamConsumer> {
         let dispatcher_impls = dispatchers
             .iter()
@@ -451,7 +454,6 @@ impl LocalStreamManagerCore {
             actor_id,
             self.context.clone(),
             self.streaming_metrics.clone(),
-            actor_control_msg_rx,
         ))
     }
 
@@ -462,7 +464,7 @@ impl LocalStreamManagerCore {
         fragment_id: FragmentId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
-        env: ActorLocalStreamEnvironment,
+        env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
@@ -527,11 +529,12 @@ impl LocalStreamManagerCore {
         &mut self,
         fragment_id: FragmentId,
         node: &stream_plan::StreamNode,
-        env: ActorLocalStreamEnvironment,
+        env: StreamEnvironment,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
+        local_state_store: LocalStateStoreImpl,
     ) -> Result<BoxedExecutor> {
-        dispatch_state_store!(self.state_store.clone(), store, {
+        dispatch_local_state_store!(local_state_store, store, {
             self.create_nodes_inner(
                 fragment_id,
                 node,
@@ -583,28 +586,23 @@ impl LocalStreamManagerCore {
                 .ok()
                 .map(|b| b.try_into())
                 .transpose()?;
-            let (local_env, actor_control_msg_rx) = env.new_actor_local_env();
+            let local_state_store = env.state_store().start_local_state_store();
             let executor = self.create_nodes(
                 actor.fragment_id,
                 actor.get_nodes()?,
-                local_env.clone(),
+                env.clone(),
                 &actor_context,
                 vnode_bitmap,
+                local_state_store.clone(),
             )?;
 
-            let dispatcher = self.create_dispatcher(
-                executor,
-                &actor.dispatcher,
-                actor_id,
-                actor_control_msg_rx,
-            )?;
+            let dispatcher = self.create_dispatcher(executor, &actor.dispatcher, actor_id)?;
             let actor = Actor::new(
                 dispatcher,
                 actor_id,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
                 actor_context,
-                local_env.clone(),
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -615,8 +613,12 @@ impl LocalStreamManagerCore {
 
             let handle = {
                 let actor = async move {
-                    // unwrap the actor result to panic on error
-                    actor.run().await.expect("actor failed");
+                    let state_store_monitoring = local_state_store.into_monitoring_future();
+                    match select(state_store_monitoring, actor.run().boxed()).await {
+                        Either::Left((result, _)) => result,
+                        Either::Right((result, _)) => result,
+                    }
+                    .expect("actor failed"); // unwrap the actor result to panic on error
                 };
                 #[auto_enums::auto_enum(Future)]
                 let traced = match trace_reporter {

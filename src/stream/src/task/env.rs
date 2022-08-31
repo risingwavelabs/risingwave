@@ -17,10 +17,7 @@ use std::sync::Arc;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_source::{SourceManager, SourceManagerRef};
-use risingwave_storage::store_impl::LocalStateStoreImpl;
 use risingwave_storage::StateStoreImpl;
-
-use crate::executor::ActorControlMsgReceiver;
 
 pub(crate) type WorkerNodeId = u32;
 
@@ -99,83 +96,6 @@ impl StreamEnvironment {
     }
 
     pub fn state_store(&self) -> StateStoreImpl {
-        self.state_store.clone()
-    }
-
-    pub fn new_actor_local_env(&self) -> (ActorLocalStreamEnvironment, ActorControlMsgReceiver) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let local_state_store = self.state_store.register_new_local_state_store(tx);
-        (
-            ActorLocalStreamEnvironment {
-                server_addr: self.server_addr.clone(),
-                source_manager: self.source_manager.clone(),
-                config: self.config.clone(),
-                worker_id: self.worker_id,
-                state_store: local_state_store,
-            },
-            ActorControlMsgReceiver::new(rx),
-        )
-    }
-}
-
-/// The local environment for actor execution.
-/// The instance is owned by each actor
-#[derive(Debug, Clone)]
-pub struct ActorLocalStreamEnvironment {
-    /// Endpoint the stream manager listens on.
-    server_addr: HostAddr,
-
-    /// Reference to the source manager.
-    source_manager: SourceManagerRef,
-
-    /// Streaming related configurations.
-    config: Arc<StreamingConfig>,
-
-    /// Current worker node id.
-    worker_id: WorkerNodeId,
-
-    state_store: LocalStateStoreImpl,
-}
-
-impl ActorLocalStreamEnvironment {
-    pub fn new(
-        source_manager: SourceManagerRef,
-        server_addr: HostAddr,
-        config: Arc<StreamingConfig>,
-        worker_id: WorkerNodeId,
-        state_store: LocalStateStoreImpl,
-    ) -> Self {
-        Self {
-            server_addr,
-            source_manager,
-            config,
-            worker_id,
-            state_store,
-        }
-    }
-
-    pub fn server_address(&self) -> &HostAddr {
-        &self.server_addr
-    }
-
-    #[expect(clippy::explicit_auto_deref)]
-    pub fn source_manager(&self) -> &dyn SourceManager {
-        &*self.source_manager
-    }
-
-    pub fn source_manager_ref(&self) -> SourceManagerRef {
-        self.source_manager.clone()
-    }
-
-    pub fn config(&self) -> &StreamingConfig {
-        self.config.as_ref()
-    }
-
-    pub fn worker_id(&self) -> WorkerNodeId {
-        self.worker_id
-    }
-
-    pub fn state_store(&self) -> LocalStateStoreImpl {
         self.state_store.clone()
     }
 }

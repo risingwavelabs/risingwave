@@ -25,8 +25,8 @@ use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
 use super::StreamConsumer;
-use crate::executor::{ActorControlMsg, ActorTrapItem, Epoch};
-use crate::task::{ActorId, ActorLocalStreamEnvironment, SharedContext};
+use crate::executor::Epoch;
+use crate::task::{ActorId, SharedContext};
 
 /// Shared by all operators of an actor.
 #[derive(Default)]
@@ -64,7 +64,6 @@ pub struct Actor<C> {
     context: Arc<SharedContext>,
     _metrics: Arc<StreamingMetrics>,
     _actor_context: ActorContextRef,
-    env: ActorLocalStreamEnvironment,
 }
 
 impl<C> Actor<C>
@@ -77,7 +76,6 @@ where
         context: Arc<SharedContext>,
         metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
-        env: ActorLocalStreamEnvironment,
     ) -> Self {
         Self {
             consumer,
@@ -85,7 +83,6 @@ where
             context,
             _metrics: metrics,
             _actor_context: actor_context,
-            env,
         }
     }
 
@@ -99,7 +96,6 @@ where
             span.add_property(|| ("epoch", (-1).to_string()));
             span
         };
-        let mut current_epoch = 0;
 
         let mut last_epoch: Option<Epoch> = None;
 
@@ -107,7 +103,7 @@ where
         pin_mut!(stream);
 
         // Drive the streaming task with an infinite loop
-        while let Some(actor_trap_item) = stream
+        while let Some(barrier) = stream
             .next()
             .in_span(span)
             .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
@@ -116,29 +112,18 @@ where
             .await
             .transpose()?
         {
-            let actor_trap_item: ActorTrapItem = actor_trap_item;
-            match actor_trap_item {
-                ActorTrapItem::Barrier(barrier) => {
-                    last_epoch = Some(barrier.epoch);
+            last_epoch = Some(barrier.epoch);
 
-                    // Collect barriers to local barrier manager
-                    self.context
-                        .lock_barrier_manager()
-                        .collect(self.id, &barrier)?;
+            // Collect barriers to local barrier manager
+            self.context
+                .lock_barrier_manager()
+                .collect(self.id, &barrier)?;
 
-                    // Then stop this actor if asked
-                    let to_stop = barrier.is_stop_or_update_drop_actor(self.id);
-                    if to_stop {
-                        tracing::trace!(actor_id = self.id, "actor exit");
-                        return Ok(());
-                    }
-                    current_epoch = barrier.epoch.curr;
-                }
-                ActorTrapItem::ControlMsg(msg) => match msg {
-                    ActorControlMsg::Storage(msg) => {
-                        self.env.state_store().apply_control_msg(msg).await;
-                    }
-                },
+            // Then stop this actor if asked
+            let to_stop = barrier.is_stop_or_update_drop_actor(self.id);
+            if to_stop {
+                tracing::trace!(actor_id = self.id, "actor exit");
+                return Ok(());
             }
 
             // Tracing related work
@@ -147,7 +132,7 @@ where
                 span.add_property(|| ("otel.name", span_name.to_string()));
                 span.add_property(|| ("next", self.id.to_string()));
                 span.add_property(|| ("next", "Outbound".to_string()));
-                span.add_property(|| ("epoch", current_epoch.to_string()));
+                span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
                 span
             };
         }

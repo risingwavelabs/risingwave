@@ -34,7 +34,7 @@ use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
 use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
-use crate::task::{SharedContext, StreamEnvironment};
+use crate::task::SharedContext;
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
@@ -91,14 +91,12 @@ async fn test_merger_sum_aggr() {
             channel: Box::new(LocalOutput::new(233, tx)),
         };
         let context = SharedContext::for_test().into();
-        let (env, _ctrl_msg_rx) = StreamEnvironment::for_test().new_actor_local_env();
         let actor = Actor::new(
             consumer,
             0,
             context,
             StreamingMetrics::unused().into(),
             actor_ctx.clone(),
-            env,
         );
         (actor, rx)
     };
@@ -136,8 +134,6 @@ async fn test_merger_sum_aggr() {
         0,
         Arc::new(StreamingMetrics::unused()),
     ));
-
-    let (env, ctrl_msg_rx) = StreamEnvironment::for_test().new_actor_local_env();
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
@@ -146,7 +142,6 @@ async fn test_merger_sum_aggr() {
         0,
         ctx,
         metrics,
-        ctrl_msg_rx,
     );
     let context = SharedContext::for_test().into();
     let actor = Actor::new(
@@ -155,7 +150,6 @@ async fn test_merger_sum_aggr() {
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
-        env,
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -208,15 +202,12 @@ async fn test_merger_sum_aggr() {
         data: items.clone(),
     };
     let context = SharedContext::for_test().into();
-
-    let (env, _ctrl_msg_rx) = StreamEnvironment::for_test().new_actor_local_env();
     let actor = Actor::new(
         consumer,
         0,
         context,
         StreamingMetrics::unused().into(),
         actor_ctx.clone(),
-        env,
     );
     handles.push(tokio::spawn(actor.run()));
 
@@ -270,9 +261,9 @@ struct MockConsumer {
 }
 
 impl StreamConsumer for MockConsumer {
-    type ActorTrapItemStream = impl Stream<Item = Result<ActorTrapItem>> + Send;
+    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
 
-    fn execute(self: Box<Self>) -> Self::ActorTrapItemStream {
+    fn execute(self: Box<Self>) -> Self::BarrierStream {
         let mut input = self.input.execute();
         let data = self.data;
         #[try_stream]
@@ -280,7 +271,7 @@ impl StreamConsumer for MockConsumer {
             while let Some(item) = input.next().await {
                 match item? {
                     Message::Chunk(chunk) => data.lock().unwrap().push(chunk),
-                    Message::Barrier(barrier) => yield ActorTrapItem::Barrier(barrier),
+                    Message::Barrier(barrier) => yield barrier,
                 }
             }
         }
@@ -294,9 +285,9 @@ pub struct SenderConsumer {
 }
 
 impl StreamConsumer for SenderConsumer {
-    type ActorTrapItemStream = impl Stream<Item = Result<ActorTrapItem>> + Send;
+    type BarrierStream = impl Stream<Item = Result<Barrier>> + Send;
 
-    fn execute(self: Box<Self>) -> Self::ActorTrapItemStream {
+    fn execute(self: Box<Self>) -> Self::BarrierStream {
         let mut input = self.input.execute();
         let mut channel = self.channel;
         #[try_stream]
@@ -308,7 +299,7 @@ impl StreamConsumer for SenderConsumer {
                 channel.send(msg).await?;
 
                 if let Some(barrier) = barrier {
-                    yield ActorTrapItem::Barrier(barrier);
+                    yield barrier;
                 }
             }
         }

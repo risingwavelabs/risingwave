@@ -13,29 +13,32 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::future::pending;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
-use lazy_static::lazy_static;
+use futures::future::{select_all, BoxFuture};
+use futures::FutureExt;
+use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::error::RwError;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
 use risingwave_rpc_client::HummockMetaClient;
-use spin::Mutex;
 
 use crate::error::StorageResult;
 use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::{
-    HummockStorage, SstableStore, StorageControlMsg, TieredCache, TieredCacheMetricsBuilder,
+    HummockStorage, LocalHummockStorageWrapper, SstableStore, TieredCache,
+    TieredCacheMetricsBuilder,
 };
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
-use crate::StateStore;
+use crate::store::StateStore;
 
-// TODO: developing the local state store
-pub type LocalStateStoreImpl = StateStoreImpl;
+pub enum StorageControlMessage {}
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -72,10 +75,10 @@ impl Debug for StateStoreImpl {
 }
 
 #[macro_export]
-macro_rules! dispatch_state_store {
-    ($impl:expr, $store:ident, $body:tt) => {
+macro_rules! dispatch_state_store_inner {
+    ($impl:expr, $store:ident, $body:tt, $type_name:ident) => {
         match $impl {
-            StateStoreImpl::MemoryStateStore($store) => {
+            $type_name::MemoryStateStore($store) => {
                 // WARNING: don't change this. Enabling memory backend will cause monomorphization
                 // explosion and thus slow compile time in release mode.
                 #[cfg(debug_assertions)]
@@ -88,8 +91,15 @@ macro_rules! dispatch_state_store {
                     unimplemented!("memory state store should never be used in release mode");
                 }
             }
-            StateStoreImpl::HummockStateStore($store) => $body,
+            $type_name::HummockStateStore($store) => $body,
         }
+    };
+}
+
+#[macro_export]
+macro_rules! dispatch_state_store {
+    ($impl:expr, $store:ident, $body:tt) => {
+        $crate::dispatch_state_store_inner!($impl, $store, $body, StateStoreImpl)
     };
 }
 
@@ -177,22 +187,61 @@ impl StateStoreImpl {
         Ok(store)
     }
 
-    pub fn register_new_local_state_store(
-        &self,
-        control_msg_tx: tokio::sync::mpsc::UnboundedSender<StorageControlMsg>,
-    ) -> LocalStateStoreImpl {
-        // TODO: remove this after local state store is developed.
-        // This is a temporary holder for tx to prevent rx.try_recv from failing.
-        lazy_static! {
-            static ref TX_HOLDER: Mutex<Vec<tokio::sync::mpsc::UnboundedSender<StorageControlMsg>>> =
-                Mutex::new(Vec::new());
+    pub fn start_local_state_store(&self) -> LocalStateStoreImpl {
+        match self {
+            StateStoreImpl::HummockStateStore(store) => LocalStateStoreImpl::HummockStateStore(
+                store
+                    .state_store()
+                    .start_local_state_store()
+                    .monitored(store.stats()),
+            ),
+            StateStoreImpl::MemoryStateStore(store) => {
+                LocalStateStoreImpl::MemoryStateStore(store.clone())
+            }
         }
-        TX_HOLDER.lock().push(control_msg_tx);
-        self.clone()
     }
+}
 
-    #[allow(clippy::unused_async)]
-    pub async fn apply_control_msg(&self, msg: StorageControlMsg) {
-        match msg {}
+/// The type erased [`StateStore`].
+#[derive(Clone, EnumAsInner)]
+pub enum LocalStateStoreImpl {
+    // TODO: implement new local state store builder for hummock
+    HummockStateStore(Monitored<LocalHummockStorageWrapper>),
+    MemoryStateStore(Monitored<MemoryStateStore>),
+}
+
+impl LocalStateStoreImpl {
+    pub fn into_monitoring_future(
+        self,
+    ) -> BoxFuture<'static, risingwave_common::error::Result<()>> {
+        // TODO: different implementation for hummock
+        match self {
+            LocalStateStoreImpl::HummockStateStore(state_store) => {
+                let instances = state_store
+                    .state_store()
+                    .collect_local_state_store_instance();
+                let futures = instances
+                    .into_iter()
+                    .map(|(instance, mut rx)| {
+                        async move {
+                            while let Some(control_msg) = rx.recv().await {
+                                instance.apply_control_msg(control_msg)
+                            }
+                            Ok::<(), RwError>(())
+                        }
+                        .boxed()
+                    })
+                    .collect_vec();
+                select_all(futures).map(|_| Ok::<(), RwError>(())).boxed()
+            }
+            LocalStateStoreImpl::MemoryStateStore(_) => pending().boxed(),
+        }
     }
+}
+
+#[macro_export]
+macro_rules! dispatch_local_state_store {
+    ($impl:expr, $store:ident, $body:tt) => {
+        $crate::dispatch_state_store_inner!($impl, $store, $body, LocalStateStoreImpl)
+    };
 }

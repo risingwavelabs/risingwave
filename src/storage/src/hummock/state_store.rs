@@ -43,7 +43,7 @@ use crate::hummock::shared_buffer::{
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
-use crate::hummock::HummockResult;
+use crate::hummock::{HummockResult, LocalHummockStorageWrapper};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -768,5 +768,114 @@ impl Drop for HummockStateStoreIter {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic(&mut stats);
         stats.report(&self.metrics);
+    }
+}
+
+impl StateStore for LocalHummockStorageWrapper {
+    type Iter = <HummockStorage as StateStore>::Iter;
+
+    define_state_store_associated_type!();
+
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        check_bloom_filter: bool,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
+        self.inner
+            .global_instance
+            .get(key, check_bloom_filter, read_options)
+    }
+
+    fn scan<R, B>(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        key_range: R,
+        limit: Option<usize>,
+        read_options: ReadOptions,
+    ) -> Self::ScanFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        self.inner
+            .global_instance
+            .scan(prefix_hint, key_range, limit, read_options)
+    }
+
+    fn backward_scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        read_options: ReadOptions,
+    ) -> Self::BackwardScanFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        self.inner
+            .global_instance
+            .backward_scan(key_range, limit, read_options)
+    }
+
+    fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        write_options: WriteOptions,
+    ) -> Self::IngestBatchFuture<'_> {
+        self.inner
+            .global_instance
+            .ingest_batch(kv_pairs, write_options)
+    }
+
+    fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        write_options: WriteOptions,
+    ) -> Self::ReplicateBatchFuture<'_> {
+        self.inner
+            .global_instance
+            .replicate_batch(kv_pairs, write_options)
+    }
+
+    fn iter<R, B>(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        self.inner
+            .global_instance
+            .iter(prefix_hint, key_range, read_options)
+    }
+
+    fn backward_iter<R, B>(
+        &self,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::BackwardIterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        self.inner
+            .global_instance
+            .backward_iter(key_range, read_options)
+    }
+
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+        self.inner.global_instance.wait_epoch(epoch)
+    }
+
+    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+        self.inner.global_instance.sync(epoch)
+    }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        self.inner.global_instance.clear_shared_buffer()
     }
 }
