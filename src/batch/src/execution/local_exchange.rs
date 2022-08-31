@@ -179,16 +179,4 @@ mod tests {
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }
-
-    #[tokio::test]
-    async fn test_unconnectable_node() {
-        let addr: HostAddr = "127.0.0.1:1001".parse().unwrap();
-        let client = ComputeClient::new(addr).await.unwrap();
-        let task_output_id = TaskOutputId {
-            task_id: Some(TaskId::default()),
-            ..Default::default()
-        };
-        let res = GrpcExchangeSource::create(client, task_output_id, None).await;
-        assert!(res.is_err());
-    }
 }
