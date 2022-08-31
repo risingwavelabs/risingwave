@@ -165,7 +165,7 @@ fn create_hash_join_executor(
         right_child,
         vec![0],
         vec![0],
-        false,
+        vec![false],
         cond,
         "HashJoinExecutor".into(),
     ))

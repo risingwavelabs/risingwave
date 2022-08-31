@@ -238,7 +238,7 @@
                 LogicalJoin { type: Inner, on: (nation.n_regionkey = region.r_regionkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
                   LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey] }
                     LogicalJoin { type: Inner, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey] }
-                      LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost] }
+                      LogicalScan { table: partsupp, output_columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], required_columns: [ps_partkey, ps_suppkey, ps_supplycost], predicate: IsNotNull(partsupp.ps_partkey) }
                       LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey] }
                     LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey] }
                   LogicalScan { table: region, output_columns: [region.r_regionkey], required_columns: [r_regionkey, r_name], predicate: (region.r_name = 'AFRICA':Varchar) }
@@ -277,7 +277,8 @@
                                 BatchExchange { order: [], dist: HashShard(supplier.s_nationkey) }
                                   BatchHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey] }
                                     BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
-                                      BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                                      BatchFilter { predicate: IsNotNull(partsupp.ps_partkey) }
+                                        BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                                     BatchExchange { order: [], dist: HashShard(supplier.s_suppkey) }
                                       BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                                 BatchExchange { order: [], dist: HashShard(nation.n_nationkey) }
@@ -327,7 +328,8 @@
                                   StreamExchange { dist: HashShard(supplier.s_nationkey) }
                                     StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
                                       StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                                        StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                                        StreamFilter { predicate: IsNotNull(partsupp.ps_partkey) }
+                                          StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                                       StreamExchange { dist: HashShard(supplier.s_suppkey) }
                                         StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
                                   StreamExchange { dist: HashShard(nation.n_nationkey) }
@@ -1794,7 +1796,7 @@
               LogicalJoin { type: LeftOuter, on: (part.p_partkey = lineitem.l_partkey), output: [part.p_partkey, lineitem.l_quantity] }
                 LogicalAgg { group_key: [part.p_partkey], aggs: [] }
                   LogicalScan { table: part, columns: [part.p_partkey] }
-                LogicalScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity] }
+                LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_quantity], required_columns: [l_partkey, l_quantity], predicate: IsNotNull(lineitem.l_partkey) }
   batch_plan: |
     BatchProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)] }
       BatchSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice))] }
@@ -1818,7 +1820,8 @@
                           BatchHashAgg { group_key: [part.p_partkey], aggs: [] }
                             BatchScan { table: part, columns: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                         BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
-                          BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
+                          BatchFilter { predicate: IsNotNull(lineitem.l_partkey) }
+                            BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [avg_yearly], pk_columns: [] }
       StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)] }
@@ -1844,7 +1847,8 @@
                               StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
                                 StreamTableScan { table: part, columns: [part.p_partkey], pk: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                           StreamExchange { dist: HashShard(lineitem.l_partkey) }
-                            StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                            StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
+                              StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
 - id: tpch_q18
   before:
   - create_tables
@@ -2116,7 +2120,7 @@
             LogicalJoin { type: LeftOuter, on: (partsupp.ps_partkey = lineitem.l_partkey) AND (partsupp.ps_suppkey = lineitem.l_suppkey), output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
               LogicalAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
                 LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
-              LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity], required_columns: [l_partkey, l_suppkey, l_quantity, l_shipdate], predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+              LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity], required_columns: [l_partkey, l_suppkey, l_quantity, l_shipdate], predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
   batch_plan: |
     BatchExchange { order: [supplier.s_name ASC], dist: Single }
       BatchSort { order: [supplier.s_name ASC] }
@@ -2149,7 +2153,7 @@
                             BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                         BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                           BatchProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity] }
-                            BatchFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                            BatchFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
                               BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), nation.n_nationkey(hidden)], pk_columns: [supplier.s_suppkey, nation.n_nationkey], order_descs: [s_name, supplier.s_suppkey, nation.n_nationkey] }
@@ -2183,7 +2187,7 @@
                             StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                         StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                          StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                          StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
                             StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], distribution: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
 - id: tpch_q21
   before:
