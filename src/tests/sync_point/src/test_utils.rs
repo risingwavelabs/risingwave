@@ -91,7 +91,7 @@ pub fn run_slt() -> Output {
 
 pub async fn get_object_store_client() -> ObjectStoreImpl {
     let url = std::env::var("OBJECT_STORE_URL").unwrap();
-    parse_remote_object_store(&url, 256, Arc::new(ObjectStoreMetrics::unused())).await
+    parse_remote_object_store(&url, Arc::new(ObjectStoreMetrics::unused())).await
 }
 
 pub fn get_object_store_bucket() -> String {

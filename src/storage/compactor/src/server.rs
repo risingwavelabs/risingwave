@@ -90,7 +90,6 @@ pub async fn compactor_serve(
             opts.state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
-            storage_config.s3_num_prefixes,
             object_metrics,
         )
         .await,
