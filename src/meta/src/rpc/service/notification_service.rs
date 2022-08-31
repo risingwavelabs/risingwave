@@ -24,13 +24,11 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerKey,
 };
 use crate::storage::MetaStore;
-use crate::stream::GlobalStreamManagerRef;
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -38,7 +36,6 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
-    stream_manager: GlobalStreamManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -51,7 +48,6 @@ where
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
-        stream_manager: GlobalStreamManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         Self {
@@ -59,7 +55,6 @@ where
             catalog_manager,
             cluster_manager,
             hummock_manager,
-            stream_manager,
             fragment_manager,
         }
     }
@@ -78,26 +73,25 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
-        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let worker_type = req.get_worker_type()?;
+        let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
         let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
         let (databases, schemas, mut tables, sources, sinks, indexes) =
             catalog_guard.database.get_catalog().await?;
+        let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
-        let processing_table_guard = self.stream_manager.get_processing_table_guard().await;
-
-        let table_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.id));
+        let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
         let parallel_unit_mappings = fragment_guard
-            .all_table_mappings()
-            .filter(|mapping| table_ids.contains(&mapping.table_id))
+            .all_fragment_mappings()
+            .filter(|mapping| fragment_ids.contains(&mapping.fragment_id))
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
@@ -120,7 +114,7 @@ where
             },
 
             WorkerType::Compactor => {
-                tables.extend(processing_table_guard.values().cloned());
+                tables.extend(creating_tables);
 
                 MetaSnapshot {
                     tables,
@@ -129,7 +123,7 @@ where
             }
 
             WorkerType::ComputeNode => {
-                tables.extend(processing_table_guard.values().cloned());
+                tables.extend(creating_tables);
 
                 MetaSnapshot {
                     tables,

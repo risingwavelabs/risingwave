@@ -223,6 +223,7 @@ impl ToBatchProst for BatchHashJoin {
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
+            null_safe: self.eq_join_predicate.null_safes().into_iter().collect(),
             condition: self
                 .eq_join_predicate
                 .other_cond()

@@ -111,7 +111,7 @@
       LogicalScan { table: ab, columns: [ab.a, ab.b] }
       LogicalJoin { type: Inner, on: true, output: all }
         LogicalScan { table: bc, columns: [bc.b] }
-        LogicalScan { table: t, columns: [] }
+        LogicalScan { table: t, output_columns: [], required_columns: [v1], predicate: IsNotNull(t.v1) }
 - sql: |
     /* We cannot reference columns in left table if not lateral */
     create table ab (a int, b int);
