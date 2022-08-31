@@ -306,7 +306,7 @@ impl HummockStorage {
         for epoch_replicated_batches in replicated_batches {
             for batch in epoch_replicated_batches {
                 if let Some(v) = self.get_from_batch(&batch, key) {
-                    return Ok(v);
+                    return Ok(v.into_user_value());
                 }
             }
         }
@@ -324,7 +324,7 @@ impl HummockStorage {
                 )
                 .await?;
             if let Some(v) = value {
-                return Ok(v);
+                return Ok(v.into_user_value());
             }
             table_counts += table_count;
         }
@@ -339,7 +339,7 @@ impl HummockStorage {
                 )
                 .await?;
             if let Some(v) = value {
-                return Ok(v);
+                return Ok(v.into_user_value());
             }
             table_counts += table_count;
         }
@@ -368,7 +368,7 @@ impl HummockStorage {
                             )
                             .await?
                         {
-                            return Ok(v);
+                            return Ok(v.into_user_value());
                         }
                     }
                 }
@@ -404,7 +404,7 @@ impl HummockStorage {
                         .get_from_table(table, &internal_key, check_bloom_filter, &mut local_stats)
                         .await?
                     {
-                        return Ok(v);
+                        return Ok(v.into_user_value());
                     }
                 }
             }

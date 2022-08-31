@@ -167,7 +167,7 @@ impl HummockStorage {
         internal_key: &[u8],
         check_bloom_filter: bool,
         stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Option<Option<Bytes>>> {
+    ) -> HummockResult<Option<HummockValue<Bytes>>> {
         let ukey = user_key(internal_key);
         if check_bloom_filter && !Self::hit_sstable_bloom_filter(sstable.value(), ukey, stats) {
             return Ok(None);
@@ -189,10 +189,11 @@ impl HummockStorage {
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
         let value = match key::user_key(iter.key()) == ukey {
-            true => Some(iter.value().into_user_value().map(Bytes::copy_from_slice)),
+            true => Some(iter.value().to_owned_bytes_value()),
             false => None,
         };
         iter.collect_local_statistic(stats);
+
         Ok(value)
     }
 
@@ -245,7 +246,7 @@ impl HummockStorage {
         stats: &mut StoreLocalStatistic,
         key: &[u8],
         check_bloom_filter: bool,
-    ) -> StorageResult<(Option<Option<Bytes>>, i32)> {
+    ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
         let mut table_counts = 0;
         let epoch = key::get_epoch(internal_key);
         for data_list in order_sorted_uncommitted_data {
@@ -253,20 +254,20 @@ impl HummockStorage {
                 match data {
                     UncommittedData::Batch(batch) => {
                         assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
-                        let data = self.get_from_batch(&batch, key);
-                        if data.is_some() {
-                            return Ok((data, table_counts));
+                        if let Some(data) = self.get_from_batch(&batch, key) {
+                            return Ok((Some(data), table_counts));
                         }
                     }
+
                     UncommittedData::Sst((_, table_info)) => {
                         let table = self.sstable_store.sstable(table_info.id, stats).await?;
                         table_counts += 1;
 
-                        let data = self
+                        if let Some(data) = self
                             .get_from_table(table, internal_key, check_bloom_filter, stats)
-                            .await?;
-                        if data.is_some() {
-                            return Ok((data, table_counts));
+                            .await?
+                        {
+                            return Ok((Some(data), table_counts));
                         }
                     }
                 }
@@ -275,11 +276,11 @@ impl HummockStorage {
         Ok((None, table_counts))
     }
 
-    /// Get `user_value` from `SharedBufferBatch` Return `Some(None)` means the key is deleted.
-    fn get_from_batch(&self, batch: &SharedBufferBatch, key: &[u8]) -> Option<Option<Bytes>> {
+    /// Get `user_value` from `SharedBufferBatch`
+    fn get_from_batch(&self, batch: &SharedBufferBatch, key: &[u8]) -> Option<HummockValue<Bytes>> {
         batch.get(key).map(|v| {
             self.stats.get_shared_buffer_hit_counts.inc();
-            v.into_user_value().map(|v| v.into())
+            v
         })
     }
 }

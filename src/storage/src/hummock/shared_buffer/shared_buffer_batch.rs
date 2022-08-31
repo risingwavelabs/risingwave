@@ -125,14 +125,14 @@ impl SharedBufferBatch {
             .sum()
     }
 
-    pub fn get(&self, user_key: &[u8]) -> Option<HummockValue<Vec<u8>>> {
+    pub fn get(&self, user_key: &[u8]) -> Option<HummockValue<Bytes>> {
         // Perform binary search on user key because the items in SharedBufferBatch is ordered by
         // user key.
         match self
             .inner
             .binary_search_by(|m| key::user_key(&m.0).cmp(user_key))
         {
-            Ok(i) => Some(self.inner[i].1.to_vec()),
+            Ok(i) => Some(self.inner[i].1.clone()),
             Err(_) => None,
         }
     }
@@ -318,29 +318,29 @@ mod tests {
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, iterator_test_key_of_epoch};
 
     fn transform_shared_buffer(
-        batches: Vec<(Vec<u8>, HummockValue<Vec<u8>>)>,
+        batches: Vec<(Vec<u8>, HummockValue<Bytes>)>,
     ) -> Vec<(Bytes, HummockValue<Bytes>)> {
         batches
             .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
+            .map(|(k, v)| (k.into(), v))
             .collect_vec()
     }
 
     #[tokio::test]
     async fn test_shared_buffer_batch_basic() {
         let epoch = 1;
-        let shared_buffer_items = vec![
+        let shared_buffer_items: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
                 iterator_test_key_of_epoch(0, epoch),
-                HummockValue::put(b"value1".to_vec()),
+                HummockValue::put(Bytes::from("value1")),
             ),
             (
                 iterator_test_key_of_epoch(1, epoch),
-                HummockValue::put(b"value2".to_vec()),
+                HummockValue::put(Bytes::from("value1")),
             ),
             (
                 iterator_test_key_of_epoch(2, epoch),
-                HummockValue::put(b"value3".to_vec()),
+                HummockValue::put(Bytes::from("value1")),
             ),
         ];
         let shared_buffer_batch = SharedBufferBatch::new(
@@ -384,7 +384,7 @@ mod tests {
         iter.rewind().await.unwrap();
         let mut output = vec![];
         while iter.is_valid() {
-            output.push((iter.key().to_owned(), iter.value().to_owned_value()));
+            output.push((iter.key().to_owned(), iter.value().to_owned_bytes_value()));
             iter.next().await.unwrap();
         }
         assert_eq!(output, shared_buffer_items);
@@ -396,7 +396,7 @@ mod tests {
         while backward_iter.is_valid() {
             output.push((
                 backward_iter.key().to_owned(),
-                backward_iter.value().to_owned_value(),
+                backward_iter.value().to_owned_bytes_value(),
             ));
             backward_iter.next().await.unwrap();
         }
@@ -410,15 +410,15 @@ mod tests {
         let shared_buffer_items = vec![
             (
                 iterator_test_key_of_epoch(1, epoch),
-                HummockValue::put(b"value1".to_vec()),
+                HummockValue::put(Bytes::from("value1")),
             ),
             (
                 iterator_test_key_of_epoch(2, epoch),
-                HummockValue::put(b"value2".to_vec()),
+                HummockValue::put(Bytes::from("value2")),
             ),
             (
                 iterator_test_key_of_epoch(3, epoch),
-                HummockValue::put(b"value3".to_vec()),
+                HummockValue::put(Bytes::from("value3")),
             ),
         ];
         let shared_buffer_batch = SharedBufferBatch::new(
