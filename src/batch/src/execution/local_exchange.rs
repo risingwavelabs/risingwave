@@ -85,7 +85,7 @@ mod tests {
     use std::time::Duration;
 
     use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskId, TaskOutputId};
+    use risingwave_pb::batch_plan::{TaskId, TaskOutputId};
     use risingwave_pb::data::DataChunk;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
@@ -93,6 +93,7 @@ mod tests {
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
+    use risingwave_rpc_client::ComputeClient;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
@@ -160,15 +161,14 @@ mod tests {
         sleep(Duration::from_secs(1)).await;
         assert!(server_run.load(Ordering::SeqCst));
 
-        let exchange_source = ProstExchangeSource {
-            task_output_id: Some(TaskOutputId {
-                task_id: Some(TaskId::default()),
-                ..Default::default()
-            }),
-            host: Some(HostAddr::from(addr).to_protobuf()),
-            local_execute_plan: None,
+        let client = ComputeClient::new(addr.into()).await.unwrap();
+        let task_output_id = TaskOutputId {
+            task_id: Some(TaskId::default()),
+            ..Default::default()
         };
-        let mut src = GrpcExchangeSource::create(exchange_source).await.unwrap();
+        let mut src = GrpcExchangeSource::create(client, task_output_id, None)
+            .await
+            .unwrap();
         for _ in 0..3 {
             assert!(src.take_data().await.unwrap().is_some());
         }
@@ -183,15 +183,12 @@ mod tests {
     #[tokio::test]
     async fn test_unconnectable_node() {
         let addr: HostAddr = "127.0.0.1:1001".parse().unwrap();
-        let exchange_source = ProstExchangeSource {
-            task_output_id: Some(TaskOutputId {
-                task_id: Some(TaskId::default()),
-                ..Default::default()
-            }),
-            host: Some(addr.to_protobuf()),
-            local_execute_plan: None,
+        let client = ComputeClient::new(addr).await.unwrap();
+        let task_output_id = TaskOutputId {
+            task_id: Some(TaskId::default()),
+            ..Default::default()
         };
-        let res = GrpcExchangeSource::create(exchange_source).await;
+        let res = GrpcExchangeSource::create(client, task_output_id, None).await;
         assert!(res.is_err());
     }
 }
