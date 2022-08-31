@@ -231,14 +231,7 @@ impl HummockIterator for ConcatSstableIterator {
                 Ok(())
             } else {
                 // seek to next table
-                let mut next_idx = self.cur_idx + 1;
-                while next_idx < self.tables.len() {
-                    self.seek_idx(next_idx, None).await?;
-                    if self.sstable_iter.is_some() {
-                        break;
-                    }
-                    next_idx += 1;
-                }
+                self.seek_idx(self.cur_idx + 1, None).await?;
                 Ok(())
             }
         }
@@ -272,21 +265,9 @@ impl HummockIterator for ConcatSstableIterator {
                     ord == Ordering::Less || ord == Ordering::Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
-            let mut next_idx = table_idx;
-            if VersionedComparator::compare_key(
-                &self.tables[table_idx].key_range.as_ref().unwrap().right,
-                key,
-            ) == Ordering::Less
-            {
-                next_idx += 1;
-                self.sstable_iter.take();
-            }
-            while next_idx < self.tables.len() {
-                self.seek_idx(next_idx, Some(key)).await?;
-                if self.sstable_iter.is_some() {
-                    break;
-                }
-                next_idx += 1;
+            self.seek_idx(table_idx, Some(key)).await?;
+            if self.sstable_iter.is_none() && table_idx + 1 < self.tables.len() {
+                self.seek_idx(table_idx + 1, Some(key)).await?;
             }
             Ok(())
         }

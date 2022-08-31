@@ -117,7 +117,7 @@ pub async fn rpc_serve(
             .await
         }
         MetaStoreBackend::Mem => {
-            let meta_store = Arc::new(MemStore::default());
+            let meta_store = Arc::new(MemStore::shared());
             rpc_serve_with_store(
                 meta_store,
                 address_info,
@@ -452,7 +452,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         catalog_manager,
         cluster_manager.clone(),
         hummock_manager.clone(),
-        stream_manager.clone(),
         fragment_manager.clone(),
     );
 

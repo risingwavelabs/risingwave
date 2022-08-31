@@ -90,7 +90,7 @@ impl fmt::Debug for OrderDisplay<'_> {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
