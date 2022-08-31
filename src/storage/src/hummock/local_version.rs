@@ -28,8 +28,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use super::shared_buffer::SharedBuffer;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
-    KeyIndexSharedBufferBatch, KeyIndexedUncommittedData, OrderSortedUncommittedData,
-    UncommittedData,
+    KeyIndexSharedBufferBatch, OrderSortedUncommittedData, UncommittedData,
 };
 use crate::hummock::utils::{filter_single_sst, range_overlap};
 
@@ -49,39 +48,42 @@ pub struct LocalVersion {
 pub enum SyncUncommittedData {
     /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
     /// as `Syncing`.
-    Syncing(Vec<KeyIndexedUncommittedData>),
+    Syncing(OrderSortedUncommittedData),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
     Synced(Vec<LocalSstableInfo>),
 }
 
 impl SyncUncommittedData {
-    pub fn get_overlap_data<R, B>(&self, key_range: &R) -> OrderSortedUncommittedData
+    pub fn get_overlap_data<R, B>(
+        &self,
+        key_range: &R,
+        epoch: HummockEpoch,
+    ) -> OrderSortedUncommittedData
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         match self {
-            SyncUncommittedData::Syncing(task) => {
-                let local_data_iter = task
-                    .iter()
-                    .flatten()
-                    .filter(|(_, data)| match data {
-                        UncommittedData::Batch(batch) => {
-                            range_overlap(key_range, batch.start_user_key(), batch.end_user_key())
-                        }
-                        UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
-                    })
-                    .map(|((_, order_index), data)| (*order_index, data.clone()));
-
-                let mut uncommitted_data = BTreeMap::new();
-                for (order_index, data) in local_data_iter {
-                    uncommitted_data
-                        .entry(order_index)
-                        .or_insert_with(Vec::new)
-                        .push(data);
-                }
-                uncommitted_data.into_values().rev().collect()
-            }
+            SyncUncommittedData::Syncing(task) => task
+                .iter()
+                .map(|order_vec_data| {
+                    order_vec_data
+                        .iter()
+                        .filter(|data| match data {
+                            UncommittedData::Batch(batch) => {
+                                batch.epoch() <= epoch
+                                    && range_overlap(
+                                        key_range,
+                                        batch.start_user_key(),
+                                        batch.end_user_key(),
+                                    )
+                            }
+                            UncommittedData::Sst((_, info)) => filter_single_sst(info, key_range),
+                        })
+                        .cloned()
+                        .collect_vec()
+                })
+                .collect_vec(),
             SyncUncommittedData::Synced(ssts) => vec![ssts
                 .iter()
                 .filter(|(_, info)| filter_single_sst(info, key_range))
@@ -299,7 +301,7 @@ impl LocalVersion {
                             node.0.first().le(&Some(&read_epoch))
                                 && node.0.first().ge(&Some(&smallest_uncommitted_epoch))
                         })
-                        .map(|(_, value)| value.get_overlap_data(key_range))
+                        .map(|(_, value)| value.get_overlap_data(key_range, read_epoch))
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
                     (replicated_batches, shared_buffer_data, sync_data)

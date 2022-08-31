@@ -582,10 +582,10 @@ impl LocalVersionManager {
                 });
             }
             let task_payload = all_uncommitted_data
-                .iter()
+                .into_iter()
                 .flat_map(to_order_sorted)
                 .collect_vec();
-            local_version_guard.add_sync_state(epochs.clone(), Syncing(all_uncommitted_data));
+            local_version_guard.add_sync_state(epochs.clone(), Syncing(task_payload.clone()));
             (task_payload, epochs, sync_size)
         };
         let uncommitted_ssts = self

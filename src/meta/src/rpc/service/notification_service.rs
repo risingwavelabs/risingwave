@@ -24,7 +24,6 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification, WorkerKey,
@@ -74,8 +73,8 @@ where
         request: Request<SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
-        let host_address = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let worker_type = req.get_worker_type()?;
+        let host_address = req.get_host()?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 

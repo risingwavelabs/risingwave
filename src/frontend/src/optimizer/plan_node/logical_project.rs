@@ -43,14 +43,23 @@ pub struct LogicalProjectBuilder {
 impl LogicalProjectBuilder {
     /// add an expression to the `LogicalProject` and return the column index of the project's
     /// output
-    pub fn add_expr(&mut self, expr: &ExprImpl) -> usize {
+    pub fn add_expr(&mut self, expr: &ExprImpl) -> std::result::Result<usize, &'static str> {
+        if expr.has_subquery() {
+            return Err("subquery");
+        }
+        if expr.has_agg_call() {
+            return Err("aggregate function");
+        }
+        if expr.has_table_function() {
+            return Err("table function");
+        }
         if let Some(idx) = self.exprs_index.get(expr) {
-            *idx
+            Ok(*idx)
         } else {
             let index = self.exprs.len();
             self.exprs.push(expr.clone());
             self.exprs_index.insert(expr.clone(), index);
-            index
+            Ok(index)
         }
     }
 
@@ -75,11 +84,6 @@ pub struct LogicalProject {
 }
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        assert!(
-            exprs.iter().all(|e| !e.has_table_function()),
-            "Project should not have table function."
-        );
-
         let ctx = input.ctx();
         let schema = Self::derive_schema(&exprs, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
@@ -87,6 +91,10 @@ impl LogicalProject {
             assert_input_ref!(expr, input.schema().fields().len());
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
+            assert!(
+                !expr.has_table_function(),
+                "Project should not have table function."
+            );
         }
         let functional_dependency =
             Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);
@@ -122,6 +130,12 @@ impl LogicalProject {
 
     pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
         Self::new(input, exprs).into()
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
