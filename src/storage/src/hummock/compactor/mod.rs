@@ -572,7 +572,7 @@ impl Compactor {
             > self.context.options.min_sst_size_for_streaming_upload
         {
             self.compact_key_range_impl(
-                StreamingSstableWriterFactory::create(self.context.sstable_store.clone()),
+                StreamingSstableWriterFactory::new(self.context.sstable_store.clone()),
                 iter,
                 compaction_filter,
                 filter_key_extractor,
@@ -581,7 +581,7 @@ impl Compactor {
             .await?
         } else {
             self.compact_key_range_impl(
-                BatchSstableWriterFactory::create(self.context.sstable_store.clone()),
+                BatchSstableWriterFactory::new(self.context.sstable_store.clone()),
                 iter,
                 compaction_filter,
                 filter_key_extractor,

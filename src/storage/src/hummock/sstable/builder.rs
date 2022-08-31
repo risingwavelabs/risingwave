@@ -87,7 +87,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// Options.
     options: SstableBuilderOptions,
     /// Data writer.
-    writer: Box<W>,
+    writer: W,
     /// Current block builder.
     block_builder: BlockBuilder,
     /// Block metadata vec.
@@ -107,7 +107,7 @@ pub struct SstableBuilder<W: SstableWriter> {
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
-    pub fn new_for_test(sstable_id: u64, writer: Box<W>, options: SstableBuilderOptions) -> Self {
+    pub fn new_for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self {
             writer,
             block_builder: BlockBuilder::new(BlockBuilderOptions {
@@ -134,7 +134,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
     pub fn new(
         sstable_id: u64,
-        writer: Box<W>,
+        writer: W,
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> Self {

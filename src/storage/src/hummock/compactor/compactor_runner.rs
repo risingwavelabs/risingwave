@@ -26,7 +26,6 @@ use crate::hummock::compactor::{
     CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
-use crate::hummock::utils::can_concat;
 use crate::hummock::{
     CachePolicy, CompressionAlgorithm, HummockResult, SstableBuilderOptions, DEFAULT_ENTRY_SIZE,
 };

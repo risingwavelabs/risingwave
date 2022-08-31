@@ -394,8 +394,8 @@ impl SstableStore {
         self: Arc<Self>,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
-    ) -> Box<BatchUploadWriter> {
-        Box::new(BatchUploadWriter::new(sst_id, self, options))
+    ) -> BatchUploadWriter {
+        BatchUploadWriter::new(sst_id, self, options)
     }
 
     pub async fn put_sst_meta(
@@ -444,37 +444,37 @@ pub struct SstableWriterOptions {
 pub trait SstableWriterFactory: Send + Sync {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
-    fn create(sstable_store: SstableStoreRef) -> Self;
-
     async fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
-    ) -> HummockResult<Box<Self::Writer>>;
+    ) -> HummockResult<Self::Writer>;
 }
 
 pub struct BatchSstableWriterFactory {
     sstable_store: SstableStoreRef,
 }
 
+impl BatchSstableWriterFactory {
+    pub fn new(sstable_store: SstableStoreRef) -> Self {
+        BatchSstableWriterFactory { sstable_store }
+    }
+}
+
 #[async_trait::async_trait]
 impl SstableWriterFactory for BatchSstableWriterFactory {
     type Writer = BatchUploadWriter;
-
-    fn create(sstable_store: SstableStoreRef) -> Self {
-        BatchSstableWriterFactory { sstable_store }
-    }
 
     async fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
-    ) -> HummockResult<Box<Self::Writer>> {
-        Ok(Box::new(BatchUploadWriter::new(
+    ) -> HummockResult<Self::Writer> {
+        Ok(BatchUploadWriter::new(
             sst_id,
             self.sstable_store.clone(),
             options,
-        )))
+        ))
     }
 }
 
@@ -520,7 +520,7 @@ impl SstableWriter for BatchUploadWriter {
         Ok(())
     }
 
-    fn finish(mut self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
+    fn finish(mut self, size_footer: u32) -> HummockResult<Self::Output> {
         let join_handle = tokio::spawn(async move {
             // Upload size footer.
             self.buf.put_slice(&size_footer.to_le_bytes());
@@ -606,7 +606,7 @@ impl SstableWriter for StreamingUploadWriter {
             .map_err(HummockError::object_io_error)
     }
 
-    fn finish(mut self: Box<Self>, size_footer: u32) -> HummockResult<UploadJoinHandle> {
+    fn finish(mut self, size_footer: u32) -> HummockResult<UploadJoinHandle> {
         // Upload size footer.
         self.object_uploader
             .write_bytes(Bytes::from(size_footer.to_le_bytes().to_vec()))
@@ -652,27 +652,29 @@ pub struct StreamingSstableWriterFactory {
     sstable_store: SstableStoreRef,
 }
 
+impl StreamingSstableWriterFactory {
+    pub fn new(sstable_store: SstableStoreRef) -> Self {
+        StreamingSstableWriterFactory { sstable_store }
+    }
+}
+
 #[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
-
-    fn create(sstable_store: SstableStoreRef) -> Self {
-        StreamingSstableWriterFactory { sstable_store }
-    }
 
     async fn create_sst_writer(
         &self,
         sst_id: HummockSstableId,
         options: SstableWriterOptions,
-    ) -> HummockResult<Box<Self::Writer>> {
+    ) -> HummockResult<Self::Writer> {
         let path = self.sstable_store.get_sst_data_path(sst_id);
         let uploader = self.sstable_store.store.streaming_upload(&path).await?;
-        Ok(Box::new(StreamingUploadWriter::new(
+        Ok(StreamingUploadWriter::new(
             sst_id,
             self.sstable_store.clone(),
             uploader,
             options,
-        )))
+        ))
     }
 }
 

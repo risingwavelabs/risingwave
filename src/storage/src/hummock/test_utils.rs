@@ -109,8 +109,8 @@ pub fn default_writer_opt_for_test() -> SstableWriterOptions {
     }
 }
 
-pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> Box<InMemWriter> {
-    Box::new(InMemWriter::from(opt))
+pub fn mock_sst_writer(opt: &SstableBuilderOptions) -> InMemWriter {
+    InMemWriter::from(opt)
 }
 
 /// Generates sstable data and metadata from given `kv_iter`

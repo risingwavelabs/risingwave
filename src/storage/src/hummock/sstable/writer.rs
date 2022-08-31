@@ -25,7 +25,7 @@ pub trait SstableWriter: Send {
     fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()>;
 
     /// Finish writing the SST.
-    fn finish(self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output>;
+    fn finish(self, size_footer: u32) -> HummockResult<Self::Output>;
 
     /// Get the length of data that has already been written.
     fn data_len(&self) -> usize;
@@ -58,7 +58,7 @@ impl SstableWriter for InMemWriter {
         Ok(())
     }
 
-    fn finish(mut self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
+    fn finish(mut self, size_footer: u32) -> HummockResult<Self::Output> {
         self.buf.put_slice(&size_footer.to_le_bytes());
         let data = self.buf.freeze();
         Ok(data)
