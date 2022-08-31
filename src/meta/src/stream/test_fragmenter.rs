@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::vec;
 
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
@@ -33,7 +32,7 @@ use risingwave_pb::stream_plan::{
     MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
-use crate::manager::{FragmentManager, MetaSrvEnv};
+use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::CreateMaterializedViewContext;
@@ -351,16 +350,15 @@ fn make_stream_graph() -> StreamFragmentGraph {
 #[tokio::test]
 async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = make_stream_graph();
 
-    let mut actor_graph_builder =
-        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, parallel_degree, &mut ctx).await?;
+    let actor_graph_builder =
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), graph, parallel_degree, &mut ctx).await?;
 
     let graph = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), fragment_manager, &mut ctx)
+        .generate_graph(env.id_gen_manager_ref(), &mut ctx)
         .await?;
 
     let table_fragments = TableFragments::new(TableId::default(), graph);

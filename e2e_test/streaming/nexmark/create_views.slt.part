@@ -13,3 +13,4 @@ include ./views/q16.slt.part
 include ./views/q17.slt.part
 include ./views/q20.slt.part
 include ./views/q21.slt.part
+include ./views/q22.slt.part

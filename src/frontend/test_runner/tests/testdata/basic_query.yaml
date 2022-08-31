@@ -162,3 +162,19 @@
   binder_error: |-
     Feature is not yet implemented: CorrelatedInputRef in VALUES
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from t limit 1
+  batch_plan: |
+    BatchLimit { limit: 1, offset: 0 }
+      BatchExchange { order: [], dist: Single }
+        BatchLimit { limit: 1, offset: 0 }
+          BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from t order by v1 limit 1
+  batch_plan: |
+    BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
+      BatchExchange { order: [], dist: Single }
+        BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
+          BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
