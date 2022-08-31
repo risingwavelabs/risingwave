@@ -61,19 +61,18 @@ mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir.clone(),
+            data_directory: remote_dir,
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
 
         HummockStorage::for_test(
-            options.clone(),
+            options,
             sstable_store,
             hummock_meta_client.clone(),
             Arc::new(FilterKeyExtractorManager::default()),
         )
-        .await
         .unwrap()
     }
 
@@ -86,19 +85,18 @@ mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir.clone(),
+            data_directory: remote_dir,
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
 
         HummockStorage::for_test(
-            options.clone(),
+            options,
             sstable_store,
-            hummock_meta_client.clone(),
+            hummock_meta_client,
             filter_key_extractor_manager.clone(),
         )
-        .await
         .unwrap()
     }
 

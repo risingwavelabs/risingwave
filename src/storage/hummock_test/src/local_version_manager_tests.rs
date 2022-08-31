@@ -47,8 +47,7 @@ async fn test_update_pinned_version() {
             worker_node.id,
         )),
         ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    );
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_version_id = pinned_version.id();
@@ -229,8 +228,7 @@ async fn test_update_uncommitted_ssts() {
             worker_node.id,
         )),
         ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    );
 
     let pinned_version = local_version_manager.get_pinned_version();
     let max_commit_epoch = pinned_version.max_committed_epoch();
@@ -409,8 +407,7 @@ async fn test_clear_shared_buffer() {
             worker_node.id,
         )),
         ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    );
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_max_commit_epoch = pinned_version.max_committed_epoch();
@@ -468,8 +465,7 @@ async fn test_sst_gc_watermark() {
             worker_node.id,
         )),
         ConflictDetector::new_from_config(opt),
-    )
-    .await;
+    );
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_version_id = pinned_version.id();

@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::hummock::HummockPinnedVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
@@ -84,6 +85,13 @@ where
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let context_id = cluster_guard
+            .get_worker_by_host(host_address.clone())
+            .unwrap()
+            .worker_id();
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+
         let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
         let parallel_unit_mappings = fragment_guard
@@ -92,7 +100,15 @@ where
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
+        let mut hummock_manager_guard = self.hummock_manager.get_write_guard().await;
+        let current_version_id = hummock_manager_guard.current_version.id;
+        hummock_manager_guard.pinned_versions.insert(
+            context_id,
+            HummockPinnedVersion {
+                context_id,
+                min_pinned_id: current_version_id,
+            },
+        );
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));

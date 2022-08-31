@@ -47,7 +47,6 @@ async fn test_failpoints_state_store_read_upload() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
 
     let local_version_manager = hummock_storage.local_version_manager();

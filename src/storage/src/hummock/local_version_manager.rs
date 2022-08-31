@@ -30,8 +30,8 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockReadEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::{pin_version_response, HummockVersion};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -159,7 +159,7 @@ pub struct LocalVersionManager {
 }
 
 impl LocalVersionManager {
-    pub async fn new(
+    pub fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
@@ -172,21 +172,9 @@ impl LocalVersionManager {
             tokio::sync::mpsc::unbounded_channel();
         let (version_update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
 
-        let pinned_version = match Self::pin_version_with_retry(
-            hummock_meta_client.clone(),
-            INVALID_VERSION_ID,
-            10,
-            // never break until max retry
-            || false,
-        )
-        .await
-        .expect("should be `Some` since `break_condition` is always false")
-        .expect("should be able to pinned the first version")
-        {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should fetch the full hummock version in initialization")
-            }
-            Payload::PinnedVersion(version) => version,
+        let pinned_version = HummockVersion {
+            id: INVALID_VERSION_ID,
+            ..Default::default()
         };
 
         let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
@@ -208,13 +196,13 @@ impl LocalVersionManager {
             write_conflict_detector: write_conflict_detector.clone(),
 
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
-                options.clone(),
+                options,
                 sstable_store,
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
                 sstable_id_manager.clone(),
-                filter_key_extractor_manager.clone(),
+                filter_key_extractor_manager,
             )),
             sstable_id_manager,
         });
@@ -236,7 +224,7 @@ impl LocalVersionManager {
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub async fn for_test(
+    pub fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -254,7 +242,6 @@ impl LocalVersionManager {
             )),
             Arc::new(FilterKeyExtractorManager::default()),
         )
-        .await
     }
 
     /// Updates cached version if the new version is of greater id.
@@ -672,6 +659,7 @@ impl LocalVersionManager {
     ///   - `Some(Ok(pinned_version))` if success
     ///   - `Some(Err(err))` if exceed the retry limit
     ///   - `None` if meet the break condition
+    #[allow(dead_code)]
     async fn pin_version_with_retry(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         last_pinned: HummockVersionId,

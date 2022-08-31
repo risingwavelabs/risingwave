@@ -71,7 +71,6 @@ async fn test_basic() {
         meta_client.clone(),
         filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
     let observer_manager = get_observer_manager(
         env,
@@ -379,7 +378,6 @@ async fn test_state_store_sync() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
 
     let mut epoch: HummockEpoch = hummock_storage
@@ -495,7 +493,6 @@ async fn test_reload_storage() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
     let anchor = Bytes::from("aa");
 
@@ -540,7 +537,6 @@ async fn test_reload_storage() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
 
     // Get the value after flushing to remote.
@@ -684,7 +680,6 @@ async fn test_write_anytime() {
         meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
 
     let initial_epoch = hummock_storage
@@ -934,7 +929,6 @@ async fn test_delete_get() {
         meta_client.clone(),
         filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
     let observer_manager = get_observer_manager(
         env,
@@ -1017,7 +1011,6 @@ async fn test_multiple_epoch_sync() {
         meta_client.clone(),
         filter_key_extractor_manager.clone(),
     )
-    .await
     .unwrap();
     let observer_manager = get_observer_manager(
         env,

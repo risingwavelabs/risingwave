@@ -91,7 +91,6 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         mock_hummock_meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
     let vm = hummock_storage.local_version_manager().clone();
 
@@ -194,7 +193,6 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         mock_hummock_meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
     let vm = hummock_storage.local_version_manager();
 
@@ -255,7 +253,6 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         mock_hummock_meta_client.clone(),
         Arc::new(FilterKeyExtractorManager::default()),
     )
-    .await
     .unwrap();
     let vm = hummock_storage.local_version_manager();
 
