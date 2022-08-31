@@ -30,11 +30,6 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GroupTopN)?;
-        let limit = if node.limit == 0 {
-            None
-        } else {
-            Some(node.limit as usize)
-        };
         let group_by = node
             .get_group_key()
             .iter()
@@ -57,7 +52,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         Ok(GroupTopNExecutor::new(
             params.input.remove(0),
             order_pairs,
-            (node.offset as usize, limit),
+            (node.offset as usize, node.limit as usize),
             params.pk_indices,
             0,
             params.executor_id,

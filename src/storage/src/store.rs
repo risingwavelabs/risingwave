@@ -189,8 +189,8 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: AsRef<[u8]> + Send;
 
     /// Creates a `WriteBatch` associated with this state store.
-    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<Self> {
-        WriteBatch::new(self.clone(), write_options)
+    fn start_write_batch(&self, write_options: WriteOptions) -> WriteBatch<'_, Self> {
+        WriteBatch::new(self, write_options)
     }
 
     /// Waits until the epoch is committed and its data is ready to read.
