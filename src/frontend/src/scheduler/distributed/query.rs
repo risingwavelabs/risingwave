@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem;
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 
 use anyhow::anyhow;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
@@ -141,6 +141,7 @@ impl QueryExecution {
     pub async fn start(
         &self,
         shutdown_tx: Sender<SchedulerError>,
+        shutdown_rx: oneshot::Receiver<u8>,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -164,7 +165,7 @@ impl QueryExecution {
                 };
 
                 // Not trace the error here, it will be processed in scheduler.
-                tokio::spawn(async move { runner.run(shutdown_tx).await });
+                tokio::spawn(async move { runner.run(shutdown_tx, shutdown_rx).await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -192,7 +193,7 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>) {
+    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>, shutdown_rx: oneshot::Receiver<u8>) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -274,7 +275,7 @@ impl QueryRunner {
                         // The stop is return immediately so no need to spawn tasks.
                         stage_execution.stop().await;
                     }
-
+                    // self.stage_executions.clear();
                     // One stage failed, not necessary to execute schedule stages.
                     break;
                 }
@@ -378,7 +379,8 @@ mod tests {
         );
         // Channel just used to pass compiler.
         let (shutdown_tx, _shutdown_rx) = oneshot::channel::<SchedulerError>();
-        assert!(query_execution.start(shutdown_tx).await.is_err());
+        let (_shutdown_tx, shutdown_rx) = oneshot::channel::<u8>();
+        assert!(query_execution.start(shutdown_tx, shutdown_rx).await.is_err());
     }
 
     async fn create_query() -> Query {

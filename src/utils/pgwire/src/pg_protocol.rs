@@ -136,6 +136,7 @@ where
                         self.stream
                             .write_for_error(&BeMessage::ErrorResponse(Box::new(e)));
                         self.stream.write_for_error(&BeMessage::ReadyForQuery);
+                        // return true;
                     }
 
                     PsqlError::CloseError(_)
@@ -148,7 +149,9 @@ where
                     }
 
                     // Never reach this.
-                    PsqlError::CancelMsg(_) => todo!(),
+                    PsqlError::CancelMsg(_) => {
+                        todo!("Support processing cancel query")
+                    }
                 }
                 self.stream.flush_for_error().await;
                 tracing::error!("{}", error_msg);
@@ -258,8 +261,9 @@ where
     }
 
     fn process_cancel_msg(&mut self) -> PsqlResult<()> {
-        self.stream
-            .write_no_flush(&BeMessage::ErrorResponse(Box::new(PsqlError::cancel())))?;
+        // TODO: Abort running query in `QueryManager`.
+        let session = self.session.clone().unwrap();
+        session.cancel_query();
         Ok(())
     }
 

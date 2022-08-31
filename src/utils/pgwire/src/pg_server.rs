@@ -50,6 +50,7 @@ pub trait Session: Send + Sync {
         sql: &str,
     ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
     fn user_authenticator(&self) -> &UserAuthenticator;
+    fn cancel_query(&self);
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +180,10 @@ mod tests {
                 PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
                 count
             ])
+        }
+
+        fn cancel_query(&self) {
+            todo!()
         }
     }
 

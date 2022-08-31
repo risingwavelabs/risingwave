@@ -682,6 +682,10 @@ impl Session for SessionImpl {
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
+
+    fn cancel_query(&self) {
+        self.env.query_manager().cancel_running_processes()
+    }
 }
 
 /// Returns row description of the statement

@@ -12,24 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 // use futures_async_stream::try_stream;
-use tokio::sync::oneshot;
-use tracing::debug;
+use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, error, info};
 
 // use async_stream::try_stream;
 // use futures::stream;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
     DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError,
@@ -53,6 +57,8 @@ pub struct QueryManager {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
+
+    channel_map: Arc<Mutex<HashMap<String, Option<oneshot::Sender<u8>>>>>,
 }
 
 impl QueryManager {
@@ -67,6 +73,7 @@ impl QueryManager {
             hummock_snapshot_manager,
             compute_client_pool,
             catalog_reader,
+            channel_map: Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
@@ -93,7 +100,8 @@ impl QueryManager {
         );
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let query_result_fetcher = match query_execution.start(shutdown_tx).await {
+        let (_shutdown_tx, shutdown_rx) = oneshot::channel();
+        let query_result_fetcher = match query_execution.start(shutdown_tx, shutdown_rx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
                 self.hummock_snapshot_manager
@@ -103,7 +111,25 @@ impl QueryManager {
             }
         };
 
+        {
+            let mut write_guard = self.channel_map.lock();
+            write_guard.insert(query_id.id.clone(), Some(shutdown_tx));
+        }
+
         Ok(query_result_fetcher.run())
+    }
+
+    // TODO: Support specify PID cancel.
+    pub fn cancel_running_processes(&self) {
+        {
+            let mut write_guard = self.channel_map.lock();
+            for (query_id, sender) in write_guard.iter_mut() {
+                let sender_swap = mem::take(sender).expect("There should always exist a sender");
+                sender_swap.send(0).unwrap();
+                info!("Cancel query_id {:?} in query manager", query_id);
+            }
+            write_guard.clear();
+        }
     }
 }
 
