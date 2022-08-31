@@ -1,7 +1,7 @@
 # Storing State Using Relational Table
 
 - [Storing State Using Relational Table](#storing-state-using-relational-table)
-  - [Row-based Encoding](#cell-based-encoding)
+  - [Row-based Encoding](#row-based-encoding)
   - [Relational Table Layer](#relational-table-layer)
     - [Write Path](#write-path)
     - [Read Path](#read-path)
