@@ -1234,13 +1234,12 @@ impl ToBatch for LogicalAgg {
         if self.group_key().is_empty() {
             Ok(BatchSimpleAgg::new(new_logical).into())
         } else if self.group_key().iter().all(|group_by_idx| {
-            self.input()
+            new_logical
+                .input()
                 .order()
                 .field_order
                 .iter()
-                .any(|field_order|{
-                    field_order.index == *group_by_idx
-                })
+                .any(|field_order| field_order.index == *group_by_idx)
         }) {
             Ok(BatchSortAgg::new(new_logical).into())
         } else {

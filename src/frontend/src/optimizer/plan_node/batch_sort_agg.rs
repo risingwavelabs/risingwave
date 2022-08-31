@@ -28,6 +28,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 pub struct BatchSortAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
+    required_order: Order,
 }
 
 impl BatchSortAgg {
@@ -43,7 +44,28 @@ impl BatchSortAgg {
         };
         let base =
             PlanBase::new_batch(ctx, logical.schema().clone(), dist, logical.order().clone());
-        BatchSortAgg { base, logical }
+        let input_ord = input.order();
+        let required_order = Order {
+            field_order: input_ord
+                .field_order
+                .iter()
+                .filter(|field_ord| {
+                    logical
+                        .group_key()
+                        .iter()
+                        .any(|g_k| *g_k == field_ord.index)
+                })
+                .cloned()
+                .collect(),
+        };
+
+        assert_eq!(required_order.field_order.len(), logical.group_key().len());
+
+        BatchSortAgg {
+            base,
+            logical,
+            required_order,
+        }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -75,7 +97,7 @@ impl_plan_tree_node_for_unary! { BatchSortAgg }
 impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         self.to_distributed_with_required(
-            &Order::any(),
+            &self.required_order,
             &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
         )
     }
