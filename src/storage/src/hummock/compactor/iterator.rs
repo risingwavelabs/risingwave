@@ -418,7 +418,8 @@ impl HummockIterator for ConcatSstableIterator {
                         // Yes, continue with next SST.
                         (self.cur_idx + 1, vec![])
                     } else {
-                        // No,call `self.seek_idx()` with restart with the next block (will result in a Streaming Iterator).
+                        // No, call `self.seek_idx()` with restart with the next block (will result
+                        // in a Streaming Iterator).
 
                         // We need to clone here. The function call `self.seek_idx()` below borrows
                         // `self` as mutable. If we additionally pass in a borrowed key, we borrow
@@ -453,36 +454,26 @@ impl HummockIterator for ConcatSstableIterator {
         async { self.seek_idx(0, None).await }
     }
 
-    /// Resets iterator and seeks to the first position where the stored key >= `key`.
+    /// Resets the iterator and seeks to the first position where the stored key >= `key`.
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
         async {
-            let table_idx = self
-                .tables
-                .partition_point(|table| {
-                    let ord = VersionedComparator::compare_key(
-                        &table.key_range.as_ref().unwrap().left,
-                        key,
-                    );
-                    ord == Ordering::Less || ord == Ordering::Equal
-                })
-                .saturating_sub(1); // considering the boundary of 0
-            let mut next_idx = table_idx;
-            if VersionedComparator::compare_key(
-                &self.tables[table_idx].key_range.as_ref().unwrap().right,
-                key,
-            ) == Ordering::Less
-            {
-                next_idx += 1;
-                self.sstable_iter.take();
-            }
-            while next_idx < self.tables.len() {
-                self.seek_idx(next_idx, Some(key)).await?;
-                if self.sstable_iter.is_some() {
-                    break;
-                }
-                next_idx += 1;
-            }
-            Ok(())
+            let table_idx = self.tables.partition_point(|table| {
+                // We use the maximum key of an SST for the search. That avoids having to call
+                // `seek_idx()` twice if determined SST does not contain `key`.
+
+                // Assume we have two SSTs `A: [k l m]` and `B: [s t u]`, and that we search for the
+                // key `p`. If we search using the min. key of an SST, our search would result in
+                // `A`, we then search in `A`, receive an invalid iterator, and restart the search
+                // with `B`. If we use the max. key instead, then the search results in `B` and the
+                // created iterator is always valid.
+
+                // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
+                // (including its max. key) produce the same search result.
+                let max_sst_key = &table.key_range.as_ref().unwrap().right;
+                VersionedComparator::compare_key(max_sst_key, key) == Ordering::Less
+            });
+
+            self.seek_idx(table_idx, Some(key)).await
         }
     }
 
