@@ -76,16 +76,14 @@ impl Binder {
         let has_string = types.iter().any(|t| matches!(t, DataType::Varchar));
         let has_array = types.iter().any(|t| matches!(t, DataType::List { .. }));
 
-        // StringConcat
         if has_string && !has_array {
+            // StringConcat
             Ok(FunctionCall::new(ExprType::ConcatOp, vec![left, right])?.into())
-        }
-        // ArrayConcat
-        else if has_array {
-            Err(ErrorCode::NotImplemented("array concat operator".into(), None.into()).into())
-        }
-        // Invalid types
-        else {
+        } else if has_array {
+            // ArrayConcat
+            Ok(FunctionCall::new(ExprType::ArrayCat, vec![left, right])?.into())
+        } else {
+            // Invalid types
             Err(ErrorCode::BindError(format!(
                 "operator does not exist: {:?} || {:?}",
                 &types[0], &types[1]

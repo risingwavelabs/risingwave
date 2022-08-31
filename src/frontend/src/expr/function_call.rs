@@ -175,6 +175,60 @@ impl FunctionCall {
                     datatype: Box::new(DataType::Varchar),
                 })
             }
+            ExprType::ArrayCat => {
+                if inputs.len() != 2 {
+                    return Err(ErrorCode::BindError(format!(
+                        "Function `ArrayCat` takes 2 arguments ({} given)",
+                        inputs.len()
+                    ))
+                    .into());
+                }
+                let left_type = inputs[0].return_type();
+                let right_type = inputs[1].return_type();
+
+                let return_type = match (&left_type, &right_type) {
+                    (
+                        DataType::List {
+                            datatype: left_elem_type,
+                        },
+                        DataType::List {
+                            datatype: right_elem_type,
+                        },
+                    ) => {
+                        if **left_elem_type == **right_elem_type {
+                            Some(left_type.clone())
+                        } else if **left_elem_type == right_type {
+                            Some(left_type.clone())
+                        } else if **right_elem_type == left_type {
+                            Some(right_type.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    (
+                        DataType::List {
+                            datatype: left_elem_type,
+                        },
+                        _,
+                    ) if **left_elem_type == right_type => Some(left_type.clone()),
+                    (
+                        _,
+                        DataType::List {
+                            datatype: right_elem_type,
+                        },
+                    ) if left_type == **right_elem_type => Some(right_type.clone()),
+                    _ => None,
+                };
+                if let Some(return_type) = return_type {
+                    Ok(return_type)
+                } else {
+                    return Err(ErrorCode::BindError(format!(
+                        "Wrong argument types for function `ArrayCat` ({:?} and {:?})",
+                        left_type, right_type
+                    ))
+                    .into());
+                }
+            }
             ExprType::Vnode => {
                 if inputs.is_empty() {
                     return Err(ErrorCode::BindError(

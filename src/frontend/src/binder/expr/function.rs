@@ -144,6 +144,7 @@ impl Binder {
             "octet_length" => ExprType::OctetLength,
             "bit_length" => ExprType::BitLength,
             "regexp_match" => ExprType::RegexpMatch,
+            "array_cat" => ExprType::ArrayCat,
             // System information operations.
             "pg_typeof" if inputs.len() == 1 => {
                 let input = &inputs[0];
