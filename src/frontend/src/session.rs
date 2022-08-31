@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,7 +29,7 @@ use rand::RngCore;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::FrontendConfig;
+use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
@@ -60,7 +59,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::FrontendOpts;
+use crate::{FrontendConfig, FrontendOpts};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -177,15 +176,6 @@ impl std::fmt::Debug for OptimizerContext {
     }
 }
 
-fn load_config(opts: &FrontendOpts) -> FrontendConfig {
-    if opts.config_path.is_empty() {
-        return FrontendConfig::default();
-    }
-
-    let config_path = PathBuf::from(opts.config_path.to_owned());
-    FrontendConfig::init(config_path).unwrap()
-}
-
 /// The global environment for the frontend server.
 #[derive(Clone)]
 pub struct FrontendEnv {
@@ -247,7 +237,7 @@ impl FrontendEnv {
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(opts);
+        let config: FrontendConfig = load_config(&opts.config_path).unwrap();
         tracing::info!("Starting frontend node with config {:?}", config);
 
         let frontend_address: HostAddr = opts
