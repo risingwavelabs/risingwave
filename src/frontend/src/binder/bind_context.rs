@@ -56,7 +56,7 @@ impl Display for Clause {
             Clause::Values => write!(f, "VALUES"),
             Clause::GroupBy => write!(f, "GROUP BY"),
             Clause::Having => write!(f, "HAVING"),
-            Clause::Filter => write!(f, "Filter"),
+            Clause::Filter => write!(f, "FILTER"),
         }
     }
 }

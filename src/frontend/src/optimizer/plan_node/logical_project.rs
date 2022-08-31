@@ -98,6 +98,10 @@ impl LogicalProject {
                 !expr.has_table_function(),
                 "Project should not have table function."
             );
+            assert!(
+                !expr.has_window_function(),
+                "Project should not have window function."
+            );
         }
         let functional_dependency =
             Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);

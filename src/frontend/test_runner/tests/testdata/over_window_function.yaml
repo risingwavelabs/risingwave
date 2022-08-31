@@ -48,4 +48,4 @@
 - sql: |
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
-  binder_error: 'Invalid input syntax: window functions are not allowed in Filter'
+  binder_error: 'Invalid input syntax: window functions are not allowed in FILTER'
