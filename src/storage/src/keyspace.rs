@@ -20,7 +20,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{prefixed_range, table_prefix};
 
 use crate::error::StorageResult;
-use crate::store::ReadOptions;
+use crate::store::{ReadOptions, WriteOptions};
+use crate::write_batch::KeySpaceWriteBatch;
 use crate::{StateStore, StateStoreIter};
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.
@@ -54,23 +55,23 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Appends more bytes to the prefix and returns a new `Keyspace`
     #[must_use]
-    pub fn append(&self, mut bytes: Vec<u8>) -> Self {
+    pub fn append(self, mut bytes: Vec<u8>) -> Self {
         let mut prefix = self.prefix.clone();
         prefix.append(&mut bytes);
         Self {
-            store: self.store.clone(),
+            store: self.store,
             prefix,
             table_id: self.table_id,
         }
     }
 
     #[must_use]
-    pub fn append_u8(&self, val: u8) -> Self {
+    pub fn append_u8(self, val: u8) -> Self {
         self.append(val.to_be_bytes().to_vec())
     }
 
     #[must_use]
-    pub fn append_u16(&self, val: u16) -> Self {
+    pub fn append_u16(self, val: u16) -> Self {
         self.append(val.to_be_bytes().to_vec())
     }
 
@@ -176,12 +177,17 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Gets the underlying state store.
-    pub fn state_store(&self) -> S {
-        self.store.clone()
+    pub fn state_store(&self) -> &S {
+        &self.store
     }
 
     pub fn table_id(&self) -> TableId {
         self.table_id
+    }
+
+    pub fn start_write_batch(&self, option: WriteOptions) -> KeySpaceWriteBatch<'_, S> {
+        let write_batch = self.store.start_write_batch(option);
+        write_batch.prefixify(self)
     }
 }
 

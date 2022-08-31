@@ -139,6 +139,12 @@ impl LogicalProject {
         Self::new(input, exprs).into()
     }
 
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
+    }
+
     /// Creates a `LogicalProject` which select some columns from the input.
     ///
     /// `mapping` should maps from `(0..input_fields.len())` to a consecutive range starting from 0.

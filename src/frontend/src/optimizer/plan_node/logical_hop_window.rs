@@ -26,6 +26,7 @@ use super::{
 };
 use crate::expr::{InputRef, InputRefDisplay};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
@@ -230,6 +231,12 @@ impl LogicalHopWindow {
                 )
             },
         )
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 }
 

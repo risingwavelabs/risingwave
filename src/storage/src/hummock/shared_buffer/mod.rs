@@ -91,13 +91,13 @@ pub(crate) type KeyIndexedUncommittedData = BTreeMap<(Vec<u8>, OrderIndex), Unco
 /// the same order index, which means their keys don't overlap.
 pub(crate) type OrderSortedUncommittedData = Vec<Vec<UncommittedData>>;
 
-pub fn to_order_sorted(key_indexed_data: &KeyIndexedUncommittedData) -> OrderSortedUncommittedData {
+pub fn to_order_sorted(key_indexed_data: KeyIndexedUncommittedData) -> OrderSortedUncommittedData {
     let mut order_indexed_data = BTreeMap::new();
     for ((_, order_id), data) in key_indexed_data {
         order_indexed_data
-            .entry(*order_id)
+            .entry(order_id)
             .or_insert_with(Vec::new)
-            .push(data.clone());
+            .push(data);
     }
     // Take rev here to ensure order index sorted in descending order.
     order_indexed_data.into_values().rev().collect()
@@ -380,7 +380,7 @@ impl SharedBuffer {
                 .fetch_add(task_write_batch_size, Relaxed);
             let ret = Some((
                 min_order_index,
-                to_order_sorted(&keyed_payload),
+                to_order_sorted(keyed_payload.clone()),
                 task_write_batch_size,
             ));
             self.uploading_tasks
