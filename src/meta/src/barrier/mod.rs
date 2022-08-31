@@ -888,15 +888,13 @@ where
                 // If no checkpoint, we can't notify collection completion
                 if *checkpoint {
                     let mut uncommitted_states = checkpoint_control.get_uncommitted_states();
-                    if prev_epoch != INVALID_EPOCH {
-                        self.hummock_manager
-                            .commit_epoch(
-                                prev_epoch,
-                                uncommitted_states.uncommitted_ssts,
-                                uncommitted_states.uncommitted_work_ids,
-                            )
-                            .await?;
-                    }
+                    self.hummock_manager
+                        .commit_epoch(
+                            prev_epoch,
+                            uncommitted_states.uncommitted_ssts,
+                            uncommitted_states.uncommitted_work_ids,
+                        )
+                        .await?;
                     while let Some((command_ctx, mut notifiers, create_mv_progress)) =
                         uncommitted_states.uncommitted_checkpoint_post.pop_back()
                     {
@@ -913,7 +911,7 @@ where
                             tracker.update(&progress);
                         }
                     }
-                } else if prev_epoch != INVALID_EPOCH {
+                } else {
                     self.hummock_manager
                         .update_current_epoch(prev_epoch)
                         .await?;
