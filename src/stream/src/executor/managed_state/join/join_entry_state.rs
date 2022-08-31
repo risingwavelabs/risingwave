@@ -14,6 +14,8 @@
 
 use std::collections::{btree_map, BTreeMap};
 
+use risingwave_common::collection::estimate_size::EstimateSize;
+
 use super::*;
 
 #[expect(dead_code)]
@@ -36,7 +38,7 @@ pub struct JoinEntryState {
 
     allocator: SharedStatsAlloc<Global>,
 
-    content_estimate_size: usize,
+    estimated_heap_size: usize,
 }
 
 impl Default for JoinEntryState {
@@ -45,7 +47,7 @@ impl Default for JoinEntryState {
         Self {
             cached: BTreeMap::new_in(allocator.clone()),
             allocator,
-            content_estimate_size: 0,
+            estimated_heap_size: 0,
         }
     }
 }
@@ -53,10 +55,10 @@ impl Default for JoinEntryState {
 impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        self.content_estimate_size = self
-            .content_estimate_size
-            .saturating_add(key.estimate_size())
-            .saturating_add(value.estimate_size());
+        self.estimated_heap_size = self
+            .estimated_heap_size
+            .saturating_add(key.estimated_heap_size())
+            .saturating_add(value.estimated_heap_size());
 
         self.cached.try_insert(key, value).unwrap();
     }
@@ -65,10 +67,10 @@ impl JoinEntryState {
     pub fn remove(&mut self, pk: PkType) {
         let value = self.cached.remove(&pk).unwrap();
 
-        self.content_estimate_size = self
-            .content_estimate_size
-            .saturating_sub(pk.estimate_size())
-            .saturating_sub(value.estimate_size());
+        self.estimated_heap_size = self
+            .estimated_heap_size
+            .saturating_sub(pk.estimated_heap_size())
+            .saturating_sub(value.estimated_heap_size());
     }
 
     #[expect(dead_code)]
@@ -81,8 +83,8 @@ impl JoinEntryState {
         self.cached.values()
     }
 
-    /// Note: To make the estimcate size accurate, the caller should ensure that it does not mutate
-    /// the estimate size of the [`StateValueType`].
+    /// Note: To make the estimcated size accurate, the caller should ensure that it does not mutate
+    /// the estimated size of the [`StateValueType`].
     pub fn values_mut<'a, 'b: 'a>(
         &'a mut self,
         data_types: &'b [DataType],
@@ -96,9 +98,11 @@ impl JoinEntryState {
     pub fn len(&self) -> usize {
         self.cached.len()
     }
+}
 
-    pub fn estimate_size(&self) -> usize {
-        self.content_estimate_size + self.allocator.bytes_in_use() + std::mem::size_of::<Self>()
+impl EstimateSize for JoinEntryState {
+    fn estimated_heap_size(&self) -> usize {
+        self.estimated_heap_size + self.allocator.bytes_in_use()
     }
 }
 

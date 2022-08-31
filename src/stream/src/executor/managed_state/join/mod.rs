@@ -23,6 +23,7 @@ use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
+use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -139,9 +140,11 @@ impl EncodedJoinRow {
         self.degree -= 1;
         Ok(self.degree)
     }
+}
 
-    pub fn estimate_size(&self) -> usize {
-        self.row.capacity() * std::mem::size_of::<u8>() + std::mem::size_of::<Self>()
+impl EstimateSize for EncodedJoinRow {
+    fn estimated_heap_size(&self) -> usize {
+        self.row.estimated_heap_size()
     }
 }
 
@@ -231,7 +234,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let alloc = StatsAlloc::new(Global).shared();
         Self {
             inner: moka::unsync::Cache::builder()
-                .weigher(|k: &K, v: &JoinEntryState| (k.estimate_size() + v.estimate_size()) as u32)
+                .weigher(|k: &K, v: &JoinEntryState| {
+                    (k.estimated_size() + v.estimated_size()) as u32
+                })
                 .max_capacity(target_cap_bytes as u64)
                 .build_with_hasher(PrecomputedBuildHasher),
             join_key_data_types,

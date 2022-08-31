@@ -26,6 +26,7 @@ use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
     Row, StructRef,
 };
+use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
@@ -94,7 +95,9 @@ pub trait HashKeySerDe<'a>: ScalarRef<'a> {
 /// Current comparison implementation treats `null == null`. This is consistent with postgresql's
 /// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
 /// executor should take care of this.
-pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
+pub trait HashKey:
+    EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static
+{
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
@@ -148,8 +151,6 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
     }
 
     fn null_bitmap(&self) -> &FixedBitSet;
-
-    fn estimate_size(&self) -> usize;
 }
 
 /// A wrapper over `HashKey` to support null-safe, i.e., 'IS NOT DISTINCT FROM' semantics. This
@@ -242,6 +243,12 @@ pub struct SerializedKey {
     null_bitmap: FixedBitSet,
 }
 
+impl<const N: usize> EstimateSize for FixedSizeKey<N> {
+    fn estimated_heap_size(&self) -> usize {
+        self.null_bitmap.estimated_heap_size()
+    }
+}
+
 /// Fix clippy warning.
 impl<const N: usize> PartialEq for FixedSizeKey<N> {
     fn eq(&self, other: &Self) -> bool {
@@ -254,6 +261,12 @@ impl<const N: usize> Eq for FixedSizeKey<N> {}
 impl<const N: usize> Hash for FixedSizeKey<N> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         state.write_u64(self.hash_code)
+    }
+}
+
+impl EstimateSize for SerializedKey {
+    fn estimated_heap_size(&self) -> usize {
+        self.key.estimated_heap_size() + self.null_bitmap.estimated_heap_size()
     }
 }
 
@@ -711,10 +724,6 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
     fn null_bitmap(&self) -> &FixedBitSet {
         &self.null_bitmap
     }
-
-    fn estimate_size(&self) -> usize {
-        std::mem::size_of::<Self>()
-    }
 }
 
 impl HashKey for SerializedKey {
@@ -731,10 +740,6 @@ impl HashKey for SerializedKey {
 
     fn null_bitmap(&self) -> &FixedBitSet {
         &self.null_bitmap
-    }
-
-    fn estimate_size(&self) -> usize {
-        self.key.estimate_size() + std::mem::size_of::<Self>()
     }
 }
 
