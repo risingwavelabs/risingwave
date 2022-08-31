@@ -43,14 +43,11 @@ use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{serialize, serialize_pk, streaming_deserialize};
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};
-use crate::table::Distribution;
+use crate::table::{Distribution, DEFAULT_VNODE};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
-///
-/// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
-pub const DEFAULT_VNODE: VirtualNode = 0;
 #[derive(Clone)]
 pub struct StateTable<S: StateStore> {
     /// buffer row operations.
@@ -422,11 +419,10 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+        let mut local = self.keyspace.start_write_batch(WriteOptions {
             epoch,
             table_id: self.keyspace.table_id(),
         });
-        let mut local = batch.prefixify(&self.keyspace);
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
@@ -495,7 +491,7 @@ impl<S: StateStore> StateTable<S> {
                 }
             }
         }
-        batch.ingest().await?;
+        local.ingest().await?;
         Ok(())
     }
 }

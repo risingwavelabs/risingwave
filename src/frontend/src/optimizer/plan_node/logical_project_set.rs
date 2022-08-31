@@ -25,7 +25,7 @@ use super::{
 use crate::expr::{
     Expr, ExprDisplay, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
@@ -266,6 +266,12 @@ impl LogicalProjectSet {
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         Self::i2o_col_mapping_inner(self.input.schema().len(), self.select_list())
+    }
+
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 }
 

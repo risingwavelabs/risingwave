@@ -23,7 +23,7 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{key, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
@@ -259,7 +259,6 @@ impl HummockStorage {
         // the union because the underlying merge iterator
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
-            self.stats.clone(),
             key_range,
             epoch,
             min_epoch,
@@ -439,10 +438,12 @@ impl HummockStorage {
         check_bloom_filter: bool,
     ) -> StorageResult<(Option<Option<Bytes>>, i32)> {
         let mut table_counts = 0;
+        let epoch = key::get_epoch(internal_key);
         for data_list in order_sorted_uncommitted_data {
             for data in data_list {
                 match data {
                     UncommittedData::Batch(batch) => {
+                        assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
                         let data = self.get_from_batch(&batch, key);
                         if data.is_some() {
                             return Ok((data, table_counts));

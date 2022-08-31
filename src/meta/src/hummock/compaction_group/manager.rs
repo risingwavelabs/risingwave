@@ -108,15 +108,13 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
-        let table_ids = table_fragments
-            .internal_table_ids()
-            .into_iter()
-            .chain(std::iter::once(table_fragments.table_id().table_id))
-            .collect_vec();
         self.inner
             .write()
             .await
-            .unregister(&table_ids, self.env.meta_store())
+            .unregister(
+                &table_fragments.all_table_ids().collect_vec(),
+                self.env.meta_store(),
+            )
             .await
     }
 
@@ -170,14 +168,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .collect_vec();
         let valid_ids = table_fragments_list
             .iter()
-            .flat_map(|table_fragments| {
-                table_fragments
-                    .internal_table_ids()
-                    .iter()
-                    .cloned()
-                    .chain(std::iter::once(table_fragments.table_id().table_id))
-                    .collect_vec()
-            })
+            .flat_map(|table_fragments| table_fragments.all_table_ids())
             .chain(source_ids.iter().cloned())
             .chain(source_ids_in_fragments.iter().cloned())
             .dedup()
@@ -369,12 +360,13 @@ impl CompactionGroupManagerInner {
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
     use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::hummock::compaction_group::manager::{
         CompactionGroupManager, CompactionGroupManagerInner,
@@ -493,8 +485,28 @@ mod tests {
     async fn test_manager() {
         let (env, ..) = setup_compute_env(8080).await;
         let compaction_group_manager = CompactionGroupManager::new(env.clone()).await.unwrap();
-        let table_fragment_1 = TableFragments::new(TableId::new(10), Default::default());
-        let table_fragment_2 = TableFragments::new(TableId::new(20), Default::default());
+        let table_fragment_1 = TableFragments::new(
+            TableId::new(10),
+            BTreeMap::from([(
+                1,
+                Fragment {
+                    fragment_id: 1,
+                    state_table_ids: vec![10, 11, 12, 13],
+                    ..Default::default()
+                },
+            )]),
+        );
+        let table_fragment_2 = TableFragments::new(
+            TableId::new(20),
+            BTreeMap::from([(
+                2,
+                Fragment {
+                    fragment_id: 2,
+                    state_table_ids: vec![20, 21, 22, 23],
+                    ..Default::default()
+                },
+            )]),
+        );
         let source_1 = 100;
         let source_2 = 200;
         let source_3 = 300;
@@ -518,26 +530,26 @@ mod tests {
             .register_table_fragments(&table_fragment_1, &table_properties)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 1);
+        assert_eq!(registered_number().await, 4);
         compaction_group_manager
             .register_table_fragments(&table_fragment_2, &table_properties)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 2);
+        assert_eq!(registered_number().await, 8);
 
         // Test unregister_table_fragments
         compaction_group_manager
             .unregister_table_fragments(&table_fragment_1)
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 1);
+        assert_eq!(registered_number().await, 4);
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
             .purge_stale_members(&[table_fragment_2], &[], &[])
             .await
             .unwrap();
-        assert_eq!(registered_number().await, 1);
+        assert_eq!(registered_number().await, 4);
         compaction_group_manager
             .purge_stale_members(&[], &[], &[])
             .await
