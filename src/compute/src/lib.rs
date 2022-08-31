@@ -40,6 +40,7 @@ pub mod rpc;
 pub mod server;
 
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
@@ -85,6 +86,8 @@ pub struct ComputeNodeOpts {
 use std::future::Future;
 use std::pin::Pin;
 
+use risingwave_common::config::{BatchConfig, ServerConfig, StorageConfig, StreamingConfig};
+
 use crate::server::compute_node_serve;
 
 /// Start compute node
@@ -115,4 +118,24 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             join_handle.await.unwrap();
         }
     })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ComputeNodeConfig {
+    // For connection
+    #[serde(default)]
+    pub server: ServerConfig,
+
+    // Below for batch query.
+    #[serde(default)]
+    pub batch: BatchConfig,
+
+    // Below for streaming.
+    #[serde(default)]
+    pub streaming: StreamingConfig,
+
+    // Below for Hummock.
+    #[serde(default)]
+    pub storage: StorageConfig,
 }

@@ -47,6 +47,10 @@ impl FrontendService {
             .arg("--client-address")
             .arg(format!("{}:{}", config.address, config.port));
 
+        let prefix_config = env::var("PREFIX_CONFIG")?;
+        cmd.arg("--config-path")
+            .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         match provide_meta_node.len() {
             0 => {

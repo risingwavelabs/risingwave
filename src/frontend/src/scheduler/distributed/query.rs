@@ -17,20 +17,20 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::bail;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::sync::{oneshot, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 use super::{QueryResultFetcher, StageEvent};
+use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResult};
+use crate::scheduler::{HummockSnapshotManagerRef, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -91,6 +91,7 @@ impl QueryExecution {
         worker_node_manager: WorkerNodeManagerRef,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
+        catalog_reader: CatalogReader,
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
@@ -114,6 +115,7 @@ impl QueryExecution {
                     sender.clone(),
                     children_stages,
                     compute_client_pool.clone(),
+                    catalog_reader.clone(),
                 ));
                 stage_executions.insert(stage_id, stage_exec);
             }
@@ -157,13 +159,8 @@ impl QueryExecution {
                     compute_client_pool: self.compute_client_pool.clone(),
                 };
 
-                tokio::spawn(async move {
-                    let query_id = runner.query.query_id.clone();
-                    runner.run().await.map_err(|e| {
-                        error!("Query {:?} failed, reason: {:?}", query_id, e);
-                        e
-                    })
-                });
+                // Not trace the error here, it will be processed in scheduler.
+                tokio::spawn(async move { runner.run().await });
 
                 let root_stage = root_stage_receiver
                     .await
@@ -177,10 +174,8 @@ impl QueryExecution {
 
                 Ok(root_stage)
             }
-            s => {
-                // Restore old state
-                *state = s;
-                bail!("Query not pending!")
+            _ => {
+                unreachable!("The query runner should not be scheduled twice");
             }
         }
     }
@@ -193,20 +188,11 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self) -> SchedulerResult<()> {
+    async fn run(mut self) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
-            // TODO: We should not return error here, we should abort query.
-            tracing::trace!(
-                "Starting query stage: {:?}-{:?}",
-                self.query.query_id,
-                stage_id
-            );
-            self.stage_executions[stage_id].start().await.map_err(|e| {
-                error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
-                e
-            })?;
+            self.stage_executions[stage_id].start().await;
             tracing::trace!(
                 "Query stage {:?}-{:?} started.",
                 self.query.query_id,
@@ -233,7 +219,7 @@ impl QueryRunner {
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
                             .unpin_snapshot(self.epoch, self.query.query_id())
-                            .await?;
+                            .await;
                     }
 
                     if self.scheduled_stages_count == self.stage_executions.len() {
@@ -241,11 +227,11 @@ impl QueryRunner {
                         self.send_root_stage_info().await;
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
-                            if self.all_children_scheduled(parent).await {
-                                self.stage_executions[parent].start().await.map_err(|e| {
-                                    error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
-                                    e
-                                })?;
+                            if self.all_children_scheduled(parent).await
+                                // Do not schedule same stage twice.
+                                && self.stage_executions[parent].is_pending().await
+                            {
+                                self.stage_executions[parent].start().await;
                             }
                         }
                     }
@@ -281,18 +267,10 @@ impl QueryRunner {
                     break;
                 }
                 rest => {
-                    return Err(SchedulerError::NotImplemented(
-                        format!("unsupported message \"{:?}\" for QueryRunner.run", rest),
-                        None.into(),
-                    ));
+                    unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
                 }
             }
         }
-
-        info!("Query runner {:?} finished.", self.query.query_id);
-        // FIXME: This is a little confusing, it's possible to return Ok even if tell query stage
-        // runner Err.
-        Ok(())
     }
 
     #[expect(clippy::unused_async)]
@@ -346,6 +324,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
+    use parking_lot::RwLock;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETAINTION_SECOND;
     use risingwave_common::types::DataType;
@@ -353,6 +332,8 @@ mod tests {
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
 
+    use crate::catalog::catalog_service::CatalogReader;
+    use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
         BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
@@ -371,6 +352,7 @@ mod tests {
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let compute_client_pool = Arc::new(ComputeClientPool::new(1024));
+        let catalog_reader = CatalogReader::new(Arc::new(RwLock::new(Catalog::default())));
         let query_execution = QueryExecution::new(
             create_query().await,
             100,
@@ -379,6 +361,7 @@ mod tests {
                 MockFrontendMetaClient {},
             ))),
             compute_client_pool,
+            catalog_reader,
         );
         assert!(query_execution.start().await.is_err());
     }
@@ -392,12 +375,12 @@ mod tests {
         //   Scan  Scan
         //
         let ctx = OptimizerContext::mock().await;
-
+        let table_id = 0.into();
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
             false,
             Rc::new(TableDesc {
-                table_id: 0.into(),
+                table_id,
                 stream_key: vec![],
                 order_key: vec![],
                 columns: vec![
@@ -515,9 +498,12 @@ mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
-        worker_node_manager.insert_table_mapping(0.into(), vec![]);
+        worker_node_manager.insert_fragment_mapping(0, vec![]);
+        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        catalog.write().insert_table_id_mapping(table_id, 0);
+        let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
-        let fragmenter = BatchPlanFragmenter::new(worker_node_manager);
+        let fragmenter = BatchPlanFragmenter::new(worker_node_manager, catalog_reader);
         fragmenter.split(batch_exchange_node3.clone()).unwrap()
     }
 
