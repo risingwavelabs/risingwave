@@ -4230,6 +4230,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_rt",
+ "sync-point",
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
@@ -4679,6 +4680,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "sync-point",
  "tempfile",
  "thiserror",
  "tokio-retry",
@@ -4967,6 +4969,7 @@ dependencies = [
  "serde",
  "smallvec",
  "spin 0.9.4",
+ "sync-point",
  "tempfile",
  "thiserror",
  "tokio-metrics",
@@ -5055,6 +5058,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "serial_test",
+ "sync-point",
 ]
 
 [[package]]
@@ -5694,6 +5698,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "sync-point"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "madsim-tokio",
+ "spin 0.9.4",
+ "thiserror",
 ]
 
 [[package]]

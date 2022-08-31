@@ -24,7 +24,6 @@ use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, FrontendService, HummockInMemoryStrategy,
     MetaNodeService, ServiceConfig,
 };
-use risingwave_common::util::sync_point;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::signal;

@@ -17,23 +17,24 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
-use futures::FutureExt;
+use futures_util::future::{BoxFuture, FutureExt};
 
-use crate::util::sync_point::Error;
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Wait for signal {0} timeout")]
+    WaitTimeout(&'static str),
+}
 
 pub type SyncPoint = &'static str;
 type Action = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
-lazy_static::lazy_static! {
-    static ref SYNC_FACILITY: SyncFacility = SyncFacility::new();
-}
+static SYNC_FACILITY: spin::Once<SyncFacility> = spin::Once::new();
 
 struct SyncFacility {
     /// `Notify` for each sync point.
-    notifies: parking_lot::Mutex<HashMap<SyncPoint, Arc<tokio::sync::Notify>>>,
+    notifies: spin::Mutex<HashMap<SyncPoint, Arc<tokio::sync::Notify>>>,
     /// Actions for each sync point.
-    actions: parking_lot::Mutex<HashMap<SyncPoint, Action>>,
+    actions: spin::Mutex<HashMap<SyncPoint, Action>>,
 }
 
 impl SyncFacility {
@@ -42,6 +43,10 @@ impl SyncFacility {
             notifies: Default::default(),
             actions: Default::default(),
         }
+    }
+
+    fn get() -> &'static Self {
+        SYNC_FACILITY.get().expect("sync point not enabled")
     }
 
     async fn wait(
@@ -85,9 +90,16 @@ impl SyncFacility {
     }
 }
 
+/// Enable or reset the global sync facility.
+pub fn reset() {
+    SYNC_FACILITY.call_once(SyncFacility::new).reset();
+}
+
 /// Mark a sync point.
 pub async fn on(sync_point: SyncPoint) {
-    SYNC_FACILITY.on(sync_point).await;
+    if let Some(sync_facility) = SYNC_FACILITY.get() {
+        sync_facility.on(sync_point).await;
+    }
 }
 
 /// Hook a sync point with action.
@@ -99,7 +111,7 @@ where
     Fut: Future<Output = ()> + Send + 'static,
 {
     let action = Arc::new(move || action().boxed());
-    SYNC_FACILITY.hook(sync_point, action);
+    SyncFacility::get().hook(sync_point, action);
 }
 
 /// Wait for a sync point to be reached with timeout.
@@ -107,10 +119,5 @@ where
 /// If the sync point is reached before this call, it will consume this event and return
 /// immediately.
 pub async fn wait_timeout(sync_point: SyncPoint, dur: Duration) -> Result<(), Error> {
-    SYNC_FACILITY.wait(sync_point, dur, false).await
-}
-
-/// Reset the sync facility.
-pub fn reset() {
-    SYNC_FACILITY.reset();
+    SyncFacility::get().wait(sync_point, dur, false).await
 }

@@ -15,7 +15,6 @@
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::util::sync_point;
 use risingwave_rpc_client::HummockMetaClient;
 use serial_test::serial;
 

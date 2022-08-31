@@ -18,7 +18,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use risingwave_cmd_all::playground;
-use risingwave_common::util::sync_point;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreImpl};
 use risingwave_pb::common::WorkerType;
