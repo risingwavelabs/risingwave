@@ -396,23 +396,44 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
-            let sstable_iter = sstable_iter.as_mut().expect("no table iter");
-            self.sstable_iter.next()?;
-
-            if sstable_iter.is_valid() {
-                Ok(())
-            } else {
-                // seek to next table
-                let mut next_idx = self.cur_idx + 1;
-                while next_idx < self.tables.len() {
-                    self.seek_idx(next_idx, None).await?;
-                    if self.sstable_iter.is_some() {
-                        break;
-                    }
-                    next_idx += 1;
-                }
-                Ok(())
+            // Does just calling `next()` suffice?
+            self.sstable_iter.next().await?;
+            if self.sstable_iter.is_valid() {
+                // Yes. Nothing else to do.
+                return Ok(());
             }
+
+            // No. Current SST-iterator is invalid. We need to load the next one.
+            let (next_idx, min_key) = match &self.sstable_iter {
+                SstIterOption::None => unreachable!(), // `next()` would have already panicked.
+                SstIterOption::Prefetch(iter) => {
+                    // If it was a Prefetch Iterator, we might be able to continue the rest of the
+                    // SST with a Streaming Iterator.
+
+                    let block_metas = &iter.sst.value().meta.block_metas;
+                    let end_index = iter.blocks.end_index();
+
+                    // Did the Prefetch Iterator process all blocks of the SST?
+                    if end_index >= block_metas.len() {
+                        // Yes, continue with next SST.
+                        (self.cur_idx + 1, vec![])
+                    } else {
+                        // No,call `self.seek_idx()` with restart with the next block (will result in a Streaming Iterator).
+
+                        // We need to clone here. The function call `self.seek_idx()` below borrows
+                        // `self` as mutable. If we additionally pass in a borrowed key, we borrow
+                        // from `self` twice (which then causes a compiler error).
+                        let key = block_metas[end_index].smallest_key.clone();
+                        (self.cur_idx + 1, key)
+                    }
+                }
+                SstIterOption::Stream(iter) => {
+                    // If it was a streaming iterator, we continue with the next SST.
+                    (self.cur_idx + 1, vec![])
+                }
+            };
+
+            self.seek_idx(next_idx, None).await
         }
     }
 
@@ -425,13 +446,14 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.sstable_iter.is_valid()
     }
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async { self.seek_idx(0, None).await }
     }
 
+    /// Resets iterator and seeks to the first position where the stored key >= `key`.
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
         async {
             let table_idx = self

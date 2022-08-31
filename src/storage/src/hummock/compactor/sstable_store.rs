@@ -54,6 +54,10 @@ impl SstableBlocks {
         self.offset_index += 1;
         Some((idx, block))
     }
+
+    pub fn end_index(&self) -> usize {
+        self.end_index
+    }
 }
 
 pub struct CompactorSstableStore {
