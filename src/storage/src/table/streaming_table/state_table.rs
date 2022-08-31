@@ -328,14 +328,6 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    /// `vnode | pk`
-    fn serialize_pk_with_vnode(&self, pk: &Row) -> Vec<u8> {
-        let mut output = Vec::new();
-        output.put_slice(&self.compute_vnode_by_pk(pk).to_be_bytes());
-        self.pk_serializer.serialize(pk, &mut output);
-        output
-    }
-
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) {
         assert!(
             !self.is_dirty(),
