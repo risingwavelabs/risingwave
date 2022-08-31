@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 
@@ -112,13 +112,7 @@ pub trait TableIter: Send {
 }
 
 /// Get vnode value with `indices` on the given `row`. Should not be used directly.
-fn compute_vnode(
-    row: &Row,
-    indices: &[usize],
-    vnodes: Arc<Bitmap>,
-    table_columns: &[ColumnDesc],
-    dist_key_indices: &[usize],
-) -> VirtualNode {
+fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
@@ -130,22 +124,17 @@ fn compute_vnode(
 
     // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
     if !indices.is_empty() {
-        check_vnode_is_set(vnode, vnodes, table_columns, dist_key_indices);
+        check_vnode_is_set(vnode, vnodes);
     }
     vnode
 }
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
-pub fn check_vnode_is_set(
-    vnode: VirtualNode,
-    vnodes: Arc<Bitmap>,
-    table_columns: &[ColumnDesc],
-    dist_key_indices: &[usize],
-) {
+fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     let is_set = vnodes.is_set(vnode as usize).unwrap();
     assert!(
         is_set,
-        "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-        vnode, table_columns, dist_key_indices
+        "vnode {} should not be accessed by this table",
+        vnode
     );
 }

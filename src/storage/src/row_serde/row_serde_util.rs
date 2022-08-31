@@ -34,10 +34,10 @@ pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
 pub fn serialize_pk_with_vnode(
     pk: &Row,
     serializer: &OrderedRowSerializer,
-    vnode: &VirtualNode,
+    vnode: VirtualNode,
 ) -> Vec<u8> {
     let pk_bytes = serialize_pk(pk, serializer);
-    [vnode.to_be_bytes().to_vec(), pk_bytes].concat()
+    [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
 }
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {

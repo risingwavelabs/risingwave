@@ -52,10 +52,6 @@ pub struct StorageTable<S: StateStore> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
-    /// All columns of this table. Note that this is different from the output columns in
-    /// `mapping.output_columns`.
-    table_columns: Vec<ColumnDesc>,
-
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
     schema: Schema,
@@ -239,7 +235,6 @@ impl<S: StateStore> StorageTable<S> {
         let keyspace = Keyspace::table_root(store, &table_id);
         Self {
             keyspace,
-            table_columns,
             schema,
             pk_serializer,
             mapping,
@@ -260,13 +255,7 @@ impl<S: StateStore> StorageTable<S> {
 impl<S: StateStore> StorageTable<S> {
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
-        compute_vnode(
-            pk,
-            &self.dist_key_in_pk_indices,
-            self.vnodes.clone(),
-            &self.table_columns,
-            &self.dist_key_indices,
-        )
+        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
@@ -275,21 +264,13 @@ impl<S: StateStore> StorageTable<S> {
         self.dist_key_in_pk_indices
             .iter()
             .all(|&d| d < pk_prefix.0.len())
-            .then(|| {
-                compute_vnode(
-                    pk_prefix,
-                    &self.dist_key_in_pk_indices,
-                    self.vnodes.clone(),
-                    &self.table_columns,
-                    &self.dist_key_indices,
-                )
-            })
+            .then(|| compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes))
     }
 
     /// Get a single row by point get
     pub async fn get_row(&mut self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk =
-            serialize_pk_with_vnode(pk, &self.pk_serializer, &self.compute_vnode_by_pk(pk));
+            serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let read_options = self.get_read_option(epoch);
         assert!(pk.size() <= self.pk_indices.len());
         let key_indices = (0..pk.size())

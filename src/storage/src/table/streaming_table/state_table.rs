@@ -56,10 +56,6 @@ pub struct StateTable<S: StateStore> {
     /// write into state store.
     keyspace: Keyspace<S>,
 
-    /// All columns of this table. Note that this is different from the output columns in
-    /// `mapping.output_columns`.
-    table_columns: Vec<ColumnDesc>,
-
     /// Used for serializing the primary key.
     pk_serializer: OrderedRowSerializer,
 
@@ -165,7 +161,6 @@ impl<S: StateStore> StateTable<S> {
         Self {
             mem_table: MemTable::new(),
             keyspace,
-            table_columns,
             pk_serializer,
             data_types,
             pk_indices: pk_indices.to_vec(),
@@ -232,7 +227,6 @@ impl<S: StateStore> StateTable<S> {
         Self {
             mem_table: MemTable::new(),
             keyspace,
-            table_columns,
             pk_serializer,
             data_types,
             pk_indices,
@@ -251,13 +245,7 @@ impl<S: StateStore> StateTable<S> {
 
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
-        compute_vnode(
-            pk,
-            &self.dist_key_in_pk_indices,
-            self.vnodes.clone(),
-            &self.table_columns,
-            &self.dist_key_indices,
-        )
+        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     // TODO: remove, should not be exposed to user
@@ -283,7 +271,7 @@ impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
     pub async fn get_row<'a>(&'a self, pk: &'a Row, epoch: u64) -> StorageResult<Option<Row>> {
         let serialized_pk =
-            serialize_pk_with_vnode(pk, &self.pk_serializer, &self.compute_vnode_by_pk(pk));
+            serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
 
         let read_options = self.get_read_option(epoch);
@@ -349,7 +337,7 @@ impl<S: StateStore> StateTable<S> {
         let pk = value.by_indices(self.pk_indices());
 
         let key_bytes =
-            serialize_pk_with_vnode(&pk, &self.pk_serializer, &self.compute_vnode_by_pk(&pk));
+            serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         let value_bytes = serialize_value(value).map_err(err)?;
         self.mem_table.insert(key_bytes, value_bytes);
         Ok(())
@@ -360,7 +348,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let pk = old_value.by_indices(self.pk_indices());
         let key_bytes =
-            serialize_pk_with_vnode(&pk, &self.pk_serializer, &self.compute_vnode_by_pk(&pk));
+            serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         let value_bytes = serialize_value(old_value).map_err(err)?;
         self.mem_table.delete(key_bytes, value_bytes);
         Ok(())
@@ -375,7 +363,7 @@ impl<S: StateStore> StateTable<S> {
         let new_key_bytes = serialize_pk_with_vnode(
             &new_pk,
             &self.pk_serializer,
-            &self.compute_vnode_by_pk(&new_pk),
+            self.compute_vnode_by_pk(&new_pk),
         );
 
         let old_value_bytes = serialize_value(old_value).map_err(err)?;
@@ -592,15 +580,7 @@ impl<S: StateStore> StateTable<S> {
         self.dist_key_in_pk_indices
             .iter()
             .all(|&d| d < pk_prefix.0.len())
-            .then(|| {
-                compute_vnode(
-                    pk_prefix,
-                    &self.dist_key_in_pk_indices,
-                    self.vnodes.clone(),
-                    &self.table_columns,
-                    &self.dist_key_indices,
-                )
-            })
+            .then(|| compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes))
     }
 }
 
