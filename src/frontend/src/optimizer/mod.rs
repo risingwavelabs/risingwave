@@ -28,14 +28,14 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::Order;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::BatchExchange;
+use crate::optimizer::plan_node::{BatchExchange, LogicalApply};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
@@ -158,8 +158,25 @@ impl PlanRoot {
         }
     }
 
+    /// Check whether the plan has `LogicalApply` that isn't be unnested.
+    pub fn has_apply(plan: PlanRef) -> bool {
+        pub struct PlanApplyFinder {
+            has_apply: bool,
+        }
+
+        impl PlanVisitor<()> for PlanApplyFinder {
+            fn visit_logical_apply(&mut self, _plan: &LogicalApply) {
+                self.has_apply = true;
+            }
+        }
+
+        let mut finder = PlanApplyFinder { has_apply: false };
+        finder.visit(plan);
+        finder.has_apply
+    }
+
     /// Apply logical optimization to the plan.
-    pub fn gen_optimized_logical_plan(&self) -> PlanRef {
+    pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -200,6 +217,10 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
+
+        if Self::has_apply(plan.clone()) {
+            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+        }
 
         // Predicate Push-down
         plan = plan.predicate_pushdown(Condition::true_cond());
@@ -280,13 +301,13 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         );
 
-        plan
+        Ok(plan)
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
     fn gen_batch_plan(&self) -> Result<PlanRef> {
         // Logical optimization
-        let mut plan = self.gen_optimized_logical_plan();
+        let mut plan = self.gen_optimized_logical_plan()?;
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -365,7 +386,7 @@ impl PlanRoot {
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let mut plan = match self.plan.convention() {
             Convention::Logical => {
-                let plan = self.gen_optimized_logical_plan();
+                let plan = self.gen_optimized_logical_plan()?;
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
                 self.required_dist =
                     out_col_change.rewrite_required_distribution(&self.required_dist);
