@@ -73,7 +73,7 @@ SELECT INTERVAL '3 mins' * 1.5;
 ----
 00:04:30
 
-# https://github.com/singularity-data/risingwave/issues/3873
+# https://github.com/risingwavelabs/risingwave/issues/3873
 query TTTTT
 select distinct * from (values (interval '1' month), (interval '30' day)) as t;
 ----

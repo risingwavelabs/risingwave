@@ -227,14 +227,23 @@ impl Binder {
                     .into());
                 }
                 if expr.has_subquery() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "subquery in filter clause is not supported".to_string(),
+                    return Err(ErrorCode::NotImplemented(
+                        "subquery in filter clause".to_string(),
+                        None.into(),
                     )
                     .into());
                 }
                 if expr.has_agg_call() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "aggregation function in filter clause is not supported".to_string(),
+                    return Err(ErrorCode::NotImplemented(
+                        "aggregation function in filter clause".to_string(),
+                        None.into(),
+                    )
+                    .into());
+                }
+                if expr.has_table_function() {
+                    return Err(ErrorCode::NotImplemented(
+                        "table function in filter clause".to_string(),
+                        None.into(),
                     )
                     .into());
                 }

@@ -66,10 +66,10 @@ impl Display for TrackingIssue {
         match self.0 {
             Some(id) => write!(
                 f,
-                "Tracking issue: https://github.com/singularity-data/risingwave/issues/{}",
+                "Tracking issue: https://github.com/risingwavelabs/risingwave/issues/{}",
                 id
             ),
-            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md"),
+            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml"),
         }
     }
 }

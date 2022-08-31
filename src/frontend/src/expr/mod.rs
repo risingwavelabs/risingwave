@@ -164,7 +164,7 @@ impl ExprImpl {
     /// Evaluate the expression on the given input.
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
-    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/3479>
+    /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         backend_expr.eval_row(input).map_err(Into::into)
@@ -377,6 +377,21 @@ impl ExprImpl {
     pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
             && function_call.get_expr_type() == ExprType::Equal
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+        {
+            if x.index() < y.index() {
+                Some((*x, *y))
+            } else {
+                Some((*y, *x))
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_is_not_distinct_from_cond(&self) -> Option<(InputRef, InputRef)> {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::IsNotDistinctFrom
             && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
         {
             if x.index() < y.index() {

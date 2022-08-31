@@ -139,6 +139,9 @@ message HashJoinNode {
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
   repeated uint32 output_indices = 5;
+  // Null safe means it treats `null = null` as true.
+  // Each key pair can be null safe independently. (left_key, right_key, null_safe)
+  repeated bool null_safe = 6;
 }
 
 message SortMergeJoinNode {

@@ -35,3 +35,6 @@ seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-node './e2e_test/streaming/\
 
 echo "--- deterministic simulation e2e, ci-3cn-1fe, recovery, batch"
 seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --kill-node './e2e_test/batch/\*\*/\*.slt'
+
+echo "--- deterministic simulation e2e, ci-3cn-1fe, fuzzing"
+seq 1 | parallel MADSIM_TEST_SEED={} $RUNNER --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata

@@ -40,7 +40,7 @@ function polling() {
 
 function cleanup {
   echo "--- Delete tenant"
-  rwc t delete -tenant ${TENANT_NAME}
+  rwc tenant delete -name ${TENANT_NAME}
 }
 
 trap cleanup EXIT
@@ -64,17 +64,17 @@ apt-get -y install golang-go librdkafka-dev
 curl -L https://rwc-cli-internal-release.s3.ap-southeast-1.amazonaws.com/download.sh | bash && mv rwc /usr/local/bin
 
 echo "--- RWC Config and Login"
-rwc config -region ap-southeast-1
+rwc config -region bench-ap-southeast-1
 rwc config ls
 rwc login -account benchmark -password "$BENCH_TOKEN"
 
 echo "--- RWC Create a Risingwave Instance"
-rwc t create -tenant ${TENANT_NAME} -sku ${SKU} -imagetag ${IMAGE_TAG}
+rwc tenant create -name ${TENANT_NAME} -sku ${SKU} -imagetag ${IMAGE_TAG}
 
 sleep 2
 
 echo "--- Wait Risingwave Instance Ready "
-endpoint=$(rwc t get-endpoint -tenant ${TENANT_NAME})
+endpoint=$(rwc tenant endpoint -name ${TENANT_NAME})
 polling ${endpoint}
 
 echo "--- Generate Tpch-Bench Args"
@@ -85,7 +85,7 @@ cat ~/risingwave-deploy/tpch-bench-args-frontend
 cat ~/risingwave-deploy/tpch-bench-args-kafka
 
 echo "--- Clone Tpch-Bench Repo"
-git clone https://"$GITHUB_TOKEN"@github.com/singularity-data/tpch-bench.git
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/tpch-bench.git
 
 echo "--- Run Tpch-Bench"
 cd tpch-bench/

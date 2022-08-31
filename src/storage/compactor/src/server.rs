@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::config::load_config;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -47,15 +47,7 @@ pub async fn compactor_serve(
     client_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
-    let config = {
-        if opts.config_path.is_empty() {
-            CompactorConfig::default()
-        } else {
-            let config_path = PathBuf::from(opts.config_path.to_owned());
-            CompactorConfig::init(config_path).unwrap()
-        }
-    };
-
+    let config: CompactorConfig = load_config(&opts.config_path).unwrap();
     tracing::info!(
         "Starting compactor with config {:?} and opts {:?}",
         config,
