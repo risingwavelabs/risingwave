@@ -53,7 +53,7 @@ pub async fn start_cluster() -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
         });
     });
     // It will find "CLUSTER_READY" even when it is reached after "CLUSTER_READY" has been emitted.
-    sync_point::wait("CLUSTER_READY", Duration::from_secs(30))
+    sync_point::wait_timeout("CLUSTER_READY", Duration::from_secs(30))
         .await
         .unwrap();
     (join_handle, tx)
@@ -112,7 +112,7 @@ pub async fn get_meta_client() -> MetaClient {
 #[should_panic]
 async fn test_wait_timeout() {
     sync_point::hook("TEST_SETUP_TIMEOUT", || async {
-        sync_point::wait("SIG_NEVER_EMIT", Duration::from_secs(1))
+        sync_point::wait_timeout("SIG_NEVER_EMIT", Duration::from_secs(1))
             .await
             .unwrap();
     });

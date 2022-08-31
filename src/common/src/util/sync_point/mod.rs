@@ -24,5 +24,5 @@ pub async fn on(_sync_point: &str) {}
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Wait for signal {0} timeout")]
-    WaitForSignalTimeout(&'static str),
+    WaitTimeout(&'static str),
 }

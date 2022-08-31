@@ -23,7 +23,6 @@ use futures::FutureExt;
 use crate::util::sync_point::Error;
 
 pub type SyncPoint = &'static str;
-pub type Signal = &'static str;
 type Action = Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync>;
 
 lazy_static::lazy_static! {
@@ -31,82 +30,87 @@ lazy_static::lazy_static! {
 }
 
 struct SyncFacility {
-    /// `Notify` for each `Signal`.
-    signals: parking_lot::Mutex<HashMap<Signal, Arc<tokio::sync::Notify>>>,
-    /// `SyncPointInfo` for active `SyncPoint`.
-    sync_points: parking_lot::Mutex<HashMap<SyncPoint, Action>>,
+    /// `Notify` for each sync point.
+    notifies: parking_lot::Mutex<HashMap<SyncPoint, Arc<tokio::sync::Notify>>>,
+    /// Actions for each sync point.
+    actions: parking_lot::Mutex<HashMap<SyncPoint, Action>>,
 }
 
 impl SyncFacility {
     fn new() -> Self {
         Self {
-            signals: Default::default(),
-            sync_points: Default::default(),
+            notifies: Default::default(),
+            actions: Default::default(),
         }
     }
 
     async fn wait(
         &self,
-        signal: Signal,
+        sync_point: SyncPoint,
         timeout: Duration,
-        relay_signal: bool,
+        relay: bool,
     ) -> Result<(), Error> {
-        let entry = self.signals.lock().entry(signal).or_default().clone();
+        let entry = self.notifies.lock().entry(sync_point).or_default().clone();
         match tokio::time::timeout(timeout, entry.notified()).await {
-            Ok(_) if relay_signal => entry.notify_one(),
+            Ok(_) if relay => entry.notify_one(),
             Ok(_) => {}
-            Err(_) => return Err(Error::WaitForSignalTimeout(signal)),
+            Err(_) => return Err(Error::WaitTimeout(sync_point)),
         }
         Ok(())
     }
 
-    fn emit_signal(&self, signal: Signal) {
-        if let Some(notify) = self.signals.lock().get_mut(signal) {
-            notify.notify_one();
-        }
+    fn emit(&self, sync_point: SyncPoint) {
+        self.notifies
+            .lock()
+            .entry(sync_point)
+            .or_default()
+            .notify_one();
     }
 
-    fn set_action(&self, sync_point: SyncPoint, action: Action) {
-        self.sync_points.lock().insert(sync_point, action);
+    fn hook(&self, sync_point: SyncPoint, action: Action) {
+        self.actions.lock().insert(sync_point, action);
     }
 
     fn reset(&self) {
-        self.sync_points.lock().clear();
-        self.signals.lock().clear();
+        self.actions.lock().clear();
+        self.notifies.lock().clear();
     }
 
     async fn on(&self, sync_point: SyncPoint) {
-        let action = self
-            .sync_points
-            .lock()
-            .get(sync_point)
-            .map(|action| action());
+        let action = self.actions.lock().get(sync_point).map(|action| action());
         if let Some(action) = action {
             action.await;
         }
-        self.emit_signal(sync_point);
+        self.emit(sync_point);
     }
 }
 
-/// Activate the sync point forever.
+/// Mark a sync point.
+pub async fn on(sync_point: SyncPoint) {
+    SYNC_FACILITY.on(sync_point).await;
+}
+
+/// Hook a sync point with action.
+///
+/// The action will be executed before reaching the sync point.
 pub fn hook<F, Fut>(sync_point: SyncPoint, action: F)
 where
     F: Fn() -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
     let action = Arc::new(move || action().boxed());
-    SYNC_FACILITY.set_action(sync_point, action);
+    SYNC_FACILITY.hook(sync_point, action);
 }
 
-/// The sync point is triggered
-pub async fn on(sync_point: SyncPoint) {
-    SYNC_FACILITY.on(sync_point).await;
+/// Wait for a sync point to be reached with timeout.
+///
+/// If the sync point is reached before this call, it will consume this event and return
+/// immediately.
+pub async fn wait_timeout(sync_point: SyncPoint, dur: Duration) -> Result<(), Error> {
+    SYNC_FACILITY.wait(sync_point, dur, false).await
 }
 
-pub async fn wait(signal: Signal, timeout: Duration) -> Result<(), Error> {
-    SYNC_FACILITY.wait(signal, timeout, false).await
-}
-
+/// Reset the sync facility.
 pub fn reset() {
     SYNC_FACILITY.reset();
 }
