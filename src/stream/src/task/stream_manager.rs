@@ -613,7 +613,7 @@ impl LocalStreamManagerCore {
 
             let handle = {
                 let actor = async move {
-                    let state_store_monitoring = local_state_store.into_monitoring_future();
+                    let state_store_monitoring = local_state_store.into_poll_control_future();
                     match select(state_store_monitoring, actor.run().boxed()).await {
                         Either::Left((result, _)) => result,
                         Either::Right((result, _)) => result,

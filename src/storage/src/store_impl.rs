@@ -211,10 +211,9 @@ pub enum LocalStateStoreImpl {
 }
 
 impl LocalStateStoreImpl {
-    pub fn into_monitoring_future(
+    pub fn into_poll_control_future(
         self,
     ) -> BoxFuture<'static, risingwave_common::error::Result<()>> {
-        // TODO: different implementation for hummock
         match self {
             LocalStateStoreImpl::HummockStateStore(state_store) => {
                 let instances = state_store

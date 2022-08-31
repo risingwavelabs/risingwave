@@ -272,7 +272,7 @@ impl HummockStorage {
         let local_instance = self.new_local_state_store_inner();
         LocalHummockStorageWrapper {
             inner: Arc::new(local_instance),
-            instance_collector: Arc::new(Default::default()),
+            instance_collector: Arc::new(Mutex::new(Some(Vec::new()))),
         }
     }
 
