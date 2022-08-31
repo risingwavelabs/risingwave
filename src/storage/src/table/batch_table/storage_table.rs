@@ -39,8 +39,10 @@ use tracing::trace;
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::row_serde_util::{batch_deserialize, parse_raw_key_to_vnode_and_key};
-use crate::row_serde::{serialize_pk, ColumnDescMapping};
+use crate::row_serde::row_serde_util::{
+    batch_deserialize, parse_raw_key_to_vnode_and_key, serialize_pk,
+};
+use crate::row_serde::ColumnDescMapping;
 use crate::store::ReadOptions;
 use crate::table::{Distribution, TableIter, DEFAULT_VNODE};
 use crate::{Keyspace, StateStore, StateStoreIter};

@@ -27,8 +27,8 @@ pub struct EqJoinPredicate {
 
     /// The equal columns indexes(in the input schema) both sides,
     /// the first is from the left table and the second is from the right table.
-    /// now all are normal equal(not null-safe-equal),
-    eq_keys: Vec<(InputRef, InputRef)>,
+    /// The third is `null_safe` flag.
+    eq_keys: Vec<(InputRef, InputRef, bool)>,
 
     left_cols_num: usize,
 }
@@ -36,11 +36,31 @@ pub struct EqJoinPredicate {
 impl fmt::Display for EqJoinPredicate {
     fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
         let mut eq_keys = self.eq_keys().iter();
-        if let Some((k1, k2)) = eq_keys.next() {
-            write!(f, "{} = {}", k1, k2)?;
+        if let Some((k1, k2, null_safe)) = eq_keys.next() {
+            write!(
+                f,
+                "{} {} {}",
+                k1,
+                if *null_safe {
+                    "IS NOT DISTINCT FROM"
+                } else {
+                    "="
+                },
+                k2
+            )?;
         }
-        for (k1, k2) in eq_keys {
-            write!(f, " AND {} = {}", k1, k2)?;
+        for (k1, k2, null_safe) in eq_keys {
+            write!(
+                f,
+                "AND {} {} {}",
+                k1,
+                if *null_safe {
+                    "IS NOT DISTINCT FROM"
+                } else {
+                    "="
+                },
+                k2
+            )?;
         }
         if !self.other_cond.always_true() {
             write!(f, " AND {}", self.other_cond)?;
@@ -54,7 +74,7 @@ impl EqJoinPredicate {
     /// The new method for `JoinPredicate` without any analysis, check or rewrite.
     pub fn new(
         other_cond: Condition,
-        eq_keys: Vec<(InputRef, InputRef)>,
+        eq_keys: Vec<(InputRef, InputRef, bool)>,
         left_cols_num: usize,
     ) -> Self {
         Self {
@@ -91,10 +111,17 @@ impl EqJoinPredicate {
                 .eq_keys
                 .iter()
                 .cloned()
-                .map(|(l, r)| {
-                    FunctionCall::new(ExprType::Equal, vec![l.into(), r.into()])
-                        .unwrap()
-                        .into()
+                .map(|(l, r, null_safe)| {
+                    FunctionCall::new(
+                        if null_safe {
+                            ExprType::IsNotDistinctFrom
+                        } else {
+                            ExprType::Equal
+                        },
+                        vec![l.into(), r.into()],
+                    )
+                    .unwrap()
+                    .into()
                 })
                 .collect(),
         }
@@ -128,26 +155,36 @@ impl EqJoinPredicate {
     }
 
     /// Get a reference to the join predicate's eq keys.
-    pub fn eq_keys(&self) -> &[(InputRef, InputRef)] {
+    pub fn eq_keys(&self) -> &[(InputRef, InputRef, bool)] {
         self.eq_keys.as_ref()
     }
 
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
         self.eq_keys
             .iter()
-            .map(|(left, right)| (left.index(), right.index() - self.left_cols_num))
+            .map(|(left, right, _)| (left.index(), right.index() - self.left_cols_num))
             .collect()
     }
 
     pub fn left_eq_indexes(&self) -> Vec<usize> {
-        self.eq_keys.iter().map(|(left, _)| left.index()).collect()
+        self.eq_keys
+            .iter()
+            .map(|(left, _, _)| left.index())
+            .collect()
     }
 
     /// return the eq keys column index **based on the right input schema**
     pub fn right_eq_indexes(&self) -> Vec<usize> {
         self.eq_keys
             .iter()
-            .map(|(_, right)| right.index() - self.left_cols_num)
+            .map(|(_, right, _)| right.index() - self.left_cols_num)
+            .collect()
+    }
+
+    pub fn null_safes(&self) -> Vec<bool> {
+        self.eq_keys
+            .iter()
+            .map(|(_, _, null_safe)| *null_safe)
             .collect()
     }
 
@@ -158,7 +195,7 @@ impl EqJoinPredicate {
         right_cols_num: usize,
     ) -> ColIndexMapping {
         let mut map = vec![None; right_cols_num];
-        for (left, right) in self.eq_keys() {
+        for (left, right, _) in self.eq_keys() {
             map[right.index - left_cols_num] = Some(left.index);
         }
         ColIndexMapping::new(map)
@@ -174,13 +211,18 @@ impl EqJoinPredicateDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
         let that = self.eq_join_predicate;
         let mut eq_keys = that.eq_keys().iter();
-        if let Some((k1, k2)) = eq_keys.next() {
+        if let Some((k1, k2, null_safe)) = eq_keys.next() {
             write!(
                 f,
-                "{} = {}",
+                "{} {} {}",
                 InputRefDisplay {
                     input_ref: k1,
                     input_schema: self.input_schema
+                },
+                if *null_safe {
+                    "IS NOT DISTINCT FROM"
+                } else {
+                    "="
                 },
                 InputRefDisplay {
                     input_ref: k2,
@@ -188,13 +230,18 @@ impl EqJoinPredicateDisplay<'_> {
                 }
             )?;
         }
-        for (k1, k2) in eq_keys {
+        for (k1, k2, null_safe) in eq_keys {
             write!(
                 f,
-                " AND {} = {}",
+                " AND {} {} {}",
                 InputRefDisplay {
                     input_ref: k1,
                     input_schema: self.input_schema
+                },
+                if *null_safe {
+                    "IS NOT DISTINCT FROM"
+                } else {
+                    "="
                 },
                 InputRefDisplay {
                     input_ref: k2,

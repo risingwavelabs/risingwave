@@ -398,7 +398,7 @@ risedev:
 
 
 compose:
-  risingwave: "ghcr.io/singularity-data/risingwave:latest"
+  risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
   minio: "quay.io/minio/minio:latest"
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"

@@ -419,11 +419,10 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Vec<u8>, RowOp>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+        let mut local = self.keyspace.start_write_batch(WriteOptions {
             epoch,
             table_id: self.keyspace.table_id(),
         });
-        let mut local = batch.prefixify(&self.keyspace);
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
@@ -492,7 +491,7 @@ impl<S: StateStore> StateTable<S> {
                 }
             }
         }
-        batch.ingest().await?;
+        local.ingest().await?;
         Ok(())
     }
 }
