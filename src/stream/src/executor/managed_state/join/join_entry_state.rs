@@ -36,18 +36,21 @@ pub struct JoinEntryState {
     /// The full copy of the state. If evicted, it will be `None`.
     cached: BTreeMap<PkType, StateValueType, SharedStatsAlloc<Global>>,
 
+    /// Allocator for counting the memory usage of the `cached` map itself.
     allocator: SharedStatsAlloc<Global>,
 
-    estimated_heap_size: usize,
+    /// Estimated heap size of the keys and values in the `cached` map.
+    estimated_content_heap_size: usize,
 }
 
 impl Default for JoinEntryState {
     fn default() -> Self {
+        // TODO: may use static rc here.
         let allocator = StatsAlloc::new(Global).shared();
         Self {
             cached: BTreeMap::new_in(allocator.clone()),
             allocator,
-            estimated_heap_size: 0,
+            estimated_content_heap_size: 0,
         }
     }
 }
@@ -55,8 +58,8 @@ impl Default for JoinEntryState {
 impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        self.estimated_heap_size = self
-            .estimated_heap_size
+        self.estimated_content_heap_size = self
+            .estimated_content_heap_size
             .saturating_add(key.estimated_heap_size())
             .saturating_add(value.estimated_heap_size());
 
@@ -67,8 +70,8 @@ impl JoinEntryState {
     pub fn remove(&mut self, pk: PkType) {
         let value = self.cached.remove(&pk).unwrap();
 
-        self.estimated_heap_size = self
-            .estimated_heap_size
+        self.estimated_content_heap_size = self
+            .estimated_content_heap_size
             .saturating_sub(pk.estimated_heap_size())
             .saturating_sub(value.estimated_heap_size());
     }
@@ -102,7 +105,7 @@ impl JoinEntryState {
 
 impl EstimateSize for JoinEntryState {
     fn estimated_heap_size(&self) -> usize {
-        self.estimated_heap_size + self.allocator.bytes_in_use()
+        self.estimated_content_heap_size + self.allocator.bytes_in_use()
     }
 }
 

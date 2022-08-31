@@ -39,6 +39,25 @@ impl EstimateSize for FixedBitSet {
 
 impl EstimateSize for Vec<u8> {
     fn estimated_heap_size(&self) -> usize {
-        self.capacity() * std::mem::size_of::<u8>()
+        self.capacity()
+    }
+}
+
+impl<T> EstimateSize for Vec<T>
+where
+    T: EstimateSize,
+{
+    fn estimated_heap_size(&self) -> usize {
+        self.capacity() * std::mem::size_of::<T>()
+            + self
+                .iter()
+                .map(EstimateSize::estimated_heap_size)
+                .sum::<usize>()
+    }
+}
+
+impl EstimateSize for String {
+    fn estimated_heap_size(&self) -> usize {
+        self.capacity()
     }
 }
