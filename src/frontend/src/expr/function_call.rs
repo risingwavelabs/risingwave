@@ -186,6 +186,15 @@ impl FunctionCall {
                 let left_type = inputs[0].return_type();
                 let right_type = inputs[1].return_type();
 
+                let wrap_single_elem = |elem, ret_type| -> ExprImpl {
+                    Self {
+                        func_type: ExprType::Array,
+                        return_type: ret_type,
+                        inputs: vec![elem],
+                    }
+                    .into()
+                };
+
                 let return_type = match (&left_type, &right_type) {
                     (
                         DataType::List {
@@ -198,8 +207,10 @@ impl FunctionCall {
                         if **left_elem_type == **right_elem_type {
                             Some(left_type.clone())
                         } else if **left_elem_type == right_type {
+                            inputs[1] = wrap_single_elem(inputs[1].clone(), left_type.clone());
                             Some(left_type.clone())
-                        } else if **right_elem_type == left_type {
+                        } else if left_type == **right_elem_type {
+                            inputs[0] = wrap_single_elem(inputs[0].clone(), right_type.clone());
                             Some(right_type.clone())
                         } else {
                             None
@@ -210,13 +221,19 @@ impl FunctionCall {
                             datatype: left_elem_type,
                         },
                         _,
-                    ) if **left_elem_type == right_type => Some(left_type.clone()),
+                    ) if **left_elem_type == right_type => {
+                        inputs[1] = wrap_single_elem(inputs[1].clone(), left_type.clone());
+                        Some(left_type.clone())
+                    }
                     (
                         _,
                         DataType::List {
                             datatype: right_elem_type,
                         },
-                    ) if left_type == **right_elem_type => Some(right_type.clone()),
+                    ) if left_type == **right_elem_type => {
+                        inputs[0] = wrap_single_elem(inputs[0].clone(), right_type.clone());
+                        Some(right_type.clone())
+                    }
                     _ => None,
                 };
                 if let Some(return_type) = return_type {
