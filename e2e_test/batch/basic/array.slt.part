@@ -156,7 +156,7 @@ select pg_typeof((v1::integer[][])[2][1]), (v1::integer[][])[2][1] from (values 
 ----
 integer 2
 
-# Test multiple castings of the same input
+# Test multiple castings of the same input.
 query TTI
 select 
     (arr::varchar[][])[1][2] as double_varchar,
