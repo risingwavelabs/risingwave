@@ -92,6 +92,32 @@ impl std::fmt::Debug for FunctionCall {
     }
 }
 
+macro_rules! ensure_arity {
+    ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
+        if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes {} to {} arguments ({} given)",
+                $func,
+                $lower,
+                $upper,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, $lower:literal <= | $inputs:ident |) => {
+        if !($lower <= $inputs.len()) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at least {} arguments ({} given)",
+                $func,
+                $lower,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+}
+
 impl FunctionCall {
     /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
@@ -117,26 +143,11 @@ impl FunctionCall {
                 Ok(DataType::Boolean)
             }
             ExprType::Coalesce => {
-                if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `Coalesce` takes at least {} arguments ({} given)",
-                        1, 0
-                    ))
-                    .into());
-                }
+                ensure_arity!("coalesce", 1 <= | inputs |);
                 align_types(inputs.iter_mut())
             }
             ExprType::ConcatWs => {
-                let expected = 2;
-                let actual = inputs.len();
-                if actual < expected {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `ConcatWs` takes at least {} arguments ({} given)",
-                        expected, actual
-                    ))
-                    .into());
-                }
-
+                ensure_arity!("concat_ws", 2 <= | inputs |);
                 inputs = inputs
                     .into_iter()
                     .enumerate()
@@ -157,13 +168,7 @@ impl FunctionCall {
                 Ok(DataType::Varchar)
             }
             ExprType::RegexpMatch => {
-                if inputs.len() < 2 || inputs.len() > 3 {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `RegexpMatch` takes 2 or 3 arguments ({} given)",
-                        inputs.len()
-                    ))
-                    .into());
-                }
+                ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
                 if inputs.len() == 3 {
                     return Err(ErrorCode::NotImplemented(
                         "flag in regexp_match".to_string(),
@@ -176,12 +181,7 @@ impl FunctionCall {
                 })
             }
             ExprType::Vnode => {
-                if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(
-                        "Function `Vnode` takes at least 1 arguments (0 given)".to_string(),
-                    )
-                    .into());
-                }
+                ensure_arity!("vnode", 1 <= | inputs |);
                 Ok(DataType::Int16)
             }
             _ => {
