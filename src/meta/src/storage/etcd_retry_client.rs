@@ -16,8 +16,8 @@ use std::iter::{Map, Take};
 use std::time::Duration;
 
 use etcd_client::{
-    DeleteOptions, DeleteResponse, GetOptions, GetResponse, KvClient, PutOptions, PutResponse, Txn,
-    TxnResponse,
+    DeleteOptions, DeleteResponse, Error, GetOptions, GetResponse, KvClient, PutOptions,
+    PutResponse, Txn, TxnResponse,
 };
 use tokio_retry::strategy::{jitter, FixedInterval};
 
@@ -42,6 +42,14 @@ impl EtcdRetryClient {
             .take(DEFAULT_RETRY_MAX_ATTEMPTS)
             .map(jitter)
     }
+
+    #[inline(always)]
+    fn should_retry(err: &Error) -> bool {
+        match err {
+            Error::GRpcStatus(status) => status.code() == tonic::Code::Unavailable,
+            _ => false,
+        }
+    }
 }
 
 /// Wrap etcd client with retry logic.
@@ -52,10 +60,14 @@ impl EtcdRetryClient {
         key: impl Into<Vec<u8>> + Clone,
         options: Option<GetOptions>,
     ) -> Result<GetResponse> {
-        tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
-            let mut client = self.client.clone();
-            client.get(key.clone(), options.clone()).await
-        })
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut client = self.client.clone();
+                client.get(key.clone(), options.clone()).await
+            },
+            Self::should_retry,
+        )
         .await
     }
 
@@ -66,12 +78,16 @@ impl EtcdRetryClient {
         value: impl Into<Vec<u8>> + Clone,
         options: Option<PutOptions>,
     ) -> Result<PutResponse> {
-        tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
-            let mut client = self.client.clone();
-            client
-                .put(key.clone(), value.clone(), options.clone())
-                .await
-        })
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut client = self.client.clone();
+                client
+                    .put(key.clone(), value.clone(), options.clone())
+                    .await
+            },
+            Self::should_retry,
+        )
         .await
     }
 
@@ -81,19 +97,27 @@ impl EtcdRetryClient {
         key: impl Into<Vec<u8>> + Clone,
         options: Option<DeleteOptions>,
     ) -> Result<DeleteResponse> {
-        tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
-            let mut client = self.client.clone();
-            client.delete(key.clone(), options.clone()).await
-        })
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut client = self.client.clone();
+                client.delete(key.clone(), options.clone()).await
+            },
+            Self::should_retry,
+        )
         .await
     }
 
     #[inline]
     pub async fn txn(&self, txn: Txn) -> Result<TxnResponse> {
-        tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
-            let mut client = self.client.clone();
-            client.txn(txn.clone()).await
-        })
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let mut client = self.client.clone();
+                client.txn(txn.clone()).await
+            },
+            Self::should_retry,
+        )
         .await
     }
 }
