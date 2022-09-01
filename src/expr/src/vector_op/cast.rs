@@ -604,15 +604,15 @@ mod tests {
             nested_list123
         );
 
-        let nested_list456 = ListValue::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
+        let nested_list445566 = ListValue::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
             Some(44.to_scalar_value()),
             Some(55.to_scalar_value()),
             Some(66.to_scalar_value()),
         ])))]);
 
-        let double_nested_list123_456 = ListValue::new(vec![
+        let double_nested_list123_445566 = ListValue::new(vec![
             Some(ScalarImpl::List(nested_list123.clone())),
-            Some(ScalarImpl::List(nested_list456.clone())),
+            Some(ScalarImpl::List(nested_list445566.clone())),
         ]);
 
         // Double nested List
@@ -626,11 +626,11 @@ mod tests {
                 }
             )
             .unwrap(),
-            double_nested_list123_456
+            double_nested_list123_445566
         );
 
         // Cast previous double nested lists to double nested varchar lists
-        let double_nested_varchar_list123_456 = ListValue::new(vec![
+        let double_nested_varchar_list123_445566 = ListValue::new(vec![
             Some(ScalarImpl::List(
                 list_cast(
                     ListRef::ValueRef {
@@ -648,7 +648,7 @@ mod tests {
             Some(ScalarImpl::List(
                 list_cast(
                     ListRef::ValueRef {
-                        val: &nested_list456,
+                        val: &nested_list445566,
                     },
                     &DataType::List {
                         datatype: Box::new(DataType::Int32),
@@ -672,7 +672,7 @@ mod tests {
                 }
             )
             .unwrap(),
-            double_nested_varchar_list123_456
+            double_nested_varchar_list123_445566
         );
     }
 }

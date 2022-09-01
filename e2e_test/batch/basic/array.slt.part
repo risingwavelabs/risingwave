@@ -155,3 +155,13 @@ query TI
 select pg_typeof((v1::integer[][])[2][1]), (v1::integer[][])[2][1] from (values ('{{1}, {2}}')) as t(v1);
 ----
 integer 2
+
+# Test multiple castings of the same input
+query TTI
+select 
+    (arr::varchar[][])[1][2] as double_varchar,
+    (arr::varchar[][][])[1][2][3] as triple_varchar, 
+    (arr::integer[][][])[1][2][3] as triple_integer
+from (values ('{{{1, 2, 3}, {44, 55, 66}}}')) as t(arr);
+----
+{44, 55, 66} 66 66
