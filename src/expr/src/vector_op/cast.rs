@@ -316,7 +316,7 @@ macro_rules! for_each_cast {
 
 // TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
 // function.
-fn tokenize(input: &str) -> Result<Vec<String>> {
+fn unnest(input: &str) -> Result<Vec<String>> {
     use itertools::Itertools;
 
     // Trim input
@@ -332,15 +332,14 @@ fn tokenize(input: &str) -> Result<Vec<String>> {
         "Last character should be right brace '}}'"
     );
 
-    let mut lexer = chars.peekable();
-    let mut token_list: Vec<String> = Vec::new();
-    while let Some(c) = lexer.next() {
+    let mut items = Vec::new();
+    while let Some(c) = chars.next() {
         match c {
             '{' => {
                 let mut string = String::from(c);
                 let mut depth = 1;
                 while depth != 0 {
-                    let c = match lexer.next() {
+                    let c = match chars.next() {
                         Some(c) => {
                             if c == '{' {
                                 depth += 1;
@@ -353,25 +352,25 @@ fn tokenize(input: &str) -> Result<Vec<String>> {
                     };
                     string.push(c);
                 }
-                token_list.push(string);
+                items.push(string);
             }
             '}' | ',' => {}
             c if c.is_whitespace() => {}
-            c => token_list.push(format!(
+            c => items.push(format!(
                 "{}{}",
                 c,
-                (&mut lexer)
+                (&mut chars)
                     .take_while_ref(|&c| c != ',' && c != '}')
                     .collect::<String>()
             )),
         }
     }
-    Ok(token_list)
+    Ok(items)
 }
 
 #[inline(always)]
 pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-    let vec = tokenize(input)?;
+    let vec = unnest(input)?;
 
     // Return a new ListValue.
     // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn
@@ -552,21 +551,21 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize() {
+    fn test_unnest() {
         assert_eq!(
-            tokenize("{1, 2, 3}").unwrap(),
+            unnest("{1, 2, 3}").unwrap(),
             vec!["1".to_string(), "2".to_string(), "3".to_string()]
         );
         assert_eq!(
-            tokenize("{{1, 2, 3}, {4, 5, 6}}").unwrap(),
+            unnest("{{1, 2, 3}, {4, 5, 6}}").unwrap(),
             vec!["{1, 2, 3}".to_string(), "{4, 5, 6}".to_string()]
         );
         assert_eq!(
-            tokenize("{{{1, 2, 3}}, {{4, 5, 6}}}").unwrap(),
+            unnest("{{{1, 2, 3}}, {{4, 5, 6}}}").unwrap(),
             vec!["{{1, 2, 3}}".to_string(), "{{4, 5, 6}}".to_string()]
         );
         assert_eq!(
-            tokenize("{{{1, 2, 3}, {4, 5, 6}}}").unwrap(),
+            unnest("{{{1, 2, 3}, {4, 5, 6}}}").unwrap(),
             vec!["{{1, 2, 3}, {4, 5, 6}}".to_string()]
         );
     }
