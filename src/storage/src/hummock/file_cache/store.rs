@@ -138,7 +138,8 @@ where
             .disk_write_throughput
             .inc_by(self.buffer.len() as f64);
         let timer = self.store.metrics.disk_write_latency.start_timer();
-        let boff = self.store.cache_file.append(self.buffer).await? as u32 / self.block_size as u32;
+        let boff = self.store.cache_file.append(self.buffer).await? / self.block_size as u64;
+        let boff: u32 = boff.try_into().unwrap();
         timer.observe_duration();
 
         for bloc in &mut self.blocs {

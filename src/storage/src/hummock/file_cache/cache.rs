@@ -92,7 +92,7 @@ where
             if batch.is_empty() {
                 // Avoid allocate a new buffer.
                 self.buffer.swap();
-                // Trigger clear frer list.
+                // Trigger clear free list.
                 batch.finish().await?;
             } else {
                 let (keys, slots) = batch.finish().await?;
