@@ -19,12 +19,13 @@ use etcd_client::{
     DeleteOptions, DeleteResponse, Error, GetOptions, GetResponse, KvClient, PutOptions,
     PutResponse, Txn, TxnResponse,
 };
-use tokio_retry::strategy::{jitter, FixedInterval};
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
-type Result<T> = std::result::Result<T, etcd_client::Error>;
+type Result<T> = std::result::Result<T, Error>;
 
-const DEFAULT_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 20;
+const DEFAULT_RETRY_INTERVAL: u64 = 20;
+const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
+const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 10;
 
 #[derive(Clone)]
 pub struct EtcdRetryClient {
@@ -37,8 +38,9 @@ impl EtcdRetryClient {
     }
 
     #[inline(always)]
-    fn get_retry_strategy() -> Map<Take<FixedInterval>, fn(Duration) -> Duration> {
-        FixedInterval::new(DEFAULT_RETRY_INTERVAL)
+    fn get_retry_strategy() -> Map<Take<ExponentialBackoff>, fn(Duration) -> Duration> {
+        ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
+            .max_delay(DEFAULT_RETRY_MAX_DELAY)
             .take(DEFAULT_RETRY_MAX_ATTEMPTS)
             .map(jitter)
     }
