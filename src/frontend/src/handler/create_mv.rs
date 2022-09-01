@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -40,15 +41,18 @@ pub fn gen_create_mv_plan(
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        check_privileges(
-            session,
-            &vec![ObjectCheckItem::new(
-                schema.owner(),
-                Action::Create,
-                Object::SchemaId(schema.id()),
-            )],
-        )?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+            check_privileges(
+                session,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
+
         catalog_reader.check_relation_name_duplicated(
             session.database(),
             &schema_name,
