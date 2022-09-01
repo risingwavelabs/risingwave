@@ -343,7 +343,9 @@ fn unnest(input: &str) -> Result<Vec<String>> {
                             }
                             c
                         }
-                        None => return Err(ExprError::Parse("Missing closing brace '}}' character")),
+                        None => {
+                            return Err(ExprError::Parse("Missing closing brace '}}' character"))
+                        }
                     };
                     string.push(c);
                 }
