@@ -589,24 +589,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     // Report metrics of cached join rows/entries
-                    let cached_rows_l: usize = self.side_l.ht.iter().map(|(_, e)| e.len()).sum();
-                    let cached_rows_r: usize = self.side_r.ht.iter().map(|(_, e)| e.len()).sum();
-                    self.metrics
-                        .join_cached_rows
-                        .with_label_values(&[&actor_id_str, "left"])
-                        .set(cached_rows_l as i64);
-                    self.metrics
-                        .join_cached_rows
-                        .with_label_values(&[&actor_id_str, "right"])
-                        .set(cached_rows_r as i64);
-                    self.metrics
-                        .join_cached_entries
-                        .with_label_values(&[&actor_id_str, "left"])
-                        .set(self.side_l.ht.entry_count() as i64);
-                    self.metrics
-                        .join_cached_entries
-                        .with_label_values(&[&actor_id_str, "right"])
-                        .set(self.side_r.ht.entry_count() as i64);
+                    for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
+                        self.metrics
+                            .join_cached_rows
+                            .with_label_values(&[&actor_id_str, side])
+                            .set(ht.cached_rows() as i64);
+                        self.metrics
+                            .join_cached_entries
+                            .with_label_values(&[&actor_id_str, side])
+                            .set(ht.entry_count() as i64);
+                        self.metrics
+                            .join_cached_estimated_size
+                            .with_label_values(&[&actor_id_str, side])
+                            .set(ht.weighted_size() as i64);
+                    }
 
                     yield Message::Barrier(barrier);
                 }

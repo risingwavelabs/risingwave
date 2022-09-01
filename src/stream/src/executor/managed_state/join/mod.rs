@@ -384,6 +384,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.state_table.update(old_row, new_row)?;
         Ok(())
     }
+
+    /// Cached rows for this hash table.
+    pub fn cached_rows(&self) -> usize {
+        self.iter().map(|(_, e)| e.len()).sum()
+    }
 }
 
 impl<K: HashKey, S: StateStore> Deref for JoinHashMap<K, S> {
