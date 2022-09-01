@@ -23,7 +23,12 @@ use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<ExprImpl>, DataType)> {
+pub fn infer_type(func_type: ExprType, inputs_mut: &mut Vec<ExprImpl>) -> Result<DataType> {
+    if let Some(res) = infer_type_for_special(func_type, inputs_mut).transpose() {
+        return res;
+    }
+
+    let inputs = std::mem::take(inputs_mut);
     let actuals = inputs
         .iter()
         .map(|e| match e.is_unknown() {
@@ -43,7 +48,16 @@ pub fn infer_type(func_type: ExprType, inputs: Vec<ExprImpl>) -> Result<(Vec<Exp
         })
         .try_collect()?;
     let ret_type = sig.ret_type.into();
-    Ok((inputs, ret_type))
+
+    *inputs_mut = inputs;
+    Ok(ret_type)
+}
+
+pub fn infer_type_for_special(
+    _func_type: ExprType,
+    _inputs_mut: &mut Vec<ExprImpl>,
+) -> Result<Option<DataType>> {
+    Ok(None)
 }
 
 /// From all available functions in `sig_map`, find and return the best matching `FuncSign` for the
@@ -615,7 +629,7 @@ mod tests {
     use super::*;
 
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
-        let inputs = inputs_type
+        let mut inputs = inputs_type
             .into_iter()
             .map(|t| {
                 crate::expr::Literal::new(
@@ -634,8 +648,7 @@ mod tests {
                 .into()
             })
             .collect();
-        let (_, ret) = infer_type(func_type, inputs)?;
-        Ok(ret)
+        infer_type(func_type, &mut inputs)
     }
 
     fn test_simple_infer_type(

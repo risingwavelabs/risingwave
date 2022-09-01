@@ -187,9 +187,7 @@ impl FunctionCall {
             _ => {
                 // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
                 // interface has been enhanced to support mutating (casting) inputs as well.
-                let ret;
-                (inputs, ret) = infer_type(func_type, inputs)?;
-                Ok(ret)
+                infer_type(func_type, &mut inputs)
             }
         }?;
         Ok(Self {
