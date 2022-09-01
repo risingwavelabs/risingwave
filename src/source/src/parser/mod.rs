@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+pub use avro_parser::*;
 pub use debezium::*;
 pub use json_parser::*;
 pub use protobuf_parser::*;
-pub use avro_parser::*;
 use risingwave_common::array::Op;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
