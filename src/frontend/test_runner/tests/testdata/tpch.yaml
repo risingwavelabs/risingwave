@@ -1934,8 +1934,8 @@
                   BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity], distribution: SomeShard }
               BatchProject { exprs: [lineitem.l_orderkey] }
                 BatchFilter { predicate: (sum(lineitem.l_quantity) > 1:Int32) }
-                  BatchSortAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity)] }
-                    BatchExchange { order: [lineitem.l_orderkey ASC], dist: HashShard(lineitem.l_orderkey) }
+                  BatchHashAgg { group_key: [lineitem.l_orderkey], aggs: [sum(lineitem.l_quantity)] }
+                    BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
                       BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], pk_columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], order_descs: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey] }

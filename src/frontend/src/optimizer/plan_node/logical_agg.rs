@@ -1240,6 +1240,14 @@ impl ToBatch for LogicalAgg {
                 .field_order
                 .iter()
                 .any(|field_order| field_order.index == *group_by_idx)
+                && new_logical
+                    .input()
+                    .schema()
+                    .fields()
+                    .get(*group_by_idx)
+                    .unwrap()
+                    .data_type
+                    == DataType::Int32
         }) {
             Ok(BatchSortAgg::new(new_logical).into())
         } else {
