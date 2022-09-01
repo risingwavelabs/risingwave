@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(not(test))]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::monitor::StateStoreMetrics;
+
 #[derive(Default)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
@@ -29,6 +32,11 @@ pub struct StoreLocalStatistic {
     pub bloom_filter_true_negative_count: u64,
     pub remote_io_time: Arc<AtomicU64>,
     pub bloom_filter_check_counts: u64,
+
+    #[cfg(not(test))]
+    reported: AtomicBool,
+    #[cfg(not(test))]
+    added: AtomicBool,
 }
 
 impl StoreLocalStatistic {
@@ -47,6 +55,11 @@ impl StoreLocalStatistic {
             Ordering::Relaxed,
         );
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
+
+        #[cfg(not(test))]
+        if cfg!(not(test)) && other.added.fetch_or(true, Ordering::SeqCst) {
+            panic!("double added");
+        }
     }
 
     pub fn report(&self, metrics: &StateStoreMetrics) {
@@ -105,6 +118,20 @@ impl StoreLocalStatistic {
                 .iter_scan_key_counts
                 .with_label_values(&["skip"])
                 .inc_by(self.skip_key_count);
+        }
+
+        #[cfg(not(test))]
+        if self.reported.fetch_or(true, Ordering::SeqCst) {
+            panic!("double reported");
+        }
+    }
+}
+
+impl Drop for StoreLocalStatistic {
+    fn drop(&mut self) {
+        #[cfg(not(test))]
+        if !self.reported.load(Ordering::SeqCst) && !self.added.load(Ordering::SeqCst) {
+            panic!("local stats lost!");
         }
     }
 }
