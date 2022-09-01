@@ -142,28 +142,67 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     ) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
-        // We have banned streaming query that doesn't have LIMIT, so it is safe to unwrap here
 
         // apply the chunk to state table
         for (_, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
             let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
+
+            if self.cache.middle.len() == self.cache.limit
+                && ordered_pk_row >= *self.cache.middle.last_key_value().unwrap().0
+            {
+                continue;
+            }
             self.managed_state
                 .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
 
+            // Then insert input row to corresponding cache range according to its order key
+            if self.cache.low.len() < self.cache.offset {
+                debug_assert!(self.cache.middle.is_empty());
+                debug_assert!(self.cache.high.is_empty());
+                self.cache.low.insert(ordered_pk_row, row);
+                continue;
+            }
+
+            // If offset is 0, every input row has noting to do with `cache.low`
+            let elem_to_compare_with_middle = if self.cache.offset > 0
+                && ordered_pk_row <= *self.cache.low.last_key_value().unwrap().0
+            {
+                // If the new row is in the range of [0, offset), the largest row in
+                // `cache.low` needs be moved to `cache.middle`
+                // which covers the range of [offset, offset+limit)
+                let res = self.cache.low.pop_last().unwrap();
+                self.cache.low.insert(ordered_pk_row.clone(), row.clone());
+                res
+            } else {
+                (ordered_pk_row, row)
+            };
+
+            if self.cache.middle.len() < self.cache.limit {
+                self.cache.middle.insert(
+                    elem_to_compare_with_middle.0,
+                    elem_to_compare_with_middle.1.clone(),
+                );
+                res_ops.push(Op::Insert);
+                res_rows.push(elem_to_compare_with_middle.1);
+                continue;
+            }
+            // If the row in the range of [offset, offset+limit), the largest row in
+            // `cache.middle` needs to be removed.
+            let res = self.cache.middle.pop_last().unwrap();
+            res_ops.push(Op::Delete);
+            res_rows.push(res.1.clone());
+            self.managed_state.delete(&res.0, res.1, epoch)?;
+
+            res_ops.push(Op::Insert);
+            res_rows.push(elem_to_compare_with_middle.1.clone());
             self.cache
-                .update(
-                    None,
-                    &mut self.managed_state,
-                    Op::Insert,
-                    ordered_pk_row,
-                    row,
-                    epoch,
-                    &mut res_ops,
-                    &mut res_rows,
-                )
-                .await?
+                .middle
+                .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
+
+            // Unlike normal topN, append only topN does not necessarily use the high part of the
+            // cache
         }
         // compare the those two ranges and emit the differantial result
         generate_output(res_rows, res_ops, &self.schema)
