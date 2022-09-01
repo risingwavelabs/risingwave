@@ -652,53 +652,6 @@ impl LocalVersionManager {
     pub fn get_pinned_version(&self) -> PinnedVersion {
         self.local_version.read().pinned_version().clone()
     }
-
-    /// Pin a version with retry.
-    ///
-    /// Return:
-    ///   - `Some(Ok(pinned_version))` if success
-    ///   - `Some(Err(err))` if exceed the retry limit
-    ///   - `None` if meet the break condition
-    #[allow(dead_code)]
-    async fn pin_version_with_retry(
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-        last_pinned: HummockVersionId,
-        max_retry: usize,
-        break_condition: impl Fn() -> bool,
-    ) -> Option<HummockResult<pin_version_response::Payload>> {
-        let max_retry_interval = Duration::from_secs(10);
-        let mut retry_backoff = tokio_retry::strategy::ExponentialBackoff::from_millis(10)
-            .max_delay(max_retry_interval)
-            .map(jitter);
-
-        let mut retry_count = 0;
-        loop {
-            if retry_count > max_retry {
-                break Some(Err(HummockError::meta_error(format!(
-                    "pin_version max retry reached: {}.",
-                    max_retry
-                ))));
-            }
-            if break_condition() {
-                break None;
-            }
-            match hummock_meta_client.pin_version(last_pinned).await {
-                Ok(version) => {
-                    break Some(Ok(version));
-                }
-                Err(err) => {
-                    let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
-                    tracing::warn!(
-                        "Failed to pin version {:?}. Will retry after about {} milliseconds",
-                        err,
-                        retry_after.as_millis()
-                    );
-                    tokio::time::sleep(retry_after).await;
-                }
-            }
-            retry_count += 1;
-        }
-    }
 }
 
 // concurrent worker thread of `LocalVersionManager`
@@ -936,12 +889,6 @@ impl LocalVersionManager {
 #[cfg(any(test, feature = "test"))]
 // Some method specially for tests of `LocalVersionManager`
 impl LocalVersionManager {
-    pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
-        let last_pinned = self.get_pinned_version().id();
-        let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
-        self.try_update_pinned_version(Some(last_pinned), version)
-    }
-
     pub fn local_version(&self) -> &RwLock<LocalVersion> {
         &self.local_version
     }

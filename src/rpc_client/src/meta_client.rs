@@ -441,26 +441,6 @@ impl MetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MetaClient {
-    async fn pin_version(
-        &self,
-        last_pinned: HummockVersionId,
-    ) -> Result<pin_version_response::Payload> {
-        let req = PinVersionRequest {
-            context_id: self.worker_id(),
-            last_pinned,
-        };
-        let resp = self.inner.pin_version(req).await?;
-        Ok(resp.payload.unwrap())
-    }
-
-    async fn unpin_version(&self) -> Result<()> {
-        let req = UnpinVersionRequest {
-            context_id: self.worker_id(),
-        };
-        self.inner.unpin_version(req).await?;
-        Ok(())
-    }
-
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
