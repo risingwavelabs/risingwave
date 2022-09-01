@@ -25,7 +25,6 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanType,
 };
-use risingwave_batch::task::ComputeNodeContext;
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -230,7 +229,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqExecutor2".to_string(),
-        None::<ComputeNodeContext>,
+        None,
     ));
     let mut stream = scan.execute();
     let result = stream.next().await;
@@ -292,7 +291,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        None::<ComputeNodeContext>,
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -364,7 +363,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         )],
         1024,
         "RowSeqScanExecutor2".to_string(),
-        None::<ComputeNodeContext>,
+        None,
     ));
 
     let mut stream = scan.execute();
@@ -437,7 +436,7 @@ async fn test_row_seq_scan() -> Result<()> {
         )],
         1,
         "RowSeqScanExecutor2".to_string(),
-        None::<ComputeNodeContext>,
+        None,
     ));
 
     assert_eq!(executor.schema().fields().len(), 3);

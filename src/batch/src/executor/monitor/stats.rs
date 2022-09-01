@@ -116,6 +116,7 @@ macro_rules! def_task_metrics {
     ([$struct:ident], $( { $metric:ident, $type:ty }, )*) => {
         #[derive(Clone)]
         pub struct $struct {
+            labels: HashMap<String, String>,
             registry: Registry,
             sender: Option<UnboundedSender<Box<dyn Collector>>>,
             $( pub $metric: $type, )*
@@ -205,12 +206,13 @@ impl BatchTaskMetrics {
                 "batch_task_slow_poll_duration",
                 "The total duration (s) of slow polls.",
             )
-            .const_labels(const_labels),
+            .const_labels(const_labels.clone()),
             registry,
         )
         .unwrap();
 
         Self {
+            labels: const_labels,
             registry,
             sender,
             task_first_poll_delay,
@@ -233,6 +235,13 @@ impl BatchTaskMetrics {
         Self::new(prometheus::Registry::new(), TaskId::default(), None)
     }
 
+    /// Following functions are used to custom executor level metrics.
+    // Each task execution has its own label:
+    // QueryID, StageId, TaskId
+    pub fn task_labels(&self) -> HashMap<String, String> {
+        self.labels.clone()
+    }
+
     pub fn register(&self, c: Box<dyn Collector>) -> Result<(), BatchError> {
         self.registry.register(c)?;
         Ok(())
@@ -249,6 +258,7 @@ impl BatchTaskMetrics {
 
 pub struct BatchMetrics {}
 
+#[allow(clippy::new_without_default)]
 impl BatchMetrics {
     pub fn new() -> Self {
         Self {}

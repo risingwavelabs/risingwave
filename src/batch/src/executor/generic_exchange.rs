@@ -169,7 +169,7 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
             self.sources
                 .into_iter()
                 .map(|source| {
-                    data_chunk_stream(source, self.context.clone(), self.identity.clone())
+                    data_chunk_stream(source, self.metrics.clone(), self.identity.clone())
                 })
                 .collect_vec(),
         )
@@ -183,15 +183,15 @@ impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream<C: BatchTaskContext>(
+async fn data_chunk_stream(
     mut source: ExchangeSourceImpl,
-    context: C,
+    metrics: Option<BatchTaskMetrics>,
     identity: String,
 ) {
     // create the collector
     let source_id = source.get_task_id();
-    let counter = {
-        let mut labels = context.task_labels();
+    let counter = if let Some(ref metrics) = metrics {
+        let mut labels = metrics.task_labels();
         labels.insert("executor_id".to_string(), identity.clone());
         labels.insert(
             "source_stage_id".to_string(),
@@ -205,10 +205,11 @@ async fn data_chunk_stream<C: BatchTaskContext>(
         )
         .const_labels(labels);
         let counter = IntCounter::with_opts(opts).unwrap();
-        match context.register(Box::new(counter.clone())) {
-            Ok(_) => Some(counter),
-            Err(_) => None,
-        }
+        metrics.register(Box::new(counter.clone()))?;
+        Some(counter)
+    } else {
+        // no metrics to collect, no counter
+        None
     };
 
     loop {
@@ -227,8 +228,8 @@ async fn data_chunk_stream<C: BatchTaskContext>(
         break;
     }
 
-    if let Some(counter) = counter {
-        context.unregister(Box::new(counter));
+    if let (Some(counter), Some(metrics)) = (counter, metrics) {
+        metrics.unregister(Box::new(counter));
     }
 }
 

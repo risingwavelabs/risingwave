@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use prometheus::core::Collector;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -72,14 +70,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// None indicates that not collect task metrics.
     fn get_task_metrics(&self) -> Option<BatchTaskMetrics>;
 
-    // Each task execution has its own label:
-    // QueryID, StageId, TaskId
-    fn task_labels(&self) -> HashMap<String, String>;
-
-    fn register(&self, c: Box<dyn Collector>) -> Result<()>;
-
-    fn unregister(&self, c: Box<dyn Collector>);
-
     /// Get compute client pool. This is used in grpc exchange to avoid creating new compute client
     /// for each grpc call.
     fn client_pool(&self) -> ComputeClientPoolRef;
@@ -88,7 +78,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 /// Batch task context on compute node.
 #[derive(Clone)]
 pub struct ComputeNodeContext {
-    id: TaskId,
     env: BatchEnvironment,
     task_metrics: BatchTaskMetrics,
 }
@@ -127,23 +116,6 @@ impl BatchTaskContext for ComputeNodeContext {
     fn client_pool(&self) -> ComputeClientPoolRef {
         self.env.client_pool()
     }
-
-    fn task_labels(&self) -> HashMap<String, String> {
-        HashMap::from([
-            ("query_id".to_string(), self.id.query_id.clone()),
-            ("stage_id".to_string(), self.id.stage_id.to_string()),
-            ("task_id".to_string(), self.id.task_id.to_string()),
-        ])
-    }
-
-    fn register(&self, c: Box<dyn Collector>) -> Result<()> {
-        self.task_metrics.register(c)?;
-        Ok(())
-    }
-
-    fn unregister(&self, c: Box<dyn Collector>) {
-        self.task_metrics.unregister(c)
-    }
 }
 
 impl ComputeNodeContext {
@@ -152,16 +124,11 @@ impl ComputeNodeContext {
         Self {
             env: BatchEnvironment::for_test(),
             task_metrics: BatchTaskMetrics::for_test(),
-            id: TaskId::default(),
         }
     }
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
-        let task_metrics = env.create_task_metrics(task_id.clone());
-        Self {
-            env,
-            task_metrics,
-            id: task_id,
-        }
+        let task_metrics = env.create_task_metrics(task_id);
+        Self { env, task_metrics }
     }
 }

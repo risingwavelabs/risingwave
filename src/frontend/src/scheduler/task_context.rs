@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use prometheus::core::Collector;
 use risingwave_batch::executor::{BatchMetrics, BatchTaskMetrics};
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
@@ -78,14 +76,4 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     fn client_pool(&self) -> ComputeClientPoolRef {
         self.env.client_pool()
     }
-
-    fn task_labels(&self) -> HashMap<String, String> {
-        HashMap::default()
-    }
-
-    fn register(&self, _c: Box<dyn Collector>) -> Result<()> {
-        Ok(())
-    }
-
-    fn unregister(&self, _c: Box<dyn Collector>) {}
 }
