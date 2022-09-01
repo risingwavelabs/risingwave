@@ -23,7 +23,7 @@ use risingwave_object_store::object::BlockLocation;
 
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::MemoryTracker;
-use crate::hummock::{Block, HummockError, HummockResult, MemoryLimiter, Sstable, BlockStream};
+use crate::hummock::{Block, BlockStream, HummockError, HummockResult, MemoryLimiter, Sstable};
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
 pub struct SstableBlocks {

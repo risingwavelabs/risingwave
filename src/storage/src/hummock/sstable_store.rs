@@ -118,10 +118,12 @@ pub struct BlockStream {
     /// refers to the third block of `T`.
     block_idx: usize,
 
-    /// The length of each block the stream reads. Note that it does not contain the length of
-    /// blocks which precede the first streamed block. That is, if streaming starts at block 2 of a
-    /// given SST, then the list does not contain information about block 0 and block 1.
-    block_len_vec: Vec<usize>,
+    /// The sizes of each block which the stream reads. The first number states the compressed size
+    /// in the stream. The second number is the block's uncompressed size.  Note that the list does
+    /// not contain the size of blocks which precede the first streamed block. That is, if
+    /// streaming starts at block 2 of a given SST, then the list does not contain information
+    /// about block 0 and block 1.
+    block_size_vec: Vec<(usize, usize)>,
 }
 
 impl BlockStream {
@@ -148,24 +150,27 @@ impl BlockStream {
         let mut block_len_vec = Vec::with_capacity(metas.len() - block_index);
         sst_meta.block_metas[block_index..]
             .iter()
-            .for_each(|b_meta| block_len_vec.push(b_meta.len as usize));
+            .for_each(|b_meta| {
+                block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
+            });
 
         Self {
             byte_stream,
             block_idx: 0,
-            block_len_vec,
+            block_size_vec: block_len_vec,
         }
     }
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
     pub async fn next(&mut self) -> HummockResult<Option<BlockHolder>> {
-        if self.block_idx >= self.block_len_vec.len() {
+        if self.block_idx >= self.block_size_vec.len() {
             return Ok(None);
         }
 
-        let block_len = *self.block_len_vec.get(self.block_idx).unwrap();
-        let mut buffer = vec![0; block_len];
+        let (block_stream_size, block_full_size) =
+            *self.block_size_vec.get(self.block_idx).unwrap();
+        let mut buffer = vec![0; block_stream_size];
 
         let bytes_read = self
             .byte_stream
@@ -173,16 +178,16 @@ impl BlockStream {
             .await
             .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
 
-        if bytes_read != block_len {
+        if bytes_read != block_stream_size {
             return Err(HummockError::object_io_error(ObjectError::internal(
                 format!(
                     "unexpected number of bytes: expected: {} read: {}",
-                    block_len, bytes_read
+                    block_stream_size, bytes_read
                 ),
             )));
         }
 
-        let boxed_block = Box::new(Block::decode(&buffer)?);
+        let boxed_block = Box::new(Block::decode(&buffer, block_full_size)?);
         self.block_idx += 1;
 
         Ok(Some(BlockHolder::from_owned_block(boxed_block)))
