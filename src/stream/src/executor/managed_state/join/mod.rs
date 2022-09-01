@@ -399,8 +399,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.len()
     }
 
+    /// Estimated memory usage for this hash table.
     pub fn estimated_size(&self) -> usize {
-        self.values().map(|e| e.estimated_size()).sum()
+        self.iter()
+            .map(|(k, v)| k.estimated_size() + v.estimated_size())
+            .sum()
     }
 }
 
