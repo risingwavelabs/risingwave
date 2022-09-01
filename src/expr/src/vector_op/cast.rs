@@ -370,37 +370,23 @@ fn unnest(input: &str) -> Result<Vec<String>> {
 
 #[inline(always)]
 pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-    let vec = unnest(input)?;
 
     // Return a new ListValue.
     // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn
     // is cast into the target DataType. If the target DataType is of type Varchar, then
     // no casting is needed.
-
-    if let DataType::List { datatype } = target_elem_type {
-        Ok(ListValue::new(
-            vec.iter()
-                .map(|l| {
-                    Some(ScalarImpl::List(
-                        str_to_list(l.as_str(), &datatype.clone()).unwrap(),
-                    ))
-                })
-                .collect(),
-        ))
-    } else {
-        Ok(ListValue::new(
-            vec.iter()
-                .map(|s| {
-                    Some(ScalarRefImpl::Utf8(s.trim()))
-                        .map(|scalar_ref| match *target_elem_type {
-                            DataType::Varchar => Ok(scalar_ref.into_scalar_impl()),
-                            _ => scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type),
-                        })
-                        .transpose()
-                })
-                .try_collect()?,
-        ))
-    }
+    Ok(ListValue::new(
+        unnest(input)?.iter()
+            .map(|s| {
+                Some(ScalarRefImpl::Utf8(s.trim()))
+                    .map(|scalar_ref| match &*target_elem_type {
+                        DataType::Varchar => Ok(scalar_ref.into_scalar_impl()),
+                        _ => scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type),
+                    })
+                    .transpose()
+            })
+            .try_collect()?,
+    ))
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
