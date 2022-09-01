@@ -7,6 +7,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 clap = "3"
+etcd-client = { version = "0.2", package = "madsim-etcd-client", path = "../../../../madsim/madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 madsim = "0.2.4"

@@ -109,6 +109,19 @@ async fn main() {
     println!("seed = {}", handle.seed());
     println!("{:?}", args);
 
+    // etcd node
+    handle
+        .create_node()
+        .name("etcd")
+        .ip("192.168.10.1".parse().unwrap())
+        .init(|| async {
+            let addr = "0.0.0.0:2388".parse().unwrap();
+            etcd_client::SimServer::serve(addr).await.unwrap();
+        })
+        .build();
+    // wait for the service to be ready
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
     // meta node
     handle
         .create_node()
@@ -121,6 +134,10 @@ async fn main() {
                 // "src/config/risingwave.toml",
                 "--listen-addr",
                 "0.0.0.0:5690",
+                "--backend",
+                "etcd",
+                "--etcd-endpoints",
+                "192.168.10.1:2388",
             ]);
             risingwave_meta::start(opts).await
         })
