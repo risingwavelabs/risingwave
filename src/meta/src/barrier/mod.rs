@@ -214,7 +214,7 @@ type CheckpointPost<S> = (
 struct UncommittedMessages<S: MetaStore> {
     uncommitted_checkpoint_post: VecDeque<CheckpointPost<S>>,
     /// Ssts that need to commit with next checkpoint.
-    uncommitted_ssts: Vec<LocalSstableInfo>,
+    uncommitted_ssts: VecDeque<LocalSstableInfo>,
     /// Work_ids that need to commit with next checkpoint.
     uncommitted_work_ids: HashMap<HummockSstableId, WorkerId>,
 }
@@ -285,7 +285,7 @@ where
                     .insert(sst.id, resp.worker_id);
                 self.uncommitted_messages
                     .uncommitted_ssts
-                    .push((grouped.compaction_group_id, sst));
+                    .push_front((grouped.compaction_group_id, sst));
             });
         }
         self.uncommitted_messages
@@ -892,7 +892,10 @@ where
                         self.hummock_manager
                             .commit_epoch(
                                 prev_epoch,
-                                uncommitted_states.uncommitted_ssts,
+                                uncommitted_states
+                                    .uncommitted_ssts
+                                    .into_iter()
+                                    .collect_vec(),
                                 uncommitted_states.uncommitted_work_ids,
                             )
                             .await?;
