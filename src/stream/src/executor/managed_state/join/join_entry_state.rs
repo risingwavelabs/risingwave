@@ -86,8 +86,8 @@ impl JoinEntryState {
         self.cached.values()
     }
 
-    /// Note: To make the estimcated size accurate, the caller should ensure that it does not mutate
-    /// the estimated size of the [`StateValueType`].
+    /// Note: To make the estimated size accurate, the caller should ensure that it does not mutate
+    /// the size (or capacity) of the [`StateValueType`].
     pub fn values_mut<'a, 'b: 'a>(
         &'a mut self,
         data_types: &'b [DataType],
@@ -105,7 +105,8 @@ impl JoinEntryState {
 
 impl EstimateSize for JoinEntryState {
     fn estimated_heap_size(&self) -> usize {
-        self.estimated_content_heap_size + self.allocator.bytes_in_use()
+        self.estimated_content_heap_size // heap size of keys and values
+         + self.allocator.bytes_in_use() // heap size of the btree-map itself
     }
 }
 

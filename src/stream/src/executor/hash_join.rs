@@ -608,6 +608,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     }
 
     async fn flush_data(&mut self) -> StreamExecutorResult<()> {
+        // All changes to the state has been buffered in the mem-table of the state table. Just
+        // `commit` them here.
         self.side_l.ht.flush().await?;
         self.side_r.ht.flush().await?;
 
