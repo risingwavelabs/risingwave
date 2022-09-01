@@ -50,10 +50,10 @@ impl BatchSortAgg {
                 .cloned()
                 .collect(),
         };
-        Self::construct_with_required_order(logical, required_order)
+        Self::with_required_order(logical, required_order)
     }
 
-    fn construct_with_required_order(logical: LogicalAgg, required_order: Order) -> Self {
+    fn with_required_order(logical: LogicalAgg, required_order: Order) -> Self {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let input_dist = input.distribution();
@@ -96,7 +96,7 @@ impl PlanTreeNodeUnary for BatchSortAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::construct_with_required_order(
+        Self::with_required_order(
             self.logical.clone_with_input(input),
             self.required_order.clone(),
         )
