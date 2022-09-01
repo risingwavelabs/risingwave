@@ -26,7 +26,9 @@ use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    add_new_sub_level, HummockVersionExt,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
     HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
@@ -1132,7 +1134,13 @@ where
 
         let mut modified_compaction_groups = vec![];
         // Append SSTs to a new version.
-        for (compaction_group_id, sstables) in &sstables.into_iter().group_by(|(cg_id, _)| *cg_id) {
+        for (compaction_group_id, sstables) in &sstables
+            .into_iter()
+            // the sort is stable sort, and will not change the order within compaction group.
+            // Do a sort so that sst in the same compaction group can be consecutive
+            .sorted_by_key(|(cg_id, _)| *cg_id)
+            .group_by(|(cg_id, _)| *cg_id)
+        {
             modified_compaction_groups.push(compaction_group_id);
             let group_sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
             let level_deltas = &mut new_version_delta
@@ -1145,28 +1153,16 @@ where
                 .l0
                 .as_mut()
                 .expect("Expect level 0 is not empty");
+            let l0_sub_level_id = max_committed_epoch;
             let level_delta = LevelDelta {
                 level_idx: 0,
                 inserted_table_infos: group_sstables.clone(),
-                l0_sub_level_id: max_committed_epoch,
+                l0_sub_level_id,
                 ..Default::default()
             };
-
-            // All files will be committed in one new Overlapping sub-level and become
-            // Nonoverlapping  after at least one compaction.
-            let level = Level {
-                level_type: LevelType::Overlapping as i32,
-                level_idx: 0,
-                total_file_size: group_sstables
-                    .iter()
-                    .map(|table| table.file_size)
-                    .sum::<u64>(),
-                table_infos: group_sstables,
-                sub_level_id: level_delta.l0_sub_level_id,
-            };
-            version_l0.total_file_size += level.total_file_size;
-            version_l0.sub_levels.push(level);
             level_deltas.push(level_delta);
+
+            add_new_sub_level(version_l0, l0_sub_level_id, group_sstables);
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.

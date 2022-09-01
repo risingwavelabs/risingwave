@@ -77,6 +77,14 @@ impl Planner {
         if select_items.iter().any(|e| e.has_subquery()) {
             (root, select_items) = self.substitute_subqueries(root, select_items)?;
         }
+        if select_items.iter().any(|e| e.has_window_function()) {
+            return Err(ErrorCode::NotImplemented(
+                "plan LogicalWindowAgg".to_string(),
+                4847.into(),
+            )
+            .into());
+        }
+
         if select_items.iter().any(|e| e.has_table_function()) {
             root = LogicalProjectSet::create(root, select_items)
         } else {
