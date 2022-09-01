@@ -267,8 +267,8 @@
                           BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], distribution: UpstreamHashShard(supplier.s_suppkey) }
                     BatchHashAgg { group_key: [part.p_partkey], aggs: [min(partsupp.ps_supplycost)] }
                       BatchHashJoin { type: LeftOuter, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, partsupp.ps_supplycost] }
-                        BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
-                          BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                        BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                          BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
                             BatchScan { table: part, columns: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                         BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
                           BatchHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
@@ -1816,8 +1816,8 @@
                   BatchProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity)))] }
                     BatchHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
                       BatchHashJoin { type: LeftOuter, predicate: part.p_partkey = lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity] }
-                        BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
-                          BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                        BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                          BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
                             BatchScan { table: part, columns: [part.p_partkey], distribution: UpstreamHashShard(part.p_partkey) }
                         BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
                           BatchFilter { predicate: IsNotNull(lineitem.l_partkey) }
@@ -2148,8 +2148,8 @@
                   BatchProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity))] }
                     BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(lineitem.l_quantity)] }
                       BatchHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
-                        BatchSortAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
-                          BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                        BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                          BatchSortAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
                             BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                         BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                           BatchProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity] }

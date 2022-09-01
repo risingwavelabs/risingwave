@@ -30,12 +30,24 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 pub struct BatchSortAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
-    required_order: Order,
+    input_order: Order,
 }
 
 impl BatchSortAgg {
     pub fn new(logical: LogicalAgg) -> Self {
-        let required_order = Order {
+        let ctx = logical.base.ctx.clone();
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::HashShard(_) => logical
+                .i2o_col_mapping()
+                .rewrite_provided_distribution(input_dist),
+            d => d.clone(),
+        };
+        let base =
+            PlanBase::new_batch(ctx, logical.schema().clone(), dist, logical.order().clone());
+
+        let input_order = Order {
             field_order: logical
                 .input()
                 .order()
@@ -50,28 +62,13 @@ impl BatchSortAgg {
                 .cloned()
                 .collect(),
         };
-        Self::with_required_order(logical, required_order)
-    }
 
-    fn with_required_order(logical: LogicalAgg, required_order: Order) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::HashShard(_) => logical
-                .i2o_col_mapping()
-                .rewrite_provided_distribution(input_dist),
-            d => d.clone(),
-        };
-        let base =
-            PlanBase::new_batch(ctx, logical.schema().clone(), dist, logical.order().clone());
-
-        assert_eq!(required_order.field_order.len(), logical.group_key().len());
+        assert_eq!(input_order.field_order.len(), logical.group_key().len());
 
         BatchSortAgg {
             base,
             logical,
-            required_order,
+            input_order,
         }
     }
 
@@ -96,30 +93,17 @@ impl PlanTreeNodeUnary for BatchSortAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::with_required_order(
-            self.logical.clone_with_input(input),
-            self.required_order.clone(),
-        )
+        Self::new(self.logical.clone_with_input(input))
     }
 }
 impl_plan_tree_node_for_unary! { BatchSortAgg }
 
 impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        self.to_distributed_with_required(
-            &self.required_order,
+        let new_input = self.input().to_distributed_with_required(
+            &self.input_order,
             &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
-        )
-    }
-
-    fn to_distributed_with_required(
-        &self,
-        required_order: &Order,
-        required_dist: &RequiredDist,
-    ) -> Result<PlanRef> {
-        let new_input = self
-            .input()
-            .to_distributed_with_required(required_order, required_dist)?;
+        )?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
