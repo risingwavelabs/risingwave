@@ -27,8 +27,8 @@ macro_rules! def_visitor {
                 return true;
             }
 
-            // This merge function is used to reduce results of plan inputs.
-            // In order to always remind users to implement themselves, we don't provide an default implementation.
+            /// This merge function is used to reduce results of plan inputs.
+            /// In order to always remind users to implement themselves, we don't provide an default implementation.
             fn merge(a: R, b: R) -> R;
 
             paste! {

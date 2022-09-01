@@ -26,9 +26,9 @@ use super::{
 /// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
 pub trait ExprVisitor<R: Default> {
-    // This merge function is used to reduce results of expr inputs.
-    // In order to always remind users to implement themselves, we don't provide an default
-    // implementation.
+    /// This merge function is used to reduce results of expr inputs.
+    /// In order to always remind users to implement themselves, we don't provide an default
+    /// implementation.
     fn merge(a: R, b: R) -> R;
 
     fn visit_expr(&mut self, expr: &ExprImpl) -> R {
