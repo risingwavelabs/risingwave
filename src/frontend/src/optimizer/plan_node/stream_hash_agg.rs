@@ -24,11 +24,14 @@ use crate::optimizer::property::Distribution;
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
+    /// a optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution
+    vnode_col_idx: Option<usize>,
     logical: LogicalAgg,
 }
 
 impl StreamHashAgg {
-    pub fn new(logical: LogicalAgg) -> Self {
+    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
@@ -48,7 +51,11 @@ impl StreamHashAgg {
             dist,
             false,
         );
-        StreamHashAgg { base, logical }
+        StreamHashAgg {
+            base,
+            vnode_col_idx,
+            logical,
+        }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -76,7 +83,7 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
@@ -84,7 +91,9 @@ impl_plan_tree_node_for_unary! { StreamHashAgg }
 impl ToStreamProst for StreamHashAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog();
+        let (internal_tables, column_mappings) = self
+            .logical
+            .infer_internal_table_catalog(self.vnode_col_idx);
         ProstStreamNode::HashAgg(HashAggNode {
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect_vec(),
             agg_calls: self

@@ -121,6 +121,7 @@ impl TableCatalogBuilder {
         distribution_key: Vec<usize>,
         append_only: bool,
         column_mapping: &[usize],
+        vnode_col_idx: Option<usize>,
     ) -> TableCatalog {
         // Transform indices to set for checking.
         let input_dist_key_indices_set: HashSet<usize> =
@@ -145,8 +146,13 @@ impl TableCatalogBuilder {
                     .expect("Have checked that all input indices must be found")
             })
             .collect();
-
-        self.build(dist_indices_on_table_columns, append_only, None)
+        let vnode_col_idx_in_table_columns =
+            vnode_col_idx.and_then(|x| column_mapping.iter().position(|col_idx| *col_idx == x));
+        self.build(
+            dist_indices_on_table_columns,
+            append_only,
+            vnode_col_idx_in_table_columns,
+        )
     }
 }
 
