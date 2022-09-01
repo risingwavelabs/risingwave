@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use num_integer::Integer as _;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{align_types, cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -92,32 +91,6 @@ impl std::fmt::Debug for FunctionCall {
     }
 }
 
-macro_rules! ensure_arity {
-    ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
-        if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
-            return Err(ErrorCode::BindError(format!(
-                "Function `{}` takes {} to {} arguments ({} given)",
-                $func,
-                $lower,
-                $upper,
-                $inputs.len(),
-            ))
-            .into());
-        }
-    };
-    ($func:literal, $lower:literal <= | $inputs:ident |) => {
-        if !($lower <= $inputs.len()) {
-            return Err(ErrorCode::BindError(format!(
-                "Function `{}` takes at least {} arguments ({} given)",
-                $func,
-                $lower,
-                $inputs.len(),
-            ))
-            .into());
-        }
-    };
-}
-
 impl FunctionCall {
     /// Create a `FunctionCall` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
@@ -125,71 +98,7 @@ impl FunctionCall {
     // number of arguments are checked
     // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> Result<Self> {
-        let return_type = match func_type {
-            ExprType::Case => {
-                let len = inputs.len();
-                align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
-                    // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
-                    // the end. So we align exprs at odd indices as well as the last one when length
-                    // is odd.
-                    match i.is_odd() || len.is_odd() && i == len - 1 {
-                        true => Some(e),
-                        false => None,
-                    }
-                }))
-            }
-            ExprType::In => {
-                align_types(inputs.iter_mut())?;
-                Ok(DataType::Boolean)
-            }
-            ExprType::Coalesce => {
-                ensure_arity!("coalesce", 1 <= | inputs |);
-                align_types(inputs.iter_mut())
-            }
-            ExprType::ConcatWs => {
-                ensure_arity!("concat_ws", 2 <= | inputs |);
-                inputs = inputs
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, input)| match i {
-                        // 0-th arg must be string
-                        0 => input.cast_implicit(DataType::Varchar),
-                        // subsequent can be any type, using the output format
-                        _ => input.cast_output(),
-                    })
-                    .try_collect()?;
-                Ok(DataType::Varchar)
-            }
-            ExprType::ConcatOp => {
-                inputs = inputs
-                    .into_iter()
-                    .map(|input| input.cast_explicit(DataType::Varchar))
-                    .try_collect()?;
-                Ok(DataType::Varchar)
-            }
-            ExprType::RegexpMatch => {
-                ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
-                if inputs.len() == 3 {
-                    return Err(ErrorCode::NotImplemented(
-                        "flag in regexp_match".to_string(),
-                        4545.into(),
-                    )
-                    .into());
-                }
-                Ok(DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                })
-            }
-            ExprType::Vnode => {
-                ensure_arity!("vnode", 1 <= | inputs |);
-                Ok(DataType::Int16)
-            }
-            _ => {
-                // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
-                // interface has been enhanced to support mutating (casting) inputs as well.
-                infer_type(func_type, &mut inputs)
-            }
-        }?;
+        let return_type = infer_type(func_type, &mut inputs)?;
         Ok(Self {
             func_type,
             return_type,

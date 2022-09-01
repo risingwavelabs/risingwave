@@ -15,10 +15,11 @@
 use std::collections::HashMap;
 
 use itertools::{iproduct, Itertools as _};
+use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{cast_ok_base, CastContext, DataTypeName};
+use super::{align_types, cast_ok_base, CastContext, DataTypeName};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
@@ -53,11 +54,100 @@ pub fn infer_type(func_type: ExprType, inputs_mut: &mut Vec<ExprImpl>) -> Result
     Ok(ret_type)
 }
 
+macro_rules! ensure_arity {
+    ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
+        if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes {} to {} arguments ({} given)",
+                $func,
+                $lower,
+                $upper,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, $lower:literal <= | $inputs:ident |) => {
+        if !($lower <= $inputs.len()) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at least {} arguments ({} given)",
+                $func,
+                $lower,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+}
+
 pub fn infer_type_for_special(
-    _func_type: ExprType,
-    _inputs_mut: &mut Vec<ExprImpl>,
+    func_type: ExprType,
+    inputs: &mut Vec<ExprImpl>,
 ) -> Result<Option<DataType>> {
-    Ok(None)
+    match func_type {
+        ExprType::Case => {
+            let len = inputs.len();
+            align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
+                // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
+                // the end. So we align exprs at odd indices as well as the last one when length
+                // is odd.
+                match i.is_odd() || len.is_odd() && i == len - 1 {
+                    true => Some(e),
+                    false => None,
+                }
+            }))
+            .map(Some)
+        }
+        ExprType::In => {
+            align_types(inputs.iter_mut())?;
+            Ok(Some(DataType::Boolean))
+        }
+        ExprType::Coalesce => {
+            ensure_arity!("coalesce", 1 <= | inputs |);
+            align_types(inputs.iter_mut()).map(Some)
+        }
+        ExprType::ConcatWs => {
+            ensure_arity!("concat_ws", 2 <= | inputs |);
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .enumerate()
+                .map(|(i, input)| match i {
+                    // 0-th arg must be string
+                    0 => input.cast_implicit(DataType::Varchar),
+                    // subsequent can be any type, using the output format
+                    _ => input.cast_output(),
+                })
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::ConcatOp => {
+            let inputs_owned = std::mem::take(inputs);
+            *inputs = inputs_owned
+                .into_iter()
+                .map(|input| input.cast_explicit(DataType::Varchar))
+                .try_collect()?;
+            Ok(Some(DataType::Varchar))
+        }
+        ExprType::RegexpMatch => {
+            ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
+            if inputs.len() == 3 {
+                return Err(ErrorCode::NotImplemented(
+                    "flag in regexp_match".to_string(),
+                    4545.into(),
+                )
+                .into());
+            }
+            Ok(Some(DataType::List {
+                datatype: Box::new(DataType::Varchar),
+            }))
+        }
+        ExprType::Vnode => {
+            ensure_arity!("vnode", 1 <= | inputs |);
+            Ok(Some(DataType::Int16))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// From all available functions in `sig_map`, find and return the best matching `FuncSign` for the
