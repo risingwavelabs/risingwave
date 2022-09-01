@@ -330,6 +330,6 @@ impl StreamFragmenter {
             );
         }
 
-        internal_table_catalog_builder.build(distribution_key, append_only)
+        internal_table_catalog_builder.build(distribution_key, append_only, None)
     }
 }

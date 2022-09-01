@@ -87,6 +87,8 @@ message Table {
   uint32 owner = 15;
   map<string, string> properties = 16;
   uint32 fragment_id = 17;
+  // a optional column index which is the vnode of each row computed by the table's consistent hash distribution
+  ColumnIndex vnode_col_idx = 18;
 }
 
 message Schema {

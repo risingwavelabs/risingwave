@@ -91,7 +91,12 @@ impl TableCatalogBuilder {
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(self, distribution_key: Vec<usize>, append_only: bool) -> TableCatalog {
+    pub fn build(
+        self,
+        distribution_key: Vec<usize>,
+        append_only: bool,
+        vnode_col_idx: Option<usize>,
+    ) -> TableCatalog {
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -106,6 +111,7 @@ impl TableCatalogBuilder {
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
+            vnode_col_idx,
         }
     }
 
@@ -125,7 +131,7 @@ impl TableCatalogBuilder {
         // Only if all `distribution_key` is in `column_mapping`, we return transformed dist key
         // indices, otherwise empty.
         if !column_mapping_indices_set.is_superset(&input_dist_key_indices_set) {
-            return self.build(vec![], append_only);
+            return self.build(vec![], append_only, None);
         }
 
         // Transform `distribution_key` (based on input schema) to distribution indices on internal
@@ -140,7 +146,7 @@ impl TableCatalogBuilder {
             })
             .collect();
 
-        self.build(dist_indices_on_table_columns, append_only)
+        self.build(dist_indices_on_table_columns, append_only, None)
     }
 }
 
