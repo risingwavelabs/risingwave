@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use itertools::Itertools;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::HummockPinnedVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeResponse};
@@ -100,15 +99,8 @@ where
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        let mut hummock_manager_guard = self.hummock_manager.get_write_guard().await;
-        let current_version_id = hummock_manager_guard.current_version.id;
-        hummock_manager_guard.pinned_versions.insert(
-            context_id,
-            HummockPinnedVersion {
-                context_id,
-                min_pinned_id: current_version_id,
-            },
-        );
+        self.hummock_manager.pin_version(context_id, 0).await?;
+        let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
         let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));

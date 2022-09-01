@@ -1384,11 +1384,6 @@ where
         read_lock!(self, versioning).await
     }
 
-    #[named]
-    pub async fn get_write_guard(&self) -> RwLockWriteGuard<Versioning> {
-        write_lock!(self, versioning).await
-    }
-
     pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
         *self.compaction_scheduler.write() = Some(sender);
     }
