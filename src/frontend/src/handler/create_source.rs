@@ -22,8 +22,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_source::ProtobufParser;
-use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
+use risingwave_source::{ProtobufParser, AvroParser};
+use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
 use super::create_table::{
     bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
@@ -72,6 +72,11 @@ pub(crate) fn make_prost_source(
     })
 }
 
+/// Map an Avro schema to a relational schema.
+async fn extract_avro_table_schema(schema: &AvroSchema) -> Result<Vec<ProstColumnCatalog>> {
+    let parser = AvroParser::new().await?;
+}
+
 /// Map a protobuf schema to a relational schema.
 fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
@@ -111,6 +116,11 @@ pub async fn handle_create_source(
                 columns,
                 pk_column_ids: pk_column_ids.into_iter().map(Into::into).collect(),
             }
+        }
+        SourceSchema::Avro(avro_schema) => {
+            assert_eq!(columns.len(), 1);
+            assert_eq!(pk_column_ids, vec![0.into()]);
+            assert_eq!(row_id_index, Some(0));
         }
         SourceSchema::Json => StreamSourceInfo {
             properties: with_properties.clone(),

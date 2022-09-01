@@ -29,6 +29,7 @@ use risingwave_common::types::{
 };
 use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use url::Url;
+use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::{Event, SourceColumnDesc, SourceParser};
 
@@ -76,6 +77,10 @@ impl AvroParser {
         } else {
             Err(arvo_schema.err().unwrap())
         }
+    }
+
+    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+
     }
 }
 
