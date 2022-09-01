@@ -14,4 +14,4 @@
 
 mod top_n_state;
 
-pub use top_n_state::{ManagedTopNStateNew, TopNStateRow};
+pub use top_n_state::{ManagedTopNState, TopNStateRow};

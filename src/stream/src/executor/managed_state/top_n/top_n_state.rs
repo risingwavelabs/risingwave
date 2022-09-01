@@ -24,7 +24,7 @@ use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::iter_state_table;
 use crate::executor::top_n::TopNCache;
 
-pub struct ManagedTopNStateNew<S: StateStore> {
+pub struct ManagedTopNState<S: StateStore> {
     /// Relational table.
     pub(crate) state_table: StateTable<S>,
     /// The total number of rows in state table.
@@ -45,7 +45,7 @@ impl TopNStateRow {
     }
 }
 
-impl<S: StateStore> ManagedTopNStateNew<S> {
+impl<S: StateStore> ManagedTopNState<S> {
     pub fn new(
         total_count: usize,
         state_table: StateTable<S>,
@@ -224,7 +224,7 @@ mod tests {
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
         );
-        let mut managed_state = ManagedTopNStateNew::new(
+        let mut managed_state = ManagedTopNState::new(
             0,
             state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
@@ -314,7 +314,7 @@ mod tests {
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
         );
-        let mut managed_state = ManagedTopNStateNew::new(
+        let mut managed_state = ManagedTopNState::new(
             0,
             state_table,
             OrderedRowDeserializer::new(data_types, order_types.clone()),
