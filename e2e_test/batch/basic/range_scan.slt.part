@@ -26,7 +26,9 @@ insert into orders values
     (8, 2147483648, 2222),
     (9, 2147483648, 3333),
     (10, 2147483649, 1111),
-    (NULL, NULL, NULL);
+    (11, NULL, NULL),
+    (NULL, 9999, NULL),
+    (NULL, NULL, 8888);
 
 query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id = 42;
@@ -92,9 +94,34 @@ SELECT * FROM orders_count_by_user WHERE date > 1111 AND user_id = 42 AND 5<6 AN
 42 3333 1
 
 query III rowsort
-SELECT * FROM orders_count_by_user WHERE user_id is null;
+SELECT * FROM orders_count_by_user WHERE user_id is null order by user_id, date, orders_count;
 ----
+NULL 8888 1
 NULL NULL 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user WHERE user_id = 9999 and date is null;
+----
+9999 NULL 1
+
+
+query III rowsort
+SELECT * FROM orders_count_by_user WHERE user_id = 9999 or user_id is null order by user_id, date, orders_count;
+----
+9999 NULL 1
+NULL 8888 1
+NULL NULL 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user WHERE user_id = 9999 or (user_id is null and date is null) order by user_id, date, orders_count;
+----
+9999 NULL 1
+NULL NULL 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user WHERE user_id = 9999 or (user_id = 9999 and date is null) order by user_id, date, orders_count;
+----
+9999 NULL 1
 
 statement ok
 drop materialized view orders_count_by_user;
