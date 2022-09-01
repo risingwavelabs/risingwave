@@ -2925,27 +2925,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "moka"
-version = "0.9.3"
-source = "git+https://github.com/BugenZhao/moka.git?rev=41882d078bb92aa97b598a0c93541a0551f51882#41882d078bb92aa97b598a0c93541a0551f51882"
-dependencies = [
- "crossbeam-channel",
- "crossbeam-epoch",
- "crossbeam-utils",
- "num_cpus",
- "once_cell",
- "parking_lot 0.12.1",
- "quanta",
- "scheduled-thread-pool",
- "skeptic",
- "smallvec",
- "tagptr",
- "thiserror",
- "triomphe",
- "uuid",
-]
-
-[[package]]
 name = "more-asserts"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4196,7 +4175,7 @@ dependencies = [
  "itertools",
  "libc",
  "madsim-tokio",
- "moka 0.9.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moka",
  "nix",
  "parking_lot 0.12.1",
  "prometheus",
@@ -4781,7 +4760,7 @@ dependencies = [
  "futures",
  "madsim-tokio",
  "madsim-tonic",
- "moka 0.9.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moka",
  "paste",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -4968,7 +4947,7 @@ dependencies = [
  "memcomparable",
  "minitrace",
  "minstant",
- "moka 0.9.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moka",
  "nix",
  "num-integer",
  "num-traits",
@@ -5031,7 +5010,6 @@ dependencies = [
  "memcomparable",
  "minitrace",
  "minstant",
- "moka 0.9.3 (git+https://github.com/BugenZhao/moka.git?rev=41882d078bb92aa97b598a0c93541a0551f51882)",
  "num-traits",
  "parking_lot 0.12.1",
  "paste",

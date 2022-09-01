@@ -28,7 +28,6 @@ maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
 minstant = "0.1"
-moka = { git = "https://github.com/BugenZhao/moka.git", rev = "41882d078bb92aa97b598a0c93541a0551f51882" }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"

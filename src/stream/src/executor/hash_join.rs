@@ -38,10 +38,8 @@ use super::{
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
-/// Limit capacity of the cached entries (one per join key) on each side, in bytes.
-/// It's currently a constant of 256 MiB, which is expected to be dynamically adjusted in the
-/// future.
-pub const JOIN_CACHE_CAP_BYTES: usize = 256 * 1024 * 1024;
+/// Limit number of the cached entries (one per join key) on each side.
+pub const JOIN_CACHE_CAP: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -462,7 +460,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP_BYTES,
+                    JOIN_CACHE_CAP,
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
@@ -478,7 +476,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_CAP_BYTES,
+                    JOIN_CACHE_CAP,
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
@@ -597,7 +595,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.metrics
                             .join_cached_estimated_size
                             .with_label_values(&[&actor_id_str, side])
-                            .set(ht.weighted_size() as i64);
+                            .set(ht.estimated_size() as i64);
                     }
 
                     yield Message::Barrier(barrier);

@@ -24,6 +24,7 @@ pub(super) use join_entry_state::JoinEntryState;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
 use risingwave_common::collection::estimate_size::EstimateSize;
+use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_storage::table::streaming_table::state_table::StateTable;
@@ -153,7 +154,8 @@ type PkType = Row;
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = JoinEntryState;
 
-type JoinHashMapInner<K> = moka::unsync::Cache<K, HashValueType, PrecomputedBuildHasher>;
+type JoinHashMapInner<K> =
+    EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -217,7 +219,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        target_cap_bytes: usize,
+        target_cap: usize,
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         data_types: Vec<DataType>,
@@ -233,12 +235,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         let alloc = StatsAlloc::new(Global).shared();
         Self {
-            inner: moka::unsync::Cache::builder()
-                .weigher(|k: &K, v: &JoinEntryState| {
-                    (k.estimated_size() + v.estimated_size()) as u32
-                })
-                .max_capacity(target_cap_bytes as u64)
-                .build_with_hasher(PrecomputedBuildHasher),
+            inner: EvictableHashMap::with_hasher_in(
+                target_cap,
+                PrecomputedBuildHasher,
+                alloc.clone(),
+            ),
             join_key_data_types,
             col_data_types: data_types,
             pk_indices,
@@ -304,7 +305,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// `JoinEntryState` with empty cache will be returned.
     /// WARNING: This will NOT remove anything from remote storage.
     pub async fn remove_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
-        let state = self.inner.invalidate(key);
+        let state = self.inner.pop(key);
         self.metrics.total_lookup_count += 1;
         Ok(match state {
             Some(state) => state,
@@ -345,8 +346,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a key
     pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        let encoded_value = value.encode()?;
-        self.inner.update(join_key, |e| e.insert(pk, encoded_value));
+        if let Some(entry) = self.inner.get_mut(join_key) {
+            entry.insert(pk, value.encode()?);
+        }
 
         // If no cache maintained, only update the flush buffer.
         self.state_table.insert(value.into_row())?;
@@ -355,7 +357,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Delete a key
     pub fn delete(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        self.inner.update(join_key, |e| e.remove(pk));
+        if let Some(entry) = self.inner.get_mut(join_key) {
+            entry.remove(pk);
+        }
 
         // If no cache maintained, only update the flush buffer.
         self.state_table.delete(value.into_row())?;
@@ -364,7 +368,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a [`JoinEntryState`]
     pub fn insert_state(&mut self, key: &K, state: JoinEntryState) {
-        self.inner.insert(key.clone(), state);
+        self.inner.put(key.clone(), state);
     }
 
     pub fn inc_degree(&mut self, join_row: &mut StateValueType) -> StreamExecutorResult<()> {
@@ -387,7 +391,16 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Cached rows for this hash table.
     pub fn cached_rows(&self) -> usize {
-        self.iter().map(|(_, e)| e.len()).sum()
+        self.values().map(|e| e.len()).sum()
+    }
+
+    /// Cached entry count for this hash table.
+    pub fn entry_count(&self) -> usize {
+        self.len()
+    }
+
+    pub fn estimated_size(&self) -> usize {
+        self.values().map(|e| e.estimated_size()).sum()
     }
 }
 
