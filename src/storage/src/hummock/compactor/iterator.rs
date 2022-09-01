@@ -27,6 +27,13 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{BlockHolder, BlockIterator, BlockStream, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
+// --- Note ---
+// I will remove the `SstablePrefetchIterator` completely and adjust the `ConcatSstableIterator`
+// accordingly, because the given implementation never uses cached data in the first place. So there
+// is no reason to have the extra complexity of two different.
+
+// ToDo: Test if there are even blocks cached that it would benefit compaction or not.
+
 /// Iterates over the KV-pairs of an SST which has its blocks already stored in memory.
 pub struct SstablePrefetchIterator {
     /// The iterator of the current block.
