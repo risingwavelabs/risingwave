@@ -21,7 +21,7 @@ use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
-use super::managed_state::top_n::ManagedTopNStateNew;
+use super::managed_state::top_n::ManagedTopNState;
 use super::top_n::TopNCache;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
@@ -82,7 +82,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
     internal_key_order_types: Vec<OrderType>,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
-    managed_state: ManagedTopNStateNew<S>,
+    managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache,
@@ -114,7 +114,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
         let managed_state =
-            ManagedTopNStateNew::<S>::new(total_count, state_table, ordered_row_deserializer);
+            ManagedTopNState::<S>::new(total_count, state_table, ordered_row_deserializer);
 
         Ok(Self {
             info: ExecutorInfo {
