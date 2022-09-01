@@ -314,12 +314,14 @@ macro_rules! for_each_cast {
     };
 }
 
-#[inline(always)]
-pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
+// TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
+// function.
+fn tokenize(input: &str) -> Result<Vec<String>> {
+    use itertools::Itertools;
+
     // Trim input
     let trimmed = input.trim();
 
-    // Ensure input string is correctly braced.
     let mut chars = trimmed.chars();
     risingwave_common::ensure!(
         chars.next() == Some('{'),
@@ -330,27 +332,76 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
         "Last character should be right brace '}}'"
     );
 
-    // Return a new ListValue.
-    // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn is
-    // cast into the target DataType. If the target DataType is of type Varchar, then no casting is
-    // needed.
-    Ok(ListValue::new(
-        chars
-            .as_str()
-            .split(',')
-            .map(|s| {
-                Some(ScalarRefImpl::Utf8(s.trim()))
-                    .map(|scalar_ref| {
-                        if target_elem_type == &DataType::Varchar {
-                            Ok(scalar_ref.into_scalar_impl())
-                        } else {
-                            scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type)
+    let mut lexer = chars.peekable();
+    let mut token_list: Vec<String> = Vec::new();
+    while let Some(c) = lexer.next() {
+        match c {
+            '{' => {
+                let mut string = String::from(c);
+                let mut depth = 1;
+                while depth != 0 {
+                    let c = match lexer.next() {
+                        Some(c) => {
+                            if c == '{' {
+                                depth += 1;
+                            } else if c == '}' {
+                                depth -= 1;
+                            }
+                            c
                         }
-                    })
-                    .transpose()
-            })
-            .try_collect()?,
-    ))
+                        None => unreachable!(),
+                    };
+                    string.push(c);
+                }
+                token_list.push(string);
+            }
+            '}' | ',' => {}
+            c if c.is_whitespace() => {}
+            c => token_list.push(format!(
+                "{}{}",
+                c,
+                (&mut lexer)
+                    .take_while_ref(|&c| c != ',' && c != '}')
+                    .collect::<String>()
+            )),
+        }
+    }
+    Ok(token_list)
+}
+
+#[inline(always)]
+pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
+    let vec = tokenize(input)?;
+
+    // Return a new ListValue.
+    // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn
+    // is cast into the target DataType. If the target DataType is of type Varchar, then
+    // no casting is needed.
+
+    if let DataType::List { datatype } = target_elem_type {
+        Ok(ListValue::new(
+            vec.iter()
+                .map(|l| {
+                    Some(ScalarImpl::List(
+                        str_to_list(l.as_str(), &datatype.clone()).unwrap(),
+                    ))
+                })
+                .collect(),
+        ))
+    } else {
+        Ok(ListValue::new(
+            vec.iter()
+                .map(|s| {
+                    Some(ScalarRefImpl::Utf8(s.trim()))
+                        .map(|scalar_ref| match *target_elem_type {
+                            DataType::Varchar => Ok(scalar_ref.into_scalar_impl()),
+                            _ => scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type),
+                        })
+                        .transpose()
+                })
+                .try_collect()?,
+        ))
+    }
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
@@ -497,6 +548,77 @@ mod tests {
         assert_eq!(
             interval_to_time(IntervalUnit::new(0, 0, -61003)).unwrap(),
             str_to_time("23:58:58.997").unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_tokenize() {
+        assert_eq!(
+            tokenize("{1, 2, 3}").unwrap(),
+            vec!["1".to_string(), "2".to_string(), "3".to_string()]
+        );
+        assert_eq!(
+            tokenize("{{1, 2, 3}, {4, 5, 6}}").unwrap(),
+            vec!["{1, 2, 3}".to_string(), "{4, 5, 6}".to_string()]
+        );
+        assert_eq!(
+            tokenize("{{{1, 2, 3}}, {{4, 5, 6}}}").unwrap(),
+            vec!["{{1, 2, 3}}".to_string(), "{{4, 5, 6}}".to_string()]
+        );
+        assert_eq!(
+            tokenize("{{{1, 2, 3}, {4, 5, 6}}}").unwrap(),
+            vec!["{{1, 2, 3}, {4, 5, 6}}".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_str_to_list() {
+        assert_eq!(
+            str_to_list("{}", &DataType::Int32).unwrap(),
+            ListValue::new(vec![])
+        );
+
+        let list123 = ListValue::new(vec![
+            Some(1.to_scalar_value()),
+            Some(2.to_scalar_value()),
+            Some(3.to_scalar_value()),
+        ]);
+
+        assert_eq!(str_to_list("{1, 2, 3}", &DataType::Int32).unwrap(), list123);
+
+        let nested_list123 = ListValue::new(vec![Some(ScalarImpl::List(list123))]);
+        assert_eq!(
+            str_to_list(
+                "{{1, 2, 3}}",
+                &DataType::List {
+                    datatype: Box::new(DataType::Int32)
+                }
+            )
+            .unwrap(),
+            nested_list123
+        );
+
+        let nested_list456 = ListValue::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
+            Some(4.to_scalar_value()),
+            Some(5.to_scalar_value()),
+            Some(6.to_scalar_value()),
+        ])))]);
+
+        let double_nested_list123_456 = ListValue::new(vec![
+            Some(ScalarImpl::List(nested_list123)),
+            Some(ScalarImpl::List(nested_list456)),
+        ]);
+        assert_eq!(
+            str_to_list(
+                "{{{1, 2, 3}}, {{4, 5, 6}}}",
+                &DataType::List {
+                    datatype: Box::new(DataType::List {
+                        datatype: Box::new(DataType::Int32)
+                    })
+                }
+            )
+            .unwrap(),
+            double_nested_list123_456
         );
     }
 }
