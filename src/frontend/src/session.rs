@@ -36,6 +36,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -490,12 +491,15 @@ impl SessionManager for SessionManagerImpl {
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        if reader.get_database_by_name(database).is_err() {
-            return Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Not found database name: {}", database),
-            )));
-        }
+        let database_id = reader
+            .get_database_by_name(database)
+            .map_err(|_| {
+                Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Not found database name: {}", database),
+                ))
+            })?
+            .id();
         let user_reader = self.env.user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
@@ -503,6 +507,19 @@ impl SessionManager for SessionManagerImpl {
                 return Err(Box::new(Error::new(
                     ErrorKind::InvalidInput,
                     format!("User {} is not allowed to login", user_name),
+                )));
+            }
+            let has_privilege = user.grant_privileges.iter().any(|privilege| {
+                privilege.object == Some(Object::DatabaseId(database_id))
+                    && privilege
+                        .action_with_opts
+                        .iter()
+                        .any(|ao| ao.action == Action::Connect as i32)
+            });
+            if !user.is_super && !has_privilege {
+                return Err(Box::new(Error::new(
+                    ErrorKind::PermissionDenied,
+                    "User does not have CONNECT privilege.",
                 )));
             }
             let user_authenticator = match &user.auth_info {

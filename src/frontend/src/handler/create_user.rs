@@ -33,8 +33,8 @@ pub(crate) fn make_prost_user_info(name: ObjectName, options: &UserOptions) -> R
     };
     for option in &options.0 {
         match option {
-            UserOption::SuperUser => user_info.is_supper = true,
-            UserOption::NoSuperUser => user_info.is_supper = false,
+            UserOption::SuperUser => user_info.is_super = true,
+            UserOption::NoSuperUser => user_info.is_super = false,
             UserOption::CreateDB => user_info.can_create_db = true,
             UserOption::NoCreateDB => user_info.can_create_db = false,
             UserOption::CreateUser => user_info.can_create_user = true,
@@ -72,9 +72,9 @@ pub async fn handle_create_user(
         }
 
         let session_user = reader.get_user_by_name(session.user_name()).unwrap();
-        if !session_user.is_supper
+        if !session_user.is_super
             && (!session_user.can_create_user
-                || user_info.is_supper
+                || user_info.is_super
                 || (!session_user.can_create_db && user_info.can_create_db))
         {
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
@@ -107,7 +107,7 @@ mod tests {
             .get_user_by_name("user")
             .cloned()
             .unwrap();
-        assert!(!user_info.is_supper);
+        assert!(!user_info.is_super);
         assert!(user_info.can_login);
         assert!(user_info.can_create_db);
         assert!(!user_info.can_create_user);
