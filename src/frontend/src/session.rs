@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,14 +29,14 @@ use rand::RngCore;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::FrontendConfig;
+use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
@@ -60,7 +59,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::FrontendOpts;
+use crate::{FrontendConfig, FrontendOpts};
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -177,15 +176,6 @@ impl std::fmt::Debug for OptimizerContext {
     }
 }
 
-fn load_config(opts: &FrontendOpts) -> FrontendConfig {
-    if opts.config_path.is_empty() {
-        return FrontendConfig::default();
-    }
-
-    let config_path = PathBuf::from(opts.config_path.to_owned());
-    FrontendConfig::init(config_path).unwrap()
-}
-
 /// The global environment for the frontend server.
 #[derive(Clone)]
 pub struct FrontendEnv {
@@ -200,6 +190,7 @@ pub struct FrontendEnv {
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     server_addr: HostAddr,
+    client_pool: ComputeClientPoolRef,
 }
 
 impl FrontendEnv {
@@ -230,6 +221,7 @@ impl FrontendEnv {
             catalog_reader.clone(),
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
         Self {
             meta_client,
             catalog_writer,
@@ -240,6 +232,7 @@ impl FrontendEnv {
             query_manager,
             hummock_snapshot_manager,
             server_addr,
+            client_pool,
         }
     }
 
@@ -247,7 +240,7 @@ impl FrontendEnv {
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(opts);
+        let config: FrontendConfig = load_config(&opts.config_path).unwrap();
         tracing::info!("Starting frontend node with config {:?}", config);
 
         let frontend_address: HostAddr = opts
@@ -320,6 +313,8 @@ impl FrontendEnv {
 
         meta_client.activate(&frontend_address).await?;
 
+        let client_pool = Arc::new(ComputeClientPool::new(u64::MAX));
+
         Ok((
             Self {
                 catalog_reader,
@@ -331,6 +326,7 @@ impl FrontendEnv {
                 query_manager,
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
+                client_pool,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -388,6 +384,10 @@ impl FrontendEnv {
 
     pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
+    }
+
+    pub fn client_pool(&self) -> ComputeClientPoolRef {
+        self.client_pool.clone()
     }
 }
 

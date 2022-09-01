@@ -284,17 +284,16 @@ impl LocalVersionManager {
             return false;
         }
 
-        let newly_pinned_version = match pin_resp_payload {
+        let (newly_pinned_version, version_deltas) = match pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = old_version.pinned_version().version();
-                for version_delta in version_deltas.delta {
-                    if version_to_apply.id == version_delta.prev_id {
-                        version_to_apply.apply_version_delta(&version_delta);
-                    }
+                for version_delta in &version_deltas.delta {
+                    assert_eq!(version_to_apply.id, version_delta.prev_id);
+                    version_to_apply.apply_version_delta(version_delta);
                 }
-                version_to_apply
+                (version_to_apply, Some(version_deltas.delta))
             }
-            Payload::PinnedVersion(version) => version,
+            Payload::PinnedVersion(version) => (version, None),
         };
 
         for levels in newly_pinned_version.levels.values() {
@@ -315,7 +314,7 @@ impl LocalVersionManager {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
 
-        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version);
+        let cleaned_epochs = new_version.set_pinned_version(newly_pinned_version, version_deltas);
         RwLockWriteGuard::unlock_fair(new_version);
         for cleaned_epoch in cleaned_epochs {
             self.sstable_id_manager
@@ -582,10 +581,10 @@ impl LocalVersionManager {
                 });
             }
             let task_payload = all_uncommitted_data
-                .iter()
+                .into_iter()
                 .flat_map(to_order_sorted)
                 .collect_vec();
-            local_version_guard.add_sync_state(epochs.clone(), Syncing(all_uncommitted_data));
+            local_version_guard.add_sync_state(epochs.clone(), Syncing(task_payload.clone()));
             (task_payload, epochs, sync_size)
         };
         let uncommitted_ssts = self
@@ -662,7 +661,7 @@ impl LocalVersionManager {
         LocalVersion::read_filter(&self.local_version, read_epoch, key_range)
     }
 
-    pub fn get_pinned_version(&self) -> Arc<PinnedVersion> {
+    pub fn get_pinned_version(&self) -> PinnedVersion {
         self.local_version.read().pinned_version().clone()
     }
 

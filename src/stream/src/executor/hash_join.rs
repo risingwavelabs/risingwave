@@ -391,15 +391,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        mut state_table_l: StateTable<S>,
-        mut state_table_r: StateTable<S>,
+        state_table_l: StateTable<S>,
+        state_table_r: StateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        // TODO: enable sanity check for hash join executor <https://github.com/risingwavelabs/risingwave/issues/3887>
-        state_table_l.disable_sanity_check();
-        state_table_r.disable_sanity_check();
-
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
