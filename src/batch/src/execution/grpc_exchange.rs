@@ -18,8 +18,8 @@ use std::future::Future;
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
-use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
-use risingwave_pb::batch_plan::{ExchangeSource as ProstExchangeSource, TaskOutputId};
+use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::{self, Plan};
+use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
@@ -35,12 +35,12 @@ pub struct GrpcExchangeSource {
 }
 
 impl GrpcExchangeSource {
-    pub async fn create(exchange_source: ProstExchangeSource) -> Result<Self> {
-        let addr = exchange_source.get_host()?.into();
-        let task_output_id = exchange_source.get_task_output_id()?.clone();
+    pub async fn create(
+        client: ComputeClient,
+        task_output_id: TaskOutputId,
+        local_execute_plan: Option<LocalExecutePlan>,
+    ) -> Result<Self> {
         let task_id = task_output_id.get_task_id()?.clone();
-        let client = ComputeClient::new(addr).await?;
-        let local_execute_plan = exchange_source.local_execute_plan;
         let stream = match local_execute_plan {
             // When in the local execution mode, `GrpcExchangeSource` would send out
             // `ExecuteRequest` and get the data chunks back in a single RPC.

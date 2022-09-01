@@ -69,7 +69,6 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
-    soft_fail: true
 
   - label: "end-to-end test (deterministic simulation) (release mode)"
     command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"

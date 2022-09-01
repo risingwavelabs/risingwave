@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ops::Bound::{self, *};
-use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -59,7 +58,7 @@ pub trait DirectedUserIteratorBuilder {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator;
 }
 
@@ -144,7 +143,7 @@ pub struct UserIterator {
     min_epoch: HummockEpoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Option<Arc<PinnedVersion>>,
+    _version: Option<PinnedVersion>,
 
     stats: StoreLocalStatistic,
 }
@@ -176,7 +175,7 @@ impl UserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> Self {
         Self {
             iterator,
@@ -331,7 +330,7 @@ impl DirectedUserIteratorBuilder for UserIterator {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
-        version: Option<Arc<PinnedVersion>>,
+        version: Option<PinnedVersion>,
     ) -> DirectedUserIterator {
         let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
         DirectedUserIterator::Forward(Self::new(
