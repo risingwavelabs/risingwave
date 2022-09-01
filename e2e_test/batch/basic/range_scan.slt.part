@@ -25,7 +25,8 @@ insert into orders values
     (7, 2147483648, 1111),
     (8, 2147483648, 2222),
     (9, 2147483648, 3333),
-    (10, 2147483649, 1111);
+    (10, 2147483649, 1111),
+    (NULL, NULL, NULL);
 
 query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id = 42;
@@ -89,6 +90,11 @@ SELECT * FROM orders_count_by_user WHERE date > 1111 AND user_id = 42 AND 5<6 AN
 ----
 42 2222 2
 42 3333 1
+
+query III rowsort
+SELECT * FROM orders_count_by_user WHERE user_id is null;
+----
+NULL NULL 1
 
 statement ok
 drop materialized view orders_count_by_user;

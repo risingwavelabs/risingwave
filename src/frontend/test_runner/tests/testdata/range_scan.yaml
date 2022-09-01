@@ -67,8 +67,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id IS NULL
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: IsNull(orders_count_by_user.user_id) }
-        BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
+      BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id IS NULL], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
   sql: |
