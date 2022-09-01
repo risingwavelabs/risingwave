@@ -15,12 +15,14 @@
 use std::fmt;
 
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::expr::ExprNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -33,20 +35,10 @@ pub struct BatchSortAgg {
 
 impl BatchSortAgg {
     pub fn new(logical: LogicalAgg) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::HashShard(_) => logical
-                .i2o_col_mapping()
-                .rewrite_provided_distribution(input_dist),
-            d => d.clone(),
-        };
-        let base =
-            PlanBase::new_batch(ctx, logical.schema().clone(), dist, logical.order().clone());
-        let input_ord = input.order();
         let required_order = Order {
-            field_order: input_ord
+            field_order: logical
+                .input()
+                .order()
                 .field_order
                 .iter()
                 .filter(|field_ord| {
@@ -58,6 +50,21 @@ impl BatchSortAgg {
                 .cloned()
                 .collect(),
         };
+        Self::construct_with_required_order(logical, required_order)
+    }
+
+    fn construct_with_required_order(logical: LogicalAgg, required_order: Order) -> Self {
+        let ctx = logical.base.ctx.clone();
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::HashShard(_) => logical
+                .i2o_col_mapping()
+                .rewrite_provided_distribution(input_dist),
+            d => d.clone(),
+        };
+        let base =
+            PlanBase::new_batch(ctx, logical.schema().clone(), dist, logical.order().clone());
 
         assert_eq!(required_order.field_order.len(), logical.group_key().len());
 
@@ -89,7 +96,10 @@ impl PlanTreeNodeUnary for BatchSortAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::construct_with_required_order(
+            self.logical.clone_with_input(input),
+            self.required_order.clone(),
+        )
     }
 }
 impl_plan_tree_node_for_unary! { BatchSortAgg }
@@ -126,11 +136,10 @@ impl ToBatchProst for BatchSortAgg {
                 .group_key()
                 .iter()
                 .clone()
-                .map(|index| ExprNode {
-                    expr_type: *index as i32,
-                    return_type: None,
-                    rex_node: None,
+                .map(|idx| {
+                    ExprImpl::InputRef(Box::new(InputRef::new(*idx as usize, DataType::Int32)))
                 })
+                .map(|expr| expr.to_expr_proto())
                 .collect::<Vec<ExprNode>>(),
         })
     }
