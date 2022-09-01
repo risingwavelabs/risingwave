@@ -611,7 +611,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         self.side_l.ht.flush().await?;
         self.side_r.ht.flush().await?;
 
-        // Note: the LRU cache is automatically evicted as we operate on it.
+        // We need to manually evict the cache to the target capacity.
+        self.side_l.ht.evict_to_target_cap();
+        self.side_r.ht.evict_to_target_cap();
+
         Ok(())
     }
 

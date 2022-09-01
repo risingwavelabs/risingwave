@@ -306,7 +306,7 @@ impl Row {
 
 impl EstimateSize for Row {
     fn estimated_heap_size(&self) -> usize {
-        // TODO: this is not accurate now as the heap size of some `Scalar` is not counted.
+        // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
         self.0.capacity() * std::mem::size_of::<Datum>()
     }
 }
