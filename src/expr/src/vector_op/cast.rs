@@ -568,10 +568,15 @@ mod tests {
             unnest("{{{1, 2, 3}, {4, 5, 6}}}").unwrap(),
             vec!["{{1, 2, 3}, {4, 5, 6}}".to_string()]
         );
+        assert_eq!(
+            unnest("{{{aa, bb, cc}, {dd, ee, ff}}}").unwrap(),
+            vec!["{{aa, bb, cc}, {dd, ee, ff}}".to_string()]
+        );
     }
 
     #[test]
     fn test_str_to_list() {
+        // Empty List
         assert_eq!(
             str_to_list("{}", &DataType::Int32).unwrap(),
             ListValue::new(vec![])
@@ -583,8 +588,10 @@ mod tests {
             Some(3.to_scalar_value()),
         ]);
 
+        // Single List
         assert_eq!(str_to_list("{1, 2, 3}", &DataType::Int32).unwrap(), list123);
 
+        // Nested List
         let nested_list123 = ListValue::new(vec![Some(ScalarImpl::List(list123))]);
         assert_eq!(
             str_to_list(
@@ -598,18 +605,20 @@ mod tests {
         );
 
         let nested_list456 = ListValue::new(vec![Some(ScalarImpl::List(ListValue::new(vec![
-            Some(4.to_scalar_value()),
-            Some(5.to_scalar_value()),
-            Some(6.to_scalar_value()),
+            Some(44.to_scalar_value()),
+            Some(55.to_scalar_value()),
+            Some(66.to_scalar_value()),
         ])))]);
 
         let double_nested_list123_456 = ListValue::new(vec![
-            Some(ScalarImpl::List(nested_list123)),
-            Some(ScalarImpl::List(nested_list456)),
+            Some(ScalarImpl::List(nested_list123.clone())),
+            Some(ScalarImpl::List(nested_list456.clone())),
         ]);
+
+        // Double nested List
         assert_eq!(
             str_to_list(
-                "{{{1, 2, 3}}, {{4, 5, 6}}}",
+                "{{{1, 2, 3}}, {{44, 55, 66}}}",
                 &DataType::List {
                     datatype: Box::new(DataType::List {
                         datatype: Box::new(DataType::Int32)
@@ -618,6 +627,52 @@ mod tests {
             )
             .unwrap(),
             double_nested_list123_456
+        );
+
+        // Cast previous double nested lists to double nested varchar lists
+        let double_nested_varchar_list123_456 = ListValue::new(vec![
+            Some(ScalarImpl::List(
+                list_cast(
+                    ListRef::ValueRef {
+                        val: &nested_list123,
+                    },
+                    &DataType::List {
+                        datatype: Box::new(DataType::Int32),
+                    },
+                    &DataType::List {
+                        datatype: Box::new(DataType::Varchar),
+                    },
+                )
+                .unwrap(),
+            )),
+            Some(ScalarImpl::List(
+                list_cast(
+                    ListRef::ValueRef {
+                        val: &nested_list456,
+                    },
+                    &DataType::List {
+                        datatype: Box::new(DataType::Int32),
+                    },
+                    &DataType::List {
+                        datatype: Box::new(DataType::Varchar),
+                    },
+                )
+                .unwrap(),
+            )),
+        ]);
+
+        // Double nested Varchar List
+        assert_eq!(
+            str_to_list(
+                "{{{1, 2, 3}}, {{44, 55, 66}}}",
+                &DataType::List {
+                    datatype: Box::new(DataType::List {
+                        datatype: Box::new(DataType::Varchar)
+                    })
+                }
+            )
+            .unwrap(),
+            double_nested_varchar_list123_456
         );
     }
 }
