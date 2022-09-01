@@ -39,7 +39,7 @@ impl ArrayCatExpression {
         }
     }
 
-    fn concat(&self, left: Datum, right: Datum) -> Datum {
+    fn concat(left: Datum, right: Datum) -> Datum {
         match (left, right) {
             (None, right) => right,
             (left, None) => left,
@@ -67,11 +67,19 @@ impl Expression for ArrayCatExpression {
         let mut builder = self
             .return_type
             .create_array_builder(left_array.len() + right_array.len());
-        for (left, right) in left_array.iter().zip_eq(right_array.iter()) {
-            builder.append_datum(&self.concat(
-                left.map(|x| x.into_scalar_impl()),
-                right.map(|x| x.into_scalar_impl()),
-            ))?;
+        for (vis, (left, right)) in input
+            .vis()
+            .iter()
+            .zip_eq(left_array.iter().zip_eq(right_array.iter()))
+        {
+            if !vis {
+                builder.append_null()?;
+            } else {
+                builder.append_datum(&Self::concat(
+                    left.map(|x| x.into_scalar_impl()),
+                    right.map(|x| x.into_scalar_impl()),
+                ))?;
+            }
         }
         Ok(Arc::new(builder.finish()?.into()))
     }
@@ -79,7 +87,7 @@ impl Expression for ArrayCatExpression {
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let left_data = self.left.eval_row(input)?;
         let right_data = self.right.eval_row(input)?;
-        Ok(self.concat(left_data, right_data))
+        Ok(Self::concat(left_data, right_data))
     }
 }
 
@@ -97,5 +105,206 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayCatExpression {
         let left = expr_build_from_prost(&children[0])?;
         let right = expr_build_from_prost(&children[1])?;
         Ok(Self::new(ret_type, left, right))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::DataChunk;
+    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstType};
+    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
+
+    use super::*;
+    use crate::expr::{Expression, LiteralExpression};
+
+    fn make_i64_expr_node(value: i64) -> ExprNode {
+        ExprNode {
+            expr_type: ProstType::ConstantValue as i32,
+            return_type: Some(DataType::Int64.to_protobuf()),
+            rex_node: Some(RexNode::Constant(ConstantValue {
+                body: value.to_be_bytes().to_vec(),
+            })),
+        }
+    }
+
+    #[test]
+    fn test_array_cat_try_from() {
+        let left_array = ExprNode {
+            expr_type: ProstType::Array as i32,
+            return_type: Some(
+                DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                }
+                .to_protobuf(),
+            ),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![make_i64_expr_node(42)],
+            })),
+        };
+        let right_array = ExprNode {
+            expr_type: ProstType::Array as i32,
+            return_type: Some(
+                DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                }
+                .to_protobuf(),
+            ),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![make_i64_expr_node(43), make_i64_expr_node(44)],
+            })),
+        };
+        let expr = ExprNode {
+            expr_type: ProstType::ArrayCat as i32,
+            return_type: Some(
+                DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                }
+                .to_protobuf(),
+            ),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![left_array, right_array],
+            })),
+        };
+        assert!(ArrayCatExpression::try_from(&expr).is_ok());
+    }
+
+    fn make_i64_array_expr(values: Vec<i64>) -> BoxedExpression {
+        LiteralExpression::new(
+            DataType::List {
+                datatype: Box::new(DataType::Int64),
+            },
+            Some(ListValue::new(values.into_iter().map(|x| Some(x.into())).collect()).into()),
+        )
+        .boxed()
+    }
+
+    #[test]
+    fn test_array_cat_array_of_primitives() {
+        let left_array = make_i64_array_expr(vec![42]);
+        let right_array = make_i64_array_expr(vec![43, 44]);
+        let expr = ArrayCatExpression::new(
+            DataType::List {
+                datatype: Box::new(DataType::Int64),
+            },
+            left_array,
+            right_array,
+        );
+
+        let chunk = DataChunk::new_dummy(4)
+            .with_visibility([true, false, true, true].into_iter().collect());
+        let expected_array = Some(ScalarImpl::List(ListValue::new(vec![
+            Some(42i64.into()),
+            Some(43i64.into()),
+            Some(44i64.into()),
+        ])));
+        let expected = vec![
+            expected_array.clone(),
+            None,
+            expected_array.clone(),
+            expected_array.clone(),
+        ];
+        let actual = expr
+            .eval(&chunk)
+            .unwrap()
+            .iter()
+            .map(|v| v.map(|s| s.into_scalar_impl()))
+            .collect_vec();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_array_cat_null_arg() {
+        let test_the_expr = |expr: ArrayCatExpression| {
+            let chunk = DataChunk::new_dummy(4)
+                .with_visibility([true, false, true, true].into_iter().collect());
+            let expected_array = Some(ScalarImpl::List(ListValue::new(vec![Some(42i64.into())])));
+            let expected = vec![
+                expected_array.clone(),
+                None,
+                expected_array.clone(),
+                expected_array.clone(),
+            ];
+            let actual = expr
+                .eval(&chunk)
+                .unwrap()
+                .iter()
+                .map(|v| v.map(|s| s.into_scalar_impl()))
+                .collect_vec();
+            assert_eq!(actual, expected);
+        };
+
+        let expr = ArrayCatExpression::new(
+            DataType::List {
+                datatype: Box::new(DataType::Int64),
+            },
+            make_i64_array_expr(vec![42]),
+            LiteralExpression::new(
+                DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                },
+                None,
+            )
+            .boxed(),
+        );
+        test_the_expr(expr);
+
+        let expr = ArrayCatExpression::new(
+            DataType::List {
+                datatype: Box::new(DataType::Int64),
+            },
+            LiteralExpression::new(
+                DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                },
+                None,
+            )
+            .boxed(),
+            make_i64_array_expr(vec![42]),
+        );
+        test_the_expr(expr);
+    }
+
+    #[test]
+    fn test_array_cat_array_of_arrays() {
+        let ret_type = DataType::List {
+            datatype: Box::new(DataType::List {
+                datatype: Box::new(DataType::Int64),
+            }),
+        };
+        let left_array = LiteralExpression::new(
+            ret_type.clone(),
+            Some(
+                ListValue::new(vec![Some(ListValue::new(vec![Some(42i64.into())]).into())]).into(),
+            ),
+        )
+        .boxed();
+        let right_array = LiteralExpression::new(
+            ret_type.clone(),
+            Some(
+                ListValue::new(vec![Some(ListValue::new(vec![Some(43i64.into())]).into())]).into(),
+            ),
+        )
+        .boxed();
+        let expr = ArrayCatExpression::new(ret_type.clone(), left_array, right_array);
+
+        let chunk = DataChunk::new_dummy(4)
+            .with_visibility([true, false, true, true].into_iter().collect());
+        let expected_array = Some(ScalarImpl::List(ListValue::new(vec![
+            Some(ListValue::new(vec![Some(42i64.into())]).into()),
+            Some(ListValue::new(vec![Some(43i64.into())]).into()),
+        ])));
+        let expected = vec![
+            expected_array.clone(),
+            None,
+            expected_array.clone(),
+            expected_array.clone(),
+        ];
+        let actual = expr
+            .eval(&chunk)
+            .unwrap()
+            .iter()
+            .map(|v| v.map(|s| s.into_scalar_impl()))
+            .collect_vec();
+        assert_eq!(actual, expected);
     }
 }
