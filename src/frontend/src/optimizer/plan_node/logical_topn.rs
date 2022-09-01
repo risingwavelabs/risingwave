@@ -17,17 +17,18 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::utils::TableCatalogBuilder;
 use super::{
     gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ToBatch, ToStream,
+    StreamGroupTopN, StreamProject, ToBatch, ToStream,
 };
+use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{FieldOrder, Order, OrderDisplay, RequiredDist};
+use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
@@ -74,7 +75,7 @@ impl LogicalTopN {
     /// `topn_order` returns the order of the Top-N operator. This naming is because `order()`
     /// already exists and it was designed to return the operator's physical property order.
     ///
-    /// Note that `order()` and `topn_order()` may differ. For streaming query, `order()` which
+    /// Note that for streaming query, `order()` and `topn_order()` may differ. `order()` which
     /// implies the output ordering of an operator, is never guaranteed; while `topn_order()` must
     /// be non-null because it's a critical information for Top-N operators to work
     pub fn topn_order(&self) -> &Order {
@@ -101,9 +102,9 @@ impl LogicalTopN {
             .finish()
     }
 
-    pub fn infer_internal_table_catalog(&self) -> TableCatalog {
+    // `group_key` only be set when inferring group topN's state table catalog.
+    pub fn infer_internal_table_catalog(&self, group_key: Option<&[usize]>) -> TableCatalog {
         let schema = &self.base.schema;
-        let dist_keys = self.base.dist.dist_column_indices().to_vec();
         let pk_indices = &self.base.logical_pk;
         let columns_fields = schema.fields().to_vec();
         let field_order = &self.order.field_order;
@@ -114,10 +115,24 @@ impl LogicalTopN {
         });
         let mut order_cols = HashSet::new();
 
+        if let Some(group_key) = group_key {
+            // Here we want the state table to store the states in the order we want, fisrtly in
+            // ascending order by the columns specified by the group key, then by the columns
+            // specified by `order`. If we do that, when the later group topN operator
+            // does a prefix scannimg with the group key, we can fetch the data in the
+            // desired order.
+            group_key.iter().for_each(|idx| {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+                order_cols.insert(*idx);
+            });
+        }
+
         field_order.iter().for_each(|field_order| {
-            internal_table_catalog_builder
-                .add_order_column(field_order.index, OrderType::from(field_order.direct));
-            order_cols.insert(field_order.index);
+            if !order_cols.contains(&field_order.index) {
+                internal_table_catalog_builder
+                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
+                order_cols.insert(field_order.index);
+            }
         });
 
         pk_indices.iter().for_each(|idx| {
@@ -126,7 +141,83 @@ impl LogicalTopN {
                 order_cols.insert(*idx);
             }
         });
-        internal_table_catalog_builder.build(dist_keys, self.base.append_only)
+        internal_table_catalog_builder.build(vec![], self.base.append_only)
+    }
+
+    fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        let input_dist = stream_input.distribution().clone();
+
+        let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
+            Ok(StreamTopN::new(self.clone_with_input(
+                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
+            ))
+            .into())
+        };
+
+        // if it is append only, for now we don't generate 2-phase rules
+        if stream_input.append_only() {
+            return gen_single_plan(stream_input);
+        }
+
+        match input_dist {
+            Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
+            Distribution::Broadcast => Err(RwError::from(ErrorCode::NotImplemented(
+                "topN does not support Broadcast".to_string(),
+                None.into(),
+            ))),
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+                self.gen_vnode_two_phase_streaming_top_n_plan(stream_input, &dists)
+            }
+        }
+    }
+
+    fn gen_vnode_two_phase_streaming_top_n_plan(
+        &self,
+        stream_input: PlanRef,
+        dist_key: &[usize],
+    ) -> Result<PlanRef> {
+        let input_fields = stream_input.schema().fields();
+
+        // use projectiton to add a column for vnode, and use this column as group key.
+        let mut exprs: Vec<_> = input_fields
+            .iter()
+            .enumerate()
+            .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
+            .collect();
+        exprs.push(
+            FunctionCall::new(
+                ExprType::Vnode,
+                dist_key
+                    .iter()
+                    .map(|idx| InputRef::new(*idx, input_fields[*idx].data_type()).into())
+                    .collect(),
+            )?
+            .into(),
+        );
+        let vnode_col_idx = exprs.len() - 1;
+        let project = StreamProject::new(LogicalProject::new(stream_input, exprs.clone()));
+        let local_top_n = StreamGroupTopN::new(
+            LogicalTopN::new(
+                project.into(),
+                self.limit + self.offset,
+                0,
+                self.order.clone(),
+            ),
+            vec![vnode_col_idx],
+        );
+        let exchange =
+            RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
+        let global_top_n = StreamTopN::new(LogicalTopN::new(
+            exchange,
+            self.limit,
+            self.offset,
+            self.order.clone(),
+        ));
+
+        // use another projectiton to remove the column we added before.
+        exprs.pop();
+        let project = StreamProject::new(LogicalProject::new(global_top_n.into(), exprs));
+        Ok(project.into())
     }
 }
 
@@ -225,35 +316,21 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
-        self.to_batch_with_order_required(&Order::any())
-    }
-
-    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        let ret = BatchTopN::new(new_logical).into();
-
-        if self.topn_order().satisfies(required_order) {
-            Ok(ret)
-        } else {
-            Ok(required_order.enforce(ret))
-        }
+        Ok(BatchTopN::new(new_logical).into())
     }
 }
 
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> Result<PlanRef> {
-        // Unlike `BatchTopN`, `StreamTopN` cannot guarantee the output order
-        let input = self
-            .input()
-            .to_stream_with_dist_required(&RequiredDist::single())?;
-
         if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
             return Err(RwError::from(InternalError(
                 "Doesn't support OFFSET without LIMIT".to_string(),
             )));
         }
-        Ok(StreamTopN::new(self.clone_with_input(input)).into())
+        let stream_top_n = self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?;
+        Ok(stream_top_n)
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {

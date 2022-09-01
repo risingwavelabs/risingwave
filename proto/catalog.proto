@@ -7,18 +7,27 @@ import "plan_common.proto";
 
 option optimize_for = SPEED;
 
+// The rust prost library always treats uint64 as required and message as optional.
+// In order to allow `row_id_index` as optional field in `StreamSourceInfo` and `TableSourceInfo`,
+// we wrap uint64 inside this message.
+message ColumnIndex {
+  uint64 index = 1;
+}
+
 message StreamSourceInfo {
   map<string, string> properties = 1;
   plan_common.RowFormatType row_format = 2;
   string row_schema_location = 3;
-  int32 row_id_index = 4;
+  ColumnIndex row_id_index = 4;
   repeated plan_common.ColumnCatalog columns = 5;
   repeated int32 pk_column_ids = 6;
 }
 
 message TableSourceInfo {
-  repeated plan_common.ColumnCatalog columns = 1;
-  map<string, string> properties = 2;
+  ColumnIndex row_id_index = 1;
+  repeated plan_common.ColumnCatalog columns = 2;
+  repeated int32 pk_column_ids = 3;
+  map<string, string> properties = 4;
 }
 
 message Source {
@@ -77,6 +86,7 @@ message Table {
   bool appendonly = 14;
   uint32 owner = 15;
   map<string, string> properties = 16;
+  uint32 fragment_id = 17;
 }
 
 message Schema {

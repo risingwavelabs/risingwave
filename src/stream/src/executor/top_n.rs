@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
@@ -37,12 +37,12 @@ impl<S: StateStore> TopNExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, Option<usize>),
+        offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
@@ -274,7 +274,7 @@ impl TopNCache {
     }
 }
 
-pub fn generate_internal_key(
+pub fn generate_executor_pk_indices_info(
     order_pairs: &[OrderPair],
     pk_indices: PkIndicesRef,
     schema: &Schema,
@@ -308,15 +308,15 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         input_info: ExecutorInfo,
         schema: Schema,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, Option<usize>),
+        offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_internal_key(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
 
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
@@ -337,7 +337,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit.unwrap_or(1024)),
+            cache: TopNCache::new(num_offset, num_limit),
             key_indices,
         })
     }
@@ -616,7 +616,7 @@ mod tests {
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, Some(1000)),
+                (3, 1000),
                 vec![0, 1],
                 0,
                 1,
@@ -713,7 +713,7 @@ mod tests {
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (0, Some(4)),
+                (0, 4),
                 vec![0, 1],
                 0,
                 1,
@@ -821,7 +821,7 @@ mod tests {
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, Some(4)),
+                (3, 4),
                 vec![0, 1],
                 0,
                 1,
@@ -920,7 +920,7 @@ mod tests {
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (1, Some(3)),
+                (1, 3),
                 vec![0, 3],
                 0,
                 1,
@@ -997,7 +997,7 @@ mod tests {
             TopNExecutor::new(
                 create_source_new_before_recovery() as Box<dyn Executor>,
                 order_types.clone(),
-                (1, Some(3)),
+                (1, 3),
                 vec![0, 3],
                 0,
                 1,
@@ -1039,7 +1039,7 @@ mod tests {
             TopNExecutor::new(
                 create_source_new_after_recovery() as Box<dyn Executor>,
                 order_types.clone(),
-                (1, Some(3)),
+                (1, 3),
                 vec![3],
                 0,
                 1,

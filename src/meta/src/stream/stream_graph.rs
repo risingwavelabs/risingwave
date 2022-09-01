@@ -20,7 +20,7 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{generate_intertable_name_with_type, TableId};
+use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -33,10 +33,8 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::CreateMaterializedViewContext;
-use crate::manager::{
-    BuildGraphInfo, FragmentManagerRef, IdCategory, IdGeneratorManagerRef, WorkerId,
-};
-use crate::model::{ActorId, FragmentId};
+use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -333,19 +331,9 @@ impl StreamActorBuilder {
 #[derive(Default)]
 struct StreamGraphBuilder {
     actor_builders: BTreeMap<LocalActorId, StreamActorBuilder>,
-
-    table_node_actors: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
-
-    table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
 }
 
 impl StreamGraphBuilder {
-    /// Resolve infos at first to avoid blocking call inside.
-    pub fn fill_info(&mut self, info: BuildGraphInfo) {
-        self.table_node_actors = info.table_node_actors;
-        self.table_sink_actor_ids = info.table_sink_actor_ids;
-    }
-
     /// Insert new generated actor.
     pub fn add_actor(
         &mut self,
@@ -378,7 +366,7 @@ impl StreamGraphBuilder {
             assert_eq!(
                 upstream_actor_ids.len(),
                 downstream_actor_ids.len(),
-                "mismatched length when procssing no-shuffle exchange: {:?} -> {:?} on exchange {}",
+                "mismatched length when processing no-shuffle exchange: {:?} -> {:?} on exchange {}",
                 upstream_actor_ids,
                 downstream_actor_ids,
                 exchange_operator_id
@@ -540,12 +528,13 @@ impl StreamGraphBuilder {
             table.id += table_id_offset;
             table.schema_id = ctx.schema_id;
             table.database_id = ctx.database_id;
-            table.name = generate_intertable_name_with_type(
+            table.name = generate_internal_table_name_with_type(
                 &ctx.mview_name,
                 fragment_id.as_global_id(),
                 table.id,
                 table_type_name,
             );
+            table.fragment_id = fragment_id.as_global_id();
             check_and_fill_internal_table(table.id, Some(table.clone()));
         };
 
@@ -566,6 +555,12 @@ impl StreamGraphBuilder {
                         if let Some(table) = &mut node.right_table {
                             update_table(table, "HashJoinRight");
                         }
+                    }
+
+                    NodeBody::Source(node) => {
+                        node.state_table_id += table_id_offset;
+                        // fill internal table for source node with None catalog.
+                        check_and_fill_internal_table(node.state_table_id, None);
                     }
 
                     NodeBody::Lookup(node) => {
@@ -745,20 +740,13 @@ pub struct ActorGraphBuilder {
 impl ActorGraphBuilder {
     pub async fn new<S>(
         id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_graph: &StreamFragmentGraphProto,
+        fragment_graph: StreamFragmentGraphProto,
         default_parallelism: u32,
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<Self>
     where
         S: MetaStore,
     {
-        // save dependent table ids in ctx
-        ctx.dependent_table_ids = fragment_graph
-            .dependent_table_ids
-            .iter()
-            .map(|table_id| TableId::new(*table_id))
-            .collect();
-
         let fragment_len = fragment_graph.fragments.len() as u32;
         let offset = id_gen_manager
             .generate_interval::<{ IdCategory::Fragment }>(fragment_len as i32)
@@ -780,18 +768,46 @@ impl ActorGraphBuilder {
         })
     }
 
+    pub fn fill_mview_id(&mut self, table: &mut Table) {
+        // Fill in the correct mview id for stream node.
+        fn fill_mview_id(stream_node: &mut StreamNode, mview_id: u32) -> usize {
+            let mut mview_count = 0;
+            if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
+            {
+                materialize_node.table_id = mview_id;
+                materialize_node.table.as_mut().unwrap().id = mview_id;
+                mview_count += 1;
+            }
+            for input in &mut stream_node.input {
+                mview_count += fill_mview_id(input, mview_id);
+            }
+            mview_count
+        }
+
+        let mut mview_count = 0;
+        for fragment in self.fragment_graph.fragments_mut().values_mut() {
+            let delta = fill_mview_id(fragment.node.as_mut().unwrap(), table.id);
+            mview_count += delta;
+            if delta != 0 {
+                table.fragment_id = fragment.fragment_id
+            }
+        }
+
+        assert_eq!(
+            mview_count, 1,
+            "require exactly 1 materialize node when creating materialized view"
+        );
+    }
+
     pub async fn generate_graph<S>(
-        &mut self,
+        &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
     {
-        let mut graph = self
-            .generate_graph_inner(id_gen_manager, fragment_manager, ctx)
-            .await?;
+        let mut graph = self.generate_graph_inner(id_gen_manager, ctx).await?;
 
         // Record internal state table ids.
         for fragment in graph.values_mut() {
@@ -808,7 +824,6 @@ impl ActorGraphBuilder {
     async fn generate_graph_inner<S>(
         &self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        fragment_manager: FragmentManagerRef<S>,
         ctx: &mut CreateMaterializedViewContext,
     ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
     where
@@ -821,14 +836,6 @@ impl ActorGraphBuilder {
                 ..
             } = {
                 let mut state = BuildActorGraphState::default();
-                // resolve upstream table infos first
-                // TODO: this info is only used by `resolve_chain_node`. We can move that logic to
-                // stream manager and remove dependency on fragment manager.
-                let info = fragment_manager
-                    .get_build_graph_info(&ctx.dependent_table_ids)
-                    .await?;
-                ctx.table_sink_map = info.table_sink_actor_ids.clone();
-                state.stream_graph_builder.fill_info(info);
 
                 // Generate actors of the streaming plan
                 self.build_actor_graph(&mut state, &self.fragment_graph, ctx)?;
@@ -890,7 +897,7 @@ impl ActorGraphBuilder {
         let mut downstream_cnts = HashMap::new();
 
         // Iterate all fragments
-        for (fragment_id, _) in fragment_graph.fragments().iter() {
+        for fragment_id in fragment_graph.fragments().keys() {
             // Count how many downstreams we have for a given fragment
             let downstream_cnt = fragment_graph.get_downstreams(*fragment_id).len();
             if downstream_cnt == 0 {
@@ -1017,6 +1024,9 @@ impl ActorGraphBuilder {
                 let table_id = node.get_table_id();
                 fragment.state_table_ids.push(table_id);
             }
+            NodeBody::Source(node) => {
+                fragment.state_table_ids.push(node.state_table_id);
+            }
             NodeBody::Arrange(node) => {
                 let table_id = node.table.as_ref().unwrap().id;
                 fragment.state_table_ids.push(table_id);
@@ -1132,6 +1142,10 @@ impl StreamFragmentGraph {
 
     pub fn fragments(&self) -> &HashMap<GlobalFragmentId, StreamFragment> {
         &self.fragments
+    }
+
+    pub fn fragments_mut(&mut self) -> &mut HashMap<GlobalFragmentId, StreamFragment> {
+        &mut self.fragments
     }
 
     pub fn get_fragment(&self, fragment_id: GlobalFragmentId) -> Option<&StreamFragment> {

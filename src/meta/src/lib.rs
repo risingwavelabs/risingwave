@@ -43,6 +43,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
 mod barrier;
+#[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
 mod error;
 pub mod hummock;
@@ -56,7 +57,7 @@ use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
 pub use error::{MetaError, MetaResult};
-use risingwave_common::config::ComputeNodeConfig;
+use serde::{Deserialize, Serialize};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
@@ -133,7 +134,7 @@ pub struct MetaNodeOpts {
     /// Threshold used by worker node to filter out new SSTs when scanning object store, during
     /// full SST GC.
     #[clap(long, default_value = "604800")]
-    sst_retention_time_sec: u64,
+    min_sst_retention_time_sec: u64,
 
     /// Compaction scheduler retries compactor selection with this interval.
     #[clap(long, default_value = "5")]
@@ -142,22 +143,24 @@ pub struct MetaNodeOpts {
     /// The spin interval when collecting global GC watermark in hummock
     #[clap(long, default_value = "5")]
     collect_gc_watermark_spin_interval_sec: u64,
-}
 
-fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
-    risingwave_common::config::load_config(&opts.config_path)
+    /// Enable sanity check when SSTs are committed. By default disabled.
+    #[clap(long)]
+    enable_committed_sst_sanity_check: bool,
 }
 
 use std::future::Future;
 use std::pin::Pin;
 
-/// Start meta node
+use risingwave_common::config::{load_config, StreamingConfig};
 
+/// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let compute_config = load_config(&opts);
+        let meta_config: MetaNodeConfig = load_config(&opts.config_path).unwrap();
+        tracing::info!("Starting meta node with config {:?}", meta_config);
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
@@ -178,9 +181,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         };
         let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
         let checkpoint_interval =
-            Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+            Duration::from_millis(meta_config.streaming.checkpoint_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
-        let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
+        let in_flight_barrier_nums = meta_config.streaming.in_flight_barrier_nums as usize;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -201,9 +204,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_idle_ms,
                 in_flight_barrier_nums,
                 vacuum_interval_sec: opts.vacuum_interval_sec,
-                sst_retention_time_sec: opts.sst_retention_time_sec,
+                min_sst_retention_time_sec: opts.min_sst_retention_time_sec,
                 compactor_selection_retry_interval_sec: opts.compactor_selection_retry_interval_sec,
                 collect_gc_watermark_spin_interval_sec: opts.collect_gc_watermark_spin_interval_sec,
+                enable_committed_sst_sanity_check: opts.enable_committed_sst_sanity_check,
             },
         )
         .await
@@ -211,4 +215,11 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         tracing::info!("Meta server is stopped");
     })
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct MetaNodeConfig {
+    // Below for streaming.
+    #[serde(default)]
+    pub streaming: StreamingConfig,
 }

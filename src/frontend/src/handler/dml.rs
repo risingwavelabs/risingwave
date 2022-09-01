@@ -72,11 +72,11 @@ async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Res
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
-            let max_committed_epoch = client.flush().await?;
+            let snapshot = client.flush().await?;
             session
                 .env()
                 .hummock_snapshot_manager()
-                .update_epoch(max_committed_epoch);
+                .update_epoch(snapshot);
         }
         _ => {}
     }

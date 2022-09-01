@@ -23,12 +23,12 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::ManagedTopNStateNew;
-use super::top_n::{generate_internal_key, TopNCache};
+use super::top_n::{generate_executor_pk_indices_info, TopNCache};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
@@ -39,13 +39,13 @@ impl<S: StateStore> GroupTopNExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, Option<usize>),
+        offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
@@ -75,18 +75,18 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     schema: Schema,
 
     /// `LIMIT XXX`. None means no limit.
-    limit: Option<usize>,
+    limit: usize,
 
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
 
-    /// The primary key indices of the `LocalTopNExecutor`
+    /// The primary key indices of the `GroupTopNExecutor`
     pk_indices: PkIndices,
 
-    /// The internal key indices of the `LocalTopNExecutor`
+    /// The internal key indices of the `GroupTopNExecutor`
     internal_key_indices: PkIndices,
 
-    /// The order of internal keys of the `LocalTopNExecutor`
+    /// The order of internal keys of the `GroupTopNExecutor`
     internal_key_order_types: Vec<OrderType>,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
@@ -109,16 +109,16 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
         input_info: ExecutorInfo,
         schema: Schema,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, Option<usize>),
+        offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
         group_by: Vec<usize>,
-        state_table: RowBasedStateTable<S>,
+        state_table: StateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_internal_key(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
 
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(internal_key_data_types, internal_key_order_types.clone());
@@ -153,8 +153,8 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.limit.unwrap_or(1024));
-        let mut res_rows = Vec::with_capacity(self.limit.unwrap_or(1024));
+        let mut res_ops = Vec::with_capacity(self.limit);
+        let mut res_rows = Vec::with_capacity(self.limit);
 
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
@@ -172,7 +172,7 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
             match entry {
                 Occupied(_) => {}
                 Vacant(entry) => {
-                    let mut topn_cache = TopNCache::new(self.offset, self.limit.unwrap_or(1024));
+                    let mut topn_cache = TopNCache::new(self.offset, self.limit);
                     self.managed_state
                         .init_topn_cache(Some(&pk_prefix), &mut topn_cache, epoch)
                         .await?;
@@ -371,7 +371,7 @@ mod tests {
             GroupTopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (0, Some(2)),
+                (0, 2),
                 vec![1, 2, 0],
                 0,
                 1,
@@ -464,7 +464,7 @@ mod tests {
             GroupTopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (1, Some(2)),
+                (1, 2),
                 vec![1, 2, 0],
                 0,
                 1,
@@ -533,102 +533,6 @@ mod tests {
             ),
         );
     }
-
-    #[tokio::test]
-    async fn test_without_limits() {
-        let order_types = create_order_pairs();
-        let source = create_source();
-        let state_table = create_in_memory_state_table(
-            &[DataType::Int64, DataType::Int64, DataType::Int64],
-            &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
-            ],
-            &[1, 2, 0],
-        );
-        let top_n_executor = Box::new(
-            GroupTopNExecutor::new(
-                source as Box<dyn Executor>,
-                order_types,
-                (0, None),
-                vec![1, 2, 0],
-                0,
-                1,
-                vec![],
-                vec![1],
-                state_table,
-            )
-            .unwrap(),
-        );
-        let mut top_n_executor = top_n_executor.execute();
-
-        // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
-                "  I I I
-                + 10 9 1
-                +  8 8 2
-                +  7 8 2
-                +  9 1 1
-                + 10 1 1
-                +  8 1 3",
-            ),
-        );
-
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
-                "  I I I
-                - 10 9 1
-                - 8 8 2
-                - 10 1 1",
-            ),
-        );
-
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
-                "  I I I
-                - 9 1 1
-                - 8 1 3
-                - 7 8 2",
-            ),
-        );
-
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        compare_stream_chunk(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
-                "  I I I
-                +  5 1 1
-                +  2 1 1
-                +  3 1 2
-                +  4 1 3",
-            ),
-        );
-    }
-
     #[tokio::test]
     async fn test_multi_group_key() {
         let order_types = create_order_pairs();
@@ -646,7 +550,7 @@ mod tests {
             GroupTopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (0, Some(2)),
+                (0, 2),
                 vec![1, 2, 0],
                 0,
                 1,

@@ -59,6 +59,10 @@ impl StreamingUploader for InMemStreamingUploader {
             Ok(())
         }
     }
+
+    fn get_memory_usage(&self) -> u64 {
+        self.buf.capacity() as u64
+    }
 }
 
 /// In-memory object storage, useful for testing.
@@ -69,6 +73,10 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
+    fn get_object_prefix(&self, _obj_id: u64) -> String {
+        String::default()
+    }
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
             "mem upload error"
@@ -157,6 +165,18 @@ impl ObjectStore for InMemObjectStore {
             "mem delete error"
         )));
         self.objects.lock().await.remove(path);
+        Ok(())
+    }
+
+    /// Deletes the objects with the given paths permanently from the storage. If an object
+    /// specified in the request is not found, it will be considered as successfully deleted.
+    async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
+        let mut guard = self.objects.lock().await;
+
+        for path in paths {
+            guard.remove(path);
+        }
+
         Ok(())
     }
 
@@ -344,5 +364,27 @@ mod tests {
             store.delete(path).await.unwrap();
             assert_eq!(store.list("").await.unwrap().len(), paths.len() - i - 1);
         }
+    }
+
+    #[tokio::test]
+    async fn test_delete_objects() {
+        let block1 = Bytes::from("123456");
+        let block2 = Bytes::from("987654");
+
+        let store = InMemObjectStore::new();
+        store.upload("/abc", block1).await.unwrap();
+        store.upload("/klm", block2).await.unwrap();
+
+        assert_eq!(store.list("").await.unwrap().len(), 2);
+
+        let str_list = [
+            String::from("/abc"),
+            String::from("/klm"),
+            String::from("/xyz"),
+        ];
+
+        store.delete_objects(&str_list).await.unwrap();
+
+        assert_eq!(store.list("").await.unwrap().len(), 0);
     }
 }

@@ -23,12 +23,13 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
+use risingwave_hummock_sdk::{can_concat, key, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
-use super::utils::{can_concat, search_sst_idx, validate_epoch};
+use super::utils::{search_sst_idx, validate_epoch};
 use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
@@ -258,7 +259,6 @@ impl HummockStorage {
         // the union because the underlying merge iterator
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
-            self.stats.clone(),
             key_range,
             epoch,
             min_epoch,
@@ -438,10 +438,12 @@ impl HummockStorage {
         check_bloom_filter: bool,
     ) -> StorageResult<(Option<Option<Bytes>>, i32)> {
         let mut table_counts = 0;
+        let epoch = key::get_epoch(internal_key);
         for data_list in order_sorted_uncommitted_data {
             for data in data_list {
                 match data {
                     UncommittedData::Batch(batch) => {
+                        assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
                         let data = self.get_from_batch(&batch, key);
                         if data.is_some() {
                             return Ok((data, table_counts));
@@ -661,10 +663,11 @@ impl StateStore for HummockStorage {
             // not check
         }
 
-        let span = self.tracing.new_tracer("hummock_iter");
-
-        self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options)
-            .in_span(span)
+        let iter = self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options);
+        #[cfg(not(madsim))]
+        return iter.in_span(self.tracing.new_tracer("hummock_iter"));
+        #[cfg(madsim)]
+        iter
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -685,7 +688,7 @@ impl StateStore for HummockStorage {
         self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
     }
 

@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::RowBasedStateTable;
+use risingwave_storage::table::streaming_table::state_table::StateTable;
 
 use super::*;
 use crate::executor::TopNExecutor;
@@ -31,15 +31,10 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::TopN)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let limit = if node.limit == 0 {
-            None
-        } else {
-            Some(node.limit as usize)
-        };
 
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = RowBasedStateTable::from_table_catalog(table, store, vnodes);
+        let state_table = StateTable::from_table_catalog(table, store, vnodes);
         let order_pairs = table
             .get_order_key()
             .iter()
@@ -53,7 +48,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         Ok(TopNExecutor::new(
             input,
             order_pairs,
-            (node.offset as usize, limit),
+            (node.offset as usize, node.limit as usize),
             params.pk_indices,
             0,
             params.executor_id,

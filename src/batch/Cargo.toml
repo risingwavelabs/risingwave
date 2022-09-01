@@ -15,6 +15,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 crc32fast = "1"
 either = "1"
 farmhash = "1"
+fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
@@ -30,6 +31,7 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
@@ -50,13 +52,16 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs",
 ] }
+tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
-tonic = { version = "0.2.1", package = "madsim-tonic" }
+tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"
 uuid = "1"
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
@@ -87,4 +92,8 @@ harness = false
 
 [[bench]]
 name = "top_n"
+harness = false
+
+[[bench]]
+name = "hash_agg"
 harness = false

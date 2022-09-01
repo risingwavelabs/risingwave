@@ -43,7 +43,9 @@ impl FrontendService {
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &FrontendConfig) -> Result<()> {
         cmd.arg("--host")
-            .arg(format!("{}:{}", config.listen_address, config.port));
+            .arg(format!("{}:{}", config.listen_address, config.port))
+            .arg("--client-address")
+            .arg(format!("{}:{}", config.address, config.port));
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         match provide_meta_node.len() {
@@ -77,6 +79,10 @@ impl Task for FrontendService {
         let mut cmd = self.frontend()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+
+        let prefix_config = env::var("PREFIX_CONFIG")?;
+        cmd.arg("--config-path")
+            .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {

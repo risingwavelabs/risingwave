@@ -38,6 +38,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
+use serde::Serialize;
 
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
@@ -67,7 +68,7 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, Serialize)]
 pub struct PlanNodeId(pub i32);
 
 #[derive(Debug, PartialEq)]
@@ -500,7 +501,7 @@ macro_rules! enum_plan_node_type {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-            #[derive(Copy, Clone, PartialEq, Debug)]
+            #[derive(Copy, Clone, PartialEq, Debug, Hash, Eq, Serialize)]
             pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }

@@ -237,8 +237,7 @@ impl ConcatSstableIterator {
             .get_stream(table.value(), Some(start_index))
             .await?;
 
-        let mut sstable_iter =
-            SstableStreamIterator::new(block_stream, end_index - start_index);
+        let mut sstable_iter = SstableStreamIterator::new(block_stream, end_index - start_index);
         sstable_iter.start(seek_key).await?;
 
         self.sstable_iter = Some(sstable_iter);

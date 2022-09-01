@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{CorrelatedId, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -44,12 +44,25 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn exprs(&self) -> impl Iterator<Item = &ExprImpl> {
         self.select_items
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
             .chain(self.having.iter())
+    }
+
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
+        self.select_items
+            .iter_mut()
+            .chain(self.group_by.iter_mut())
+            .chain(self.where_clause.iter_mut())
+        // TODO: uncomment `having` below after #4850 is fixed
+        // .chain(self.having.iter_mut())
+    }
+
+    pub fn is_correlated(&self) -> bool {
+        self.exprs()
             .any(|expr| expr.has_correlated_input_ref_by_depth())
             || match self.from.as_ref() {
                 Some(relation) => relation.is_correlated(),
@@ -59,21 +72,20 @@ impl BoundSelect {
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
+        depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        let mut correlated_indices = vec![];
-        self.select_items
-            .iter_mut()
-            .chain(self.group_by.iter_mut())
-            .chain(self.where_clause.iter_mut())
-            .for_each(|expr| {
-                correlated_indices
-                    .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
-            });
+        let mut correlated_indices = self
+            .exprs_mut()
+            .flat_map(|expr| {
+                expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            })
+            .collect_vec();
 
         if let Some(relation) = self.from.as_mut() {
-            correlated_indices
-                .extend(relation.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
+            correlated_indices.extend(
+                relation.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+            );
         }
 
         correlated_indices
@@ -99,15 +111,19 @@ impl Binder {
         Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
+        self.context.clause = Some(Clause::GroupBy);
         let group_by = select
             .group_by
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .try_collect()?;
+        self.context.clause = None;
 
         // Bind HAVING clause.
+        self.context.clause = Some(Clause::Having);
         let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
         Self::require_bool_clause(&having, "HAVING")?;
+        self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items

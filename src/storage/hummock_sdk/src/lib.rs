@@ -21,8 +21,14 @@ mod version_cmp;
 #[macro_use]
 extern crate num_derive;
 
+use std::cmp::Ordering;
+use std::ops::Deref;
+
 use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
+
+use crate::key::user_key;
+
 pub mod compact;
 pub mod compaction_group;
 pub mod filter_key_extractor;
@@ -57,6 +63,26 @@ pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
     id & LOCAL_SST_ID_MASK == 0
 }
 
+/// Package read epoch of hummock, it be used for `wait_epoch`
+#[derive(Debug, Clone)]
+pub enum HummockReadEpoch {
+    /// We need to wait the `max_committed_epoch`
+    Committed(HummockEpoch),
+    /// We need to wait the `max_current_epoch`
+    Current(HummockEpoch),
+    /// We don't need to wait epoch, we usually do stream reading with it.
+    NoWait(HummockEpoch),
+}
+
+impl HummockReadEpoch {
+    pub fn get_epoch(&self) -> HummockEpoch {
+        *match self {
+            HummockReadEpoch::Committed(epoch) => epoch,
+            HummockReadEpoch::Current(epoch) => epoch,
+            HummockReadEpoch::NoWait(epoch) => epoch,
+        }
+    }
+}
 pub struct SstIdRange {
     // inclusive
     pub start_id: HummockSstableId,
@@ -82,4 +108,17 @@ impl SstIdRange {
         self.start_id += 1;
         next_id
     }
+}
+
+pub fn can_concat(ssts: &[impl Deref<Target = SstableInfo>]) -> bool {
+    let len = ssts.len();
+    for i in 0..len - 1 {
+        if user_key(&ssts[i].get_key_range().as_ref().unwrap().right).cmp(user_key(
+            &ssts[i + 1].get_key_range().as_ref().unwrap().left,
+        )) != Ordering::Less
+        {
+            return false;
+        }
+    }
+    true
 }

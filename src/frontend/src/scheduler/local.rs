@@ -87,7 +87,8 @@ impl LocalQueryExecution {
             .front_env
             .hummock_snapshot_manager()
             .get_epoch(query_id)
-            .await?;
+            .await?
+            .committed_epoch;
         self.epoch = Some(epoch);
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
@@ -310,8 +311,16 @@ impl LocalQueryExecution {
                             .expect("no side table desc");
                         node.probe_side_vnode_mapping = self
                             .front_env
-                            .worker_node_manager()
-                            .get_table_mapping(&side_table_desc.table_id.into())
+                            .catalog_reader()
+                            .read_guard()
+                            .get_table_by_id(&side_table_desc.table_id.into())
+                            .map(|table| {
+                                self.front_env
+                                    .worker_node_manager()
+                                    .get_fragment_mapping(&table.fragment_id)
+                            })
+                            .ok()
+                            .flatten()
                             .unwrap_or_default();
                         node.worker_nodes =
                             self.front_env.worker_node_manager().list_worker_nodes();

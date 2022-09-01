@@ -30,13 +30,8 @@ mod compactor_observer;
 mod rpc;
 mod server;
 
-use std::fs;
-use std::path::PathBuf;
-
 use clap::Parser;
 use risingwave_common::config::{ServerConfig, StorageConfig};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use serde::{Deserialize, Serialize};
 
 use crate::server::compactor_serve;
@@ -91,21 +86,6 @@ pub struct CompactorConfig {
     pub storage: StorageConfig,
 }
 
-impl CompactorConfig {
-    pub fn init(path: PathBuf) -> Result<CompactorConfig> {
-        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
-            RwError::from(InternalError(format!(
-                "failed to open config file '{}': {}",
-                path.to_string_lossy(),
-                e
-            )))
-        })?;
-        let config: CompactorConfig = toml::from_str(config_str.as_str())
-            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
-        Ok(config)
-    }
-}
-
 use std::future::Future;
 use std::pin::Pin;
 
@@ -121,7 +101,10 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let client_address = opts
             .client_address
             .as_ref()
-            .unwrap_or(&opts.host)
+            .unwrap_or_else(|| {
+                tracing::warn!("Client address is not specified, defaulting to host address");
+                &opts.host
+            })
             .parse()
             .unwrap();
         tracing::info!("Client address is {}", client_address);
