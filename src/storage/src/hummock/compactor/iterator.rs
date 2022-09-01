@@ -338,51 +338,101 @@ impl ConcatSstableIterator {
         }
     }
 
-    /// Seeks to a table, and then seeks to the key if `seek_key` is given.
+    /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
+    /// The function assumes that `seek_key` is at most as large as the maximum key in the SST.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+        // Always reset iterator.
         self.sstable_iter = SstIterOption::None;
 
-        if idx < self.tables.len() {
-            let table = self
-                .sstable_store
+        if idx >= self.tables.len() {
+            // Index out of range.
+            return Ok(());
+        }
+
+        // We store the `TableHolder` object in an `Option<>` to avoid problems with ownership
+        // later. That way, we can move ownership of the `TableHolder` object into an iterator and,
+        // if needed, take it back afterwards without losing ownership of the `Option<>` object.
+        // See https://stackoverflow.com/a/48141939.
+        let mut table = Some(
+            self.sstable_store
                 .sstable(self.tables[idx].id, &mut self.stats)
-                .await?;
-            let block_metas = &table.value().meta.block_metas;
-            let start_index = if self.key_range.left.is_empty() {
-                0
-            } else {
-                block_metas
-                    .partition_point(|block| {
-                        VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
-                            != Ordering::Greater
-                    })
-                    .saturating_sub(1)
-            };
-            let end_index = if self.key_range.right.is_empty() {
-                block_metas.len()
-            } else {
-                block_metas.partition_point(|block| {
-                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
+                .await?,
+        );
+        let block_metas = &table.as_ref().unwrap().value().meta.block_metas;
+
+        let mut start_index /* inclusive */ = if self.key_range.left.is_empty() {
+            0
+        } else {
+            block_metas
+                .partition_point(|block| {
+                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
                         != Ordering::Greater
                 })
-            };
-            if end_index <= start_index {
-                return Ok(());
-            }
-            let data = self
-                .sstable_store
-                .scan(table.value(), start_index, end_index, &mut self.stats)
-                .await?;
-            let mut sstable_iter = SstablePrefetchIterator::new(table, data);
+                .saturating_sub(1)
+        };
+
+        let end_index /* exclusive */ = if self.key_range.right.is_empty() {
+            block_metas.len()
+        } else {
+            block_metas.partition_point(|block| {
+                VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
+                    != Ordering::Greater
+            })
+        };
+
+        if end_index <= start_index {
+            // Empty range.
+            return Ok(());
+        }
+
+        // Load as many blocks as possible from cache.
+        let data = self
+            .sstable_store
+            .scan_cache(
+                table.as_ref().unwrap().value(),
+                start_index,
+                end_index,
+                &mut self.stats,
+            )
+            .await?;
+
+        // Was at least one block cached?
+        if data.end_index() > start_index {
+            // Move ownership via `Option<>::take()`.
+            let mut sstable_iter = SstablePrefetchIterator::new(table.take().unwrap(), data);
             if let Some(key) = seek_key {
                 sstable_iter.seek(key)?;
             } else {
                 sstable_iter.rewind()?;
             }
 
-            self.sstable_iter = Some(sstable_iter);
-            self.cur_idx = idx;
+            // It is possible that `seek_key` is between two blocks `A` and `B` where `A` is cached,
+            // but `B` is not (i.e., `A` is the last block of `sstable_iter`). In that case, we
+            // still have to search over `A` first and later create a streaming iterator for `B`.
+
+            if sstable_iter.is_valid() {
+                self.sstable_iter = SstIterOption::Prefetch(sstable_iter);
+            } else {
+                // Take back ownership and update start.
+                table = Some(sstable_iter.sst);
+                start_index = sstable_iter.blocks.end_index();
+            }
         }
+
+        if matches!(self.sstable_iter, SstIterOption::None) {
+            let block_stream = self
+                .sstable_store
+                .get_stream(table.as_ref().unwrap().value(), Some(start_index))
+                .await?;
+
+            let mut sstable_iter =
+                SstableStreamIterator::new(table.unwrap(), block_stream, end_index - start_index);
+            sstable_iter.start(seek_key).await?;
+
+            self.sstable_iter = SstIterOption::Stream(sstable_iter);
+        }
+
+        self.cur_idx = idx;
         Ok(())
     }
 }
@@ -418,23 +468,23 @@ impl HummockIterator for ConcatSstableIterator {
                         // Yes, continue with next SST.
                         (self.cur_idx + 1, vec![])
                     } else {
-                        // No, call `self.seek_idx()` with restart with the next block (will result
-                        // in a Streaming Iterator).
+                        // No, call `self.seek_idx()` to restart with the next block (will result in
+                        // a Streaming Iterator).
 
                         // We need to clone here. The function call `self.seek_idx()` below borrows
                         // `self` as mutable. If we additionally pass in a borrowed key, we borrow
                         // from `self` twice (which then causes a compiler error).
                         let key = block_metas[end_index].smallest_key.clone();
-                        (self.cur_idx + 1, key)
+                        (self.cur_idx, key)
                     }
                 }
-                SstIterOption::Stream(iter) => {
+                SstIterOption::Stream(_) => {
                     // If it was a streaming iterator, we continue with the next SST.
                     (self.cur_idx + 1, vec![])
                 }
             };
 
-            self.seek_idx(next_idx, None).await
+            self.seek_idx(next_idx, Some(min_key.as_slice())).await
         }
     }
 
@@ -458,8 +508,9 @@ impl HummockIterator for ConcatSstableIterator {
     fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
         async {
             let table_idx = self.tables.partition_point(|table| {
-                // We use the maximum key of an SST for the search. That avoids having to call
-                // `seek_idx()` twice if determined SST does not contain `key`.
+                // We use the maximum key of an SST for the search. That way, we guarantee that the
+                // resulting SST either contains that key or the next larger KV-pair. Subsequently,
+                // we avoid calling `seek_idx()` twice if determined SST does not contain `key`.
 
                 // Assume we have two SSTs `A: [k l m]` and `B: [s t u]`, and that we search for the
                 // key `p`. If we search using the min. key of an SST, our search would result in

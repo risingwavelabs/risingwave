@@ -25,7 +25,7 @@ use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     Block, CachePolicy, HummockError, HummockResult, MemoryLimiter, Sstable, SstableMeta,
-    SstableStoreWrite,
+    SstableStoreWrite, BlockStream,
 };
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
@@ -132,6 +132,26 @@ impl CompactorSstableStore {
                 .collect_vec(),
             _tracker: tracker,
         })
+    }
+
+    /// Loads the blocks (their data) in the specified range of the specified SST from cache.
+    pub async fn scan_cache(
+        &self,
+        sst: &Sstable,
+        start_index: usize,
+        end_index: usize,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<SstableBlocks> {
+        unimplemented!();
+    }
+
+    pub async fn get_stream(
+        &self,
+        sst: &Sstable,
+        block_index: Option<usize>,
+    ) -> HummockResult<BlockStream> {
+        // ToDo: What about `StoreLocalStatistic`?
+        self.sstable_store.get_block_stream(sst, block_index).await
     }
 }
 
