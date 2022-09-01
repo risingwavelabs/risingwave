@@ -323,14 +323,9 @@ fn unnest(input: &str) -> Result<Vec<String>> {
     let trimmed = input.trim();
 
     let mut chars = trimmed.chars();
-    risingwave_common::ensure!(
-        chars.next() == Some('{'),
-        "First character should be left brace '{{'"
-    );
-    risingwave_common::ensure!(
-        chars.next_back() == Some('}'),
-        "Last character should be right brace '}}'"
-    );
+    if chars.next() != Some('{') || chars.next_back() != Some('}') {
+        return Err(ExprError::Parse("Input must be braced"));
+    }
 
     let mut items = Vec::new();
     while let Some(c) = chars.next() {
@@ -348,19 +343,20 @@ fn unnest(input: &str) -> Result<Vec<String>> {
                             }
                             c
                         }
-                        None => unreachable!(),
+                        None => return Err(ExprError::Parse("Missing closing brace '}}' character")),
                     };
                     string.push(c);
                 }
                 items.push(string);
             }
-            '}' | ',' => {}
+            '}' => return Err(ExprError::Parse("Unexpected closing brace '}}' character")),
+            ',' => {}
             c if c.is_whitespace() => {}
             c => items.push(format!(
                 "{}{}",
                 c,
                 (&mut chars)
-                    .take_while_ref(|&c| c != ',' && c != '}')
+                    .take_while_ref(|&c| c != ',')
                     .collect::<String>()
             )),
         }
@@ -370,13 +366,13 @@ fn unnest(input: &str) -> Result<Vec<String>> {
 
 #[inline(always)]
 pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-
     // Return a new ListValue.
     // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn
     // is cast into the target DataType. If the target DataType is of type Varchar, then
     // no casting is needed.
     Ok(ListValue::new(
-        unnest(input)?.iter()
+        unnest(input)?
+            .iter()
             .map(|s| {
                 Some(ScalarRefImpl::Utf8(s.trim()))
                     .map(|scalar_ref| match &*target_elem_type {
@@ -660,5 +656,14 @@ mod tests {
             .unwrap(),
             double_nested_varchar_list123_445566
         );
+    }
+
+    #[test]
+    fn test_invalid_str_to_list() {
+        // Unbalanced input
+        assert!(str_to_list("{{}", &DataType::Int32).is_err());
+        assert!(str_to_list("{}}", &DataType::Int32).is_err());
+        assert!(str_to_list("{{1, 2, 3}, {4, 5, 6}", &DataType::Int32).is_err());
+        assert!(str_to_list("{{1, 2, 3}, 4, 5, 6}}", &DataType::Int32).is_err());
     }
 }
