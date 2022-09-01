@@ -26,6 +26,11 @@ macro_rules! def_visitor {
             fn check_convention(&self, _convention: Convention) -> bool {
                 return true;
             }
+
+            // This merge function is used to reduce results of plan inputs.
+            // In order to always remind users to implement themselves, we don't provide an default implementation.
+            fn merge(a: R, b: R) -> R;
+
             paste! {
                 fn visit(&mut self, plan: PlanRef) -> R{
                     match plan.node_type() {
@@ -38,14 +43,11 @@ macro_rules! def_visitor {
                 $(
                     #[doc = "Visit [`" [<$convention $name>] "`] , the function should visit the inputs."]
                     fn [<visit_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> R {
-                        let inputs = plan.inputs();
-                        if inputs.is_empty() {
-                            return R::default();
-                        }
-                        let mut iter = plan.inputs().into_iter();
-                        let ret = self.visit(iter.next().unwrap());
-                        iter.for_each(|input| {self.visit(input);});
-                        ret
+                        plan.inputs()
+                            .into_iter()
+                            .map(|input| self.visit(input))
+                            .reduce(Self::merge)
+                            .unwrap_or_default()
                     }
                 )*
             }
