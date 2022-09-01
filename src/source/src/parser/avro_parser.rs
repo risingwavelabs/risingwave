@@ -92,7 +92,7 @@ impl AvroParser {
             Ok(x)
         } else {
             Err(RwError::from(InternalError(
-                "schema invaild, record required".into(),
+                "schema invalid, record required".into(),
             )))
         }
     }
@@ -263,6 +263,7 @@ pub(crate) fn from_avro_value(column: &SourceColumnDesc, field_value: Value) -> 
 
 impl SourceParser for AvroParser {
     fn parse(&self, payload: &[u8], columns: &[SourceColumnDesc]) -> Result<Event> {
+        println!("payload {:?}", payload);
         let reader_rs = Reader::with_schema(&self.schema, payload);
         if let Ok(reader) = reader_rs {
             let mut rows = Vec::new();
