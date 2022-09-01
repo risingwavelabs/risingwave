@@ -526,7 +526,7 @@ impl SstableWriter for BatchUploadWriter {
             self.buf.put_slice(&size_footer.to_le_bytes());
             let data = self.buf.freeze();
 
-            let tracker = self.tracker.map(|mut t| {
+            let _tracker = self.tracker.map(|mut t| {
                 if !t.try_increase_memory(data.capacity() as u64) {
                     tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
                                     self.sst_id, data.capacity());
@@ -535,22 +535,23 @@ impl SstableWriter for BatchUploadWriter {
             });
 
             // Upload data to object store.
-            let ret = self
-                .sstable_store
+            self.sstable_store
                 .clone()
                 .put_sst_data(self.sst_id, data.clone())
-                .await;
+                .await?;
 
             // Add block cache.
-            if let CachePolicy::Fill = self.policy && ret.is_ok() {
+            if CachePolicy::Fill == self.policy {
                 debug_assert!(!self.block_info.is_empty());
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
-                    self.sstable_store.block_cache
-                        .insert(self.sst_id, block_idx as u64, Box::new(block));
+                    self.sstable_store.block_cache.insert(
+                        self.sst_id,
+                        block_idx as u64,
+                        Box::new(block),
+                    );
                 }
             }
-            drop(tracker);
-            ret
+            Ok(())
         });
         Ok(join_handle)
     }
