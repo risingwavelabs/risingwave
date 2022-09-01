@@ -81,7 +81,7 @@ impl Expression for ArrayCatExpression {
                 ))?;
             }
         }
-        Ok(Arc::new(builder.finish()?.into()))
+        Ok(Arc::new(builder.finish()?))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
@@ -201,7 +201,7 @@ mod tests {
             expected_array.clone(),
             None,
             expected_array.clone(),
-            expected_array.clone(),
+            expected_array,
         ];
         let actual = expr
             .eval(&chunk)
@@ -222,7 +222,7 @@ mod tests {
                 expected_array.clone(),
                 None,
                 expected_array.clone(),
-                expected_array.clone(),
+                expected_array,
             ];
             let actual = expr
                 .eval(&chunk)
@@ -285,7 +285,7 @@ mod tests {
             ),
         )
         .boxed();
-        let expr = ArrayCatExpression::new(ret_type.clone(), left_array, right_array);
+        let expr = ArrayCatExpression::new(ret_type, left_array, right_array);
 
         let chunk = DataChunk::new_dummy(4)
             .with_visibility([true, false, true, true].into_iter().collect());
@@ -297,7 +297,7 @@ mod tests {
             expected_array.clone(),
             None,
             expected_array.clone(),
-            expected_array.clone(),
+            expected_array,
         ];
         let actual = expr
             .eval(&chunk)
