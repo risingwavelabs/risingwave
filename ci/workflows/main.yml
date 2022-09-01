@@ -69,10 +69,9 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
-    soft_fail: true
 
   - label: "end-to-end test (deterministic simulation) (release mode)"
-    command: "ci/scripts/deterministic-e2e-test.sh"
+    command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -81,7 +80,6 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 15
     retry: *auto-retry
-    soft_fail: true
 
   - label: "release"
     command: "ci/scripts/release.sh"

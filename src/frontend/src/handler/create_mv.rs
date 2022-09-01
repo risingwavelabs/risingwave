@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -26,7 +27,7 @@ use crate::optimizer::property::RequiredDist;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 /// Generate create MV plan, return plan and mv table info.
 pub fn gen_create_mv_plan(
@@ -40,15 +41,18 @@ pub fn gen_create_mv_plan(
     let (database_id, schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        check_privileges(
-            session,
-            &vec![ObjectCheckItem::new(
-                schema.owner(),
-                Action::Create,
-                Object::SchemaId(schema.id()),
-            )],
-        )?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+            check_privileges(
+                session,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
+
         catalog_reader.check_relation_name_duplicated(
             session.database(),
             &schema_name,
@@ -103,7 +107,7 @@ pub async fn handle_create_mv(
 
     let (table, graph) = {
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
-        let graph = StreamFragmenterV2::build_graph(plan);
+        let graph = build_graph(plan);
 
         (table, graph)
     };

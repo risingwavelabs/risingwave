@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{IndexId, TableDesc, TableId};
+use risingwave_common::catalog::{IndexId, TableDesc, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenterV2;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
     session: &SessionImpl,
@@ -116,15 +116,17 @@ pub(crate) fn gen_create_index_plan(
     let (index_database_id, index_schema_id) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        check_privileges(
-            session,
-            &vec![ObjectCheckItem::new(
-                schema.owner(),
-                Action::Create,
-                Object::SchemaId(schema.id()),
-            )],
-        )?;
+        if schema_name != DEFAULT_SCHEMA_NAME {
+            let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+            check_privileges(
+                session,
+                &vec![ObjectCheckItem::new(
+                    schema.owner(),
+                    Action::Create,
+                    Object::SchemaId(schema.id()),
+                )],
+            )?;
+        }
 
         catalog_reader.check_relation_name_duplicated(
             session.database(),
@@ -308,7 +310,7 @@ pub async fn handle_create_index(
             columns,
             include,
         )?;
-        let graph = StreamFragmenterV2::build_graph(plan);
+        let graph = build_graph(plan);
 
         (graph, index_table, index)
     };

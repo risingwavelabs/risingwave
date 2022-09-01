@@ -21,6 +21,7 @@ use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
@@ -55,7 +56,15 @@ pub trait CreateSource: Send {
 }
 
 #[derive(Clone)]
-pub struct DefaultCreateSource {}
+pub struct DefaultCreateSource {
+    client_pool: ComputeClientPoolRef,
+}
+
+impl DefaultCreateSource {
+    pub fn new(client_pool: ComputeClientPoolRef) -> Self {
+        Self { client_pool }
+    }
+}
 
 #[async_trait::async_trait]
 impl CreateSource for DefaultCreateSource {
@@ -84,7 +93,12 @@ impl CreateSource for DefaultCreateSource {
             );
 
             Ok(ExchangeSourceImpl::Grpc(
-                GrpcExchangeSource::create(prost_source.clone()).await?,
+                GrpcExchangeSource::create(
+                    self.client_pool.get_by_addr(peer_addr).await?,
+                    task_output_id.clone(),
+                    prost_source.local_execute_plan.clone(),
+                )
+                .await?,
             ))
         }
     }
@@ -109,7 +123,8 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
 
         ensure!(!node.get_sources().is_empty());
         let prost_sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
-        let source_creators = vec![DefaultCreateSource {}; prost_sources.len()];
+        let source_creators =
+            vec![DefaultCreateSource::new(source.context().client_pool()); prost_sources.len()];
         let mut sources: Vec<ExchangeSourceImpl> = vec![];
 
         for (prost_source, source_creator) in prost_sources.iter().zip_eq(source_creators) {

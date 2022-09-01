@@ -1,6 +1,6 @@
 contact_links:
   - name: Questions and General Discussion
-    url: https://github.com/singularity-data/risingwave/discussions
+    url: https://github.com/risingwavelabs/risingwave/discussions
     about: Have questions? Welcome to open a discussion.
   - name: Community Chat
     url: https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw

@@ -57,6 +57,10 @@ impl StreamingUploader for InMemStreamingUploader {
             Ok(())
         }
     }
+
+    fn get_memory_usage(&self) -> u64 {
+        self.buf.capacity() as u64
+    }
 }
 
 /// In-memory object storage, useful for testing.
@@ -67,6 +71,10 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
+    fn get_object_prefix(&self, _obj_id: u64) -> String {
+        String::default()
+    }
+
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
             "mem upload error"

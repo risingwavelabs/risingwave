@@ -111,15 +111,19 @@ impl Binder {
         Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
+        self.context.clause = Some(Clause::GroupBy);
         let group_by = select
             .group_by
             .into_iter()
             .map(|expr| self.bind_expr(expr))
             .try_collect()?;
+        self.context.clause = None;
 
         // Bind HAVING clause.
+        self.context.clause = Some(Clause::Having);
         let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
         Self::require_bool_clause(&having, "HAVING")?;
+        self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items

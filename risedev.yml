@@ -26,8 +26,8 @@ risedev:
     # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
-    - use: prometheus
-    - use: grafana
+    # - use: prometheus
+    # - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
@@ -313,8 +313,8 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
-      enable-tiered-cache: true
     - use: frontend
     - use: compactor
 
@@ -324,18 +324,16 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: true
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: true
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: true
     - use: frontend
     - use: compactor
 
@@ -345,18 +343,16 @@ risedev:
       unsafe-no-fsync: true
     - use: meta-node
       unsafe-disable-recovery: true
+      enable-committed-sst-sanity-check: true
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      enable-tiered-cache: true
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      enable-tiered-cache: true
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      enable-tiered-cache: true
     - use: frontend
       port: 4565
     - use: frontend
@@ -392,7 +388,7 @@ risedev:
 
 
 compose:
-  risingwave: "ghcr.io/singularity-data/risingwave:latest"
+  risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
   minio: "quay.io/minio/minio:latest"
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
@@ -537,6 +533,9 @@ template:
     # Threshold used by worker node to filter out new SSTs when scanning object store, during full SST GC.
     # 7 days by default.
     min-sst-retention-time-sec: 604800
+
+    # Enable sanity check when SSTs are committed. Disabled by default.
+    enable-committed-sst-sanity-check: false
 
   prometheus:
     # Advertise address of Prometheus

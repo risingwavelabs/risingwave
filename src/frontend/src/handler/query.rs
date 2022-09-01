@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::Statement;
 use tracing::debug;
 
 use crate::binder::{Binder, BoundStatement};
+use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{force_local_mode, to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{
@@ -41,6 +42,9 @@ pub async fn handle_query(
         let mut binder = Binder::new(&session);
         binder.bind(stmt)?
     };
+
+    let check_items = resolve_privileges(&bound);
+    check_privileges(&session, &check_items)?;
 
     let query_mode = if force_local_mode(&bound) {
         debug!("force query mode to local");
@@ -101,7 +105,10 @@ pub async fn distribute_execute(
             plan.explain_to_string()?
         );
 
-        let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
+        let plan_fragmenter = BatchPlanFragmenter::new(
+            session.env().worker_node_manager_ref(),
+            session.env().catalog_reader().clone(),
+        );
         let query = plan_fragmenter.split(plan)?;
         tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
         (query, pg_descs)
@@ -134,7 +141,10 @@ fn local_execute(
 
         let plan = root.gen_batch_local_plan()?;
 
-        let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
+        let plan_fragmenter = BatchPlanFragmenter::new(
+            session.env().worker_node_manager_ref(),
+            session.env().catalog_reader().clone(),
+        );
         let query = plan_fragmenter.split(plan)?;
         tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
         (query, pg_descs)
