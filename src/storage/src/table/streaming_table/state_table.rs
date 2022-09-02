@@ -182,7 +182,7 @@ impl<S: StateStore> StateTable<S> {
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
-            vnode_col_idx_in_pk: vnode_col_idx_in_pk,
+            vnode_col_idx_in_pk,
         }
     }
 
