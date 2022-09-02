@@ -599,7 +599,7 @@ where
                     for upstream_actor in &mut upstream_fragment.actors {
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
-                                dispatcher.hash_mapping = Some(upstream_dispatcher_mapping.clone());
+                                dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,

@@ -546,42 +546,47 @@ where
                 "hash dispatcher should have at least one downstream actor"
             );
 
-            let upstream_dispatcher_mapping = if parallel_unit_to_actor_after_reschedule.len() == 1
-            {
-                ActorMapping {
-                    original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
-                    data: vec![
-                        *parallel_unit_to_actor_after_reschedule
-                            .first_key_value()
-                            .unwrap()
-                            .1,
-                    ],
-                }
-            } else {
-                let downstream_vnode_mapping = fragment.vnode_mapping.clone().unwrap();
-                let ParallelUnitMapping {
-                    original_indices,
-                    data,
-                    ..
-                } = downstream_vnode_mapping;
+            let upstream_dispatcher_mapping = match fragment.distribution_type() {
+                FragmentDistributionType::Hash => {
+                    if parallel_unit_to_actor_after_reschedule.len() == 1 {
+                        Some(ActorMapping {
+                            original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
+                            data: vec![
+                                *parallel_unit_to_actor_after_reschedule
+                                    .first_key_value()
+                                    .unwrap()
+                                    .1,
+                            ],
+                        })
+                    } else {
+                        let downstream_vnode_mapping = fragment.vnode_mapping.clone().unwrap();
+                        let ParallelUnitMapping {
+                            original_indices,
+                            data,
+                            ..
+                        } = downstream_vnode_mapping;
 
-                let data = data
-                    .iter()
-                    .map(|parallel_unit_id| {
-                        if let Some(new_parallel_unit_id) =
-                            replace_parallel_unit_map.get(parallel_unit_id)
-                        {
-                            parallel_unit_to_actor_after_reschedule[new_parallel_unit_id]
-                        } else {
-                            parallel_unit_to_actor_after_reschedule[parallel_unit_id]
-                        }
-                    })
-                    .collect_vec();
+                        let data = data
+                            .iter()
+                            .map(|parallel_unit_id| {
+                                if let Some(new_parallel_unit_id) =
+                                    replace_parallel_unit_map.get(parallel_unit_id)
+                                {
+                                    parallel_unit_to_actor_after_reschedule[new_parallel_unit_id]
+                                } else {
+                                    parallel_unit_to_actor_after_reschedule[parallel_unit_id]
+                                }
+                            })
+                            .collect_vec();
 
-                ActorMapping {
-                    original_indices: original_indices.clone(),
-                    data,
+                        Some(ActorMapping {
+                            original_indices: original_indices.clone(),
+                            data,
+                        })
+                    }
                 }
+                FragmentDistributionType::Single => None,
+                FragmentDistributionType::Unspecified => unreachable!(),
             };
 
             let mut upstream_fragment_dispatcher_set = BTreeSet::new();

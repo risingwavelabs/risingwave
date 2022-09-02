@@ -261,7 +261,9 @@ where
                                     actor_id,
                                     ProstDispatcherUpdate {
                                         dispatcher_id,
-                                        hash_mapping: reschedule.upstream_dispatcher_mapping.clone(),
+                                        hash_mapping: reschedule
+                                            .upstream_dispatcher_mapping
+                                            .clone(),
                                         added_downstream_actor_id: reschedule.added_actors.clone(),
                                         removed_downstream_actor_id: reschedule
                                             .removed_actors
