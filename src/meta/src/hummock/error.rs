@@ -72,6 +72,12 @@ impl From<MetadataModelError> for Error {
     }
 }
 
+impl From<Error> for tonic::Status {
+    fn from(err: Error) -> Self {
+        tonic::Status::new(tonic::Code::Internal, format!("{}", err))
+    }
+}
+
 impl From<anyhow::Error> for Error {
     fn from(e: anyhow::Error) -> Self {
         Error::InternalError(e)

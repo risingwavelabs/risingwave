@@ -160,19 +160,20 @@ impl PlanRoot {
 
     /// Check whether the plan has `LogicalApply` that isn't be unnested.
     pub fn has_apply(plan: PlanRef) -> bool {
-        pub struct PlanApplyFinder {
-            has_apply: bool,
-        }
+        pub struct PlanApplyFinder {}
 
-        impl PlanVisitor<()> for PlanApplyFinder {
-            fn visit_logical_apply(&mut self, _plan: &LogicalApply) {
-                self.has_apply = true;
+        impl PlanVisitor<bool> for PlanApplyFinder {
+            fn visit_logical_apply(&mut self, _plan: &LogicalApply) -> bool {
+                true
+            }
+
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
             }
         }
 
-        let mut finder = PlanApplyFinder { has_apply: false };
-        finder.visit(plan);
-        finder.has_apply
+        let mut finder = PlanApplyFinder {};
+        finder.visit(plan)
     }
 
     /// Apply logical optimization to the plan.
@@ -316,6 +317,10 @@ impl PlanRoot {
 
         struct HasExchange;
         impl PlanVisitor<bool> for HasExchange {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
             fn visit_batch_exchange(&mut self, _: &BatchExchange) -> bool {
                 true
             }

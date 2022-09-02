@@ -42,3 +42,6 @@ drop materialized view nexmark_q20;
 
 statement ok
 drop materialized view nexmark_q21;
+
+statement ok
+drop materialized view nexmark_q22;

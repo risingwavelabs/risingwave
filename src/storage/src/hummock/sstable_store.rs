@@ -301,16 +301,20 @@ impl SstableStore {
     }
 
     pub fn get_sst_meta_path(&self, sst_id: HummockSstableId) -> String {
-        let mut ret = format!("{}/{}.meta", self.path, sst_id);
-        if !is_remote_sst_id(sst_id) {
+        let is_remote = is_remote_sst_id(sst_id);
+        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
+        let mut ret = format!("{}/{}{}.meta", self.path, obj_prefix, sst_id);
+        if !is_remote {
             ret = get_local_path(&ret);
         }
         ret
     }
 
     pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
-        let mut ret = format!("{}/{}.data", self.path, sst_id);
-        if !is_remote_sst_id(sst_id) {
+        let is_remote = is_remote_sst_id(sst_id);
+        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
+        let mut ret = format!("{}/{}{}.data", self.path, obj_prefix, sst_id);
+        if !is_remote {
             ret = get_local_path(&ret);
         }
         ret
@@ -388,6 +392,43 @@ impl SstableStore {
             .await
             .map_err(HummockError::object_io_error)
     }
+
+    pub async fn create_sst_writer(
+        self: Arc<Self>,
+        sst_id: HummockSstableId,
+        policy: CachePolicy,
+        options: SstableWriterOptions,
+    ) -> HummockResult<BoxedSstableWriter> {
+        match &options.mode {
+            SstableWriteMode::Batch => Ok(Box::new(BatchUploadWriter::new(
+                sst_id, self, policy, options,
+            ))),
+            SstableWriteMode::Streaming => {
+                let data_path = self.get_sst_data_path(sst_id);
+                let uploader = self.store.streaming_upload(&data_path).await?;
+                Ok(Box::new(StreamingUploadWriter::new(
+                    sst_id, self, policy, uploader, options,
+                )))
+            }
+        }
+    }
+
+    pub async fn put_sst_meta(
+        &self,
+        sst_id: HummockSstableId,
+        meta: SstableMeta,
+    ) -> HummockResult<()> {
+        fail_point!("metadata_upload_err");
+        if let Err(e) = self.put_meta(sst_id, &meta).await {
+            self.delete_sst_data(sst_id).await?;
+            return Err(e);
+        }
+        let sst = Sstable::new(sst_id, meta);
+        let charge = sst.estimate_size();
+        self.meta_cache
+            .insert(sst_id, sst_id, charge, Box::new(sst));
+        Ok(())
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
@@ -436,55 +477,6 @@ impl From<&SstableBuilderOptions> for SstableWriterOptions {
                 tracker: None,
             }
         }
-    }
-}
-
-#[async_trait::async_trait]
-pub trait SstableStoreWrite: Send + Sync {
-    /// Create a writer for SST data.
-    async fn create_sst_writer(
-        self: Arc<Self>,
-        sst_id: HummockSstableId,
-        policy: CachePolicy,
-        options: SstableWriterOptions,
-    ) -> HummockResult<BoxedSstableWriter>;
-
-    async fn put_sst_meta(&self, sst_id: HummockSstableId, meta: SstableMeta) -> HummockResult<()>;
-}
-
-#[async_trait::async_trait]
-impl SstableStoreWrite for SstableStore {
-    async fn create_sst_writer(
-        self: Arc<Self>,
-        sst_id: HummockSstableId,
-        policy: CachePolicy,
-        options: SstableWriterOptions,
-    ) -> HummockResult<BoxedSstableWriter> {
-        match &options.mode {
-            SstableWriteMode::Batch => Ok(Box::new(BatchUploadWriter::new(
-                sst_id, self, policy, options,
-            ))),
-            SstableWriteMode::Streaming => {
-                let data_path = self.get_sst_data_path(sst_id);
-                let uploader = self.store.streaming_upload(&data_path).await?;
-                Ok(Box::new(StreamingUploadWriter::new(
-                    sst_id, self, policy, uploader, options,
-                )))
-            }
-        }
-    }
-
-    async fn put_sst_meta(&self, sst_id: HummockSstableId, meta: SstableMeta) -> HummockResult<()> {
-        fail_point!("metadata_upload_err");
-        if let Err(e) = self.put_meta(sst_id, &meta).await {
-            self.delete_sst_data(sst_id).await?;
-            return Err(e);
-        }
-        let sst = Sstable::new(sst_id, meta);
-        let charge = sst.estimate_size();
-        self.meta_cache
-            .insert(sst_id, sst_id, charge, Box::new(sst));
-        Ok(())
     }
 }
 

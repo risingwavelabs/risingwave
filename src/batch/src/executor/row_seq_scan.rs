@@ -25,12 +25,12 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
-use risingwave_storage::row_serde::RowBasedSerde;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
+use risingwave_storage::table::batch_table::storage_table::{StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -50,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    BatchScan(StorageTableIter<S, RowBasedSerde>),
+    BatchScan(StorageTableIter<S>),
     PointGet(Option<Row>),
 }
 
@@ -93,8 +93,7 @@ fn get_scan_bound(
         .iter()
         .map(|v| {
             let ty = pk_types.next().unwrap();
-            let scalar = ScalarImpl::from_proto_bytes(v, &ty.to_protobuf()).unwrap();
-            Some(scalar)
+            deserialize_datum(v.as_slice(), &ty).expect("fail to deserialize datum")
         })
         .collect_vec());
     if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
@@ -181,7 +180,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
                 vnodes: Bitmap::from(vnodes).into(),
@@ -202,7 +200,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let batch_stats = source.context().stats().unwrap();
-            let table = RowBasedStorageTable::new_partial(
+            let table = StorageTable::new_partial(
                 state_store.clone(),
                 table_id,
                 column_descs,
@@ -231,7 +229,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             for scan_range in &seq_scan_node.scan_ranges {
                 let scan_type = async {
                     let pk_types = pk_types.clone();
-                    let table = table.clone();
+                    let mut table = table.clone();
                     let keyspace = keyspace.clone();
 
                     let (pk_prefix_value, next_col_bounds) =

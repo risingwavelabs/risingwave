@@ -168,7 +168,10 @@ impl fmt::Display for BatchSeqScan {
                     .eq_conds
                     .iter()
                     .zip(order_names.iter())
-                    .map(|(v, name)| format!("{} = {:?}", name, v))
+                    .map(|(v, name)| match v {
+                        Some(v) => format!("{} = {:?}", name, v),
+                        None => format!("{} IS NULL", name),
+                    })
                     .collect_vec();
                 if !is_full_range(&scan_range.range) {
                     let i = scan_range.eq_conds.len();

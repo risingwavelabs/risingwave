@@ -62,9 +62,9 @@ impl Rule for ApplyAggRule {
                 .map(|(i, data_type)| {
                     let left = InputRef::new(i, data_type.clone());
                     let right = InputRef::new(i + left_len, data_type);
-                    // TODO: use is not distinct from instead of equal
+                    // use null-safe equal
                     FunctionCall::new_unchecked(
-                        ExprType::Equal,
+                        ExprType::IsNotDistinctFrom,
                         vec![left.into(), right.into()],
                         DataType::Boolean,
                     )

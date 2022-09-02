@@ -1,4 +1,4 @@
-# https://github.com/singularity-data/risingwave/issues/4213
+# https://github.com/risingwavelabs/risingwave/issues/4213
 
 statement ok
 create table t1 (v1 int);

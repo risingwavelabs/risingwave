@@ -38,7 +38,7 @@ use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
-use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, Relation};
+use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -271,42 +271,59 @@ where
         }
     }
 
-    pub async fn start_create_procedure(&self, relation: &Relation) -> MetaResult<()> {
-        match relation {
-            Relation::Table(table) => self.start_create_table_procedure(table).await,
-            Relation::Sink(sink) => self.start_create_sink_procedure(sink).await,
-            Relation::Index(index, index_table) => {
+    pub async fn start_create_stream_job_procedure(
+        &self,
+        stream_job: &StreamingJob,
+    ) -> MetaResult<()> {
+        match stream_job {
+            StreamingJob::MaterializedView(table) => self.start_create_table_procedure(table).await,
+            StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
+            StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
-        }
-    }
-
-    pub async fn cancel_create_procedure(&self, relation: &Relation) -> MetaResult<()> {
-        match relation {
-            Relation::Table(table) => self.cancel_create_table_procedure(table).await,
-            Relation::Sink(sink) => self.cancel_create_sink_procedure(sink).await,
-            Relation::Index(index, index_table) => {
-                self.cancel_create_index_procedure(index, index_table).await
+            StreamingJob::MaterializedSource(source, table) => {
+                self.start_create_materialized_source_procedure(source, table)
+                    .await
             }
         }
     }
 
-    pub async fn finish_create_procedure(
-        &self,
-        internal_tables: Option<Vec<Table>>,
-        relation: &Relation,
-    ) -> MetaResult<NotificationVersion> {
-        match relation {
-            Relation::Table(table) => {
-                self.finish_create_table_procedure(internal_tables.unwrap(), table)
-                    .await
-            }
-            Relation::Sink(sink) => self.finish_create_sink_procedure(sink).await,
-            Relation::Index(index, index_table) => {
-                self.finish_create_index_procedure(index, internal_tables.unwrap(), index_table)
-                    .await
+    pub async fn mark_creating_tables(&self, creating_tables: &[Table]) {
+        let core = &mut self.core.lock().await.database;
+        core.mark_creating_tables(creating_tables);
+        for table in creating_tables {
+            self.notify_compute_and_compactor(Operation::Add, Info::Table(table.to_owned()))
+                .await;
+        }
+    }
+
+    pub async fn unmark_creating_tables(&self, creating_table_ids: &[TableId], need_notify: bool) {
+        let core = &mut self.core.lock().await.database;
+        core.unmark_creating_tables(creating_table_ids);
+        if need_notify {
+            for table_id in creating_table_ids {
+                self.notify_compute_and_compactor(
+                    Operation::Delete,
+                    Info::Table(Table {
+                        id: *table_id,
+                        ..Default::default()
+                    }),
+                )
+                .await;
             }
         }
+    }
+
+    async fn notify_compute_and_compactor(&self, operation: Operation, info: Info) {
+        self.env
+            .notification_manager()
+            .notify_compute(operation, info.clone())
+            .await;
+
+        self.env
+            .notification_manager()
+            .notify_compactor(operation, info)
+            .await;
     }
 
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
@@ -546,12 +563,8 @@ where
             source.insert(self.env.meta_store()).await?;
             core.add_source(source);
 
-            // stream_manager handle the materialized only (mview, table, index,
-            // materialized_source) so we need to notify all_node for this case.
             let version = self
-                .env
-                .notification_manager()
-                .notify_all_node(Operation::Add, Info::Source(source.to_owned()))
+                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
                 .await;
 
             Ok(version)
@@ -982,7 +995,7 @@ where
                 let default_user = UserInfo {
                     id,
                     name: user.to_string(),
-                    is_supper: true,
+                    is_super: true,
                     can_create_db: true,
                     can_create_user: true,
                     can_login: true,
@@ -1173,13 +1186,13 @@ where
                 .get_user_grant_relation_entry(grantor)
                 .or_insert_with(HashSet::new);
 
-            if user.is_supper {
+            if user.is_super {
                 return Err(MetaError::permission_denied(format!(
                     "Cannot grant privilege to super user {}",
                     user_id
                 )));
             }
-            if !grantor_info.is_supper {
+            if !grantor_info.is_super {
                 for new_grant_privilege in new_grant_privileges {
                     if let Some(privilege) = grantor_info
                         .grant_privileges
@@ -1284,7 +1297,7 @@ where
             .get_user_info(&revoke_by)
             .ok_or_else(|| anyhow!("User {} does not exist", &revoke_by))?;
         let same_user = granted_by == revoke_by.id;
-        if !revoke_by.is_supper {
+        if !revoke_by.is_super {
             for privilege in revoke_grant_privileges {
                 if let Some(user_privilege) = revoke_by
                     .grant_privileges
@@ -1310,7 +1323,7 @@ where
             let user = core
                 .get_user_info(user_id)
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
-            if user.is_supper {
+            if user.is_super {
                 return Err(MetaError::permission_denied(format!(
                     "Cannot revoke privilege from supper user {}",
                     user_id

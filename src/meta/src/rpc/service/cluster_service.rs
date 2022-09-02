@@ -20,7 +20,6 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::error::meta_error_to_tonic;
 use crate::manager::ClusterManagerRef;
 use crate::storage::MetaStore;
 
@@ -48,8 +47,8 @@ where
         request: Request<AddWorkerNodeRequest>,
     ) -> Result<Response<AddWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
-        let host = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let worker_type = req.get_worker_type()?;
+        let host = req.get_host()?.clone();
         let worker_node_parallelism = req.worker_node_parallelism as usize;
         let worker_node = self
             .cluster_manager
@@ -66,7 +65,7 @@ where
         request: Request<ActivateWorkerNodeRequest>,
     ) -> Result<Response<ActivateWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let host = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let host = req.get_host()?.clone();
         self.cluster_manager.activate_worker_node(host).await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
@@ -76,7 +75,7 @@ where
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let host = req.get_host().map_err(meta_error_to_tonic)?.clone();
+        let host = req.get_host()?.clone();
         self.cluster_manager.delete_worker_node(host).await?;
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }
@@ -86,7 +85,7 @@ where
         request: Request<ListAllNodesRequest>,
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
-        let worker_type = req.get_worker_type().map_err(meta_error_to_tonic)?;
+        let worker_type = req.get_worker_type()?;
         let worker_state = if req.include_starting_nodes {
             None
         } else {

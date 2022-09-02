@@ -24,9 +24,10 @@ use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStor
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
 };
+use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CompressionAlgorithm, SstableBuilderOptions, SstableStore, SstableStoreWrite, TieredCache,
+    CompressionAlgorithm, SstableBuilderOptions, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
@@ -51,7 +52,7 @@ fn get_builder_options(
 }
 
 fn get_builder(
-    sstable_store: Arc<dyn SstableStoreWrite>,
+    sstable_store: SstableStoreRef,
     options: SstableBuilderOptions,
 ) -> CapacitySplitTableBuilder<LocalTableBuilderFactory> {
     CapacitySplitTableBuilder::new_for_test(LocalTableBuilderFactory::new(

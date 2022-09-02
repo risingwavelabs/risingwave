@@ -104,7 +104,9 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
         | ConcatOp => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom | ArrayAccess => build_nullable_binary_expr_prost(prost),
+        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
+            build_nullable_binary_expr_prost(prost)
+        }
         ToChar => build_to_char_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),

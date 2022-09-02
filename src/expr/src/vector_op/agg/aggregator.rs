@@ -22,16 +22,15 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
-use super::array_agg::create_array_agg_state;
-use super::string_agg::StringAgg;
-use crate::expr::{
-    build_from_prost, AggKind, Expression, ExpressionRef, InputRefExpression, LiteralExpression,
-};
+use crate::expr::{build_from_prost, AggKind};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
+use crate::vector_op::agg::array_agg::create_array_agg_state;
 use crate::vector_op::agg::count_star::CountStar;
+use crate::vector_op::agg::filter::*;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
+use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
@@ -84,22 +83,12 @@ impl AggStateFactory {
             order_pairs.push(OrderPair::new(col_idx, order_type));
             order_col_types.push(col_type);
         });
-        let filter: ExpressionRef = match prost.filter {
-            Some(ref expr) => Arc::from(build_from_prost(expr)?),
-            None => Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        };
 
         let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
-            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone(), filter)),
+            (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),
             (AggKind::ApproxCountDistinct, [arg]) => {
                 let input_col_idx = arg.get_input()?.get_column_idx() as usize;
-                Box::new(ApproxCountDistinct::new(
-                    return_type.clone(),
-                    input_col_idx,
-                    filter,
-                ))
+                Box::new(ApproxCountDistinct::new(return_type.clone(), input_col_idx))
             }
             (AggKind::StringAgg, [agg_arg, delim_arg]) => {
                 assert_eq!(
@@ -110,20 +99,9 @@ impl AggStateFactory {
                     DataType::from(delim_arg.get_type().unwrap()),
                     DataType::Varchar
                 );
-                let input_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
-                let delim_expr = Arc::from(
-                    InputRefExpression::new(
-                        DataType::Varchar,
-                        delim_arg.get_input()?.get_column_idx() as usize,
-                    )
-                    .boxed(),
-                );
-                Box::new(StringAgg::new(
-                    input_col_idx,
-                    delim_expr,
-                    order_pairs,
-                    order_col_types,
-                ))
+                let agg_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
+                let delim_col_idx = delim_arg.get_input()?.get_column_idx() as usize;
+                create_string_agg_state(agg_col_idx, delim_col_idx, order_pairs)?
             }
             (AggKind::ArrayAgg, [arg]) => {
                 let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
@@ -139,10 +117,18 @@ impl AggStateFactory {
                     agg_kind,
                     return_type.clone(),
                     distinct,
-                    filter,
                 )?
             }
             _ => bail!("Invalid agg call: {:?}", agg_kind),
+        };
+
+        // wrap the agg state in a `Filter` if needed
+        let initial_agg_state = match prost.filter {
+            Some(ref expr) => Box::new(Filter::new(
+                Arc::from(build_from_prost(expr)?),
+                initial_agg_state,
+            )),
+            None => initial_agg_state,
         };
 
         Ok(Self {
@@ -166,7 +152,6 @@ pub fn create_agg_state_unary(
     agg_kind: AggKind,
     return_type: DataType,
     distinct: bool,
-    filter: ExpressionRef,
 ) -> Result<BoxedAggState> {
     use crate::expr::data_types::*;
 
@@ -185,7 +170,6 @@ pub fn create_agg_state_unary(
                             input_col_idx,
                             $fn,
                             $init_result,
-                            filter
                         ))
                     },
                     ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
@@ -193,7 +177,6 @@ pub fn create_agg_state_unary(
                             return_type,
                             input_col_idx,
                             $fn,
-                            filter,
                         ))
                     },
                 )*
@@ -284,9 +267,6 @@ mod tests {
         let decimal_type = DataType::Decimal;
         let bool_type = DataType::Boolean;
         let char_type = DataType::Varchar;
-        let filter: ExpressionRef = Arc::from(
-            LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-        );
         macro_rules! test_create {
             ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
                 assert!(create_agg_state_unary(
@@ -295,7 +275,6 @@ mod tests {
                     AggKind::$agg,
                     $return_type.clone(),
                     false,
-                    filter.clone(),
                 )
                 .$expected());
                 assert!(create_agg_state_unary(
@@ -304,7 +283,6 @@ mod tests {
                     AggKind::$agg,
                     $return_type.clone(),
                     true,
-                    filter.clone(),
                 )
                 .$expected());
             };

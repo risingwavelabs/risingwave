@@ -98,6 +98,12 @@ pub mod monitor_service_serde;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);
 
+impl From<ProstFieldNotFound> for tonic::Status {
+    fn from(e: ProstFieldNotFound) -> Self {
+        tonic::Status::new(tonic::Code::Internal, e.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
