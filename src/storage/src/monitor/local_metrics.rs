@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(any(test, feature = "test")))]
+#[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -33,9 +33,9 @@ pub struct StoreLocalStatistic {
     pub remote_io_time: Arc<AtomicU64>,
     pub bloom_filter_check_counts: u64,
 
-    #[cfg(not(any(test, feature = "test")))]
+    #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
     reported: AtomicBool,
-    #[cfg(not(any(test, feature = "test")))]
+    #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
     added: AtomicBool,
 }
 
@@ -56,7 +56,7 @@ impl StoreLocalStatistic {
         );
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
 
-        #[cfg(not(any(test, feature = "test")))]
+        #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
         if other.added.fetch_or(true, Ordering::SeqCst) {
             panic!("double added");
         }
@@ -120,14 +120,14 @@ impl StoreLocalStatistic {
                 .inc_by(self.skip_key_count);
         }
 
-        #[cfg(not(any(test, feature = "test")))]
+        #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
         if self.reported.fetch_or(true, Ordering::SeqCst) {
             panic!("double reported");
         }
     }
 }
 
-#[cfg(not(any(test, feature = "test")))]
+#[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
 impl Drop for StoreLocalStatistic {
     fn drop(&mut self) {
         if !self.reported.load(Ordering::SeqCst) && !self.added.load(Ordering::SeqCst) {
