@@ -357,9 +357,7 @@ fn unnest(input: &str) -> Result<Vec<String>> {
             c => items.push(format!(
                 "{}{}",
                 c,
-                (&mut chars)
-                    .take_while_ref(|&c| c != ',')
-                    .collect::<String>()
+                chars.take_while_ref(|&c| c != ',').collect::<String>()
             )),
         }
     }
@@ -377,7 +375,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
             .iter()
             .map(|s| {
                 Some(ScalarRefImpl::Utf8(s.trim()))
-                    .map(|scalar_ref| match &*target_elem_type {
+                    .map(|scalar_ref| match target_elem_type {
                         DataType::Varchar => Ok(scalar_ref.into_scalar_impl()),
                         _ => scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type),
                     })
