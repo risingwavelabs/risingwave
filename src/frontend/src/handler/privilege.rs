@@ -126,7 +126,7 @@ pub(crate) fn check_super_user(session: &SessionImpl) -> bool {
     let reader = user_reader.read_guard();
 
     if let Some(info) = reader.get_user_by_name(session.user_name()) {
-        info.is_supper
+        info.is_super
     } else {
         false
     }
@@ -138,7 +138,7 @@ pub(crate) fn check_privileges(session: &SessionImpl, items: &Vec<ObjectCheckIte
     let reader = user_reader.read_guard();
 
     if let Some(info) = reader.get_user_by_name(session.user_name()) {
-        if info.is_supper {
+        if info.is_super {
             return Ok(());
         }
         for item in items {

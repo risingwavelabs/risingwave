@@ -205,7 +205,8 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
 
         let exchange_node = sort_merge_node.get_exchange()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
-        let source_creators = vec![DefaultCreateSource {}; proto_sources.len()];
+        let source_creators =
+            vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
         ensure!(!exchange_node.get_sources().is_empty());
         let fields = exchange_node
             .get_input_schema()
