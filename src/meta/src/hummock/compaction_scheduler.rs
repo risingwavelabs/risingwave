@@ -154,8 +154,7 @@ where
             // 2.1 Select a compactor.
             let compactor = match self
                 .compactor_manager
-                .next_idle_compactor(&self.hummock_manager, Some(&compact_task))
-                .await
+                .next_idle_compactor(Some(&compact_task))
             {
                 None => {
                     let current_compactor_tasks =
@@ -199,8 +198,7 @@ where
                     match err {
                         Error::InvalidContext(_) | Error::CompactorUnreachable(_) => {
                             self.compactor_manager
-                                .remove_compactor(compactor.context_id())
-                                .await;
+                                .remove_compactor(compactor.context_id());
                         }
                         _ => {}
                     }

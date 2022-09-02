@@ -116,7 +116,7 @@ where
                 .cloned()
                 .collect_vec();
             // 1. Pick a worker.
-            let compactor = match self.compactor_manager.next_compactor(None).await {
+            let compactor = match self.compactor_manager.next_compactor(None) {
                 None => {
                     tracing::warn!("No vacuum worker is available.");
                     break;
@@ -149,8 +149,7 @@ where
                         err
                     );
                     self.compactor_manager
-                        .remove_compactor(compactor.context_id())
-                        .await;
+                        .remove_compactor(compactor.context_id());
                 }
             }
         }
@@ -193,11 +192,7 @@ where
             "run full GC with sst_retention_time = {} secs",
             sst_retention_time.as_secs()
         );
-        let compactor = match self
-            .compactor_manager
-            .next_idle_compactor(&self.hummock_manager, None)
-            .await
-        {
+        let compactor = match self.compactor_manager.next_idle_compactor(None) {
             None => {
                 tracing::warn!("Try full GC but no available idle worker.");
                 return Ok(());
@@ -330,13 +325,13 @@ mod tests {
     async fn test_vacuum_basic() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::default());
+        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),
             compactor_manager.clone(),
         ));
-        let _receiver = compactor_manager.add_compactor(0, u64::MAX).await;
+        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX);
 
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
 

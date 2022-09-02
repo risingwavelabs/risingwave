@@ -17,22 +17,21 @@ use std::sync::Arc;
 
 use rand::Rng;
 use risingwave_hummock_sdk::HummockContextId;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
 use tokio::sync::mpsc::Receiver;
 
-use super::{Compactor, HummockManager};
-use crate::storage::MetaStore;
+use super::Compactor;
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
 
 /// The implementation of compaction task scheduling policy.
-#[async_trait::async_trait]
 pub trait CompactionSchedulePolicy: Send + Sync {
     /// Get next idle compactor to assign task.
-    async fn next_idle_compactor<S: MetaStore>(
+    fn next_idle_compactor(
         &mut self,
-        hummock_manager: &HummockManager<S>,
+        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
         compact_task: Option<&CompactTask>,
     ) -> Option<Arc<Compactor>>;
 
@@ -54,76 +53,6 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask);
 }
 
-pub enum CompactionSchedulePolicyImpl {
-    RoundRobin(RoundRobinPolicy),
-    LeastPendingBytes(LeastPendingBytesPolicy),
-}
-
-impl CompactionSchedulePolicyImpl {
-    pub async fn next_idle_compactor<S: MetaStore>(
-        &mut self,
-        hummock_manager: &HummockManager<S>,
-        compact_task: Option<&CompactTask>,
-    ) -> Option<Arc<Compactor>> {
-        match self {
-            Self::RoundRobin(inner) => {
-                inner
-                    .next_idle_compactor(hummock_manager, compact_task)
-                    .await
-            }
-            Self::LeastPendingBytes(inner) => {
-                inner
-                    .next_idle_compactor(hummock_manager, compact_task)
-                    .await
-            }
-        }
-    }
-
-    pub fn next_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
-        match self {
-            Self::RoundRobin(inner) => inner.next_compactor(compact_task),
-            Self::LeastPendingBytes(inner) => inner.next_compactor(compact_task),
-        }
-    }
-
-    pub fn random_compactor(
-        &mut self,
-        compact_task: Option<&CompactTask>,
-    ) -> Option<Arc<Compactor>> {
-        match self {
-            Self::RoundRobin(inner) => inner.random_compactor(compact_task),
-            Self::LeastPendingBytes(inner) => inner.random_compactor(compact_task),
-        }
-    }
-
-    pub fn add_compactor(
-        &mut self,
-        context_id: HummockContextId,
-        max_concurrent_task_number: u64,
-    ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
-        match self {
-            Self::RoundRobin(inner) => inner.add_compactor(context_id, max_concurrent_task_number),
-            Self::LeastPendingBytes(inner) => {
-                inner.add_compactor(context_id, max_concurrent_task_number)
-            }
-        }
-    }
-
-    pub fn remove_compactor(&mut self, context_id: HummockContextId) {
-        match self {
-            Self::RoundRobin(inner) => inner.remove_compactor(context_id),
-            Self::LeastPendingBytes(inner) => inner.remove_compactor(context_id),
-        }
-    }
-
-    pub fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask) {
-        match self {
-            Self::RoundRobin(inner) => inner.report_compact_task(context_id, task),
-            Self::LeastPendingBytes(inner) => inner.report_compact_task(context_id, task),
-        }
-    }
-}
-
 // This strategy is retained just for reference, it is not used.
 pub struct RoundRobinPolicy {
     /// Senders of stream to available compactors.
@@ -142,12 +71,10 @@ impl RoundRobinPolicy {
         }
     }
 }
-
-#[async_trait::async_trait]
 impl CompactionSchedulePolicy for RoundRobinPolicy {
-    async fn next_idle_compactor<S: MetaStore>(
+    fn next_idle_compactor(
         &mut self,
-        hummock_manager: &HummockManager<S>,
+        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
         compact_task: Option<&CompactTask>,
     ) -> Option<Arc<Compactor>> {
         let mut visited = HashSet::new();
@@ -160,9 +87,9 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
                     if visited.contains(&compactor.context_id()) {
                         return None;
                     }
-                    if hummock_manager
-                        .get_assigned_tasks_number(compactor.context_id())
-                        .await
+                    if *compactor_assigned_task_num
+                        .get(&compactor.context_id())
+                        .unwrap()
                         < compactor.max_concurrent_task_number()
                     {
                         return Some(compactor);
@@ -238,17 +165,21 @@ impl LeastPendingBytesPolicy {
         context_id: HummockContextId,
         old_bytes: usize,
         compact_task: Option<&CompactTask>,
-        assign_task: bool,
     ) -> Arc<Compactor> {
-        let task_pending_bytes = match compact_task {
-            Some(task) => task.input_file_size as usize,
-            None => 0,
-        };
-        let new_bytes = if assign_task {
-            old_bytes + task_pending_bytes
-        } else {
-            debug_assert!(old_bytes >= task_pending_bytes);
-            old_bytes - task_pending_bytes
+        let mut new_bytes = old_bytes;
+        if let Some(task) = compact_task {
+            let task_size = task
+                .input_ssts
+                .iter()
+                .flat_map(|level| level.table_infos.iter())
+                .map(|table| table.file_size)
+                .sum::<u64>() as usize;
+            if let TaskStatus::Pending = task.task_status() {
+                new_bytes += task_size
+            } else {
+                debug_assert!(old_bytes >= task_size);
+                new_bytes -= task_size
+            }
         };
         // The element must exist.
         let compactor = self
@@ -265,16 +196,17 @@ impl LeastPendingBytesPolicy {
     }
 }
 
-#[async_trait::async_trait]
 impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
-    async fn next_idle_compactor<S: MetaStore>(
+    fn next_idle_compactor(
         &mut self,
-        hummock_manager: &HummockManager<S>,
+        compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
         compact_task: Option<&CompactTask>,
     ) -> Option<Arc<Compactor>> {
         let mut next_idle_compactor = None;
         for ((pending_bytes, context_id), compactor) in &self.pending_bytes_to_compactor {
-            if hummock_manager.get_assigned_tasks_number(*context_id).await
+            if *compactor_assigned_task_num
+                .get(&compactor.context_id())
+                .unwrap()
                 < compactor.max_concurrent_task_number()
             {
                 next_idle_compactor = Some((*pending_bytes, *context_id));
@@ -283,7 +215,7 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
         }
 
         if let Some((pending_bytes, context_id)) = next_idle_compactor {
-            let compactor = self.update_compactor(context_id, pending_bytes, compact_task, true);
+            let compactor = self.update_compactor(context_id, pending_bytes, compact_task);
             Some(compactor)
         } else {
             None
@@ -301,7 +233,7 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
         }
 
         if let Some((pending_bytes, context_id)) = next_compactor {
-            let compactor = self.update_compactor(context_id, pending_bytes, compact_task, true);
+            let compactor = self.update_compactor(context_id, pending_bytes, compact_task);
             Some(compactor)
         } else {
             None
@@ -323,7 +255,7 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
             .nth(compactor_index)
             .unwrap();
 
-        let compactor = self.update_compactor(*context_id, *pending_bytes, compact_task, true);
+        let compactor = self.update_compactor(*context_id, *pending_bytes, compact_task);
         Some(compactor)
     }
 
@@ -357,8 +289,9 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
     }
 
     fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask) {
+        debug_assert_ne!(task.task_status(), TaskStatus::Pending);
         if let Some(pending_bytes) = self.compactor_to_pending_bytes.get(&context_id) {
-            self.update_compactor(context_id, *pending_bytes, Some(task), false);
+            self.update_compactor(context_id, *pending_bytes, Some(task));
         }
     }
 }
@@ -371,7 +304,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::compact_task::TaskStatus;
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
-    use risingwave_pb::hummock::CompactTask;
+    use risingwave_pb::hummock::{CompactTask, InputLevel, SstableInfo};
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -383,7 +316,7 @@ mod tests {
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::HummockManager;
+    use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -408,7 +341,17 @@ mod tests {
 
     fn dummy_compact_task(task_id: u64, input_file_size: u64) -> CompactTask {
         CompactTask {
-            input_ssts: vec![],
+            // We need the dummy level to calculate input size.
+            input_ssts: vec![InputLevel {
+                level_idx: 0,
+                level_type: 0,
+                table_infos: vec![SstableInfo {
+                    id: 0,
+                    key_range: None,
+                    file_size: input_file_size,
+                    table_ids: vec![],
+                }],
+            }],
             splits: vec![],
             watermark: 0,
             sorted_output_ssts: vec![],
@@ -424,7 +367,6 @@ mod tests {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: 0,
-            input_file_size,
         }
     }
 
@@ -599,7 +541,7 @@ mod tests {
         }
 
         let task1 = dummy_compact_task(0, 5);
-        let task2 = dummy_compact_task(1, 10);
+        let mut task2 = dummy_compact_task(1, 10);
         let task3 = dummy_compact_task(2, 7);
         let task4 = dummy_compact_task(3, 1);
 
@@ -646,6 +588,7 @@ mod tests {
             .contains_key(&(10, 1)));
 
         // (5, 0), (7, 2), (10, 1).
+        task2.set_task_status(TaskStatus::Success);
         compactor_manager.report_compact_task(1, &task2);
         assert_eq!(
             *compactor_manager
@@ -673,14 +616,10 @@ mod tests {
             .contains_key(&(1, 1)));
     }
 
-    #[tokio::test]
-    async fn test_least_pending_bytes_next_idle_compactor() {
-        let config = CompactionConfigBuilder::new()
-            .level0_tier_compact_file_number(1)
-            .max_bytes_for_level_base(1)
-            .build();
-        let (_, hummock_manager, _, _) = setup_compute_env_with_config(80, config).await;
-        let mut compactor_manager = LeastPendingBytesPolicy::new();
+    #[test]
+    fn test_least_pending_bytes_next_idle_compactor() {
+        let compactor_manager =
+            CompactorManager::new_with_policy(Box::new(LeastPendingBytesPolicy::new()));
 
         // Add 2 compactors.
         for context_id in 0..2 {
@@ -699,24 +638,8 @@ mod tests {
         let compactor = compactor_manager.next_compactor(Some(&task2)).unwrap();
         assert_eq!(compactor.context_id(), 0);
 
-        hummock_manager
-            .assign_compaction_task(&task1, 0)
-            .await
-            .unwrap();
-        hummock_manager
-            .assign_compaction_task(&task2, 0)
-            .await
-            .unwrap();
-        hummock_manager
-            .assign_compaction_task(&task3, 1)
-            .await
-            .unwrap();
-
         // Next compactor should be compactor 1.
-        let compactor = compactor_manager
-            .next_idle_compactor(&hummock_manager, None)
-            .await
-            .unwrap();
+        let compactor = compactor_manager.next_idle_compactor(None).unwrap();
         assert_eq!(compactor.context_id(), 1);
     }
 }

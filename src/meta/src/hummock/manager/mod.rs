@@ -886,8 +886,7 @@ where
         compact_status.report_compact_task(compact_task);
         if let Some(context_id) = context_id {
             self.compactor_manager
-                .report_compact_task(context_id, compact_task)
-                .await;
+                .report_compact_task(context_id, compact_task);
         }
         let task_status = compact_task.task_status();
         debug_assert!(
@@ -1046,7 +1045,7 @@ where
                         return;
                     }
                 };
-                let compactor = match self.compactor_manager.random_compactor(None).await {
+                let compactor = match self.compactor_manager.random_compactor(None) {
                     None => {
                         tracing::warn!(
                             "Skip committed SST sanity check due to no available worker"
@@ -1411,10 +1410,7 @@ where
         };
 
         // 2. select_compactor
-        let compactor = self
-            .compactor_manager
-            .random_compactor(Some(&compact_task))
-            .await;
+        let compactor = self.compactor_manager.random_compactor(Some(&compact_task));
         let compactor = match compactor {
             None => {
                 tracing::warn!("trigger_manual_compaction No compactor is available.");

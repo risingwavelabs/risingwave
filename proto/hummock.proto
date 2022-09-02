@@ -201,7 +201,6 @@ message CompactTask {
   map<uint32, TableOption> table_options = 17;
   uint64 current_epoch_time = 18;
   uint64 target_sub_level_id = 19;
-  uint64 input_file_size = 20;
 }
 
 message LevelHandler {

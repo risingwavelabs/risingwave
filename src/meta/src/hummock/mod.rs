@@ -105,7 +105,7 @@ where
                     return;
                 }
             };
-            compactor_manager.remove_compactor(worker_node.id).await;
+            compactor_manager.remove_compactor(worker_node.id);
 
             // Retry only happens when meta store is undergoing failure.
             let retry_strategy = ExponentialBackoff::from_millis(10)

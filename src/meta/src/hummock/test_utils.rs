@@ -73,6 +73,14 @@ where
         .await
         .unwrap()
         .unwrap();
+    debug_assert_eq!(
+        hummock_manager
+            .compactor_manager_ref_for_test()
+            .next_idle_compactor(Some(&compact_task))
+            .unwrap()
+            .context_id(),
+        context_id
+    );
     compact_task.target_level = 6;
     hummock_manager
         .assign_compaction_task(&compact_task, context_id)

@@ -216,8 +216,15 @@ mod tests {
         let mut val = b"0"[..].repeat(1 << 10);
         val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let context_id = compactor_manager
+            .next_idle_compactor(Some(&compact_task))
+            .unwrap()
+            .context_id();
+        debug_assert_eq!(context_id, worker_node.id);
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+            .assign_compaction_task(&compact_task, context_id)
             .await
             .unwrap();
 
@@ -317,8 +324,15 @@ mod tests {
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         compact_task.current_epoch_time = 0;
 
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let context_id = compactor_manager
+            .next_idle_compactor(Some(&compact_task))
+            .unwrap()
+            .context_id();
+        debug_assert_eq!(context_id, worker_node.id);
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+            .assign_compaction_task(&compact_task, context_id)
             .await
             .unwrap();
 
@@ -581,7 +595,6 @@ mod tests {
         )
         .await;
 
-        // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
             level: 0,
             ..Default::default()
@@ -599,8 +612,16 @@ mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
+        // 3. pick compactor and assign
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let context_id = compactor_manager
+            .next_idle_compactor(Some(&compact_task))
+            .unwrap()
+            .context_id();
+        debug_assert_eq!(context_id, worker_node.id);
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+            .assign_compaction_task(&compact_task, context_id)
             .await
             .unwrap();
 
@@ -615,10 +636,10 @@ mod tests {
             kv_count
         );
 
-        // 3. compact
+        // 4. compact
         Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
 
-        // 4. get the latest version and check
+        // 5. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
         let mut table_ids_from_version = vec![];
         version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
@@ -639,7 +660,7 @@ mod tests {
         }
         assert_eq!((kv_count / 2) as u32, key_count);
 
-        // 5. get compact task and there should be none
+        // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
             .get_compact_task(StaticCompactionGroupId::StateDefault.into())
             .await
@@ -652,7 +673,7 @@ mod tests {
             .local_version_manager()
             .try_update_pinned_version(None, Payload::PinnedVersion(version));
 
-        // 6. scan kv to check key table_id
+        // 7. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
                 None,
@@ -760,8 +781,15 @@ mod tests {
         )]);
         compact_task.current_epoch_time = epoch;
 
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let context_id = compactor_manager
+            .next_idle_compactor(Some(&compact_task))
+            .unwrap()
+            .context_id();
+        debug_assert_eq!(context_id, worker_node.id);
         hummock_manager_ref
-            .assign_compaction_task(&compact_task, worker_node.id)
+            .assign_compaction_task(&compact_task, context_id)
             .await
             .unwrap();
 
@@ -928,6 +956,13 @@ mod tests {
         //     HashMap::from_iter([(existing_table_id, TableOption { ttl: 0 })]);
         compact_task.current_epoch_time = epoch;
 
+        let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
+        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        let context_id = compactor_manager
+            .next_idle_compactor(Some(&compact_task))
+            .unwrap()
+            .context_id();
+        debug_assert_eq!(context_id, context_id);
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id)
             .await

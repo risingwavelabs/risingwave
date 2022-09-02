@@ -162,7 +162,6 @@ async fn test_unpin_snapshot_before() {
 #[tokio::test]
 async fn test_hummock_compaction_task() {
     let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
     let sst_num = 2;
 
     // No compaction task available.
@@ -195,6 +194,13 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap()
         .unwrap();
+    let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+    compactor_manager.add_compactor(worker_node.id, u64::MAX);
+    let context_id = compactor_manager
+        .next_idle_compactor(Some(&compact_task))
+        .unwrap()
+        .context_id();
+    debug_assert_eq!(context_id, worker_node.id);
     hummock_manager
         .assign_compaction_task(&compact_task, context_id)
         .await
@@ -885,10 +891,9 @@ async fn test_trigger_manual_compaction() {
 
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
-    let receiver = compactor_manager_ref
-        .add_compactor(context_id, u64::MAX)
-        .await;
+    let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
 
+    // Assign
     let _ = add_test_tables(&hummock_manager, context_id).await;
     {
         // to check compactor send task fail
@@ -902,10 +907,8 @@ async fn test_trigger_manual_compaction() {
         }
     }
 
-    compactor_manager_ref.remove_compactor(context_id).await;
-    let _receiver = compactor_manager_ref
-        .add_compactor(context_id, u64::MAX)
-        .await;
+    compactor_manager_ref.remove_compactor(context_id);
+    let _receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
 
     {
         let option = ManualCompactionOption {
@@ -946,6 +949,9 @@ async fn test_trigger_manual_compaction() {
 async fn test_extend_ssts_to_delete() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
+    hummock_manager
+        .compactor_manager
+        .add_compactor(context_id, u64::MAX);
     let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
     let max_committed_sst_id = sst_infos
         .iter()
