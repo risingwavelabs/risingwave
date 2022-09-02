@@ -67,6 +67,16 @@ impl Snapshot for MemSnapshot {
     }
 }
 
+impl MemStore {
+    /// Get a global shared in-memory store.
+    pub fn shared() -> Self {
+        lazy_static::lazy_static! {
+            static ref STORE: MemStore = MemStore::default();
+        }
+        STORE.clone()
+    }
+}
+
 #[async_trait]
 impl MetaStore for MemStore {
     type Snapshot = MemSnapshot;

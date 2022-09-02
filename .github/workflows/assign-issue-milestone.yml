@@ -8,9 +8,14 @@ jobs:
   assign-milestone:
     runs-on: ubuntu-latest
     steps:
-    - name: Automatically set milestone to issue
+    - name: Add issue to the latest milestone
       uses: cgetc/automatically-set-milestone-to-issue@v0.1.2
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         version-prefix: 'release-'
         version-separator: '.'
+    - name: Add issue to project
+      uses: actions/add-to-project@v0.3.0
+      with:
+        project-url: https://github.com/orgs/risingwavelabs/projects/13
+        github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}

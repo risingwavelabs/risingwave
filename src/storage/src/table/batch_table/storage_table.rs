@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
-use bytes::BufMut;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -28,7 +27,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
@@ -40,11 +38,11 @@ use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::row_serde_util::{
-    batch_deserialize, parse_raw_key_to_vnode_and_key, serialize_pk,
+    batch_deserialize, parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::row_serde::ColumnDescMapping;
 use crate::store::ReadOptions;
-use crate::table::{Distribution, TableIter, DEFAULT_VNODE};
+use crate::table::{compute_vnode, Distribution, TableIter};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -53,10 +51,6 @@ use crate::{Keyspace, StateStore, StateStoreIter};
 pub struct StorageTable<S: StateStore> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
-
-    /// All columns of this table. Note that this is different from the output columns in
-    /// `mapping.output_columns`.
-    table_columns: Vec<ColumnDesc>,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
@@ -241,7 +235,6 @@ impl<S: StateStore> StorageTable<S> {
         let keyspace = Keyspace::table_root(store, &table_id);
         Self {
             keyspace,
-            table_columns,
             schema,
             pk_serializer,
             mapping,
@@ -260,37 +253,9 @@ impl<S: StateStore> StorageTable<S> {
 
 /// Point get
 impl<S: StateStore> StorageTable<S> {
-    /// Check whether the given `vnode` is set in the `vnodes` of this table.
-    fn check_vnode_is_set(&self, vnode: VirtualNode) {
-        let is_set = self.vnodes.is_set(vnode as usize).unwrap();
-        assert!(
-            is_set,
-            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-            vnode, self.table_columns, self.dist_key_indices
-        );
-    }
-
-    /// Get vnode value with `indices` on the given `row`. Should not be used directly.
-    fn compute_vnode(&self, row: &Row, indices: &[usize]) -> VirtualNode {
-        let vnode = if indices.is_empty() {
-            DEFAULT_VNODE
-        } else {
-            row.hash_by_indices(indices, &CRC32FastBuilder {})
-                .to_vnode()
-        };
-
-        tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
-
-        // FIXME: temporary workaround for local agg, may not needed after we have a vnode builder
-        if !indices.is_empty() {
-            self.check_vnode_is_set(vnode);
-        }
-        vnode
-    }
-
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
-        self.compute_vnode(pk, &self.dist_key_in_pk_indices)
+        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
@@ -299,20 +264,13 @@ impl<S: StateStore> StorageTable<S> {
         self.dist_key_in_pk_indices
             .iter()
             .all(|&d| d < pk_prefix.0.len())
-            .then(|| self.compute_vnode(pk_prefix, &self.dist_key_in_pk_indices))
-    }
-
-    /// `vnode | pk`
-    fn serialize_pk_with_vnode(&self, pk: &Row) -> Vec<u8> {
-        let mut output = Vec::new();
-        output.put_slice(&self.compute_vnode_by_pk(pk).to_be_bytes());
-        self.pk_serializer.serialize(pk, &mut output);
-        output
+            .then(|| compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes))
     }
 
     /// Get a single row by point get
     pub async fn get_row(&mut self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
-        let serialized_pk = self.serialize_pk_with_vnode(pk);
+        let serialized_pk =
+            serialize_pk_with_vnode(pk, &self.pk_serializer, self.compute_vnode_by_pk(pk));
         let read_options = self.get_read_option(epoch);
         assert!(pk.size() <= self.pk_indices.len());
         let key_indices = (0..pk.size())

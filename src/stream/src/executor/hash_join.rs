@@ -38,8 +38,8 @@ use super::{
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
-/// Limit number of the cached entries (one per join key) on each side
-pub const JOIN_CACHE_SIZE: usize = 1 << 16;
+/// Limit number of the cached entries (one per join key) on each side.
+pub const JOIN_CACHE_CAP: usize = 1 << 16;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -389,15 +389,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        mut state_table_l: StateTable<S>,
-        mut state_table_r: StateTable<S>,
+        state_table_l: StateTable<S>,
+        state_table_r: StateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        // TODO: enable sanity check for hash join executor <https://github.com/risingwavelabs/risingwave/issues/3887>
-        state_table_l.disable_sanity_check();
-        state_table_r.disable_sanity_check();
-
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
@@ -464,7 +460,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_SIZE,
+                    JOIN_CACHE_CAP,
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
@@ -480,7 +476,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    JOIN_CACHE_SIZE,
+                    JOIN_CACHE_CAP,
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
@@ -587,24 +583,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     // Report metrics of cached join rows/entries
-                    let cached_rows_l: usize = self.side_l.ht.values().map(|e| e.size()).sum();
-                    let cached_rows_r: usize = self.side_r.ht.values().map(|e| e.size()).sum();
-                    self.metrics
-                        .join_cached_rows
-                        .with_label_values(&[&actor_id_str, "left"])
-                        .set(cached_rows_l as i64);
-                    self.metrics
-                        .join_cached_rows
-                        .with_label_values(&[&actor_id_str, "right"])
-                        .set(cached_rows_r as i64);
-                    self.metrics
-                        .join_cached_entries
-                        .with_label_values(&[&actor_id_str, "left"])
-                        .set(self.side_l.ht.len() as i64);
-                    self.metrics
-                        .join_cached_entries
-                        .with_label_values(&[&actor_id_str, "right"])
-                        .set(self.side_r.ht.len() as i64);
+                    for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
+                        self.metrics
+                            .join_cached_rows
+                            .with_label_values(&[&actor_id_str, side])
+                            .set(ht.cached_rows() as i64);
+                        self.metrics
+                            .join_cached_entries
+                            .with_label_values(&[&actor_id_str, side])
+                            .set(ht.entry_count() as i64);
+                        self.metrics
+                            .join_cached_estimated_size
+                            .with_label_values(&[&actor_id_str, side])
+                            .set(ht.estimated_size() as i64);
+                    }
 
                     yield Message::Barrier(barrier);
                 }
@@ -614,14 +606,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     }
 
     async fn flush_data(&mut self) -> StreamExecutorResult<()> {
+        // All changes to the state has been buffered in the mem-table of the state table. Just
+        // `commit` them here.
         self.side_l.ht.flush().await?;
         self.side_r.ht.flush().await?;
 
-        // evict the LRU cache
-        // assert!(!self.side_l.is_dirty());
+        // We need to manually evict the cache to the target capacity.
         self.side_l.ht.evict_to_target_cap();
-        // assert!(!self.side_r.is_dirty());
         self.side_r.ht.evict_to_target_cap();
+
         Ok(())
     }
 
@@ -634,7 +627,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         if key.has_null() {
             Ok(None)
         } else {
-            ht.remove_state(key).await
+            ht.remove_state(key).await.map(Some)
         }
     }
 
@@ -668,7 +661,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         append_only_optimize: bool,
     ) {
         let chunk = chunk.compact()?;
-        let (data_chunk, ops) = chunk.into_parts();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (&mut side_l, &mut side_r)
@@ -710,13 +702,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             Ok(cond_match)
         };
 
-        let keys = K::build(&side_update.key_indices, &data_chunk)?;
-        for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
-            let key = &keys[idx];
+        let keys = K::build(&side_update.key_indices, chunk.data_chunk())?;
+        for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
             let value = row.to_owned_row();
             let pk = row.row_by_indices(&side_update.pk_indices);
-            let matched_rows = Self::hash_eq_match(key, &mut side_match.ht).await?;
-            match *op {
+            let matched_rows: Option<HashValueType> =
+                Self::hash_eq_match(key, &mut side_match.ht).await?;
+            match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
                     let mut append_only_matched_rows = Vec::with_capacity(1);
@@ -746,19 +738,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                                hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                             {
                                 yield Message::Chunk(chunk);
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, &row)?
                         {
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.insert_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                        hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
                         yield Message::Chunk(chunk);
                     }
@@ -803,19 +795,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                                hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                             {
                                 yield Message::Chunk(chunk);
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(*op, &row)?
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, &row)?
                         {
                             yield Message::Chunk(chunk);
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.insert_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(*op, &row)?
+                        hashjoin_chunk_builder.forward_if_not_matched(op, &row)?
                     {
                         yield Message::Chunk(chunk);
                     }

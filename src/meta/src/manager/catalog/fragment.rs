@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -54,7 +55,7 @@ impl FragmentManagerCore {
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
 pub struct FragmentManager<S: MetaStore> {
-    meta_store: Arc<S>,
+    env: MetaSrvEnv<S>,
 
     core: RwLock<FragmentManagerCore>,
 }
@@ -87,9 +88,8 @@ where
     S: MetaStore,
 {
     pub async fn new(env: MetaSrvEnv<S>) -> MetaResult<Self> {
-        let meta_store = env.meta_store_ref();
         let table_fragments = try_match_expand!(
-            TableFragments::list(&*meta_store).await,
+            TableFragments::list(env.meta_store()).await,
             Ok,
             "TableFragments::list fail"
         )?;
@@ -100,7 +100,7 @@ where
             .collect();
 
         Ok(Self {
-            meta_store,
+            env,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
         })
     }
@@ -130,12 +130,34 @@ where
             }
         }
 
-        self.meta_store.txn(transaction).await?;
+        self.env.meta_store().txn(transaction).await?;
         for table_fragment in table_fragments {
             map.insert(table_fragment.table_id(), table_fragment.clone());
+            self.notify_fragment_mapping(table_fragment, Operation::Update)
+                .await;
         }
 
         Ok(())
+    }
+
+    pub async fn notify_fragment_mapping(
+        &self,
+        table_fragment: &TableFragments,
+        operation: Operation,
+    ) {
+        for fragment in table_fragment.fragments.values() {
+            if !fragment.state_table_ids.is_empty() {
+                let mut mapping = fragment
+                    .vnode_mapping
+                    .clone()
+                    .expect("no data distribution found");
+                mapping.fragment_id = fragment.fragment_id;
+                self.env
+                    .notification_manager()
+                    .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
+                    .await;
+            }
+        }
     }
 
     pub async fn select_table_fragments_by_table_id(
@@ -164,7 +186,7 @@ where
                 table_fragment.table_id()
             ),
             Entry::Vacant(v) => {
-                table_fragment.insert(&*self.meta_store).await?;
+                table_fragment.insert(self.env.meta_store()).await?;
                 v.insert(table_fragment);
                 Ok(())
             }
@@ -177,7 +199,7 @@ where
 
         match map.entry(*table_id) {
             Entry::Occupied(o) => {
-                TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
+                TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
                 o.remove();
                 Ok(())
             }
@@ -219,7 +241,7 @@ where
                 dependent_tables.push(dependent_table);
             }
 
-            self.meta_store.txn(transaction).await?;
+            self.env.meta_store().txn(transaction).await?;
             map.insert(*table_id, table_fragments);
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
@@ -268,11 +290,14 @@ where
                 dependent_tables.push(dependent_table);
             }
 
-            self.meta_store.txn(transaction).await?;
-            map.remove(table_id).unwrap();
+            self.env.meta_store().txn(transaction).await?;
+            let delete_table_fragments = map.remove(table_id).unwrap();
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
             }
+
+            self.notify_fragment_mapping(&delete_table_fragments, Operation::Delete)
+                .await;
             Ok(())
         } else {
             bail!("table_fragment not exist: id={}", table_id);
@@ -326,7 +351,7 @@ where
         &self,
         migrate_map: &HashMap<ActorId, WorkerId>,
         node_map: &HashMap<WorkerId, WorkerNode>,
-    ) -> MetaResult<Vec<TableFragments>> {
+    ) -> MetaResult<()> {
         let mut parallel_unit_migrate_map = HashMap::new();
         let mut pu_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
         // split parallel units of node into types, map them with WorkerId
@@ -372,7 +397,7 @@ where
         });
         // update fragments
         self.batch_update_table_fragments(&new_fragments).await?;
-        Ok(new_fragments)
+        Ok(())
     }
 
     pub async fn all_node_actors(
@@ -469,7 +494,7 @@ where
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
 
-        self.meta_store.txn(transaction).await?;
+        self.env.meta_store().txn(transaction).await?;
         Ok(())
     }
 

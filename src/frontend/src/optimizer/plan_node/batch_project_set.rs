@@ -22,7 +22,6 @@ use risingwave_pb::batch_plan::ProjectSetNode;
 use crate::optimizer::plan_node::{
     LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
 };
-use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone)]
@@ -38,8 +37,12 @@ impl BatchProjectSet {
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input().distribution());
 
-        // TODO: Derive order from input
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), distribution, Order::any());
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            distribution,
+            logical.get_out_column_index_order(),
+        );
         BatchProjectSet { base, logical }
     }
 }
