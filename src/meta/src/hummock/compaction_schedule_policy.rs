@@ -144,29 +144,31 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn report_compact_task(&mut self, _context_id: HummockContextId, _task: &CompactTask) {}
 }
 
+/// Give priority to compactors with the least score. Currently the score is composed only of
+/// pending bytes compaction tasks.
 #[derive(Default)]
-pub struct LeastPendingBytesPolicy {
+pub struct ScoredPolicy {
     // These two data structures must be consistent.
     // We use `(pending_bytes, context_id)` as the key to dedup compactor with the same pending
     // bytes.
-    pending_bytes_to_compactor: BTreeMap<(usize, HummockContextId), Arc<Compactor>>,
-    compactor_to_pending_bytes: HashMap<HummockContextId, usize>,
+    score_to_compactor: BTreeMap<(usize, HummockContextId), Arc<Compactor>>,
+    compactor_to_score: HashMap<HummockContextId, usize>,
 }
 
-impl LeastPendingBytesPolicy {
+impl ScoredPolicy {
     pub fn new() -> Self {
         Self {
             ..Default::default()
         }
     }
 
-    fn update_compactor(
+    fn update_compactor_score(
         &mut self,
         context_id: HummockContextId,
-        old_bytes: usize,
+        old_score: usize,
         compact_task: Option<&CompactTask>,
     ) -> Arc<Compactor> {
-        let mut new_bytes = old_bytes;
+        let mut new_score = old_score;
         if let Some(task) = compact_task {
             let task_size = task
                 .input_ssts
@@ -175,47 +177,44 @@ impl LeastPendingBytesPolicy {
                 .map(|table| table.file_size)
                 .sum::<u64>() as usize;
             if let TaskStatus::Pending = task.task_status() {
-                new_bytes += task_size
+                new_score += task_size
             } else {
-                debug_assert!(old_bytes >= task_size);
-                new_bytes -= task_size
+                debug_assert!(old_score >= task_size);
+                new_score -= task_size
             }
         };
         // The element must exist.
         let compactor = self
-            .pending_bytes_to_compactor
-            .remove(&(old_bytes, context_id))
+            .score_to_compactor
+            .remove(&(old_score, context_id))
             .unwrap();
-        self.pending_bytes_to_compactor
-            .insert((new_bytes, context_id), compactor.clone());
-        *self
-            .compactor_to_pending_bytes
-            .get_mut(&context_id)
-            .unwrap() = new_bytes;
+        self.score_to_compactor
+            .insert((new_score, context_id), compactor.clone());
+        *self.compactor_to_score.get_mut(&context_id).unwrap() = new_score;
         compactor
     }
 }
 
-impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
+impl CompactionSchedulePolicy for ScoredPolicy {
     fn next_idle_compactor(
         &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
         compact_task: Option<&CompactTask>,
     ) -> Option<Arc<Compactor>> {
         let mut next_idle_compactor = None;
-        for ((pending_bytes, context_id), compactor) in &self.pending_bytes_to_compactor {
+        for ((score, context_id), compactor) in &self.score_to_compactor {
             if *compactor_assigned_task_num
                 .get(&compactor.context_id())
                 .unwrap()
                 < compactor.max_concurrent_task_number()
             {
-                next_idle_compactor = Some((*pending_bytes, *context_id));
+                next_idle_compactor = Some((*score, *context_id));
                 break;
             }
         }
 
-        if let Some((pending_bytes, context_id)) = next_idle_compactor {
-            let compactor = self.update_compactor(context_id, pending_bytes, compact_task);
+        if let Some((score, context_id)) = next_idle_compactor {
+            let compactor = self.update_compactor_score(context_id, score, compact_task);
             Some(compactor)
         } else {
             None
@@ -224,16 +223,16 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
 
     fn next_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
         let mut next_compactor = None;
-        if let Some((pending_bytes, context_id)) = self
-            .pending_bytes_to_compactor
+        if let Some((score, context_id)) = self
+            .score_to_compactor
             .keys()
             .min_by(|(pb1, _), (pb2, _)| pb1.cmp(pb2))
         {
-            next_compactor = Some((*pending_bytes, *context_id));
+            next_compactor = Some((*score, *context_id));
         }
 
-        if let Some((pending_bytes, context_id)) = next_compactor {
-            let compactor = self.update_compactor(context_id, pending_bytes, compact_task);
+        if let Some((score, context_id)) = next_compactor {
+            let compactor = self.update_compactor_score(context_id, score, compact_task);
             Some(compactor)
         } else {
             None
@@ -241,21 +240,16 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
     }
 
     fn random_compactor(&mut self, compact_task: Option<&CompactTask>) -> Option<Arc<Compactor>> {
-        if self.pending_bytes_to_compactor.is_empty() {
+        if self.score_to_compactor.is_empty() {
             return None;
         }
 
-        let compactor_index =
-            rand::thread_rng().gen::<usize>() % self.compactor_to_pending_bytes.len();
+        let compactor_index = rand::thread_rng().gen::<usize>() % self.compactor_to_score.len();
         // `BTreeMap` does not record subtree size, so O(logn) method to find the nth smallest
         // element is not available.
-        let (context_id, pending_bytes) = self
-            .compactor_to_pending_bytes
-            .iter()
-            .nth(compactor_index)
-            .unwrap();
+        let (context_id, score) = self.compactor_to_score.iter().nth(compactor_index).unwrap();
 
-        let compactor = self.update_compactor(*context_id, *pending_bytes, compact_task);
+        let compactor = self.update_compactor_score(*context_id, *score, compact_task);
         Some(compactor)
     }
 
@@ -265,23 +259,23 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
         max_concurrent_task_number: u64,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-        if let Some(pending_bytes) = self.compactor_to_pending_bytes.remove(&context_id) {
-            self.pending_bytes_to_compactor
+        if let Some(pending_bytes) = self.compactor_to_score.remove(&context_id) {
+            self.score_to_compactor
                 .remove(&(pending_bytes, context_id))
                 .unwrap();
         }
-        self.pending_bytes_to_compactor.insert(
+        self.score_to_compactor.insert(
             (0, context_id),
             Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
         );
-        self.compactor_to_pending_bytes.insert(context_id, 0);
+        self.compactor_to_score.insert(context_id, 0);
         tracing::info!("Added compactor session {}", context_id);
         rx
     }
 
     fn remove_compactor(&mut self, context_id: HummockContextId) {
-        if let Some(pending_bytes) = self.compactor_to_pending_bytes.remove(&context_id) {
-            self.pending_bytes_to_compactor
+        if let Some(pending_bytes) = self.compactor_to_score.remove(&context_id) {
+            self.score_to_compactor
                 .remove(&(pending_bytes, context_id))
                 .unwrap();
         }
@@ -290,8 +284,8 @@ impl CompactionSchedulePolicy for LeastPendingBytesPolicy {
 
     fn report_compact_task(&mut self, context_id: HummockContextId, task: &CompactTask) {
         debug_assert_ne!(task.task_status(), TaskStatus::Pending);
-        if let Some(pending_bytes) = self.compactor_to_pending_bytes.get(&context_id) {
-            self.update_compactor(context_id, *pending_bytes, Some(task));
+        if let Some(score) = self.compactor_to_score.get(&context_id) {
+            self.update_compactor_score(context_id, *score, Some(task));
         }
     }
 }
@@ -309,7 +303,7 @@ mod tests {
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction_schedule_policy::{
-        CompactionSchedulePolicy, LeastPendingBytesPolicy, RoundRobinPolicy,
+        CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy,
     };
     use crate::hummock::test_utils::{
         commit_from_meta_node, generate_test_tables, get_sst_ids,
@@ -468,33 +462,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_least_pending_bytes_add_remove_compactor() {
-        let mut compactor_manager = LeastPendingBytesPolicy::new();
+    async fn test_scored_add_remove_compactor() {
+        let mut compactor_manager = ScoredPolicy::new();
         // No compactors by default.
-        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 0);
-        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 0);
+        assert_eq!(compactor_manager.compactor_to_score.len(), 0);
+        assert_eq!(compactor_manager.score_to_compactor.len(), 0);
 
         let mut receiver = compactor_manager.add_compactor(1, u64::MAX);
-        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 1);
-        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 1);
+        assert_eq!(compactor_manager.compactor_to_score.len(), 1);
+        assert_eq!(compactor_manager.score_to_compactor.len(), 1);
         let _receiver_2 = compactor_manager.add_compactor(2, u64::MAX);
-        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 2);
-        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 2);
+        assert_eq!(compactor_manager.compactor_to_score.len(), 2);
+        assert_eq!(compactor_manager.score_to_compactor.len(), 2);
         compactor_manager.remove_compactor(2);
-        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 1);
-        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 1);
+        assert_eq!(compactor_manager.compactor_to_score.len(), 1);
+        assert_eq!(compactor_manager.score_to_compactor.len(), 1);
 
         // Pending bytes are initialized correctly.
-        assert_eq!(
-            *compactor_manager
-                .compactor_to_pending_bytes
-                .get(&1)
-                .unwrap(),
-            0
-        );
-        assert!(compactor_manager
-            .pending_bytes_to_compactor
-            .contains_key(&(0, 1)));
+        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 0);
+        assert!(compactor_manager.score_to_compactor.contains_key(&(0, 1)));
 
         // No compact task there.
         assert!(matches!(
@@ -504,7 +490,7 @@ mod tests {
 
         let task = dummy_compact_task(123, 0);
         let compactor = compactor_manager
-            .pending_bytes_to_compactor
+            .score_to_compactor
             .first_entry()
             .unwrap()
             .get()
@@ -519,8 +505,8 @@ mod tests {
         assert_eq!(received_compact_task, task);
 
         compactor_manager.remove_compactor(compactor.context_id());
-        assert_eq!(compactor_manager.compactor_to_pending_bytes.len(), 0);
-        assert_eq!(compactor_manager.pending_bytes_to_compactor.len(), 0);
+        assert_eq!(compactor_manager.compactor_to_score.len(), 0);
+        assert_eq!(compactor_manager.score_to_compactor.len(), 0);
         drop(compactor);
         assert!(matches!(
             receiver.try_recv().unwrap_err(),
@@ -529,8 +515,8 @@ mod tests {
     }
 
     #[test]
-    fn test_least_pending_bytes_next_compactor() {
-        let mut compactor_manager = LeastPendingBytesPolicy::new();
+    fn test_scored_next_compactor() {
+        let mut compactor_manager = ScoredPolicy::new();
 
         // No compactor available.
         assert!(compactor_manager.next_compactor(None).is_none());
@@ -548,78 +534,37 @@ mod tests {
         // Now the compactors should be (0, 0), (0, 1), (0, 2).
         let compactor = compactor_manager.next_compactor(Some(&task1)).unwrap();
         assert_eq!(compactor.context_id(), 0);
-        assert_eq!(
-            *compactor_manager
-                .compactor_to_pending_bytes
-                .get(&0)
-                .unwrap(),
-            5
-        );
-        assert!(compactor_manager
-            .pending_bytes_to_compactor
-            .contains_key(&(5, 0)));
+        assert_eq!(*compactor_manager.compactor_to_score.get(&0).unwrap(), 5);
+        assert!(compactor_manager.score_to_compactor.contains_key(&(5, 0)));
 
         // (0, 1), (0, 2), (5, 0).
         let compactor = compactor_manager.next_compactor(Some(&task2)).unwrap();
         assert_eq!(compactor.context_id(), 1);
-        assert_eq!(
-            *compactor_manager
-                .compactor_to_pending_bytes
-                .get(&1)
-                .unwrap(),
-            10
-        );
-        assert!(compactor_manager
-            .pending_bytes_to_compactor
-            .contains_key(&(10, 1)));
+        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 10);
+        assert!(compactor_manager.score_to_compactor.contains_key(&(10, 1)));
 
         // (0, 2), (5, 0), (10, 1).
         let compactor = compactor_manager.next_compactor(Some(&task3)).unwrap();
         assert_eq!(compactor.context_id(), 2);
-        assert_eq!(
-            *compactor_manager
-                .compactor_to_pending_bytes
-                .get(&2)
-                .unwrap(),
-            7
-        );
-        assert!(compactor_manager
-            .pending_bytes_to_compactor
-            .contains_key(&(10, 1)));
+        assert_eq!(*compactor_manager.compactor_to_score.get(&2).unwrap(), 7);
+        assert!(compactor_manager.score_to_compactor.contains_key(&(10, 1)));
 
         // (5, 0), (7, 2), (10, 1).
         task2.set_task_status(TaskStatus::Success);
         compactor_manager.report_compact_task(1, &task2);
-        assert_eq!(
-            *compactor_manager
-                .compactor_to_pending_bytes
-                .get(&1)
-                .unwrap(),
-            0
-        );
-        assert!(compactor_manager
-            .pending_bytes_to_compactor
-            .contains_key(&(0, 1)));
+        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 0);
+        assert!(compactor_manager.score_to_compactor.contains_key(&(0, 1)));
 
         // (0, 1), (5, 0), (7, 2).
         let compactor = compactor_manager.next_compactor(Some(&task4)).unwrap();
         assert_eq!(compactor.context_id(), 1);
-        assert_eq!(
-            *compactor_manager
-                .compactor_to_pending_bytes
-                .get(&1)
-                .unwrap(),
-            1
-        );
-        assert!(compactor_manager
-            .pending_bytes_to_compactor
-            .contains_key(&(1, 1)));
+        assert_eq!(*compactor_manager.compactor_to_score.get(&1).unwrap(), 1);
+        assert!(compactor_manager.score_to_compactor.contains_key(&(1, 1)));
     }
 
     #[test]
-    fn test_least_pending_bytes_next_idle_compactor() {
-        let compactor_manager =
-            CompactorManager::new_with_policy(Box::new(LeastPendingBytesPolicy::new()));
+    fn test_scored_next_idle_compactor() {
+        let compactor_manager = CompactorManager::new_with_policy(Box::new(ScoredPolicy::new()));
 
         // Add 2 compactors.
         for context_id in 0..2 {

@@ -21,9 +21,7 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use super::compaction_schedule_policy::{
-    CompactionSchedulePolicy, LeastPendingBytesPolicy, RoundRobinPolicy,
-};
+use super::compaction_schedule_policy::{CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy};
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -98,7 +96,7 @@ impl Default for CompactorManager {
 impl CompactorManager {
     pub fn new() -> Self {
         Self {
-            policy: Mutex::new(Box::new(LeastPendingBytesPolicy::new())),
+            policy: Mutex::new(Box::new(ScoredPolicy::new())),
             compactor_assigned_task_num: Mutex::new(HashMap::new()),
         }
     }
