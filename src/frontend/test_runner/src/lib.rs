@@ -362,10 +362,19 @@ impl TestCase {
             }
         };
 
-        // Only generate optimized_logical_plan if it is specified in test case
-        if self.optimized_logical_plan.is_some() {
-            ret.optimized_logical_plan =
-                Some(explain_plan(&logical_plan.gen_optimized_logical_plan()));
+        if self.optimized_logical_plan.is_some() || self.optimizer_error.is_some() {
+            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan() {
+                Ok(optimized_logical_plan) => optimized_logical_plan,
+                Err(err) => {
+                    ret.optimizer_error = Some(err.to_string());
+                    return Ok(ret);
+                }
+            };
+
+            // Only generate optimized_logical_plan if it is specified in test case
+            if self.optimized_logical_plan.is_some() {
+                ret.optimized_logical_plan = Some(explain_plan(&optimized_logical_plan));
+            }
         }
 
         if self.batch_plan.is_some()
