@@ -680,3 +680,8 @@
             LogicalScan { table: a, columns: [a.a2] }
           LogicalProject { exprs: [b.b2, b.b1] }
             LogicalScan { table: b, output_columns: [b.b1, b.b2], required_columns: [b1, b2], predicate: IsNotNull(b.b2) }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1 where exists(select * from t2 where t1.x = t2.x order by x limit 1);
+  optimizer_error: 'internal error: Subquery can not be unnested.'
