@@ -1,5 +1,3 @@
-# This file covers all examples in `expr_array_concat.rs`.
-
 query T
 select array_cat(array[66], array[123]);
 ----
@@ -26,14 +24,14 @@ select array_cat(array[array[66]], null::int[]);
 {{66}}
 
 query T
-select count(array_cat(null::int[][], array[233])); # return NULL
+select array_cat(null::int[][], array[233]);
 ----
-0
+NULL
 
 query T
-select array_cat(null::int[][], null::int[]); # return NULL
+select array_cat(null::int[][], null::int[]);
 ----
-0
+NULL
 
 query T
 select array_append(array[66], 123);
@@ -66,14 +64,14 @@ select array_cat(null::int[], array[array[66]]);
 {{66}}
 
 query T
-select count(array_cat(array[233], null::int[][])); # return NULL
+select array_cat(array[233], null::int[][]);
 ----
-0
+NULL
 
 query T
-select count(array_cat(null::int[], null::int[][])); # return NULL
+select array_cat(null::int[], null::int[][]);
 ----
-0
+NULL
 
 query T
 select array_prepend(123, array[66]);
@@ -93,7 +91,7 @@ select array_prepend(233, null::int[]);
 query T
 select array_prepend(null::int, null::int[]);
 ----
-[null]
+{NULL}
 
 query T
 select array[1,2,3] || array[4,5,6];
