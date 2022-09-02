@@ -88,6 +88,10 @@ pub struct StateTable<S: StateStore> {
 
     /// If true, sanity check is disabled on this table.
     disable_sanity_check: bool,
+
+    /// a optional column index which is the vnode of each row computed by the table's consistent
+    /// hash distribution
+    pub vnode_col_idx_in_pk: Option<usize>,
 }
 
 /// init Statetable
@@ -158,6 +162,15 @@ impl<S: StateStore> StateTable<S> {
             },
             None => Distribution::fallback(),
         };
+
+        let vnode_col_idx_in_pk = table_catalog
+            .vnode_col_idx
+            .as_ref()
+            .and_then(|vnode_col_idx| {
+                let vnode_col_idx = vnode_col_idx.index as usize;
+                pk_indices.iter().position(|&i| vnode_col_idx == i)
+            });
+
         Self {
             mem_table: MemTable::new(),
             keyspace,
@@ -169,6 +182,7 @@ impl<S: StateStore> StateTable<S> {
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
             disable_sanity_check: false,
+            vnode_col_idx_in_pk: vnode_col_idx_in_pk,
         }
     }
 
@@ -235,6 +249,7 @@ impl<S: StateStore> StateTable<S> {
             vnodes,
             table_option: Default::default(),
             disable_sanity_check: false,
+            vnode_col_idx_in_pk: None,
         }
     }
 
@@ -243,9 +258,32 @@ impl<S: StateStore> StateTable<S> {
         self.disable_sanity_check = true;
     }
 
+    fn get_vnode_from_row(row: &Row, vnode_idx: usize) -> VirtualNode {
+        row[vnode_idx].clone().unwrap().into_int16() as _
+    }
+
+    /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
+    /// Return `None` if the provided columns are not enough.
+    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: &Row) -> Option<VirtualNode> {
+        let prefix_len = pk_prefix.0.len();
+        self.vnode_col_idx_in_pk
+            .and_then(
+                |vnode_col_idx_in_pk| match vnode_col_idx_in_pk < prefix_len {
+                    true => Some(Self::get_vnode_from_row(pk_prefix, vnode_col_idx_in_pk)),
+                    false => None,
+                },
+            )
+            .or_else(|| {
+                self.dist_key_in_pk_indices
+                    .iter()
+                    .all(|&d| d < prefix_len)
+                    .then(|| compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes))
+            })
+    }
+
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
-        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
+        self.try_compute_vnode_by_pk_prefix(pk).unwrap()
     }
 
     // TODO: remove, should not be exposed to user
@@ -572,15 +610,6 @@ impl<S: StateStore> StateTable<S> {
         .into_stream();
 
         Ok(iter)
-    }
-
-    /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
-    /// Return `None` if the provided columns are not enough.
-    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: &Row) -> Option<VirtualNode> {
-        self.dist_key_in_pk_indices
-            .iter()
-            .all(|&d| d < pk_prefix.0.len())
-            .then(|| compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes))
     }
 }
 
