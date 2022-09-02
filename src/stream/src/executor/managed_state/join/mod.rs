@@ -14,7 +14,6 @@
 
 mod join_entry_state;
 use std::alloc::Global;
-use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
@@ -24,6 +23,7 @@ use itertools::Itertools;
 pub(super) use join_entry_state::JoinEntryState;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::bail;
+use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -140,6 +140,12 @@ impl EncodedJoinRow {
         }
         self.degree -= 1;
         Ok(self.degree)
+    }
+}
+
+impl EstimateSize for EncodedJoinRow {
+    fn estimated_heap_size(&self) -> usize {
+        self.row.estimated_heap_size()
     }
 }
 
@@ -298,17 +304,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// up in remote storage and return. If not exist in remote storage, a
     /// `JoinEntryState` with empty cache will be returned.
     /// WARNING: This will NOT remove anything from remote storage.
-    pub async fn remove_state<'a>(
-        &mut self,
-        key: &K,
-    ) -> StreamExecutorResult<Option<HashValueType>> {
+    pub async fn remove_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
         let state = self.inner.pop(key);
         self.metrics.total_lookup_count += 1;
         Ok(match state {
-            Some(_) => state,
+            Some(state) => state,
             None => {
                 self.metrics.lookup_miss_count += 1;
-                Some(self.fetch_cached_state(key).await?)
+                self.fetch_cached_state(key).await?
             }
         })
     }
@@ -324,15 +327,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .await?;
         pin_mut!(table_iter);
 
-        let mut cached = BTreeMap::new();
+        let mut entry_state = JoinEntryState::default();
         #[for_await]
         for row in table_iter {
             let row = row?.into_owned();
             let pk = row.by_indices(&self.pk_indices);
 
-            cached.insert(pk, JoinRow::from_row(row).encode()?);
+            entry_state.insert(pk, JoinRow::from_row(row).encode()?);
         }
-        Ok(JoinEntryState::with_cached(cached))
+        Ok(entry_state)
     }
 
     pub async fn flush(&mut self) -> StreamExecutorResult<()> {
@@ -384,6 +387,23 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
         self.state_table.update(old_row, new_row)?;
         Ok(())
+    }
+
+    /// Cached rows for this hash table.
+    pub fn cached_rows(&self) -> usize {
+        self.values().map(|e| e.len()).sum()
+    }
+
+    /// Cached entry count for this hash table.
+    pub fn entry_count(&self) -> usize {
+        self.len()
+    }
+
+    /// Estimated memory usage for this hash table.
+    pub fn estimated_size(&self) -> usize {
+        self.iter()
+            .map(|(k, v)| k.estimated_size() + v.estimated_size())
+            .sum()
     }
 }
 
