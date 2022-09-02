@@ -213,7 +213,9 @@ type CheckpointPost<S> = (
 /// Post-processing information for barriers and previously uncommitted ssts
 struct UncommittedMessages<S: MetaStore> {
     uncommitted_checkpoint_post: VecDeque<CheckpointPost<S>>,
-    /// Ssts that need to commit with next checkpoint.
+    /// Ssts that need to commit with next checkpoint. We need to save data in reverse order of
+    /// epoch, because we will save `uncommitted_ssts` in version, and traverse them in the
+    /// forward direction and return the key when we find it
     uncommitted_ssts: VecDeque<LocalSstableInfo>,
     /// Work_ids that need to commit with next checkpoint.
     uncommitted_work_ids: HashMap<HummockSstableId, WorkerId>,

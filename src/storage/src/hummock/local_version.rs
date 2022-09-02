@@ -44,6 +44,9 @@ pub struct LocalVersion {
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
+    /// We need to save data in reverse order of epoch,
+    /// because we will traverse `sync_uncommitted_data` in the forward direction and return the
+    /// key when we find it
     pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
     max_sync_epoch: u64,
 }
@@ -173,6 +176,7 @@ impl LocalVersion {
         sync_epochs: Vec<HummockEpoch>,
         sync_uncommitted_data: SyncUncommittedData,
     ) {
+        assert!(sync_epochs.iter().rev().is_sorted());
         let node = self
             .sync_uncommitted_data
             .iter_mut()
@@ -379,41 +383,38 @@ impl LocalVersion {
         &mut self,
         max_committed_epoch: HummockEpoch,
     ) -> Vec<(Vec<HummockEpoch>, Vec<LocalSstableInfo>)> {
-        let index = self
-            .sync_uncommitted_data
-            .iter()
-            .position(
-                |(epoch, data)| {
-                    let min_epoch = *epoch.last().expect("epoch list should not be empty");
-                    let max_epoch = *epoch.first().expect("epoch list should not be empty");
-                    assert!(
-                        max_epoch <= max_committed_epoch
-                            || min_epoch > max_committed_epoch,
-                        "new_max_committed_epoch {} lays within max_epoch {} and min_epoch {} of data {:?}",
-                        max_committed_epoch,
-                        max_epoch,
-                        min_epoch,
-                        data,
-                    );
-                    max_epoch <= max_committed_epoch
-                }
-            ).unwrap_or(self.sync_uncommitted_data.len());
-        self.sync_uncommitted_data
-            .drain(index..)
-            .map(|(epoch, data)| {
-                (
-                    epoch,
-                    match data {
-                        SyncUncommittedData::Syncing(_) => {
-                            unreachable!(
-                                "an epoch is synced while some data of it is not synced yet"
-                            )
-                        }
-                        SyncUncommittedData::Synced(ssts) => ssts,
-                    },
-                )
-            })
-            .collect_vec()
+        match self.sync_uncommitted_data.iter().position(|(epoch, data)| {
+            let min_epoch = *epoch.last().expect("epoch list should not be empty");
+            let max_epoch = *epoch.first().expect("epoch list should not be empty");
+            assert!(
+                max_epoch <= max_committed_epoch || min_epoch > max_committed_epoch,
+                "new_max_committed_epoch {} lays within max_epoch {} and min_epoch {} of data {:?}",
+                max_committed_epoch,
+                max_epoch,
+                min_epoch,
+                data,
+            );
+            max_epoch <= max_committed_epoch
+        }) {
+            Some(index) => self
+                .sync_uncommitted_data
+                .drain(index..)
+                .map(|(epoch, data)| {
+                    (
+                        epoch,
+                        match data {
+                            SyncUncommittedData::Syncing(_) => {
+                                unreachable!(
+                                    "an epoch is synced while some data of it is not synced yet"
+                                )
+                            }
+                            SyncUncommittedData::Synced(ssts) => ssts,
+                        },
+                    )
+                })
+                .collect_vec(),
+            None => vec![],
+        }
     }
 
     fn apply_version_delta_local_related(
