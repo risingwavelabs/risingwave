@@ -89,7 +89,7 @@ pub struct StateTable<S: StateStore> {
     /// If true, sanity check is disabled on this table.
     disable_sanity_check: bool,
 
-    /// a optional column index which is the vnode of each row computed by the table's consistent
+    /// an optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
     pub vnode_col_idx_in_pk: Option<usize>,
 }

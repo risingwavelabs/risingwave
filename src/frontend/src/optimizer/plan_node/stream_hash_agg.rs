@@ -24,7 +24,7 @@ use crate::optimizer::property::Distribution;
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
-    /// a optional column index which is the vnode of each row computed by the input's consistent
+    /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
     vnode_col_idx: Option<usize>,
     logical: LogicalAgg,

@@ -85,7 +85,7 @@ pub struct TableCatalog {
 
     pub fragment_id: FragmentId,
 
-    /// a optional column index which is the vnode of each row computed by the table's consistent
+    /// an optional column index which is the vnode of each row computed by the table's consistent
     /// hash distribution
     pub vnode_col_idx: Option<usize>,
 }
