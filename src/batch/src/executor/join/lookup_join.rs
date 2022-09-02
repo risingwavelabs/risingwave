@@ -203,8 +203,8 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
             .zip_eq(self.build_side_key_types.iter())
             .zip_eq(self.probe_side_key_types.iter())
         {
-            let scalar_impl = if probe_type == build_type {
-                datum.as_ref().unwrap().clone()
+            let datum = if probe_type == build_type {
+                datum.clone()
             } else {
                 let cast_expr = new_unary_expr(
                     Type::Cast,
@@ -212,11 +212,10 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
                     Box::new(LiteralExpression::new(build_type.clone(), datum.clone())),
                 )?;
 
-                let datum = cast_expr.eval_row(Row::empty())?;
-                datum.unwrap()
+                cast_expr.eval_row(Row::empty())?
             };
 
-            scan_range.eq_conds.push(scalar_impl);
+            scan_range.eq_conds.push(datum);
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
