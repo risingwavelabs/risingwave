@@ -186,11 +186,12 @@ fn infer_type_for_special(
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let return_type = match (&left_type, &right_type) {
+                (DataType::List { .. }, DataType::List { .. }) => None,
                 (
                     DataType::List {
                         datatype: left_elem_type,
                     },
-                    _,
+                    _, // non-array
                 ) if **left_elem_type == right_type => Some(left_type.clone()),
                 _ => None,
             };
@@ -201,8 +202,9 @@ fn infer_type_for_special(
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let return_type = match (&left_type, &right_type) {
+                (DataType::List { .. }, DataType::List { .. }) => None,
                 (
-                    _,
+                    _, // non-array
                     DataType::List {
                         datatype: right_elem_type,
                     },
