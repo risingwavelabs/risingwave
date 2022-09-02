@@ -30,6 +30,7 @@ use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
+use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};
@@ -87,11 +88,11 @@ impl DispatchExecutorInner {
             Message::Barrier(barrier) => {
                 let start_time = minstant::Instant::now();
                 let mutation = barrier.mutation.clone();
-                self.pre_mutate_dispatchers(&mutation).await?;
+                self.pre_mutate_dispatchers(&mutation)?;
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
-                self.post_mutate_dispatchers(&mutation).await?;
+                self.post_mutate_dispatchers(&mutation)?;
                 self.metrics
                     .actor_output_buffer_blocking_duration_ns
                     .with_label_values(&[&self.actor_id_str])
@@ -155,8 +156,8 @@ impl DispatchExecutorInner {
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.remove_outputs(&ids);
 
-        #[expect(clippy::single_match)]
         match dispatcher {
+            // The hash mapping is only used by the hash dispatcher.
             DispatcherImpl::Hash(dispatcher) => {
                 dispatcher.hash_mapping = {
                     let compressed_mapping = update.get_hash_mapping()?;
@@ -166,15 +167,14 @@ impl DispatchExecutorInner {
                     )
                 }
             }
-            _ => {}
+            _ => assert!(update.hash_mapping.is_none()),
         }
 
         Ok(())
     }
 
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
-    #[expect(clippy::unused_async)]
-    async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+    fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
         };
@@ -197,8 +197,7 @@ impl DispatchExecutorInner {
     }
 
     /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
-    #[expect(clippy::unused_async)]
-    async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+    fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
         };
@@ -407,13 +406,22 @@ pub trait Dispatcher: Debug + 'static {
     type DataFuture<'a>: DispatchFuture<'a>;
     type BarrierFuture<'a>: DispatchFuture<'a>;
 
+    /// Dispatch a data chunk to downstream actors.
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
+    /// Dispatch a barrier to downstream actors, generally by broadcasting it.
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
 
+    /// Add new outputs to the dispatcher.
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
+    /// Remove outputs to `actor_ids` from the dispatcher.
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 
+    /// The ID of the dispatcher. A [`DispatchExecutor`] may have multiple dispatchers with
+    /// different IDs.
     fn dispatcher_id(&self) -> DispatcherId;
+
+    /// Whether the dispatcher has no outputs. If so, it'll be cleaned up from the
+    /// [`DispatchExecutor`].
     fn is_empty(&self) -> bool;
 }
 
@@ -722,53 +730,68 @@ impl Dispatcher for BroadcastDispatcher {
 /// `SimpleDispatcher` dispatches message to a single output.
 #[derive(Debug)]
 pub struct SimpleDispatcher {
-    output: Option<BoxedOutput>,
+    /// In most cases, there is exactly one output. However, in some cases of configuration change,
+    /// the field needs to be temporarily set to 0 or 2 outputs.
+    ///
+    /// - When dropping a materialized view, the output will be removed and this field becomes
+    ///   empty. The [`DispatchExecutor`] will immediately clean-up this empty dispatcher before
+    ///   finishing processing the current mutation.
+    /// - When migrating a singleton fragment, the new output will be temporarily added in `pre`
+    ///   stage and this field becomes multiple, which is for broadcasting this configuration
+    ///   change barrier to both old and new downstream actors. In `post` stage, the old output
+    ///   will be removed and this field becomes single again.
+    ///
+    /// Therefore, when dispatching data, we assert that there's exactly one output by
+    /// `Self::output`.
+    output: SmallVec<[BoxedOutput; 2]>,
     dispatcher_id: DispatcherId,
 }
 
 impl SimpleDispatcher {
     pub fn new(output: BoxedOutput, dispatcher_id: DispatcherId) -> Self {
         Self {
-            output: Some(output),
+            output: smallvec![output],
             dispatcher_id,
         }
-    }
-
-    /// Get the output of this dispatcher.
-    /// The field should always be `Some`. After `remove_output` is called, the field becomes `None`
-    /// and this dispatcher should be dropped immediately by checking `is_empty`.
-    fn output(&mut self) -> &mut BoxedOutput {
-        self.output.as_mut().expect("no output")
     }
 }
 
 impl Dispatcher for SimpleDispatcher {
     define_dispatcher_associated_types!();
 
-    fn add_outputs(&mut self, _outputs: impl IntoIterator<Item = BoxedOutput>) {
-        panic!("simple dispatcher does not support add_outputs");
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.output.extend(outputs);
+        assert!(self.output.len() <= 2);
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
         async move {
-            self.output()
-                .send(Message::Barrier(barrier.clone()))
-                .await?;
+            // Only barrier is allowed to be dispatched to multiple outputs during migration.
+            for output in self.output.iter_mut() {
+                output.send(Message::Barrier(barrier.clone())).await?;
+            }
             Ok(())
         }
     }
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            self.output().send(Message::Chunk(chunk)).await?;
-            Ok(())
+            let output = self
+                .output
+                .iter_mut()
+                .exactly_one()
+                .expect("expect exactly one output");
+
+            output.send(Message::Chunk(chunk)).await
         }
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        if actor_ids.contains(&self.output().actor_id()) {
-            self.output = None;
-        }
+        let actor_id = actor_ids
+            .iter()
+            .exactly_one()
+            .expect("expect exactly one to remove");
+        self.output.retain(|output| output.actor_id() != *actor_id);
     }
 
     fn dispatcher_id(&self) -> DispatcherId {
@@ -776,7 +799,7 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     fn is_empty(&self) -> bool {
-        self.output.is_none()
+        self.output.is_empty()
     }
 }
 
@@ -917,29 +940,48 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
         ));
         let ctx = Arc::new(SharedContext::for_test());
-        let dispatcher_id = 666;
         let metrics = Arc::new(StreamingMetrics::unused());
 
         // 1. Register info and channels in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
-            for local_actor_id in [actor_id, 234, 235, 238] {
+            for local_actor_id in [actor_id, 234, 235, 238, 114, 514] {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
         add_local_channels(
             ctx.clone(),
-            vec![(actor_id, 234), (actor_id, 235), (actor_id, 238)],
+            vec![
+                (actor_id, 234),
+                (actor_id, 235),
+                (actor_id, 238),
+                (actor_id, 114),
+                (actor_id, 514),
+            ],
         );
 
-        let dispatcher = DispatcherImpl::new(
+        let broadcast_dispatcher_id = 666;
+        let broadcast_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
             &ProstDispatcher {
                 r#type: DispatcherType::Broadcast as _,
-                dispatcher_id,
+                dispatcher_id: broadcast_dispatcher_id,
                 downstream_actor_id: vec![234, 235],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let simple_dispatcher_id = 888;
+        let simple_dispatcher = DispatcherImpl::new(
+            &ctx,
+            actor_id,
+            &ProstDispatcher {
+                r#type: DispatcherType::Simple as _,
+                dispatcher_id: simple_dispatcher_id,
+                downstream_actor_id: vec![114],
                 ..Default::default()
             },
         )
@@ -947,7 +989,7 @@ mod tests {
 
         let executor = Box::new(DispatchExecutor::new(
             input,
-            vec![dispatcher],
+            vec![broadcast_dispatcher, simple_dispatcher],
             actor_id,
             ctx.clone(),
             metrics,
@@ -956,7 +998,7 @@ mod tests {
         pin_mut!(executor);
 
         // 2. Take downstream receivers.
-        let mut rxs = [234, 235, 238]
+        let mut rxs = [234, 235, 238, 114, 514]
             .into_iter()
             .map(|id| (id, ctx.take_receiver(&(actor_id, id)).unwrap()))
             .collect::<HashMap<_, _>>();
@@ -971,10 +1013,10 @@ mod tests {
             .await
             .unwrap();
 
-        // 4. Send a configuration change barrier.
+        // 4. Send a configuration change barrier for broadcast dispatcher.
         let dispatcher_updates = maplit::hashmap! {
             actor_id => ProstDispatcherUpdate {
-                dispatcher_id,
+                dispatcher_id: broadcast_dispatcher_id,
                 added_downstream_actor_id: vec![238],
                 removed_downstream_actor_id: vec![235],
                 ..Default::default()
@@ -994,9 +1036,12 @@ mod tests {
         try_recv!(234).unwrap().as_barrier().unwrap();
 
         try_recv!(235).unwrap().as_chunk().unwrap();
-        try_recv!(235).unwrap().as_barrier().unwrap();
+        try_recv!(235).unwrap().as_barrier().unwrap(); // It should still receive the barrier even if it's to be removed.
 
         try_recv!(238).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
+
+        try_recv!(114).unwrap().as_chunk().unwrap();
+        try_recv!(114).unwrap().as_barrier().unwrap(); // Untouched.
 
         // 6. Send another barrier.
         tx.send(Message::Barrier(Barrier::new_test_barrier(2)))
@@ -1008,6 +1053,48 @@ mod tests {
         try_recv!(234).unwrap().as_barrier().unwrap();
         try_recv!(235).unwrap_err(); // Since it's stopped, we can't receive the new messages.
         try_recv!(238).unwrap().as_barrier().unwrap();
+
+        try_recv!(114).unwrap().as_barrier().unwrap(); // Untouched.
+        try_recv!(514).unwrap_err(); // Untouched.
+
+        // 8. Send another chunk.
+        tx.send(Message::Chunk(StreamChunk::default()))
+            .await
+            .unwrap();
+
+        // 9. Send a configuration change barrier for simple dispatcher.
+        let dispatcher_updates = maplit::hashmap! {
+            actor_id => ProstDispatcherUpdate {
+                dispatcher_id: simple_dispatcher_id,
+                added_downstream_actor_id: vec![514],
+                removed_downstream_actor_id: vec![114],
+                ..Default::default()
+            }
+        };
+        let b3 = Barrier::new_test_barrier(3).with_mutation(Mutation::Update {
+            dispatchers: dispatcher_updates,
+            merges: Default::default(),
+            vnode_bitmaps: Default::default(),
+            dropped_actors: Default::default(),
+        });
+        tx.send(Message::Barrier(b3)).await.unwrap();
+        executor.next().await.unwrap().unwrap();
+
+        // 10. Check downstream.
+        try_recv!(114).unwrap().as_chunk().unwrap();
+        try_recv!(114).unwrap().as_barrier().unwrap(); // It should still receive the barrier even if it's to be removed.
+
+        try_recv!(514).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
+
+        // 11. Send another barrier.
+        tx.send(Message::Barrier(Barrier::new_test_barrier(4)))
+            .await
+            .unwrap();
+        executor.next().await.unwrap().unwrap();
+
+        // 12. Check downstream.
+        try_recv!(114).unwrap_err(); // Since it's stopped, we can't receive the new messages.
+        try_recv!(514).unwrap().as_barrier().unwrap();
     }
 
     #[tokio::test]
