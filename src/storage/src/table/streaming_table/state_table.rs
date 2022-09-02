@@ -258,21 +258,17 @@ impl<S: StateStore> StateTable<S> {
         self.disable_sanity_check = true;
     }
 
-    fn get_vnode_from_row(row: &Row, vnode_idx: usize) -> VirtualNode {
-        row[vnode_idx].clone().unwrap().into_int16() as _
-    }
-
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
     /// Return `None` if the provided columns are not enough.
     fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: &Row) -> Option<VirtualNode> {
         let prefix_len = pk_prefix.0.len();
         self.vnode_col_idx_in_pk
-            .and_then(
-                |vnode_col_idx_in_pk| match vnode_col_idx_in_pk < prefix_len {
-                    true => Some(Self::get_vnode_from_row(pk_prefix, vnode_col_idx_in_pk)),
-                    false => None,
-                },
-            )
+            .and_then(|vnode_col_idx_in_pk| {
+                pk_prefix
+                    .0
+                    .get(vnode_col_idx_in_pk)
+                    .map(|vnode| vnode.clone().unwrap().into_int16() as _)
+            })
             .or_else(|| {
                 self.dist_key_in_pk_indices
                     .iter()
