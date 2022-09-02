@@ -306,7 +306,10 @@ pub struct LogicalAgg {
 }
 
 impl LogicalAgg {
-    pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, Vec<Vec<usize>>) {
+    pub fn infer_internal_table_catalog(
+        &self,
+        vnode_col_idx: Option<usize>,
+    ) -> (Vec<TableCatalog>, Vec<Vec<usize>>) {
         let mut table_catalogs = vec![];
         let out_fields = self.base.schema.fields();
         let in_fields = self.input().schema().fields().to_vec();
@@ -362,6 +365,7 @@ impl LogicalAgg {
                 in_dist_key.clone(),
                 in_append_only,
                 column_mapping,
+                vnode_col_idx,
             )
         };
 
@@ -393,6 +397,7 @@ impl LogicalAgg {
                 in_dist_key.clone(),
                 in_append_only,
                 column_mapping,
+                vnode_col_idx,
             )
         };
         // Map input col idx -> table col idx.
@@ -506,11 +511,10 @@ impl LogicalAgg {
         let mut local_group_key = self.group_key().to_vec();
         local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
-        let local_agg = StreamHashAgg::new(LogicalAgg::new(
-            self.agg_calls().to_vec(),
-            local_group_key,
-            project.into(),
-        ));
+        let local_agg = StreamHashAgg::new(
+            LogicalAgg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
+            Some(vnode_col_idx),
+        );
 
         if self.group_key().is_empty() {
             let exchange =
@@ -530,17 +534,21 @@ impl LogicalAgg {
         } else {
             let exchange = RequiredDist::shard_by_key(input_col_num, self.group_key())
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-            let global_agg = StreamHashAgg::new(LogicalAgg::new(
-                self.agg_calls()
-                    .iter()
-                    .enumerate()
-                    .map(|(partial_output_idx, agg_call)| {
-                        agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
-                    })
-                    .collect(),
-                self.group_key().to_vec(),
-                exchange,
-            ));
+            let global_agg = StreamHashAgg::new(
+                LogicalAgg::new(
+                    self.agg_calls()
+                        .iter()
+                        .enumerate()
+                        .map(|(partial_output_idx, agg_call)| {
+                            agg_call
+                                .partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                        })
+                        .collect(),
+                    self.group_key().to_vec(),
+                    exchange,
+                ),
+                None,
+            );
             Ok(global_agg.into())
         }
     }
@@ -555,6 +563,7 @@ impl LogicalAgg {
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
                         .enforce_if_not_satisfies(stream_input, &Order::any())?,
                 ),
+                None,
             )
             .into());
         }

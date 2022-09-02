@@ -128,31 +128,6 @@ impl dyn PlanNode {
         &self.plan_base().functional_dependency
     }
 
-    /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> BatchPlanProst {
-        self.to_batch_prost_identity(true)
-    }
-
-    /// Serialize the plan node and its children to a batch plan proto without the identity field
-    /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
-        let node_body = Some(self.to_batch_prost_body());
-        let children = self
-            .inputs()
-            .into_iter()
-            .map(|plan| plan.to_batch_prost_identity(identity))
-            .collect();
-        BatchPlanProst {
-            children,
-            identity: if identity {
-                format!("{:?}", self)
-            } else {
-                "".into()
-            },
-            node_body,
-        }
-    }
-
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
@@ -180,6 +155,31 @@ impl dyn PlanNode {
             stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
+        }
+    }
+
+    /// Serialize the plan node and its children to a batch plan proto.
+    pub fn to_batch_prost(&self) -> BatchPlanProst {
+        self.to_batch_prost_identity(true)
+    }
+
+    /// Serialize the plan node and its children to a batch plan proto without the identity field
+    /// (for testing).
+    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
+        let node_body = Some(self.to_batch_prost_body());
+        let children = self
+            .inputs()
+            .into_iter()
+            .map(|plan| plan.to_batch_prost_identity(identity))
+            .collect();
+        BatchPlanProst {
+            children,
+            identity: if identity {
+                format!("{:?}", self)
+            } else {
+                "".into()
+            },
+            node_body,
         }
     }
 }
@@ -434,7 +434,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we dont support that, we don't need LogicalSort, just require the Order at the top of query
+            // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
     };
 }

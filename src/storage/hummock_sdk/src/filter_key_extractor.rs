@@ -503,6 +503,7 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
+            vnode_col_idx: None,
         }
     }
 
