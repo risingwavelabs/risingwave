@@ -97,6 +97,8 @@ message ExprNode {
     ROW = 523;
     // Array functions
     ARRAY_CAT = 531;
+    ARRAY_APPEND = 532;
+    ARRAY_PREPEND = 533;
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;

@@ -135,7 +135,9 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
-        ArrayCat => ArrayCatExpression::try_from(prost).map(Expression::boxed),
+        ArrayCat | ArrayAppend | ArrayPrepend => {
+            ArrayCatExpression::try_from(prost).map(Expression::boxed)
+        }
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",

@@ -158,16 +158,6 @@ fn infer_type_for_special(
             ensure_arity!("array_cat", 2 == | inputs |);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
-
-            let wrap_single_elem = |elem, ret_type| -> ExprImpl {
-                Self {
-                    func_type: ExprType::Array,
-                    return_type: ret_type,
-                    inputs: vec![elem],
-                }
-                .into()
-            };
-
             let return_type = match (&left_type, &right_type) {
                 (
                     DataType::List {
@@ -180,44 +170,46 @@ fn infer_type_for_special(
                     if **left_elem_type == **right_elem_type {
                         Some(left_type.clone())
                     } else if **left_elem_type == right_type {
-                        inputs[1] = wrap_single_elem(inputs[1].clone(), left_type.clone());
                         Some(left_type.clone())
                     } else if left_type == **right_elem_type {
-                        inputs[0] = wrap_single_elem(inputs[0].clone(), right_type.clone());
                         Some(right_type.clone())
                     } else {
                         None
                     }
                 }
+                _ => None,
+            };
+            Ok(return_type)
+        }
+        ExprType::ArrayAppend => {
+            ensure_arity!("array_append", 2 == | inputs |);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
                 (
                     DataType::List {
                         datatype: left_elem_type,
                     },
                     _,
-                ) if **left_elem_type == right_type => {
-                    inputs[1] = wrap_single_elem(inputs[1].clone(), left_type.clone());
-                    Some(left_type.clone())
-                }
+                ) if **left_elem_type == right_type => Some(left_type.clone()),
+                _ => None,
+            };
+            Ok(return_type)
+        }
+        ExprType::ArrayPrepend => {
+            ensure_arity!("array_prepend", 2 == | inputs |);
+            let left_type = inputs[0].return_type();
+            let right_type = inputs[1].return_type();
+            let return_type = match (&left_type, &right_type) {
                 (
                     _,
                     DataType::List {
                         datatype: right_elem_type,
                     },
-                ) if left_type == **right_elem_type => {
-                    inputs[0] = wrap_single_elem(inputs[0].clone(), right_type.clone());
-                    Some(right_type.clone())
-                }
+                ) if left_type == **right_elem_type => Some(right_type.clone()),
                 _ => None,
             };
-            if let Some(return_type) = return_type {
-                Ok(return_type)
-            } else {
-                return Err(ErrorCode::BindError(format!(
-                    "Wrong argument types for function `ArrayCat` ({:?} and {:?})",
-                    left_type, right_type
-                ))
-                .into());
-            }
+            Ok(return_type)
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);

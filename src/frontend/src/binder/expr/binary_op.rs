@@ -71,24 +71,22 @@ impl Binder {
 
     /// Bind `||`. Based on the types of the inputs, this can be string concat or array concat.
     fn bind_concat_op(&mut self, left: ExprImpl, right: ExprImpl) -> Result<ExprImpl> {
-        let types = [left.return_type(), right.return_type()];
-
-        let has_string = types.iter().any(|t| matches!(t, DataType::Varchar));
-        let has_array = types.iter().any(|t| matches!(t, DataType::List { .. }));
-
-        if has_string && !has_array {
-            // StringConcat
-            Ok(FunctionCall::new(ExprType::ConcatOp, vec![left, right])?.into())
-        } else if has_array {
-            // ArrayConcat
-            Ok(FunctionCall::new(ExprType::ArrayCat, vec![left, right])?.into())
-        } else {
-            // Invalid types
-            Err(ErrorCode::BindError(format!(
-                "operator does not exist: {:?} || {:?}",
-                &types[0], &types[1]
-            ))
-            .into())
-        }
+        let func_type = match (left.return_type(), right.return_type()) {
+            // string concatenation
+            (DataType::Varchar, _) | (_, DataType::Varchar) => ExprType::ConcatOp,
+            // array concatenation
+            (DataType::List { .. }, DataType::List { .. }) => ExprType::ArrayCat,
+            (DataType::List { .. }, _) => ExprType::ArrayAppend,
+            (_, DataType::List { .. }) => ExprType::ArrayPrepend,
+            // invalid
+            (left_type, right_type) => {
+                return Err(ErrorCode::BindError(format!(
+                    "operator does not exist: {} || {}",
+                    left_type, right_type
+                ))
+                .into());
+            }
+        };
+        Ok(FunctionCall::new(func_type, vec![left, right])?.into())
     }
 }
