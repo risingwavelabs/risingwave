@@ -787,11 +787,8 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        let actor_id = actor_ids
-            .iter()
-            .exactly_one()
-            .expect("expect exactly one to remove");
-        self.output.retain(|output| output.actor_id() != *actor_id);
+        self.output
+            .retain(|output| !actor_ids.contains(&output.actor_id()));
     }
 
     fn dispatcher_id(&self) -> DispatcherId {
