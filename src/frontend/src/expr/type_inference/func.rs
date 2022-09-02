@@ -167,9 +167,7 @@ fn infer_type_for_special(
                         datatype: right_elem_type,
                     },
                 ) => {
-                    if **left_elem_type == **right_elem_type {
-                        Some(left_type.clone())
-                    } else if **left_elem_type == right_type {
+                    if **left_elem_type == **right_elem_type || **left_elem_type == right_type {
                         Some(left_type.clone())
                     } else if left_type == **right_elem_type {
                         Some(right_type.clone())

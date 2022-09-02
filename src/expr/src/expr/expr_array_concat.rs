@@ -56,12 +56,12 @@ impl ArrayConcatExpression {
     }
 
     /// Concatenates two arrays with same dimensionality.
-    /// The bahavior is the same as PosgreSQL.
+    /// The bahavior is the same as PG.
     ///
     /// Examples:
-    /// - select array_cat(array[66], array[123]); => [66,123]
-    /// - select array_cat(array[66], null::int[]); => [66]
-    /// - select array_cat(null::int[], array[123]); => [123]
+    /// - `select array_cat(array[66], array[123]);` => [66,123]
+    /// - `select array_cat(array[66], null::int[]);` => [66]
+    /// - `select array_cat(null::int[], array[123]);` => [123]
     fn concat_array(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
             (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
@@ -83,13 +83,13 @@ impl ArrayConcatExpression {
     }
 
     /// Appends an array as the back element of an array of array.
-    /// Note the behavior is slightly different from PostgreSQL.
+    /// Note the behavior is slightly different from PG.
     ///
     /// Examples:
-    /// - select array_cat(array[array[66]], array[233]); => [[66], [233]]
-    /// - select array_cat(array[array[66]], null::int[]); => [[66]] # ignore NULL, same as PG
-    /// - select array_cat(null::int[][], array[233]); => NULL # different from PG
-    /// - select array_cat(null::int[][], null::int[]); => NULL # same as PG
+    /// - `select array_cat(array[array[66]], array[233]);` => [[66], [233]]
+    /// - `select array_cat(array[array[66]], null::int[]);` => [[66]] # ignore NULL, same as PG
+    /// - `select array_cat(null::int[][], array[233]);` => NULL # different from PG
+    /// - `select array_cat(null::int[][], null::int[]);` => NULL # same as PG
     fn append_array(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
             (None, _) => None,
@@ -113,13 +113,13 @@ impl ArrayConcatExpression {
     }
 
     /// Appends a value as the back element of an array.
-    /// The bahavior is the same as PosgreSQL.
+    /// The bahavior is the same as PG.
     ///
     /// Examples:
-    /// - select array_append(array[66], 123); => [66, 123]
-    /// - select array_append(array[66], null::int); => [66, null]
-    /// - select array_append(null::int[], 233); => [233]
-    /// - select array_append(null::int[], null::int); => [null]
+    /// - `select array_append(array[66], 123);` => [66, 123]
+    /// - `select array_append(array[66], null::int);` => [66, null]
+    /// - `select array_append(null::int[], 233);` => [233]
+    /// - `select array_append(null::int[], null::int);` => [null]
     fn append_value(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
             (None, right) => {
@@ -142,13 +142,13 @@ impl ArrayConcatExpression {
     }
 
     /// Prepends an array as the front element of an array of array.
-    /// Note the behavior is slightly different from PostgreSQL.
+    /// Note the behavior is slightly different from PG.
     ///
     /// Examples:
-    /// - select array_cat(array[233], array[array[66]]); => [[233], [66]]
-    /// - select array_cat(null::int[], array[array[66]]); => [[66]] # ignore NULL, same as PG
-    /// - select array_cat(array[233], null::int[][]); => NULL # different from PG
-    /// - select array_cat(null::int[], null::int[][]); => NULL # same as PG
+    /// - `select array_cat(array[233], array[array[66]]);` => [[233], [66]]
+    /// - `select array_cat(null::int[], array[array[66]]);` => [[66]] # ignore NULL, same as PG
+    /// - `select array_cat(array[233], null::int[][]);` => NULL # different from PG
+    /// - `select array_cat(null::int[], null::int[][]);` => NULL # same as PG
     fn prepend_array(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
             (_, None) => None,
@@ -171,13 +171,13 @@ impl ArrayConcatExpression {
     }
 
     /// Prepends a value as the front element of an array.
-    /// The bahavior is the same as PosgreSQL.
+    /// The bahavior is the same as PG.
     ///
     /// Examples:
-    /// - select array_prepend(123, array[66]); => [123, 66]
-    /// - select array_prepend(null::int, array[66]); => [null, 66]
-    /// - select array_prepend(233, null::int[]); => [233]
-    /// - select array_prepend(null::int, null::int[]); => [null]
+    /// - `select array_prepend(123, array[66]);` => [123, 66]
+    /// - `select array_prepend(null::int, array[66]);` => [null, 66]
+    /// - `select array_prepend(233, null::int[]);` => [233]
+    /// - `select array_prepend(null::int, null::int[]);` => [null]
     fn prepend_value(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
             (left, None) => {
