@@ -52,10 +52,13 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                 continue;
             }
         };
+
+        // TODO: to use `prefetch: false` after `prefetch` be supported by
+        // SstableIteratorReadOptions
         let mut iter = SstableIterator::new(
             holder,
             sstable_store.clone(),
-            Arc::new(SstableIteratorReadOptions { prefetch: false }),
+            Arc::new(SstableIteratorReadOptions::default()),
         );
         let mut previous_key: Option<Vec<u8>> = None;
         if let Err(err) = iter.rewind().await {

@@ -128,13 +128,16 @@ services:
       - "0.0.0.0:4566"
       - "--meta-addr"
       - "http://meta-node-0:5690"
+      - "--config-path"
+      - /risingwave.toml
     expose:
       - "4566"
     ports:
       - "4566:4566"
     depends_on:
       - meta-node-0
-    volumes: []
+    volumes:
+      - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
     container_name: frontend-node-0

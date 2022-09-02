@@ -106,7 +106,7 @@ fn get_acl_items(
     let mut empty_flag = true;
     let super_privilege = available_prost_privilege(object.clone());
     for user in users {
-        let privileges = if user.get_is_supper() {
+        let privileges = if user.get_is_super() {
             vec![&super_privilege]
         } else {
             user.get_grant_privileges()
@@ -198,7 +198,7 @@ impl SysCatalogReaderImpl {
                     Some(ScalarImpl::Int32(user.id as i32)),
                     Some(ScalarImpl::Utf8(user.name.clone())),
                     Some(ScalarImpl::Bool(user.can_create_db)),
-                    Some(ScalarImpl::Bool(user.is_supper)),
+                    Some(ScalarImpl::Bool(user.is_super)),
                     // compatible with PG.
                     Some(ScalarImpl::Utf8("********".to_string())),
                 ])

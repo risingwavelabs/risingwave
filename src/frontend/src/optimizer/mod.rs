@@ -295,6 +295,10 @@ impl PlanRoot {
 
         struct HasExchange;
         impl PlanVisitor<bool> for HasExchange {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
             fn visit_batch_exchange(&mut self, _: &BatchExchange) -> bool {
                 true
             }
