@@ -995,7 +995,7 @@ where
                 let default_user = UserInfo {
                     id,
                     name: user.to_string(),
-                    is_supper: true,
+                    is_super: true,
                     can_create_db: true,
                     can_create_user: true,
                     can_login: true,
@@ -1186,13 +1186,13 @@ where
                 .get_user_grant_relation_entry(grantor)
                 .or_insert_with(HashSet::new);
 
-            if user.is_supper {
+            if user.is_super {
                 return Err(MetaError::permission_denied(format!(
                     "Cannot grant privilege to super user {}",
                     user_id
                 )));
             }
-            if !grantor_info.is_supper {
+            if !grantor_info.is_super {
                 for new_grant_privilege in new_grant_privileges {
                     if let Some(privilege) = grantor_info
                         .grant_privileges
@@ -1297,7 +1297,7 @@ where
             .get_user_info(&revoke_by)
             .ok_or_else(|| anyhow!("User {} does not exist", &revoke_by))?;
         let same_user = granted_by == revoke_by.id;
-        if !revoke_by.is_supper {
+        if !revoke_by.is_super {
             for privilege in revoke_grant_privileges {
                 if let Some(user_privilege) = revoke_by
                     .grant_privileges
@@ -1323,7 +1323,7 @@ where
             let user = core
                 .get_user_info(user_id)
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))?;
-            if user.is_supper {
+            if user.is_super {
                 return Err(MetaError::permission_denied(format!(
                     "Cannot revoke privilege from supper user {}",
                     user_id
