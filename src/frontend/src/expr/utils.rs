@@ -354,6 +354,8 @@ pub struct CollectInputRef {
 }
 
 impl ExprVisitor<()> for CollectInputRef {
+    fn merge(_: (), _: ()) {}
+
     fn visit_input_ref(&mut self, expr: &InputRef) {
         self.input_bits.insert(expr.index());
     }

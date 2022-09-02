@@ -193,21 +193,21 @@ macro_rules! impl_has_variant {
             impl ExprImpl {
                 $(
                     pub fn [<has_ $variant:snake>](&self) -> bool {
-                        struct Has {
-                            has: bool,
-                        }
+                        struct Has {}
 
-                        impl ExprVisitor<()> for Has {
-                            fn [<visit_ $variant:snake>](&mut self, _: &$variant) {
-                                self.has = true;
+                        impl ExprVisitor<bool> for Has {
+
+                            fn merge(a: bool, b: bool) -> bool {
+                                a | b
+                            }
+
+                            fn [<visit_ $variant:snake>](&mut self, _: &$variant) -> bool {
+                                true
                             }
                         }
 
-                        let mut visitor = Has {
-                            has: false,
-                        };
-                        visitor.visit_expr(self);
-                        visitor.has
+                        let mut visitor = Has {};
+                        visitor.visit_expr(self)
                     }
                 )*
             }
@@ -239,73 +239,80 @@ impl ExprImpl {
     // We need to traverse inside subqueries.
     pub fn has_correlated_input_ref_by_depth(&self) -> bool {
         struct Has {
-            has: bool,
             depth: usize,
         }
 
-        impl ExprVisitor<()> for Has {
-            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.depth() >= self.depth {
-                    self.has = true;
-                }
+        impl ExprVisitor<bool> for Has {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
             }
 
-            fn visit_subquery(&mut self, subquery: &Subquery) {
+            fn visit_correlated_input_ref(
+                &mut self,
+                correlated_input_ref: &CorrelatedInputRef,
+            ) -> bool {
+                correlated_input_ref.depth() >= self.depth
+            }
+
+            fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
                 use crate::binder::BoundSetExpr;
 
+                let mut has = false;
                 self.depth += 1;
                 match &subquery.query.body {
                     BoundSetExpr::Select(select) => {
-                        select.exprs().for_each(|expr| self.visit_expr(expr))
+                        select.exprs().for_each(|expr| has |= self.visit_expr(expr))
                     }
                     BoundSetExpr::Values(values) => {
-                        values.exprs().for_each(|expr| self.visit_expr(expr))
+                        values.exprs().for_each(|expr| has |= self.visit_expr(expr))
                     }
                 }
                 self.depth -= 1;
+
+                has
             }
         }
 
-        let mut visitor = Has {
-            has: false,
-            depth: 1,
-        };
-        visitor.visit_expr(self);
-        visitor.has
+        let mut visitor = Has { depth: 1 };
+        visitor.visit_expr(self)
     }
 
     pub fn has_correlated_input_ref_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
         struct Has {
-            has: bool,
             correlated_id: CorrelatedId,
         }
 
-        impl ExprVisitor<()> for Has {
-            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.correlated_id() == self.correlated_id {
-                    self.has = true;
-                }
+        impl ExprVisitor<bool> for Has {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
             }
 
-            fn visit_subquery(&mut self, subquery: &Subquery) {
+            fn visit_correlated_input_ref(
+                &mut self,
+                correlated_input_ref: &CorrelatedInputRef,
+            ) -> bool {
+                correlated_input_ref.correlated_id() == self.correlated_id
+            }
+
+            fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
                 use crate::binder::BoundSetExpr;
                 match &subquery.query.body {
-                    BoundSetExpr::Select(select) => {
-                        select.exprs().for_each(|expr| self.visit_expr(expr))
-                    }
-                    BoundSetExpr::Values(values) => {
-                        values.exprs().for_each(|expr| self.visit_expr(expr))
-                    }
+                    BoundSetExpr::Select(select) => select
+                        .exprs()
+                        .map(|expr| self.visit_expr(expr))
+                        .reduce(Self::merge)
+                        .unwrap_or_default(),
+                    BoundSetExpr::Values(values) => values
+                        .exprs()
+                        .map(|expr| self.visit_expr(expr))
+                        .reduce(Self::merge)
+                        .unwrap_or_default(),
                 }
             }
         }
 
-        let mut visitor = Has {
-            has: false,
-            correlated_id,
-        };
-        visitor.visit_expr(self);
-        visitor.has
+        let mut visitor = Has { correlated_id };
+        visitor.visit_expr(self)
     }
 
     /// Collect `CorrelatedInputRef`s in `ExprImpl` by relative `depth`, return their indices, and
@@ -365,6 +372,8 @@ impl ExprImpl {
             has: bool,
         }
         impl ExprVisitor<()> for Has {
+            fn merge(_: (), _: ()) {}
+
             fn visit_expr(&mut self, expr: &ExprImpl) {
                 match expr {
                     ExprImpl::Literal(_inner) => {}
@@ -451,6 +460,18 @@ impl ExprImpl {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), y) if y.is_const() => Some((*x, y)),
                 (_, x, ExprImpl::InputRef(y)) if x.is_const() => Some((*y, x)),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_is_null(&self) -> Option<InputRef> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+            function_call.get_expr_type() == ExprType::IsNull{
+            match function_call.clone().decompose_as_unary() {
+                (_, ExprImpl::InputRef(x)) => Some(*x),
                 _ => None,
             }
         } else {
