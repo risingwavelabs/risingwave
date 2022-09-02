@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk, ListValue, Row};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{to_datum_ref, DataType, Datum, DatumRef, ScalarRefImpl};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -24,39 +24,192 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression, Ex
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
-pub struct ArrayCatExpression {
+pub enum Operation {
+    ConcatArray,
+    AppendArray,
+    PrependArray,
+    AppendValue,
+    PrependValue,
+}
+
+#[derive(Debug)]
+pub struct ArrayConcatExpression {
     return_type: DataType,
     left: BoxedExpression,
     right: BoxedExpression,
+    op: Operation,
 }
 
-impl ArrayCatExpression {
-    pub fn new(return_type: DataType, left: BoxedExpression, right: BoxedExpression) -> Self {
-        Self {
+impl ArrayConcatExpression {
+    pub fn new(
+        return_type: DataType,
+        left: BoxedExpression,
+        right: BoxedExpression,
+        op: Operation,
+    ) -> Result<Self> {
+        Ok(Self {
             return_type,
             left,
             right,
-        }
+            op,
+        })
     }
 
-    fn concat(left: Datum, right: Datum) -> Datum {
+    /// Concatenates two arrays with same dimensionality.
+    /// The bahavior is the same as PosgreSQL.
+    ///
+    /// Examples:
+    /// - select array_cat(array[66], array[123]); => [66,123]
+    /// - select array_cat(array[66], null::int[]); => [66]
+    /// - select array_cat(null::int[], array[123]); => [123]
+    fn concat_array(left: DatumRef, right: DatumRef) -> Datum {
         match (left, right) {
-            (None, right) => right,
-            (left, None) => left,
-            (Some(ScalarImpl::List(left)), Some(ScalarImpl::List(right))) => {
-                let mut values = left.values().to_vec();
-                values.extend_from_slice(right.values());
-                Some(ScalarImpl::List(ListValue::new(values)))
-            }
-            (_, _) => {
-                // input data types should be checked in frontend
+            (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
+            (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
+            (Some(ScalarRefImpl::List(left)), Some(ScalarRefImpl::List(right))) => Some(
+                ListValue::new(
+                    left.values_ref()
+                        .into_iter()
+                        .chain(right.values_ref().into_iter())
+                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .collect(),
+                )
+                .into(),
+            ),
+            _ => {
                 panic!("the operands must be two arrays with the same data type");
             }
         }
     }
+
+    /// Appends an array as the back element of an array of array.
+    /// Note the behavior is slightly different from PostgreSQL.
+    ///
+    /// Examples:
+    /// - select array_cat(array[array[66]], array[233]); => [[66], [233]]
+    /// - select array_cat(array[array[66]], null::int[]); => [[66]] # ignore NULL, same as PG
+    /// - select array_cat(null::int[][], array[233]); => NULL # different from PG
+    /// - select array_cat(null::int[][], null::int[]); => NULL # same as PG
+    fn append_array(left: DatumRef, right: DatumRef) -> Datum {
+        match (left, right) {
+            (None, _) => None,
+            (left @ Some(ScalarRefImpl::List(_)), None) => {
+                left.map(ScalarRefImpl::into_scalar_impl)
+            }
+            (Some(ScalarRefImpl::List(left)), right) => Some(
+                ListValue::new(
+                    left.values_ref()
+                        .into_iter()
+                        .chain(std::iter::once(right))
+                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .collect(),
+                )
+                .into(),
+            ),
+            _ => {
+                panic!("the rhs must be compatible to append to lhs");
+            }
+        }
+    }
+
+    /// Appends a value as the back element of an array.
+    /// The bahavior is the same as PosgreSQL.
+    ///
+    /// Examples:
+    /// - select array_append(array[66], 123); => [66, 123]
+    /// - select array_append(array[66], null::int); => [66, null]
+    /// - select array_append(null::int[], 233); => [233]
+    /// - select array_append(null::int[], null::int); => [null]
+    fn append_value(left: DatumRef, right: DatumRef) -> Datum {
+        match (left, right) {
+            (None, right) => {
+                Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
+            }
+            (Some(ScalarRefImpl::List(left)), right) => Some(
+                ListValue::new(
+                    left.values_ref()
+                        .into_iter()
+                        .chain(std::iter::once(right))
+                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .collect(),
+                )
+                .into(),
+            ),
+            _ => {
+                panic!("the rhs must be compatible to append to lhs");
+            }
+        }
+    }
+
+    /// Prepends an array as the front element of an array of array.
+    /// Note the behavior is slightly different from PostgreSQL.
+    ///
+    /// Examples:
+    /// - select array_cat(array[233], array[array[66]]); => [[233], [66]]
+    /// - select array_cat(null::int[], array[array[66]]); => [[66]] # ignore NULL, same as PG
+    /// - select array_cat(array[233], null::int[][]); => NULL # different from PG
+    /// - select array_cat(null::int[], null::int[][]); => NULL # same as PG
+    fn prepend_array(left: DatumRef, right: DatumRef) -> Datum {
+        match (left, right) {
+            (_, None) => None,
+            (None, right @ Some(ScalarRefImpl::List(_))) => {
+                right.map(ScalarRefImpl::into_scalar_impl)
+            }
+            (left, Some(ScalarRefImpl::List(right))) => Some(
+                ListValue::new(
+                    std::iter::once(left)
+                        .chain(right.values_ref().into_iter())
+                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .collect(),
+                )
+                .into(),
+            ),
+            _ => {
+                panic!("the lhs must be compatible to prepend to rhs");
+            }
+        }
+    }
+
+    /// Prepends a value as the front element of an array.
+    /// The bahavior is the same as PosgreSQL.
+    ///
+    /// Examples:
+    /// - select array_prepend(123, array[66]); => [123, 66]
+    /// - select array_prepend(null::int, array[66]); => [null, 66]
+    /// - select array_prepend(233, null::int[]); => [233]
+    /// - select array_prepend(null::int, null::int[]); => [null]
+    fn prepend_value(left: DatumRef, right: DatumRef) -> Datum {
+        match (left, right) {
+            (left, None) => {
+                Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
+            }
+            (left, Some(ScalarRefImpl::List(right))) => Some(
+                ListValue::new(
+                    std::iter::once(left)
+                        .chain(right.values_ref().into_iter())
+                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .collect(),
+                )
+                .into(),
+            ),
+            _ => {
+                panic!("the lhs must be compatible to prepend to rhs");
+            }
+        }
+    }
+
+    fn dispatch(&self, left: DatumRef, right: DatumRef) -> Datum {
+        match self.op {
+            Operation::ConcatArray => Self::concat_array(left, right),
+            Operation::AppendArray => Self::append_array(left, right),
+            Operation::AppendValue => Self::append_value(left, right),
+            Operation::PrependArray => Self::prepend_array(left, right),
+            Operation::PrependValue => Self::prepend_value(left, right),
+        }
+    }
 }
 
-impl Expression for ArrayCatExpression {
+impl Expression for ArrayConcatExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
@@ -75,10 +228,7 @@ impl Expression for ArrayCatExpression {
             if !vis {
                 builder.append_null()?;
             } else {
-                builder.append_datum(&Self::concat(
-                    left.map(|x| x.into_scalar_impl()),
-                    right.map(|x| x.into_scalar_impl()),
-                ))?;
+                builder.append_datum(&self.dispatch(left, right))?;
             }
         }
         Ok(Arc::new(builder.finish()?))
@@ -87,16 +237,14 @@ impl Expression for ArrayCatExpression {
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let left_data = self.left.eval_row(input)?;
         let right_data = self.right.eval_row(input)?;
-        Ok(Self::concat(left_data, right_data))
+        Ok(self.dispatch(to_datum_ref(&left_data), to_datum_ref(&right_data)))
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for ArrayCatExpression {
+impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type()? == Type::ArrayCat);
-        let ret_type = DataType::from(prost.get_return_type()?);
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node()? else {
             bail!("expects a RexNode::FuncCall");
         };
@@ -104,7 +252,27 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayCatExpression {
         ensure!(children.len() == 2);
         let left = expr_build_from_prost(&children[0])?;
         let right = expr_build_from_prost(&children[1])?;
-        Ok(Self::new(ret_type, left, right))
+        let left_type = left.return_type();
+        let right_type = right.return_type();
+        let ret_type = DataType::from(prost.get_return_type()?);
+        let op = match prost.get_expr_type()? {
+            // the types are checked in frontend, so no need for type checking here
+            Type::ArrayCat => {
+                if left_type == right_type {
+                    Operation::ConcatArray
+                } else if left_type == ret_type {
+                    Operation::AppendArray
+                } else if right_type == ret_type {
+                    Operation::PrependArray
+                } else {
+                    bail!("function call node invalid");
+                }
+            }
+            Type::ArrayAppend => Operation::AppendValue,
+            Type::ArrayPrepend => Operation::PrependValue,
+            _ => bail!("expects `ArrayCat`|`ArrayAppend`|`ArrayPrepend`"),
+        };
+        Self::new(ret_type, left, right, op)
     }
 }
 
@@ -165,7 +333,7 @@ mod tests {
                 children: vec![left_array, right_array],
             })),
         };
-        assert!(ArrayCatExpression::try_from(&expr).is_ok());
+        assert!(ArrayConcatExpression::try_from(&expr).is_ok());
     }
 
     fn make_i64_array_expr(values: Vec<i64>) -> BoxedExpression {
@@ -182,7 +350,7 @@ mod tests {
     fn test_array_cat_array_of_primitives() {
         let left_array = make_i64_array_expr(vec![42]);
         let right_array = make_i64_array_expr(vec![43, 44]);
-        let expr = ArrayCatExpression::new(
+        let expr = ArrayConcatExpression::new(
             DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
@@ -214,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_array_cat_null_arg() {
-        let test_the_expr = |expr: ArrayCatExpression| {
+        let test_the_expr = |expr: ArrayConcatExpression| {
             let chunk = DataChunk::new_dummy(4)
                 .with_visibility([true, false, true, true].into_iter().collect());
             let expected_array = Some(ScalarImpl::List(ListValue::new(vec![Some(42i64.into())])));
@@ -233,7 +401,7 @@ mod tests {
             assert_eq!(actual, expected);
         };
 
-        let expr = ArrayCatExpression::new(
+        let expr = ArrayConcatExpression::new(
             DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
@@ -248,7 +416,7 @@ mod tests {
         );
         test_the_expr(expr);
 
-        let expr = ArrayCatExpression::new(
+        let expr = ArrayConcatExpression::new(
             DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
@@ -285,7 +453,7 @@ mod tests {
             ),
         )
         .boxed();
-        let expr = ArrayCatExpression::new(ret_type, left_array, right_array);
+        let expr = ArrayConcatExpression::new(ret_type, left_array, right_array);
 
         let chunk = DataChunk::new_dummy(4)
             .with_visibility([true, false, true, true].into_iter().collect());
