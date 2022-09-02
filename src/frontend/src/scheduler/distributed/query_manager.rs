@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::mem;
+
 use std::sync::Arc;
 
 use futures::StreamExt;

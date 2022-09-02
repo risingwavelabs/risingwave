@@ -19,7 +19,7 @@ use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use anyhow::anyhow;
+
 
 use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
@@ -34,7 +34,7 @@ use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, ObserverManager};
+use risingwave_common_service::observer_manager::{ObserverManager};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -198,8 +198,10 @@ pub struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
 
-    sessions_map: Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>,
+    sessions_map: SessionMapRef,
 }
+
+type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
     pub async fn init(
@@ -455,6 +457,7 @@ impl SessionImpl {
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
+            shutdown_receivers_map: Default::default(),
         }
     }
 
@@ -497,7 +500,7 @@ impl SessionImpl {
         {
             let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
             println!("Start to cancel running queries, map len {}", write_guard.len());
-            for (query_id, sender) in write_guard.iter_mut() {
+            for (query_id, sender) in &mut *write_guard {
                 if let Some(sender_swap) = mem::take(sender) {
                     sender_swap.send(()).unwrap();
                     info!("Cancel query_id {:?} in query manager", query_id);
@@ -616,7 +619,7 @@ impl SessionManager for SessionManagerImpl {
     }
 
     fn connect_for_cancel(&self, process_id: i32, secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
-        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        let write_guard = self.env.sessions_map.lock().unwrap();
         write_guard.get(&(process_id, secret_key)).cloned().ok_or(PsqlError::CancelNotFound)
     }
 }

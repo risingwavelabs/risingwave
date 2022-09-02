@@ -73,11 +73,11 @@ impl SessionManager for LocalFrontend {
         Ok(self.session_ref())
     }
 
-    fn connect_for_cancel(&self, process_id: i32, secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
+    fn connect_for_cancel(&self, _process_id: i32, _secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
         todo!()
     }
 
-    fn insert_session(&self, process_id: i32, secret_key: i32, session: Arc<Self::Session>) {
+    fn insert_session(&self, _process_id: i32, _secret_key: i32, _session: Arc<Self::Session>) {
         todo!()
     }
 }

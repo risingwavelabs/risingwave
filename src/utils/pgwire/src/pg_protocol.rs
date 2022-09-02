@@ -234,7 +234,7 @@ where
         }
         // Cancel request need this for identify and verification.
         let id = (0, 0);
-        self.stream.write_no_flush(&BeMessage::BackendKeyData(id));
+        self.stream.write_no_flush(&BeMessage::BackendKeyData(id))?;
         self.session_mgr.insert_session(id.0, id.1, session.clone());
         self.session = Some(session);
         self.state = PgProtocolState::Regular;
@@ -271,7 +271,7 @@ where
         let session = self.session.clone().unwrap();
         session.cancel_query();
         self.session = None;
-        self.stream.write_no_flush(&BeMessage::EmptyQueryResponse);
+        self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
     }
 
