@@ -46,13 +46,13 @@ impl ArrayConcatExpression {
         left: BoxedExpression,
         right: BoxedExpression,
         op: Operation,
-    ) -> Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             return_type,
             left,
             right,
             op,
-        })
+        }
     }
 
     /// Concatenates two arrays with same dimensionality.
@@ -272,13 +272,14 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
             Type::ArrayPrepend => Operation::PrependValue,
             _ => bail!("expects `ArrayCat`|`ArrayAppend`|`ArrayPrepend`"),
         };
-        Self::new(ret_type, left, right, op)
+        Ok(Self::new(ret_type, left, right, op))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
+    use risingwave_common::types::ScalarImpl;
     use risingwave_pb::expr::expr_node::{RexNode, Type as ProstType};
     use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
 
@@ -295,45 +296,147 @@ mod tests {
         }
     }
 
+    fn make_i64_array_expr_node(values: Vec<i64>) -> ExprNode {
+        ExprNode {
+            expr_type: ProstType::Array as i32,
+            return_type: Some(
+                DataType::List {
+                    datatype: Box::new(DataType::Int64),
+                }
+                .to_protobuf(),
+            ),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: values.into_iter().map(make_i64_expr_node).collect(),
+            })),
+        }
+    }
+
+    fn make_i64_array_array_expr_node(values: Vec<Vec<i64>>) -> ExprNode {
+        ExprNode {
+            expr_type: ProstType::Array as i32,
+            return_type: Some(
+                DataType::List {
+                    datatype: Box::new(DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    }),
+                }
+                .to_protobuf(),
+            ),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: values.into_iter().map(make_i64_array_expr_node).collect(),
+            })),
+        }
+    }
+
     #[test]
-    fn test_array_cat_try_from() {
-        let left_array = ExprNode {
-            expr_type: ProstType::Array as i32,
-            return_type: Some(
-                DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                }
-                .to_protobuf(),
-            ),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_i64_expr_node(42)],
-            })),
-        };
-        let right_array = ExprNode {
-            expr_type: ProstType::Array as i32,
-            return_type: Some(
-                DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                }
-                .to_protobuf(),
-            ),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_i64_expr_node(43), make_i64_expr_node(44)],
-            })),
-        };
-        let expr = ExprNode {
-            expr_type: ProstType::ArrayCat as i32,
-            return_type: Some(
-                DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                }
-                .to_protobuf(),
-            ),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![left_array, right_array],
-            })),
-        };
-        assert!(ArrayConcatExpression::try_from(&expr).is_ok());
+    fn test_array_concat_try_from() {
+        {
+            let left = make_i64_array_expr_node(vec![42]);
+            let right = make_i64_array_expr_node(vec![43]);
+            let expr = ExprNode {
+                expr_type: ProstType::ArrayCat as i32,
+                return_type: Some(
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    }
+                    .to_protobuf(),
+                ),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left, right],
+                })),
+            };
+            assert!(ArrayConcatExpression::try_from(&expr).is_ok());
+        }
+
+        {
+            let left = make_i64_array_array_expr_node(vec![vec![42]]);
+            let right = make_i64_array_array_expr_node(vec![vec![43]]);
+            let expr = ExprNode {
+                expr_type: ProstType::ArrayCat as i32,
+                return_type: Some(
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    }
+                    .to_protobuf(),
+                ),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left, right],
+                })),
+            };
+            assert!(ArrayConcatExpression::try_from(&expr).is_ok());
+        }
+
+        {
+            let left = make_i64_array_expr_node(vec![42]);
+            let right = make_i64_expr_node(43);
+            let expr = ExprNode {
+                expr_type: ProstType::ArrayAppend as i32,
+                return_type: Some(
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    }
+                    .to_protobuf(),
+                ),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left, right],
+                })),
+            };
+            assert!(ArrayConcatExpression::try_from(&expr).is_ok());
+        }
+
+        {
+            let left = make_i64_array_array_expr_node(vec![vec![42]]);
+            let right = make_i64_array_expr_node(vec![43]);
+            let expr = ExprNode {
+                expr_type: ProstType::ArrayAppend as i32,
+                return_type: Some(
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    }
+                    .to_protobuf(),
+                ),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left, right],
+                })),
+            };
+            assert!(ArrayConcatExpression::try_from(&expr).is_ok());
+        }
+
+        {
+            let left = make_i64_expr_node(43);
+            let right = make_i64_array_expr_node(vec![42]);
+            let expr = ExprNode {
+                expr_type: ProstType::ArrayPrepend as i32,
+                return_type: Some(
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    }
+                    .to_protobuf(),
+                ),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left, right],
+                })),
+            };
+            assert!(ArrayConcatExpression::try_from(&expr).is_ok());
+        }
+
+        {
+            let left = make_i64_array_expr_node(vec![43]);
+            let right = make_i64_array_array_expr_node(vec![vec![42]]);
+            let expr = ExprNode {
+                expr_type: ProstType::ArrayPrepend as i32,
+                return_type: Some(
+                    DataType::List {
+                        datatype: Box::new(DataType::Int64),
+                    }
+                    .to_protobuf(),
+                ),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left, right],
+                })),
+            };
+            assert!(ArrayConcatExpression::try_from(&expr).is_ok());
+        }
     }
 
     fn make_i64_array_expr(values: Vec<i64>) -> BoxedExpression {
@@ -347,15 +450,16 @@ mod tests {
     }
 
     #[test]
-    fn test_array_cat_array_of_primitives() {
-        let left_array = make_i64_array_expr(vec![42]);
-        let right_array = make_i64_array_expr(vec![43, 44]);
+    fn test_array_concat_array_of_primitives() {
+        let left = make_i64_array_expr(vec![42]);
+        let right = make_i64_array_expr(vec![43, 44]);
         let expr = ArrayConcatExpression::new(
             DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
-            left_array,
-            right_array,
+            left,
+            right,
+            Operation::ConcatArray,
         );
 
         let chunk = DataChunk::new_dummy(4)
@@ -380,99 +484,5 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    #[test]
-    fn test_array_cat_null_arg() {
-        let test_the_expr = |expr: ArrayConcatExpression| {
-            let chunk = DataChunk::new_dummy(4)
-                .with_visibility([true, false, true, true].into_iter().collect());
-            let expected_array = Some(ScalarImpl::List(ListValue::new(vec![Some(42i64.into())])));
-            let expected = vec![
-                expected_array.clone(),
-                None,
-                expected_array.clone(),
-                expected_array,
-            ];
-            let actual = expr
-                .eval(&chunk)
-                .unwrap()
-                .iter()
-                .map(|v| v.map(|s| s.into_scalar_impl()))
-                .collect_vec();
-            assert_eq!(actual, expected);
-        };
-
-        let expr = ArrayConcatExpression::new(
-            DataType::List {
-                datatype: Box::new(DataType::Int64),
-            },
-            make_i64_array_expr(vec![42]),
-            LiteralExpression::new(
-                DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                },
-                None,
-            )
-            .boxed(),
-        );
-        test_the_expr(expr);
-
-        let expr = ArrayConcatExpression::new(
-            DataType::List {
-                datatype: Box::new(DataType::Int64),
-            },
-            LiteralExpression::new(
-                DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                },
-                None,
-            )
-            .boxed(),
-            make_i64_array_expr(vec![42]),
-        );
-        test_the_expr(expr);
-    }
-
-    #[test]
-    fn test_array_cat_array_of_arrays() {
-        let ret_type = DataType::List {
-            datatype: Box::new(DataType::List {
-                datatype: Box::new(DataType::Int64),
-            }),
-        };
-        let left_array = LiteralExpression::new(
-            ret_type.clone(),
-            Some(
-                ListValue::new(vec![Some(ListValue::new(vec![Some(42i64.into())]).into())]).into(),
-            ),
-        )
-        .boxed();
-        let right_array = LiteralExpression::new(
-            ret_type.clone(),
-            Some(
-                ListValue::new(vec![Some(ListValue::new(vec![Some(43i64.into())]).into())]).into(),
-            ),
-        )
-        .boxed();
-        let expr = ArrayConcatExpression::new(ret_type, left_array, right_array);
-
-        let chunk = DataChunk::new_dummy(4)
-            .with_visibility([true, false, true, true].into_iter().collect());
-        let expected_array = Some(ScalarImpl::List(ListValue::new(vec![
-            Some(ListValue::new(vec![Some(42i64.into())]).into()),
-            Some(ListValue::new(vec![Some(43i64.into())]).into()),
-        ])));
-        let expected = vec![
-            expected_array.clone(),
-            None,
-            expected_array.clone(),
-            expected_array,
-        ];
-        let actual = expr
-            .eval(&chunk)
-            .unwrap()
-            .iter()
-            .map(|v| v.map(|s| s.into_scalar_impl()))
-            .collect_vec();
-        assert_eq!(actual, expected);
-    }
+    // More test cases are in e2e tests.
 }
