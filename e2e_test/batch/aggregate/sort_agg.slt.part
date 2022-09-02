@@ -10,7 +10,7 @@ insert into t values (4, 7), (9, 3), (10, 12), (1, 1), (10, 20), (4, 1), (-10, 1
 statement ok
 create materialized view mv as select * from t order by v1 desc
 
-query I
+query I rowsort
 select max(v2), v1 from mv group by v1
 ----
 10 100
