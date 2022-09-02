@@ -15,9 +15,11 @@
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
+use std::mem;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use anyhow::anyhow;
 
 use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
@@ -32,7 +34,7 @@ use risingwave_common::config::load_config;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_common_service::observer_manager::{Channel, ObserverManager};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -42,6 +44,8 @@ use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::{info, warn};
+use pgwire::error::{PsqlError, PsqlResult};
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -61,6 +65,7 @@ use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterIm
 use crate::user::UserId;
 use crate::utils::WithOptions;
 use crate::{FrontendConfig, FrontendOpts};
+use crate::scheduler::plan_fragmenter::QueryId;
 
 pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
@@ -192,6 +197,8 @@ pub struct FrontendEnv {
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
+
+    sessions_map: Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>,
 }
 
 impl FrontendEnv {
@@ -234,6 +241,7 @@ impl FrontendEnv {
             hummock_snapshot_manager,
             server_addr,
             client_pool,
+            sessions_map: Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
@@ -328,6 +336,7 @@ impl FrontendEnv {
                 hummock_snapshot_manager,
                 server_addr: frontend_address,
                 client_pool,
+                sessions_map: Arc::new(Mutex::new(HashMap::new()))
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -415,6 +424,9 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: RwLock<ConfigMap>,
+
+    /// Shutdown channels map
+    shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<Sender<()>>>>>
 }
 
 impl SessionImpl {
@@ -428,6 +440,7 @@ impl SessionImpl {
             auth_context,
             user_authenticator,
             config_map: RwLock::new(Default::default()),
+            shutdown_receivers_map: Arc::new(Mutex::new(HashMap::new()))
         }
     }
 
@@ -471,6 +484,38 @@ impl SessionImpl {
 
     pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
         self.config_map.write().set(key, value)
+    }
+
+    pub fn insert_query_shutdown_sender(&self, query_id: QueryId, shutdown_tx: Sender<()>) {
+        println!("Insert channel for query id {:?}", query_id);
+        let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+        write_guard.insert(query_id, Some(shutdown_tx));
+    }
+
+    // TODO: Support cancel query's in current session. This needs to store query ID in session.
+    pub fn cancel_running_queries(&self) {
+        {
+            let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+            println!("Start to cancel running queries, map len {}", write_guard.len());
+            for (query_id, sender) in write_guard.iter_mut() {
+                if let Some(sender_swap) = mem::take(sender) {
+                    sender_swap.send(()).unwrap();
+                    info!("Cancel query_id {:?} in query manager", query_id);
+                }
+            }
+            write_guard.clear();
+            println!("Cancel running queries done, map len {}", write_guard.len());
+        }
+    }
+
+
+    pub fn delete_corresponding_query(&self, query_id: &QueryId) {
+        {
+            let mut write_guard = self.shutdown_receivers_map.lock().unwrap();
+            if write_guard.remove(query_id).is_none() {
+                warn!("query_id has already been canceled");
+            }
+        }
     }
 }
 
@@ -563,6 +608,16 @@ impl SessionManager for SessionManagerImpl {
                 format!("Role {} does not exist", user_name),
             )))
         }
+    }
+
+    fn insert_session(&self, process_id: i32, secret_key: i32, session: Arc<Self::Session>) {
+        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard.insert((process_id, secret_key), session);
+    }
+
+    fn connect_for_cancel(&self, process_id: i32, secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
+        let mut write_guard = self.env.sessions_map.lock().unwrap();
+        write_guard.get(&(process_id, secret_key)).cloned().ok_or(PsqlError::CancelNotFound)
     }
 }
 
@@ -684,7 +739,7 @@ impl Session for SessionImpl {
     }
 
     fn cancel_query(&self) {
-        self.env.query_manager().cancel_running_processes()
+        self.cancel_running_queries()
     }
 }
 

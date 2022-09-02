@@ -38,7 +38,7 @@ pub enum FeMessage {
     Execute(FeExecuteMessage),
     Close(FeCloseMessage),
     Sync,
-    CancelQuery,
+    CancelQuery(FeCancelMessage),
     Terminate,
 }
 
@@ -118,6 +118,19 @@ pub struct FeDescribeMessage {
 pub struct FeCloseMessage {
     pub kind: u8,
     pub name: Bytes,
+}
+
+pub struct FeCancelMessage {
+    pub target_process_id: i32,
+    pub target_secret_key: i32,
+}
+
+impl FeCancelMessage {
+    pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
+        let target_process_id = buf.get_i32();
+        let target_secret_key = buf.get_i32();
+        Ok(FeMessage::CancelQuery(Self {target_process_id,  target_secret_key}))
+    }
 }
 
 impl FeDescribeMessage {
@@ -292,7 +305,7 @@ impl FeStartupMessage {
             )?)),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
-            80877102 => Ok(FeMessage::CancelQuery),
+            80877102 => FeCancelMessage::parse(Bytes::from(payload)),
             _ => Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
                 format!(
@@ -325,6 +338,7 @@ fn read_null_terminated(buf: &mut Bytes) -> Result<Bytes> {
 
 /// Message sent from server to psql client. Implement `write` (how to serialize it into psql
 /// buffer).
+/// Ref: https://www.postgresql.org/docs/current/protocol-message-formats.html
 #[derive(Debug)]
 pub enum BeMessage<'a> {
     AuthenticationOk,
@@ -345,6 +359,9 @@ pub enum BeMessage<'a> {
     RowDescription(&'a [PgFieldDescriptor]),
     ErrorResponse(BoxedError),
     CloseComplete,
+
+    // 0: process ID, 1: secret key
+    BackendKeyData((i32, i32)),
 }
 
 #[derive(Debug)]
@@ -606,6 +623,15 @@ impl<'a> BeMessage<'a> {
                     Ok(())
                 })
                 .unwrap();
+            }
+
+            BeMessage::BackendKeyData((process_id, secret_key)) => {
+                buf.put_u8(b'K');
+                write_body(buf, |buf| {
+                    buf.put_i32(*process_id);
+                    buf.put_i32(*secret_key);
+                    Ok(())
+                })?;
             }
         }
 

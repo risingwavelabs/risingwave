@@ -40,6 +40,7 @@ use risingwave_rpc_client::error::Result as RpcResult;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tempfile::{Builder, NamedTempFile};
+use pgwire::error::PsqlResult;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
@@ -70,6 +71,14 @@ impl SessionManager for LocalFrontend {
         _user_name: &str,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
+    }
+
+    fn connect_for_cancel(&self, process_id: i32, secret_key: i32) -> PsqlResult<Arc<Self::Session>> {
+        todo!()
+    }
+
+    fn insert_session(&self, process_id: i32, secret_key: i32, session: Arc<Self::Session>) {
+        todo!()
     }
 }
 

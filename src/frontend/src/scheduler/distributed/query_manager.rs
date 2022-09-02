@@ -58,8 +58,11 @@ pub struct QueryManager {
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
 
-    channel_map: Arc<Mutex<HashMap<String, Option<oneshot::Sender<u8>>>>>,
+    /// Send cancel request to query when receive ctrl-c.
+    shutdown_receivers_map: Arc<Mutex<HashMap<QueryId, Option<oneshot::Sender<u8>>>>>,
 }
+
+type QueryManagerRef = Arc<QueryManager>;
 
 impl QueryManager {
     pub fn new(
@@ -73,7 +76,7 @@ impl QueryManager {
             hummock_snapshot_manager,
             compute_client_pool,
             catalog_reader,
-            channel_map: Arc::new(Mutex::new(HashMap::new()))
+            shutdown_receivers_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -101,6 +104,11 @@ impl QueryManager {
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
         let (_shutdown_tx, shutdown_rx) = oneshot::channel();
+        // Insert shutdown channel into channel map so able to cancel it outside.
+        {
+            let session_ctx = _context.session.clone();
+            session_ctx.insert_query_shutdown_sender(query_id.clone(), _shutdown_tx);
+        }
         let query_result_fetcher = match query_execution.start(shutdown_tx, shutdown_rx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
@@ -111,26 +119,9 @@ impl QueryManager {
             }
         };
 
-        {
-            let mut write_guard = self.channel_map.lock();
-            write_guard.insert(query_id.id.clone(), Some(shutdown_tx));
-        }
-
         Ok(query_result_fetcher.run())
     }
 
-    // TODO: Support specify PID cancel.
-    pub fn cancel_running_processes(&self) {
-        {
-            let mut write_guard = self.channel_map.lock();
-            for (query_id, sender) in write_guard.iter_mut() {
-                let sender_swap = mem::take(sender).expect("There should always exist a sender");
-                sender_swap.send(0).unwrap();
-                info!("Cancel query_id {:?} in query manager", query_id);
-            }
-            write_guard.clear();
-        }
-    }
 }
 
 impl QueryResultFetcher {

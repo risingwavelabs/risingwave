@@ -26,11 +26,7 @@ use tracing::log::trace;
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement};
 use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-use crate::pg_message::{
-    BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCloseMessage,
-    FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage, FePasswordMessage,
-    FeStartupMessage,
-};
+use crate::pg_message::{BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage, FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage, FePasswordMessage, FeStartupMessage};
 use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
@@ -136,14 +132,14 @@ where
                         self.stream
                             .write_for_error(&BeMessage::ErrorResponse(Box::new(e)));
                         self.stream.write_for_error(&BeMessage::ReadyForQuery);
-                        // return true;
                     }
 
                     PsqlError::CloseError(_)
                     | PsqlError::DescribeError(_)
                     | PsqlError::ParseError(_)
                     | PsqlError::BindError(_)
-                    | PsqlError::ExecuteError(_) => {
+                    | PsqlError::ExecuteError(_)
+                    | PsqlError::CancelNotFound => {
                         self.stream
                             .write_for_error(&BeMessage::ErrorResponse(Box::new(e)));
                     }
@@ -152,6 +148,8 @@ where
                     PsqlError::CancelMsg(_) => {
                         todo!("Support processing cancel query")
                     }
+
+
                 }
                 self.stream.flush_for_error().await;
                 tracing::error!("{}", error_msg);
@@ -167,7 +165,7 @@ where
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
             FeMessage::Password(msg) => self.process_password_msg(msg)?,
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
-            FeMessage::CancelQuery => self.process_cancel_msg()?,
+            FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => self.process_parse_msg(m).await?,
             FeMessage::Bind(m) => self.process_bind_msg(m).await?,
@@ -234,6 +232,10 @@ where
                     .map_err(|err| PsqlError::StartupError(Box::new(err)))?;
             }
         }
+        // Cancel request need this for identify and verification.
+        let id = (0, 0);
+        self.stream.write_no_flush(&BeMessage::BackendKeyData(id));
+        self.session_mgr.insert_session(id.0, id.1, session.clone());
         self.session = Some(session);
         self.state = PgProtocolState::Regular;
         Ok(())
@@ -260,10 +262,16 @@ where
         Ok(())
     }
 
-    fn process_cancel_msg(&mut self) -> PsqlResult<()> {
+    fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
+        let session = self
+            .session_mgr
+            .connect_for_cancel(m.target_process_id, m.target_secret_key)?;
+        self.session = Some(session);
         // TODO: Abort running query in `QueryManager`.
         let session = self.session.clone().unwrap();
         session.cancel_query();
+        self.session = None;
+        self.stream.write_no_flush(&BeMessage::EmptyQueryResponse);
         Ok(())
     }
 

@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::mem;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc};
 
 use anyhow::anyhow;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
@@ -141,7 +141,7 @@ impl QueryExecution {
     pub async fn start(
         &self,
         shutdown_tx: Sender<SchedulerError>,
-        shutdown_rx: oneshot::Receiver<u8>,
+        shutdown_rx: oneshot::Receiver<()>,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -207,83 +207,73 @@ impl QueryRunner {
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
 
         // Schedule other stages after leaf stages are all scheduled.
-        while let Some(msg) = self.msg_receiver.recv().await {
-            match msg {
-                Stage(Scheduled(stage_id)) => {
-                    tracing::trace!(
-                        "Query stage {:?}-{:?} scheduled.",
-                        self.query.query_id,
-                        stage_id
-                    );
-                    self.scheduled_stages_count += 1;
-                    stages_with_table_scan.remove(&stage_id);
-                    if stages_with_table_scan.is_empty() {
-                        // We can be sure here that all the Hummock iterators have been created,
-                        // thus they all successfully pinned a HummockVersion.
-                        // So we can now unpin their epoch.
-                        tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        self.hummock_snapshot_manager
-                            .unpin_snapshot(self.epoch, self.query.query_id())
-                            .await;
-                    }
+        let mut shutdown_rx = shutdown_rx;
+        loop {
+            tokio::select! {
+            _ = &mut shutdown_rx => {
 
-                    if self.scheduled_stages_count == self.stage_executions.len() {
-                        // Now all stages have been scheduled, send root stage info.
-                        self.send_root_stage_info().await;
-                    } else {
-                        for parent in self.query.get_parents(&stage_id) {
-                            if self.all_children_scheduled(parent).await
-                                // Do not schedule same stage twice.
-                                && self.stage_executions[parent].is_pending().await
-                            {
-                                self.stage_executions[parent].start().await;
+                self.handle_cancel_or_failed_stage(SchedulerError::QueryCancelError).await;
+                println!("Break from loop");
+                break;
+            }
+
+            msg = self.msg_receiver.recv() => {
+                if let Some(msg_inner) = msg {
+                    match msg_inner {
+                        Stage(Scheduled(stage_id)) => {
+                            tracing::trace!(
+                                "Query stage {:?}-{:?} scheduled.",
+                                self.query.query_id,
+                                stage_id
+                            );
+                            self.scheduled_stages_count += 1;
+                            stages_with_table_scan.remove(&stage_id);
+                            if stages_with_table_scan.is_empty() {
+                                // We can be sure here that all the Hummock iterators have been created,
+                                // thus they all successfully pinned a HummockVersion.
+                                // So we can now unpin their epoch.
+                                tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
+                                self.hummock_snapshot_manager
+                                    .unpin_snapshot(self.epoch, self.query.query_id())
+                                    .await;
+                            }
+
+                            if self.scheduled_stages_count == self.stage_executions.len() {
+                                // Now all stages have been scheduled, send root stage info.
+                                self.send_root_stage_info().await;
+                            } else {
+                                for parent in self.query.get_parents(&stage_id) {
+                                    if self.all_children_scheduled(parent).await
+                                        // Do not schedule same stage twice.
+                                        && self.stage_executions[parent].is_pending().await
+                                    {
+                                        self.stage_executions[parent].start().await;
+                                    }
+                                }
                             }
                         }
-                    }
-                }
-                Stage(StageEvent::Failed { id, reason }) => {
-                    error!(
-                        "Query stage {:?}-{:?} failed: {:?}.",
-                        self.query.query_id, id, reason
-                    );
-
-                    // Consume sender here and send error to root stage.
-                    let root_stage_sender = mem::take(&mut self.root_stage_sender);
-                    // It's possible we receive stage failed event message multi times and the
-                    // sender has been consumed in first failed event.
-                    if let Some(sender) = root_stage_sender {
-                        if let Err(e) = sender.send(Err(reason)) {
-                            warn!("Query execution dropped: {:?}", e);
-                        } else {
-                            debug!(
-                                "Root stage failure event for {:?} sent.",
-                                self.query.query_id
+                        Stage(StageEvent::Failed { id, reason }) => {
+                            error!(
+                                "Query stage {:?}-{:?} failed: {:?}.",
+                                self.query.query_id, id, reason
                             );
-                        }
-                    } else {
-                        // If root stage has been taken, then use channel to send error to
-                        // `QueryResultFetcher`. This may happen if some execution error received
-                        // after we have scheduled are events.
 
-                        if shutdown_tx.send(reason).is_err() {
-                            warn!("Sending error to query result fetcher fail!");
+                            self.handle_cancel_or_failed_stage(reason).await;
+                            // self.stage_executions.clear();
+                            // One stage failed, not necessary to execute schedule stages.
+                            break;
+                        }
+                        rest => {
+                            unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
                         }
                     }
-
-                    // Stop all running stages.
-                    for (_stage_id, stage_execution) in self.stage_executions.iter() {
-                        // The stop is return immediately so no need to spawn tasks.
-                        stage_execution.stop().await;
-                    }
-                    // self.stage_executions.clear();
-                    // One stage failed, not necessary to execute schedule stages.
+                } else {
                     break;
-                }
-                rest => {
-                    unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
                 }
             }
         }
+        }
+
     }
 
     #[expect(clippy::unused_async)]
@@ -329,6 +319,40 @@ impl QueryRunner {
             }
         }
         true
+    }
+
+    async fn handle_cancel_or_failed_stage(mut self, reason: SchedulerError) {
+        // Consume sender here and send error to root stage.
+        let root_stage_sender = mem::take(&mut self.root_stage_sender);
+        // It's possible we receive stage failed event message multi times and the
+        // sender has been consumed in first failed event.
+        if let Some(sender) = root_stage_sender {
+            if let Err(e) = sender.send(Err(reason)) {
+                warn!("Query execution dropped: {:?}", e);
+            } else {
+                debug!(
+                    "Root stage failure event for {:?} sent.",
+                    self.query.query_id
+                );
+
+                // If root stage has been taken, then use channel to send error to
+                // `QueryResultFetcher`. This may happen if some execution error received
+                // after we have scheduled are events.
+
+                if shutdown_tx.send(reason).is_err() {
+                    warn!("Sending error to query result fetcher fail!");
+                }
+            }
+        }
+
+        // Stop all running stages.
+        for (_stage_id, stage_execution) in self.stage_executions.iter() {
+            // The stop is return immediately so no need to spawn tasks.
+            stage_execution.stop().await;
+        }
+        // self.stage_executions.clear();
+        // One stage failed, not necessary to execute schedule stages.
+        // break;
     }
 }
 
@@ -379,7 +403,7 @@ mod tests {
         );
         // Channel just used to pass compiler.
         let (shutdown_tx, _shutdown_rx) = oneshot::channel::<SchedulerError>();
-        let (_shutdown_tx, shutdown_rx) = oneshot::channel::<u8>();
+        let (_shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         assert!(query_execution.start(shutdown_tx, shutdown_rx).await.is_err());
     }
 

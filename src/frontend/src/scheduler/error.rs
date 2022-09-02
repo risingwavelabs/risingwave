@@ -35,6 +35,9 @@ pub enum SchedulerError {
     #[error("Task fail")]
     TaskExecutionError,
 
+    #[error("Canceled by user")]
+    QueryCancelError,
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
