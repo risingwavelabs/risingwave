@@ -102,5 +102,6 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             sst_id,
             task.epoch
         );
+        iter.collect_local_statistic(&mut unused);
     }
 }
