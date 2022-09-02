@@ -298,49 +298,55 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             metrics,
             scan_types,
         } = *self;
+
+        // create collector
+        let histogram = if let Some(ref metrics) = metrics {
+            let mut labels = metrics.task_labels();
+            labels.insert("executor_id".to_string(), identity);
+            let opts = HistogramOpts::new(
+                "batch_row_seq_scan_next_duration",
+                "Time spent deserializing into a row in cell based table.",
+            )
+            .buckets(exponential_buckets(0.0001, 2.0, 20).unwrap())
+            .const_labels(labels.clone());
+            let histogram = Histogram::with_opts(opts).unwrap();
+            // change to error if failed to register.
+            match metrics.register(Box::new(histogram.clone())) {
+                Ok(_) => Some(histogram),
+                Err(err) => return Self::return_err(err.into()).boxed(),
+            }
+        } else {
+            None
+        };
+
         let streams = scan_types
             .into_iter()
             .map(|scan_type| {
-                Self::do_execute(
-                    scan_type,
-                    metrics.clone(),
-                    schema.clone(),
-                    chunk_size,
-                    identity.clone(),
-                )
+                Self::do_execute(scan_type, schema.clone(), chunk_size, histogram.clone())
             })
             .collect();
+        if let (Some(histogram), Some(metrics)) = (histogram, metrics) {
+            metrics.unregister(Box::new(histogram));
+        }
         select_all(streams).boxed()
     }
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn return_err(err: RwError) {
+        return Err(err);
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(
         scan_type: ScanType<S>,
-        metrics: Option<BatchTaskMetrics>,
         schema: Schema,
         chunk_size: usize,
-        identity: String,
+        histogram: Option<Histogram>,
     ) {
         match scan_type {
             ScanType::BatchScan(iter) => {
-                // create collector
-                let histogram = if let Some(ref metrics) = metrics {
-                    let mut labels = metrics.task_labels();
-                    labels.insert("executor_id".to_string(), identity);
-                    let opts = HistogramOpts::new(
-                        "batch_row_seq_scan_next_duration",
-                        "Time spent deserializing into a row in cell based table.",
-                    )
-                    .buckets(exponential_buckets(0.0001, 2.0, 20).unwrap())
-                    .const_labels(labels);
-                    let histogram = Histogram::with_opts(opts).unwrap();
-                    metrics.register(Box::new(histogram.clone()))?;
-                    Some(histogram)
-                } else {
-                    None
-                };
                 pin_mut!(iter);
                 loop {
                     // let timer = stats.row_seq_scan_next_duration.start_timer();
@@ -360,9 +366,6 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     } else {
                         break;
                     }
-                }
-                if let (Some(histogram), Some(metrics)) = (histogram, metrics) {
-                    metrics.unregister(Box::new(histogram));
                 }
             }
             ScanType::PointGet(row) => {

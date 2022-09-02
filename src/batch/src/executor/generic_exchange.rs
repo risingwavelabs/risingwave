@@ -193,7 +193,10 @@ async fn data_chunk_stream(
     let counter = if let Some(ref metrics) = metrics {
         let mut labels = metrics.task_labels();
         labels.insert("executor_id".to_string(), identity.clone());
-        labels.insert("source_query_id".to_string(), source_id.query_id.to_string());
+        labels.insert(
+            "source_query_id".to_string(),
+            source_id.query_id.to_string(),
+        );
         labels.insert(
             "source_stage_id".to_string(),
             source_id.stage_id.to_string(),
