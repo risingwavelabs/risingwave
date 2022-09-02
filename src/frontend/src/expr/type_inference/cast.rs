@@ -105,18 +105,11 @@ fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> b
                 datatype: target_elem,
             },
         ) => cast_ok(source_elem, target_elem, allows),
-        (
-            DataType::Varchar,
-            DataType::List {
-                datatype: target_elem,
-            },
-        ) if target_elem == &Box::new(DataType::Varchar) => true,
-        (
-            DataType::Varchar,
-            DataType::List {
-                datatype: target_elem,
-            },
-        ) => cast_ok(&DataType::Varchar, target_elem, allows),
+        // The automatic casts to string types are treated as assignment casts, while the automatic
+        // casts from string types are explicit-only.
+        // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
+        (DataType::Varchar, DataType::List { datatype: _ }) => CastContext::Explicit <= allows,
+        (DataType::List { datatype: _ }, DataType::Varchar) => CastContext::Assign <= allows,
         _ => false,
     }
 }
