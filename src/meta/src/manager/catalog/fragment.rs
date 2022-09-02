@@ -19,7 +19,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -483,7 +482,7 @@ where
         fn update_actors(
             actors: &mut Vec<ActorId>,
             to_remove: &HashSet<ActorId>,
-            to_create: &Vec<ActorId>,
+            to_create: &[ActorId],
         ) {
             actors.drain_filter(|actor_id| to_remove.contains(actor_id));
             actors.extend_from_slice(to_create);
