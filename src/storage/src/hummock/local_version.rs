@@ -380,6 +380,7 @@ impl LocalVersion {
                 cleaned_epoch.push(*epoch);
             }
         }
+        self.max_current_epoch = 0;
         self.sync_uncommitted_data.clear();
         self.shared_buffer.clear();
         self.replicated_batches.clear();

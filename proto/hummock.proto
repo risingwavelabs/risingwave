@@ -83,7 +83,7 @@ message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
 }
 
-message HummockCurrentEpoch{
+message HummockCurrentEpoch {
   uint64 current_epoch = 1;
 }
 
