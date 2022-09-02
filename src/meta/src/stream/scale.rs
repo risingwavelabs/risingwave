@@ -510,7 +510,8 @@ where
         {
             assert_eq!(added_parallel_units.len(), removed_parallel_units.len());
 
-            let replace_parallel_unit_map: BTreeMap<_, _> = removed_parallel_units.clone()
+            let replace_parallel_unit_map: BTreeMap<_, _> = removed_parallel_units
+                .clone()
                 .into_iter()
                 .zip_eq(added_parallel_units.clone().into_iter())
                 .collect();
@@ -648,11 +649,7 @@ where
         }
 
         self.fragment_manager
-            .pre_apply_reschedules(
-                fragment_created_actors,
-                &fragment_actors_to_remove,
-                &fragment_actors_to_create,
-            )
+            .pre_apply_reschedules(fragment_created_actors)
             .await?;
 
         self.barrier_manager

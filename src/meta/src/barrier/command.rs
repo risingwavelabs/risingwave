@@ -18,6 +18,7 @@ use std::sync::Arc;
 use futures::future::try_join_all;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -33,7 +34,6 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
-use risingwave_common::types::ParallelUnitId;
 
 use super::info::BarrierActorInfo;
 use crate::barrier::CommandChanges;

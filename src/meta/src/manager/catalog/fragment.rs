@@ -551,6 +551,15 @@ where
                     } else {
                         bail!("scale out/in not supported now")
                     }
+
+                    if !fragment.state_table_ids.is_empty() {
+                        let mut mapping = vnode_mapping.clone();
+                        mapping.fragment_id = fragment.fragment_id;
+                        self.env
+                            .notification_manager()
+                            .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                            .await;
+                    }
                 }
 
                 // Add actors to this fragment: set the state to `Running`.
