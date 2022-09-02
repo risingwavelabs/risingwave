@@ -37,7 +37,8 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerResult,
+    DataChunkStream, ExecutionContextRef, HummockSnapshotManagerRef, SchedulerError,
+    SchedulerResult,
 };
 
 pub struct QueryResultFetcher {
@@ -78,6 +79,7 @@ impl QueryManager {
         &self,
         _context: ExecutionContextRef,
         query: Query,
+        shutdown_tx: oneshot::Sender<SchedulerError>,
     ) -> SchedulerResult<impl DataChunkStream> {
         let query_id = query.query_id().clone();
         let epoch = self
@@ -96,7 +98,7 @@ impl QueryManager {
         );
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        // let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
@@ -107,7 +109,7 @@ impl QueryManager {
             }
         };
 
-        Ok(query_result_fetcher.run_wrapper(shutdown_rx).await)
+        Ok(query_result_fetcher.run_wrapper())
     }
 }
 
@@ -150,25 +152,8 @@ impl QueryResultFetcher {
     }
 
     // #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run_wrapper(self, shutdown_rx: Receiver<u8>) -> impl DataChunkStream {
-        let mut shutdown_rx = shutdown_rx;
-        let mut stream = self.run();
-        stream! {
-                 loop {
-                    tokio::select! {
-                        biased;
-                        _ = &mut shutdown_rx => {
-                            yield Err(internal_err(anyhow!("Execution fail")));
-                        }
-
-                    stream_res = stream.next() => {
-                        if let Some(response) = stream_res {
-                            yield response;
-                        }
-                    }
-                };
-            }
-        }
+    fn run_wrapper(self) -> impl DataChunkStream {
+        self.run_inner()
     }
 }
 

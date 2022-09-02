@@ -31,7 +31,7 @@ use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::{HummockSnapshotManagerRef, SchedulerResult};
+use crate::scheduler::{HummockSnapshotManagerRef, SchedulerError, SchedulerResult};
 
 /// Message sent to a `QueryRunner` to control its execution.
 #[derive(Debug)]
@@ -138,7 +138,10 @@ impl QueryExecution {
     }
 
     /// Start execution of this query.
-    pub async fn start(&self, shutdown_tx: Sender<u8>) -> SchedulerResult<QueryResultFetcher> {
+    pub async fn start(
+        &self,
+        shutdown_tx: Sender<SchedulerError>,
+    ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
@@ -189,7 +192,7 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<u8>) {
+    async fn run(mut self, shutdown_tx: tokio::sync::oneshot::Sender<SchedulerError>) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -264,7 +267,10 @@ impl QueryRunner {
                         stage_execution.stop().await;
                     }
 
-                    if shutdown_tx.send(0).is_err() {
+                    if shutdown_tx
+                        .send(SchedulerError::TaskExecutionError)
+                        .is_err()
+                    {
                         warn!("Sending error fail");
                     }
 
