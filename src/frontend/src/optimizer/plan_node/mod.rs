@@ -37,6 +37,7 @@ use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
+use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 use serde::Serialize;
 
 use super::property::{Distribution, FunctionalDependencySet, Order};
@@ -125,6 +126,36 @@ impl dyn PlanNode {
 
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
         &self.plan_base().functional_dependency
+    }
+
+    /// Serialize the plan node and its children to a stream plan proto.
+    ///
+    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
+    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
+    pub fn to_stream_prost(&self) -> StreamPlanProst {
+        if let Some(stream_table_scan) = self.as_stream_table_scan() {
+            return stream_table_scan.adhoc_to_stream_prost();
+        }
+        if let Some(stream_index_scan) = self.as_stream_index_scan() {
+            return stream_index_scan.adhoc_to_stream_prost();
+        }
+
+        let node = Some(self.to_stream_prost_body());
+        let input = self
+            .inputs()
+            .into_iter()
+            .map(|plan| plan.to_stream_prost())
+            .collect();
+        // TODO: support pk_indices and operator_id
+        StreamPlanProst {
+            input,
+            identity: format!("{}", self),
+            node_body: node,
+            operator_id: self.id().0 as u64,
+            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            fields: self.schema().to_prost(),
+            append_only: self.append_only(),
+        }
     }
 
     /// Serialize the plan node and its children to a batch plan proto.

@@ -267,7 +267,7 @@ fn build_delta_join_inner(
     Ok(union)
 }
 
-pub(in super::super) fn build_delta_join_without_arrange(
+pub(crate) fn build_delta_join_without_arrange(
     state: &mut BuildFragmentGraphState,
     current_fragment: &mut StreamFragment,
     mut node: StreamNode,

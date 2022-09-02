@@ -29,13 +29,12 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
-use crate::optimizer::plan_node::PlanNode;
 use crate::optimizer::PlanRef;
 
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
 #[derivative(Default)]
-struct BuildFragmentGraphState {
+pub(crate) struct BuildFragmentGraphState {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// local fragment id
@@ -72,38 +71,6 @@ impl BuildFragmentGraphState {
         let ret = self.next_table_id;
         self.next_table_id += 1;
         ret
-    }
-}
-
-impl dyn PlanNode {
-    /// Serialize the plan node and its children to a stream plan proto.
-    ///
-    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
-    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self) -> StreamNode {
-        if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost();
-        }
-        if let Some(stream_index_scan) = self.as_stream_index_scan() {
-            return stream_index_scan.adhoc_to_stream_prost();
-        }
-
-        let node = Some(self.to_stream_prost_body());
-        let input = self
-            .inputs()
-            .into_iter()
-            .map(|plan| plan.to_stream_prost())
-            .collect();
-        // TODO: support pk_indices and operator_id
-        StreamNode {
-            input,
-            identity: format!("{}", self),
-            node_body: node,
-            operator_id: self.id().0 as u64,
-            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
-            fields: self.schema().to_prost(),
-            append_only: self.append_only(),
-        }
     }
 }
 
