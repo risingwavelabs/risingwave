@@ -62,7 +62,7 @@ pub struct Reschedule {
     /// The upstream fragments of this fragment, and the dispatchers that should be updated.
     pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
     /// New hash mapping of the upstream dispatcher to be updated.
-    pub upstream_dispatcher_mapping: ActorMapping,
+    pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
     pub downstream_fragment_id: Option<FragmentId>,
@@ -261,9 +261,7 @@ where
                                     actor_id,
                                     ProstDispatcherUpdate {
                                         dispatcher_id,
-                                        hash_mapping: Some(
-                                            reschedule.upstream_dispatcher_mapping.clone(),
-                                        ),
+                                        hash_mapping: reschedule.upstream_dispatcher_mapping.clone(),
                                         added_downstream_actor_id: reschedule.added_actors.clone(),
                                         removed_downstream_actor_id: reschedule
                                             .removed_actors
