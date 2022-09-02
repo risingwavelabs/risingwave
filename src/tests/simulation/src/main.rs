@@ -116,7 +116,14 @@ async fn main() {
         .ip("192.168.10.1".parse().unwrap())
         .init(|| async {
             let addr = "0.0.0.0:2388".parse().unwrap();
-            etcd_client::SimServer::serve(addr).await.unwrap();
+            etcd_client::SimServer::builder()
+                // FIXME: If etcd returns timeout error, the meta will panic.
+                // To debug, change this rate to 0.1 and the sleep duration after meta to 30s.
+                // Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4919
+                .timeout_rate(0.0)
+                .serve(addr)
+                .await
+                .unwrap();
         })
         .build();
     // wait for the service to be ready

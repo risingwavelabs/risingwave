@@ -2664,9 +2664,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fbcfa3e52808d948f10928c17a720efd3324942b1059cef77cc88077ea639f9"
+checksum = "40e4398f1d2f5270123f69add29a12312afe3f5b5b701174faa075e388d40354"
 dependencies = [
  "ahash",
  "async-channel",
@@ -2690,10 +2690,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "madsim-macros"
-version = "0.2.0"
+name = "madsim-etcd-client"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a95505369fabd293bcb3eaab7cefd668f174a7e533dcf247eed97a91ea5d2a"
+checksum = "724691207c1c45ef747b7629d5f2ccc32fea555ef939623b12c5e16188aa9169"
+dependencies = [
+ "etcd-client",
+ "madsim",
+ "spin 0.9.4",
+ "tracing",
+]
+
+[[package]]
+name = "madsim-macros"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8abbe137adbf2023c066b8acb3fdef0a4bec6494642ef2174d060fc99a9f80ea"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -4648,7 +4660,6 @@ dependencies = [
  "crc32fast",
  "derivative",
  "either",
- "etcd-client",
  "fail",
  "function_name",
  "futures",
@@ -4656,6 +4667,7 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
+ "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -4797,6 +4809,7 @@ dependencies = [
  "futures",
  "glob",
  "madsim",
+ "madsim-etcd-client",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_compactor",
