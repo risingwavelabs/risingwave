@@ -13,21 +13,16 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::task::Poll;
 
-use anyhow::anyhow;
-use async_stream::stream;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{internal_err, Result, RwError};
+use risingwave_common::error::RwError;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 // use futures_async_stream::try_stream;
 use tokio::sync::oneshot;
-use tokio::sync::oneshot::Receiver;
 use tracing::debug;
 
 // use async_stream::try_stream;
@@ -98,7 +93,6 @@ impl QueryManager {
         );
 
         // Create a oneshot channel for QueryResultFetcher to get failed event.
-        // let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let query_result_fetcher = match query_execution.start(shutdown_tx).await {
             Ok(query_result_fetcher) => query_result_fetcher,
             Err(e) => {
@@ -109,7 +103,7 @@ impl QueryManager {
             }
         };
 
-        Ok(query_result_fetcher.run_wrapper())
+        Ok(query_result_fetcher.run())
     }
 }
 
@@ -130,9 +124,8 @@ impl QueryResultFetcher {
         }
     }
 
-    // fn run(self, shutdown_rx: Receiver<u8>) -> impl Stream<Item= Result<DataChunk>>{
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn run_inner(self) {
+    async fn run(self) {
         debug!(
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
@@ -145,15 +138,6 @@ impl QueryResultFetcher {
         while let Some(response) = stream.next().await {
             yield DataChunk::from_protobuf(response?.get_record_batch()?)?;
         }
-    }
-
-    fn run(self) -> BoxedDataChunkStream {
-        Box::pin(self.run_inner())
-    }
-
-    // #[try_stream(ok = DataChunk, error = RwError)]
-    fn run_wrapper(self) -> impl DataChunkStream {
-        self.run_inner()
     }
 }
 

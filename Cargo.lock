@@ -4526,7 +4526,6 @@ dependencies = [
  "arc-swap",
  "assert-impl",
  "assert_matches",
- "async-stream",
  "async-trait",
  "byteorder",
  "bytes",

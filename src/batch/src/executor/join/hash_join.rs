@@ -17,7 +17,6 @@ use std::iter::empty;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
@@ -25,7 +24,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{internal_err, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{
     calc_hash_key_kind, HashKey, HashKeyDispatcher, JoinHashKey, PrecomputedBuildHasher,
 };

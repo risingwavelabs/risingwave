@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::for_await;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{internal_err, Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 use tokio::sync::oneshot;
 
@@ -53,7 +52,9 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
     // Check whether error happen, if yes, returned.
     let execution_ret = data_stream.take_result();
     if let Some(ret) = execution_ret {
-        return Err(ret.unwrap().into());
+        return Err(ret
+            .expect("The shutdown message receiver should not fail")
+            .into());
     }
 
     let rows_count = match stmt_type {

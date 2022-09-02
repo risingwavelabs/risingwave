@@ -73,7 +73,9 @@ pub async fn handle_query(
     // Check whether error happen, if yes, returned.
     let execution_ret = data_stream.take_result();
     if let Some(ret) = execution_ret {
-        return Err(ret.unwrap().into());
+        return Err(ret
+            .expect("The shutdown message receiver should not fail")
+            .into());
     }
 
     let rows_count = match stmt_type {

@@ -259,19 +259,20 @@ impl QueryRunner {
                                 self.query.query_id
                             );
                         }
+                    } else {
+                        // If root stage has been taken, then use channel to send error to
+                        // `QueryResultFetcher`. This may happen if some execution error received
+                        // after we have scheduled are events.
+
+                        if shutdown_tx.send(reason).is_err() {
+                            warn!("Sending error to query result fetcher fail!");
+                        }
                     }
 
                     // Stop all running stages.
                     for (_stage_id, stage_execution) in self.stage_executions.iter() {
                         // The stop is return immediately so no need to spawn tasks.
                         stage_execution.stop().await;
-                    }
-
-                    if shutdown_tx
-                        .send(SchedulerError::TaskExecutionError)
-                        .is_err()
-                    {
-                        warn!("Sending error fail");
                     }
 
                     // One stage failed, not necessary to execute schedule stages.
@@ -342,6 +343,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::oneshot;
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
@@ -354,7 +356,7 @@ mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::HummockSnapshotManager;
+    use crate::scheduler::{HummockSnapshotManager, SchedulerError};
     use crate::session::OptimizerContext;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -374,7 +376,9 @@ mod tests {
             compute_client_pool,
             catalog_reader,
         );
-        assert!(query_execution.start().await.is_err());
+        // Channel just used to pass compiler.
+        let (shutdown_tx, _shutdown_rx) = oneshot::channel::<SchedulerError>();
+        assert!(query_execution.start(shutdown_tx).await.is_err());
     }
 
     async fn create_query() -> Query {
