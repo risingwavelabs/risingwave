@@ -62,7 +62,6 @@ message HummockVersion {
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
-  uint64 max_current_epoch = 6;
 }
 
 message HummockVersionDelta {
@@ -78,11 +77,14 @@ message HummockVersionDelta {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
-  uint64 max_current_epoch = 7;
 }
 
 message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
+}
+
+message HummockCurrentEpoch{
+  uint64 current_epoch = 1;
 }
 
 // We will have two epoch after decouple

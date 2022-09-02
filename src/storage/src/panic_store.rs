@@ -123,7 +123,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             panic!("should not wait epoch from the panic state store!");
         }

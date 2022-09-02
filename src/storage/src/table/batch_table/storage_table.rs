@@ -545,7 +545,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         B: AsRef<[u8]> + Send,
     {
         if !matches!(epoch, HummockReadEpoch::NoWait(_)) {
-            keyspace.state_store().wait_epoch(epoch).await?;
+            keyspace.state_store().try_wait_epoch(epoch).await?;
         }
         let iter = keyspace
             .iter_with_range(prefix_hint, raw_key_range, read_options)

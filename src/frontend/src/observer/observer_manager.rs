@@ -73,6 +73,9 @@ impl ObserverNodeImpl for FrontendObserverNode {
             Info::HummockVersionDeltas(_) => {
                 panic!("frontend node should not receive HummockVersionDeltas");
             }
+            Info::HummockCurrentEpoch(_) => {
+                panic!("frontend node should not receive HummockCurrentEpoch");
+            }
         }
     }
 

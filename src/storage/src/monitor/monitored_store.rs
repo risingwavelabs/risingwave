@@ -232,10 +232,10 @@ where
         }
     }
 
-    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
             self.inner
-                .wait_epoch(epoch)
+                .try_wait_epoch(epoch)
                 .stack_trace("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))

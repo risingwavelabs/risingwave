@@ -326,7 +326,7 @@ async fn test_basic() {
     let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     hummock_storage
-        .wait_epoch(HummockReadEpoch::Committed(epoch1))
+        .try_wait_epoch(HummockReadEpoch::Committed(epoch1))
         .await
         .unwrap();
     let value = hummock_storage
@@ -982,7 +982,7 @@ async fn test_delete_get() {
     let ssts = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(epoch2, ssts).await.unwrap();
     hummock_storage
-        .wait_epoch(HummockReadEpoch::Committed(epoch2))
+        .try_wait_epoch(HummockReadEpoch::Committed(epoch2))
         .await
         .unwrap();
     assert!(hummock_storage
@@ -1138,7 +1138,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
     hummock_storage
-        .wait_epoch(HummockReadEpoch::Committed(epoch3))
+        .try_wait_epoch(HummockReadEpoch::Committed(epoch3))
         .await
         .unwrap();
     test_get().await;

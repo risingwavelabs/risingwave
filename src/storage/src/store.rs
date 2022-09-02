@@ -194,7 +194,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 
     /// Waits until the epoch is committed and its data is ready to read.
-    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.
     /// If the epoch is None, all buffered data will be synced.

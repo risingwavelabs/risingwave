@@ -257,6 +257,12 @@ impl LocalVersionManager {
         .await
     }
 
+    pub fn update_current_epoch(&self, current_epoch: HummockEpoch) {
+        self.local_version
+            .write()
+            .update_current_epoch(current_epoch);
+    }
+
     /// Updates cached version if the new version is of greater id.
     /// You shouldn't unpin even the method returns false, as it is possible `hummock_version` is
     /// being referenced by some readers.
@@ -327,37 +333,34 @@ impl LocalVersionManager {
         true
     }
 
-    /// Waits until the local hummock version contains the epoch. We will wait for different epochs
-    /// according to `HummockReadEpoch`'s type
-    pub async fn wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
-        if wait_epoch.get_epoch() == HummockEpoch::MAX {
+    /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
+    /// we will only determine that it is greater than `max_current_epoch` and not wait
+    pub async fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> HummockResult<()> {
+        let wait_epoch = match wait_epoch {
+            HummockReadEpoch::Committed(epoch) => epoch,
+            HummockReadEpoch::Current(epoch) => {
+                assert!(
+                    epoch > self.local_version.read().get_max_current_epoch()
+                        && epoch != HummockEpoch::MAX
+                );
+                return Ok(());
+            }
+            HummockReadEpoch::NoWait(_) => panic!("No wait can't wait epoch"),
+        };
+        if wait_epoch == HummockEpoch::MAX {
             panic!("epoch should not be u64::MAX");
         }
         let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
             let (pinned_version_id, pinned_version_epoch) = {
                 let current_version = self.local_version.read();
-                match wait_epoch {
-                    HummockReadEpoch::Committed(epoch) => {
-                        if current_version.pinned_version().max_committed_epoch() >= epoch {
-                            return Ok(());
-                        }
-                        (
-                            current_version.pinned_version().id(),
-                            current_version.pinned_version().max_committed_epoch(),
-                        )
-                    }
-                    HummockReadEpoch::Current(epoch) => {
-                        if current_version.pinned_version().max_current_epoch() >= epoch {
-                            return Ok(());
-                        }
-                        (
-                            current_version.pinned_version().id(),
-                            current_version.pinned_version().max_current_epoch(),
-                        )
-                    }
-                    HummockReadEpoch::NoWait(_) => panic!("No wait can't wait epoch"),
+                if current_version.pinned_version().max_committed_epoch() >= wait_epoch {
+                    return Ok(());
                 }
+                (
+                    current_version.pinned_version().id(),
+                    current_version.pinned_version().max_committed_epoch(),
+                )
             };
             match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
                 Err(_) => {

@@ -45,7 +45,8 @@ pub struct LocalVersion {
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
     pub sync_uncommitted_data: Vec<(Vec<HummockEpoch>, SyncUncommittedData)>,
-    max_sync_epoch: u64,
+    max_sync_epoch: HummockEpoch,
+    max_current_epoch: HummockEpoch,
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +117,7 @@ impl LocalVersion {
             version_ids_in_use,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
+            max_current_epoch: 0,
         }
     }
 
@@ -135,6 +137,10 @@ impl LocalVersion {
 
     pub fn get_max_sync_epoch(&self) -> HummockEpoch {
         self.max_sync_epoch
+    }
+
+    pub fn get_max_current_epoch(&self) -> HummockEpoch {
+        self.max_current_epoch
     }
 
     pub fn get_mut_shared_buffer(&mut self, epoch: HummockEpoch) -> Option<&mut SharedBuffer> {
@@ -222,6 +228,10 @@ impl LocalVersion {
             .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
+    pub fn update_current_epoch(&mut self, current_epoch: HummockEpoch) {
+        self.max_current_epoch = self.max_current_epoch.max(current_epoch);
+    }
+
     /// Returns epochs cleaned from shared buffer.
     pub fn set_pinned_version(
         &mut self,
@@ -278,6 +288,7 @@ impl LocalVersion {
                 }
             };
 
+        self.update_current_epoch(new_pinned_version.max_committed_epoch());
         // update pinned version
         self.pinned_version = new_pinned_version;
 
@@ -487,7 +498,6 @@ impl LocalVersion {
         }
         version.id = version_delta.id;
         version.max_committed_epoch = version_delta.max_committed_epoch;
-        version.max_current_epoch = version_delta.max_current_epoch;
         version.safe_epoch = version_delta.safe_epoch;
 
         clean_epochs
@@ -573,10 +583,6 @@ impl PinnedVersion {
 
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
-    }
-
-    pub fn max_current_epoch(&self) -> u64 {
-        self.version.max_current_epoch
     }
 
     pub fn safe_epoch(&self) -> u64 {

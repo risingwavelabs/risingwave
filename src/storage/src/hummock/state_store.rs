@@ -688,8 +688,8 @@ impl StateStore for HummockStorage {
         self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
-    fn wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
-        async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
+    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+        async move { Ok(self.local_version_manager.try_wait_epoch(epoch).await?) }
     }
 
     fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
