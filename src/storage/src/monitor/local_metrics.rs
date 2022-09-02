@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use crate::monitor::StateStoreMetrics;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
     pub cache_data_block_total: u64,
@@ -57,8 +57,10 @@ impl StoreLocalStatistic {
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
-        if other.added.fetch_or(true, Ordering::SeqCst) {
-            panic!("double added");
+        if other.added.fetch_or(true, Ordering::Relaxed)
+            || other.reported.fetch_or(true, Ordering::Relaxed)
+        {
+            panic!("double added\n{:#?}", other);
         }
     }
 
@@ -121,17 +123,35 @@ impl StoreLocalStatistic {
         }
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
-        if self.reported.fetch_or(true, Ordering::SeqCst) {
-            panic!("double reported");
+        if self.reported.fetch_or(true, Ordering::Relaxed)
+            || self.added.fetch_or(true, Ordering::Relaxed)
+        {
+            panic!("double reported\n{:#?}", self);
         }
+    }
+
+    #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+    fn need_report(&self) -> bool {
+        return self.cache_data_block_miss != 0
+            || self.cache_data_block_total != 0
+            || self.cache_meta_block_miss != 0
+            || self.cache_meta_block_total != 0
+            || self.skip_key_count != 0
+            || self.processed_key_count != 0
+            || self.bloom_filter_true_negative_count != 0
+            || self.remote_io_time.load(Ordering::Relaxed) != 0
+            || self.bloom_filter_check_counts != 0;
     }
 }
 
 #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
 impl Drop for StoreLocalStatistic {
     fn drop(&mut self) {
-        if !self.reported.load(Ordering::SeqCst) && !self.added.load(Ordering::SeqCst) {
-            panic!("local stats lost!");
+        if !self.reported.load(Ordering::Relaxed)
+            && !self.added.load(Ordering::Relaxed)
+            && self.need_report()
+        {
+            panic!("local stats lost!\n{:#?}", self);
         }
     }
 }
