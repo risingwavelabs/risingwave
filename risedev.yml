@@ -378,9 +378,9 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
+      enable-tiered-cache: true
     - use: frontend
     - use: compactor
-      enable-tiered-cache: true
     - use: zookeeper
       persist-data: true
     - use: kafka
