@@ -57,9 +57,7 @@ impl StoreLocalStatistic {
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
-        if other.added.fetch_or(true, Ordering::Relaxed)
-            || other.reported.fetch_or(true, Ordering::Relaxed)
-        {
+        if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
             panic!("double added\n{:#?}", other);
         }
     }
@@ -123,9 +121,7 @@ impl StoreLocalStatistic {
         }
 
         #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
-        if self.reported.fetch_or(true, Ordering::Relaxed)
-            || self.added.fetch_or(true, Ordering::Relaxed)
-        {
+        if self.reported.fetch_or(true, Ordering::Relaxed) || self.added.load(Ordering::Relaxed) {
             panic!("double reported\n{:#?}", self);
         }
     }
