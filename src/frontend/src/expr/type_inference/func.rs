@@ -177,7 +177,12 @@ fn infer_type_for_special(
                 }
                 _ => None,
             };
-            Ok(return_type)
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!(
+                    "Cannot concatenate {} and {}",
+                    left_type, right_type
+                ))
+            })?))
         }
         ExprType::ArrayAppend => {
             ensure_arity!("array_append", 2 == | inputs |);
@@ -193,7 +198,9 @@ fn infer_type_for_special(
                 ) if **left_elem_type == right_type => Some(left_type.clone()),
                 _ => None,
             };
-            Ok(return_type)
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!("Cannot append {} to {}", right_type, left_type))
+            })?))
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", 2 == | inputs |);
@@ -209,7 +216,9 @@ fn infer_type_for_special(
                 ) if left_type == **right_elem_type => Some(right_type.clone()),
                 _ => None,
             };
-            Ok(return_type)
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!("Cannot prepend {} to {}", left_type, right_type))
+            })?))
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);

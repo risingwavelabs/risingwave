@@ -55,7 +55,7 @@ impl ArrayConcatExpression {
         }
     }
 
-    /// Concatenates two arrays with same dimensionality.
+    /// Concatenates two arrays with same data type.
     /// The behavior is the same as PG.
     ///
     /// Examples:
