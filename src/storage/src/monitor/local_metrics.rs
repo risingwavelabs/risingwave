@@ -130,6 +130,11 @@ impl StoreLocalStatistic {
         }
     }
 
+    pub fn ignore(&self) {
+        #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
+        self.reported.store(true, Ordering::Relaxed);
+    }
+
     #[cfg(all(debug_assertions, not(any(test, feature = "test"))))]
     fn need_report(&self) -> bool {
         return self.cache_data_block_miss != 0
