@@ -458,6 +458,18 @@ impl ExprImpl {
         }
     }
 
+    pub fn as_is_null(&self) -> Option<InputRef> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+            function_call.get_expr_type() == ExprType::IsNull{
+            match function_call.clone().decompose_as_unary() {
+                (_, ExprImpl::InputRef(x)) => Some(*x),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn as_comparison_const(&self) -> Option<(InputRef, ExprType, ExprImpl)> {
         fn reverse_comparison(comparison: ExprType) -> ExprType {
             match comparison {

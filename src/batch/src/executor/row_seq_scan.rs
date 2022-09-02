@@ -25,6 +25,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
@@ -92,8 +93,7 @@ fn get_scan_bound(
         .iter()
         .map(|v| {
             let ty = pk_types.next().unwrap();
-            let scalar = ScalarImpl::from_proto_bytes(v, &ty.to_protobuf()).unwrap();
-            Some(scalar)
+            deserialize_datum(v.as_slice(), &ty).expect("fail to deserialize datum")
         })
         .collect_vec());
     if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
