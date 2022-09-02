@@ -35,8 +35,8 @@ use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterializ
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::{BatchExchange, LogicalApply};
-use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::plan_node::BatchExchange;
+use crate::optimizer::plan_visitor::{has_batch_exchange, has_logical_apply};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
@@ -158,24 +158,6 @@ impl PlanRoot {
         }
     }
 
-    /// Check whether the plan has `LogicalApply` that isn't be unnested.
-    pub fn has_apply(plan: PlanRef) -> bool {
-        pub struct PlanApplyFinder {}
-
-        impl PlanVisitor<bool> for PlanApplyFinder {
-            fn visit_logical_apply(&mut self, _plan: &LogicalApply) -> bool {
-                true
-            }
-
-            fn merge(a: bool, b: bool) -> bool {
-                a | b
-            }
-        }
-
-        let mut finder = PlanApplyFinder {};
-        finder.visit(plan)
-    }
-
     /// Apply logical optimization to the plan.
     pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
@@ -219,7 +201,7 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        if Self::has_apply(plan.clone()) {
+        if has_logical_apply(plan.clone()) {
             return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
         }
 
@@ -314,18 +296,7 @@ impl PlanRoot {
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
-
-        struct HasExchange;
-        impl PlanVisitor<bool> for HasExchange {
-            fn merge(a: bool, b: bool) -> bool {
-                a | b
-            }
-
-            fn visit_batch_exchange(&mut self, _: &BatchExchange) -> bool {
-                true
-            }
-        }
-        assert!(!HasExchange.visit(plan.clone()), "{}", plan);
+        assert!(!has_batch_exchange(plan.clone()), "{}", plan);
 
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
