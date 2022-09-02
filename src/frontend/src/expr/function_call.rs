@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use num_integer::Integer as _;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{align_types, cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -99,170 +98,7 @@ impl FunctionCall {
     // number of arguments are checked
     // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> Result<Self> {
-        let return_type = match func_type {
-            ExprType::Case => {
-                let len = inputs.len();
-                align_types(inputs.iter_mut().enumerate().filter_map(|(i, e)| {
-                    // `Case` organize `inputs` as (cond, res) pairs with a possible `else` res at
-                    // the end. So we align exprs at odd indices as well as the last one when length
-                    // is odd.
-                    match i.is_odd() || len.is_odd() && i == len - 1 {
-                        true => Some(e),
-                        false => None,
-                    }
-                }))
-            }
-            ExprType::In => {
-                align_types(inputs.iter_mut())?;
-                Ok(DataType::Boolean)
-            }
-            ExprType::Coalesce => {
-                if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `Coalesce` takes at least {} arguments ({} given)",
-                        1, 0
-                    ))
-                    .into());
-                }
-                align_types(inputs.iter_mut())
-            }
-            ExprType::ConcatWs => {
-                let expected = 2;
-                let actual = inputs.len();
-                if actual < expected {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `ConcatWs` takes at least {} arguments ({} given)",
-                        expected, actual
-                    ))
-                    .into());
-                }
-
-                inputs = inputs
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, input)| match i {
-                        // 0-th arg must be string
-                        0 => input.cast_implicit(DataType::Varchar),
-                        // subsequent can be any type, using the output format
-                        _ => input.cast_output(),
-                    })
-                    .try_collect()?;
-                Ok(DataType::Varchar)
-            }
-            ExprType::ConcatOp => {
-                inputs = inputs
-                    .into_iter()
-                    .map(|input| input.cast_explicit(DataType::Varchar))
-                    .try_collect()?;
-                Ok(DataType::Varchar)
-            }
-            ExprType::RegexpMatch => {
-                if inputs.len() < 2 || inputs.len() > 3 {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `RegexpMatch` takes 2 or 3 arguments ({} given)",
-                        inputs.len()
-                    ))
-                    .into());
-                }
-                if inputs.len() == 3 {
-                    return Err(ErrorCode::NotImplemented(
-                        "flag in regexp_match".to_string(),
-                        4545.into(),
-                    )
-                    .into());
-                }
-                Ok(DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                })
-            }
-            ExprType::ArrayCat => {
-                if inputs.len() != 2 {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `ArrayCat` takes 2 arguments ({} given)",
-                        inputs.len()
-                    ))
-                    .into());
-                }
-                let left_type = inputs[0].return_type();
-                let right_type = inputs[1].return_type();
-
-                let wrap_single_elem = |elem, ret_type| -> ExprImpl {
-                    Self {
-                        func_type: ExprType::Array,
-                        return_type: ret_type,
-                        inputs: vec![elem],
-                    }
-                    .into()
-                };
-
-                let return_type = match (&left_type, &right_type) {
-                    (
-                        DataType::List {
-                            datatype: left_elem_type,
-                        },
-                        DataType::List {
-                            datatype: right_elem_type,
-                        },
-                    ) => {
-                        if **left_elem_type == **right_elem_type {
-                            Some(left_type.clone())
-                        } else if **left_elem_type == right_type {
-                            inputs[1] = wrap_single_elem(inputs[1].clone(), left_type.clone());
-                            Some(left_type.clone())
-                        } else if left_type == **right_elem_type {
-                            inputs[0] = wrap_single_elem(inputs[0].clone(), right_type.clone());
-                            Some(right_type.clone())
-                        } else {
-                            None
-                        }
-                    }
-                    (
-                        DataType::List {
-                            datatype: left_elem_type,
-                        },
-                        _,
-                    ) if **left_elem_type == right_type => {
-                        inputs[1] = wrap_single_elem(inputs[1].clone(), left_type.clone());
-                        Some(left_type.clone())
-                    }
-                    (
-                        _,
-                        DataType::List {
-                            datatype: right_elem_type,
-                        },
-                    ) if left_type == **right_elem_type => {
-                        inputs[0] = wrap_single_elem(inputs[0].clone(), right_type.clone());
-                        Some(right_type.clone())
-                    }
-                    _ => None,
-                };
-                if let Some(return_type) = return_type {
-                    Ok(return_type)
-                } else {
-                    return Err(ErrorCode::BindError(format!(
-                        "Wrong argument types for function `ArrayCat` ({:?} and {:?})",
-                        left_type, right_type
-                    ))
-                    .into());
-                }
-            }
-            ExprType::Vnode => {
-                if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(
-                        "Function `Vnode` takes at least 1 arguments (0 given)".to_string(),
-                    )
-                    .into());
-                }
-                Ok(DataType::Int16)
-            }
-            _ => {
-                // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
-                // interface has been enhanced to support mutating (casting) inputs as well.
-                let ret;
-                (inputs, ret) = infer_type(func_type, inputs)?;
-                Ok(ret)
-            }
-        }?;
+        let return_type = infer_type(func_type, &mut inputs)?;
         Ok(Self {
             func_type,
             return_type,

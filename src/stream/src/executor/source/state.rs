@@ -63,17 +63,16 @@ impl<S: StateStore> SourceStateHandler<S> {
             // TODO should be a clear Error Code
             bail!("states require not null");
         } else {
-            let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            let mut local_batch = self.keyspace.start_write_batch(WriteOptions {
                 epoch,
                 table_id: self.keyspace.table_id(),
             });
-            let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
                 let value = state.encode_to_bytes();
                 local_batch.put(state.id().as_str(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
-            write_batch.ingest().await.inspect_err(|e| {
+            local_batch.ingest().await.inspect_err(|e| {
                 error!(
                     "SourceStateHandler take_snapshot() batch.ingest Error,cause by {:?}",
                     e

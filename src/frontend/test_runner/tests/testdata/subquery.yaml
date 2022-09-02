@@ -107,11 +107,11 @@
       ) as t0
     );
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: (ab.a = bc.b), output: all }
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(ab.a, bc.b), output: all }
       LogicalScan { table: ab, columns: [ab.a, ab.b] }
       LogicalJoin { type: Inner, on: true, output: all }
         LogicalScan { table: bc, columns: [bc.b] }
-        LogicalScan { table: t, columns: [] }
+        LogicalScan { table: t, output_columns: [], required_columns: [v1], predicate: IsNotNull(t.v1) }
 - sql: |
     /* We cannot reference columns in left table if not lateral */
     create table ab (a int, b int);
@@ -137,14 +137,14 @@
 - sql: |
     create table t1 (x int, y int);
     create table t2 (x int, y int);
-    select count(1) from (select min(distinct 1) from t1), t2;
+    select count(1) from (select sum(distinct 1) from t1), t2;
   logical_plan: |
     LogicalProject { exprs: [count(1:Int32)] }
       LogicalAgg { aggs: [count(1:Int32)] }
         LogicalProject { exprs: [1:Int32] }
           LogicalJoin { type: Inner, on: true, output: all }
-            LogicalProject { exprs: [min(distinct 1:Int32)] }
-              LogicalAgg { aggs: [min(distinct 1:Int32)] }
+            LogicalProject { exprs: [sum(distinct 1:Int32)] }
+              LogicalAgg { aggs: [sum(distinct 1:Int32)] }
                 LogicalProject { exprs: [1:Int32] }
                   LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
             LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }

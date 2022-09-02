@@ -27,6 +27,7 @@ use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 mod binary_op;
 mod column;
 mod function;
+mod order_by;
 mod subquery;
 mod value;
 

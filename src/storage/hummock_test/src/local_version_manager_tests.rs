@@ -282,11 +282,11 @@ async fn test_update_uncommitted_ssts() {
                 .into_uncommitted_data()
                 .unwrap();
 
+            let payload = to_order_sorted(payload);
             local_version_guard.add_sync_state(
                 vec![epochs[0]],
-                SyncUncommittedData::Syncing(vec![payload.clone()]),
+                SyncUncommittedData::Syncing(payload.clone()),
             );
-            let payload = to_order_sorted(&payload);
             {
                 assert_eq!(1, payload.len());
                 assert_eq!(1, payload[0].len());
@@ -332,11 +332,11 @@ async fn test_update_uncommitted_ssts() {
                 .1
                 .into_uncommitted_data()
                 .unwrap();
+            let payload = to_order_sorted(payload);
             local_version_guard.add_sync_state(
                 vec![epochs[1]],
-                SyncUncommittedData::Syncing(vec![payload.clone()]),
+                SyncUncommittedData::Syncing(payload.clone()),
             );
-            let payload = to_order_sorted(&payload);
             {
                 assert_eq!(1, payload.len());
                 assert_eq!(1, payload[0].len());

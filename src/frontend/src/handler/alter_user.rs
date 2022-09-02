@@ -34,17 +34,17 @@ fn alter_prost_user_info(
     for option in &options.0 {
         match option {
             UserOption::SuperUser => {
-                if !session_user.is_supper {
+                if !session_user.is_super {
                     has_privilege = false;
                 }
-                user_info.is_supper = true;
+                user_info.is_super = true;
                 update_fields.push(UpdateField::Super as i32);
             }
             UserOption::NoSuperUser => {
-                if !session_user.is_supper {
+                if !session_user.is_super {
                     has_privilege = false;
                 }
-                user_info.is_supper = false;
+                user_info.is_super = false;
                 update_fields.push(UpdateField::Super as i32);
             }
             UserOption::CreateDB => {
@@ -96,7 +96,7 @@ fn alter_prost_user_info(
                 }
             }
         }
-        if !session_user.is_supper && !has_privilege {
+        if !session_user.is_super && !has_privilege {
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
     }
@@ -179,7 +179,7 @@ mod tests {
             .get_user_by_name("user")
             .cloned()
             .unwrap();
-        assert!(!user_info.is_supper);
+        assert!(!user_info.is_super);
         assert!(user_info.can_create_db);
         assert_eq!(
             user_info.auth_info,

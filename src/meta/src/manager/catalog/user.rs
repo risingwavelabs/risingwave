@@ -71,7 +71,7 @@ impl UserManager {
         let mut user = self.user_info.get(&update_user.id).unwrap().clone();
         update_fields.iter().for_each(|&field| match field {
             UpdateField::Unknown => unreachable!(),
-            UpdateField::Super => user.is_supper = update_user.is_supper,
+            UpdateField::Super => user.is_super = update_user.is_super,
             UpdateField::Login => user.can_login = update_user.can_login,
             UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
             UpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
