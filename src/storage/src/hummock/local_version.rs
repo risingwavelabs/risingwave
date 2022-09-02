@@ -44,13 +44,13 @@ pub struct LocalVersion {
     pub version_ids_in_use: BTreeSet<HummockVersionId>,
     // TODO: save uncommitted data that needs to be flushed to disk.
     /// Save uncommitted data that needs to be synced or finished syncing.
-    pub sync_uncommitted_datas: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
+    pub sync_uncommitted_data: VecDeque<(Vec<HummockEpoch>, SyncUncommittedData)>,
     max_sync_epoch: u64,
 }
 
 #[derive(Debug, Clone)]
 pub enum SyncUncommittedData {
-    /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_datas`
+    /// Before we start syncing, we need to mv data from shared buffer to `sync_uncommitted_data`
     /// as `Syncing`.
     Syncing(OrderSortedUncommittedData),
     /// After we finish syncing, we changed `Syncing` to `Synced`.
@@ -114,7 +114,7 @@ impl LocalVersion {
             pinned_version,
             local_related_version,
             version_ids_in_use,
-            sync_uncommitted_datas: Default::default(),
+            sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
         }
     }
@@ -174,13 +174,13 @@ impl LocalVersion {
         sync_uncommitted_data: SyncUncommittedData,
     ) {
         let node = self
-            .sync_uncommitted_datas
+            .sync_uncommitted_data
             .iter_mut()
             .find(|(epochs, _)| epochs == &sync_epochs);
         match &node {
             None => {
                 assert_matches!(sync_uncommitted_data, SyncUncommittedData::Syncing(_));
-                if let Some(front) = self.sync_uncommitted_datas.front() {
+                if let Some(front) = self.sync_uncommitted_data.front() {
                     assert!(
                         front.0.first().lt(&sync_epochs.last()),
                         "front epoch:{:?} >= sync epoch:{:?}",
@@ -188,7 +188,7 @@ impl LocalVersion {
                         sync_epochs
                     );
                 }
-                self.sync_uncommitted_datas
+                self.sync_uncommitted_data
                     .push_front((sync_epochs, sync_uncommitted_data));
                 return;
             }
@@ -330,7 +330,7 @@ impl LocalVersion {
                         .map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
                         .collect();
                     let sync_data: Vec<OrderSortedUncommittedData> = guard
-                        .sync_uncommitted_datas
+                        .sync_uncommitted_data
                         .iter()
                         .filter(|&node| {
                             node.0.last().le(&Some(&read_epoch))
@@ -364,12 +364,12 @@ impl LocalVersion {
 
     pub fn clear_shared_buffer(&mut self) -> Vec<HummockEpoch> {
         let mut cleaned_epoch = self.shared_buffer.keys().cloned().collect_vec();
-        for (epochs, _) in &self.sync_uncommitted_datas {
+        for (epochs, _) in &self.sync_uncommitted_data {
             for epoch in epochs {
                 cleaned_epoch.push(*epoch);
             }
         }
-        self.sync_uncommitted_datas.clear();
+        self.sync_uncommitted_data.clear();
         self.shared_buffer.clear();
         self.replicated_batches.clear();
         cleaned_epoch
@@ -380,7 +380,7 @@ impl LocalVersion {
         max_committed_epoch: HummockEpoch,
     ) -> Vec<(Vec<HummockEpoch>, Vec<LocalSstableInfo>)> {
         let index = self
-            .sync_uncommitted_datas
+            .sync_uncommitted_data
             .iter()
             .position(
                 |(epoch, data)| {
@@ -397,8 +397,8 @@ impl LocalVersion {
                     );
                     max_epoch <= max_committed_epoch
                 }
-            ).unwrap_or(0);
-        self.sync_uncommitted_datas
+            ).unwrap_or(self.sync_uncommitted_data.len());
+        self.sync_uncommitted_data
             .drain(index..)
             .map(|(epoch, data)| {
                 (
