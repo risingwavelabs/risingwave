@@ -507,6 +507,8 @@ impl<S: StateStore> StateTable<S> {
         let encoded_key_range = range_of_prefix(&encoded_prefix);
 
         // We assume that all usages of iterating the state table only access a single vnode.
+        // If this assertion fails, then something must be wrong with the operator implementation or
+        // the distribution derivation from the optimizer.
         let vnode = self
             .try_compute_vnode_by_pk_prefix(pk_prefix)
             .expect("the records with `pk_prefix` should reside in the same vnode")
