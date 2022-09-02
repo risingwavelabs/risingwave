@@ -32,7 +32,6 @@ use crate::monitor::StoreLocalStatistic;
 pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef) {
     let mut visited_keys = HashMap::new();
     let mut unused = StoreLocalStatistic::default();
-    unused.ignore();
     for sst_id in task.sst_ids {
         let mut key_counts = 0;
         let worker_id = *task
@@ -103,5 +102,6 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             task.epoch
         );
         iter.collect_local_statistic(&mut unused);
+        unused.ignore();
     }
 }
