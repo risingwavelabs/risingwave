@@ -56,7 +56,7 @@ impl ArrayConcatExpression {
     }
 
     /// Concatenates two arrays with same dimensionality.
-    /// The bahavior is the same as PG.
+    /// The behavior is the same as PG.
     ///
     /// Examples:
     /// - `select array_cat(array[66], array[123]);` => `[66,123]`
@@ -113,7 +113,7 @@ impl ArrayConcatExpression {
     }
 
     /// Appends a value as the back element of an array.
-    /// The bahavior is the same as PG.
+    /// The behavior is the same as PG.
     ///
     /// Examples:
     /// - `select array_append(array[66], 123);` => `[66, 123]`
@@ -171,7 +171,7 @@ impl ArrayConcatExpression {
     }
 
     /// Prepends a value as the front element of an array.
-    /// The bahavior is the same as PG.
+    /// The behavior is the same as PG.
     ///
     /// Examples:
     /// - `select array_prepend(123, array[66]);` => `[123, 66]`
