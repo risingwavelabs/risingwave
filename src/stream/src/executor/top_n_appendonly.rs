@@ -24,7 +24,7 @@ use super::managed_state::top_n::variants::TOP_N_MAX;
 use super::managed_state::top_n::ManagedTopNState;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
-use crate::executor::top_n::generate_internal_key;
+use crate::executor::top_n::generate_executor_pk_indices_info;
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -127,7 +127,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         key_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_internal_key(&order_pairs, &pk_indices, &schema);
+            generate_executor_pk_indices_info(&order_pairs, &pk_indices, &schema);
 
         let row_data_types = schema
             .fields

@@ -23,13 +23,13 @@ use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
 use risingwave_hummock_sdk::key::{key_with_epoch, next_key, user_key};
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
 use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
-use super::utils::{can_concat, search_sst_idx, validate_epoch};
+use super::utils::{search_sst_idx, validate_epoch};
 use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
@@ -37,10 +37,7 @@ use crate::hummock::iterator::{
     HummockIteratorUnion,
 };
 use crate::hummock::local_version::ReadVersion;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::{
-    build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
-};
+use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
@@ -259,7 +256,6 @@ impl HummockStorage {
         // the union because the underlying merge iterator
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
-            self.stats.clone(),
             key_range,
             epoch,
             min_epoch,
@@ -310,7 +306,7 @@ impl HummockStorage {
         for epoch_replicated_batches in replicated_batches {
             for batch in epoch_replicated_batches {
                 if let Some(v) = self.get_from_batch(&batch, key) {
-                    return Ok(v);
+                    return Ok(v.into_user_value());
                 }
             }
         }
@@ -328,7 +324,7 @@ impl HummockStorage {
                 )
                 .await?;
             if let Some(v) = value {
-                return Ok(v);
+                return Ok(v.into_user_value());
             }
             table_counts += table_count;
         }
@@ -343,7 +339,7 @@ impl HummockStorage {
                 )
                 .await?;
             if let Some(v) = value {
-                return Ok(v);
+                return Ok(v.into_user_value());
             }
             table_counts += table_count;
         }
@@ -367,13 +363,12 @@ impl HummockStorage {
                             .get_from_table(
                                 table,
                                 &internal_key,
-                                key,
                                 check_bloom_filter,
                                 &mut local_stats,
                             )
                             .await?
                         {
-                            return Ok(v);
+                            return Ok(v.into_user_value());
                         }
                     }
                 }
@@ -406,16 +401,10 @@ impl HummockStorage {
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
-                        .get_from_table(
-                            table,
-                            &internal_key,
-                            key,
-                            check_bloom_filter,
-                            &mut local_stats,
-                        )
+                        .get_from_table(table, &internal_key, check_bloom_filter, &mut local_stats)
                         .await?
                     {
-                        return Ok(v);
+                        return Ok(v.into_user_value());
                     }
                 }
             }
@@ -427,50 +416,6 @@ impl HummockStorage {
             .with_label_values(&["sub-iter"])
             .observe(table_counts as f64);
         Ok(None)
-    }
-
-    /// Get from `OrderSortedUncommittedData`. If not get successful, return None.
-    async fn get_from_order_sorted_uncommitted_data(
-        &self,
-        order_sorted_uncommitted_data: OrderSortedUncommittedData,
-        internal_key: &[u8],
-        stats: &mut StoreLocalStatistic,
-        key: &[u8],
-        check_bloom_filter: bool,
-    ) -> StorageResult<(Option<Option<Bytes>>, i32)> {
-        let mut table_counts = 0;
-        for data_list in order_sorted_uncommitted_data {
-            for data in data_list {
-                match data {
-                    UncommittedData::Batch(batch) => {
-                        let data = self.get_from_batch(&batch, key);
-                        if data.is_some() {
-                            return Ok((data, table_counts));
-                        }
-                    }
-                    UncommittedData::Sst((_, table_info)) => {
-                        let table = self.sstable_store.sstable(table_info.id, stats).await?;
-                        table_counts += 1;
-
-                        let data = self
-                            .get_from_table(table, internal_key, key, check_bloom_filter, stats)
-                            .await?;
-                        if data.is_some() {
-                            return Ok((data, table_counts));
-                        }
-                    }
-                }
-            }
-        }
-        Ok((None, table_counts))
-    }
-
-    /// Return `Some(None)` means the key is deleted.
-    fn get_from_batch(&self, batch: &SharedBufferBatch, key: &[u8]) -> Option<Option<Bytes>> {
-        batch.get(key).map(|v| {
-            self.stats.get_shared_buffer_hit_counts.inc();
-            v.into_user_value().map(|v| v.into())
-        })
     }
 
     fn read_filter<R, B>(

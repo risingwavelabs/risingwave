@@ -16,6 +16,7 @@ mod aggregator;
 mod approx_count_distinct;
 mod array_agg;
 mod count_star;
+mod filter;
 mod functions;
 mod general_agg;
 mod general_distinct_agg;

@@ -22,7 +22,7 @@
             LogicalAgg { group_key: [t1.y], aggs: [] }
               LogicalScan { table: t1, columns: [t1.y] }
             LogicalProject { exprs: [t2.y, t2.x] }
-              LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.y = 1000:Int32) }
+              LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: (t2.y = 1000:Int32) AND IsNotNull(t2.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -102,7 +102,7 @@
             LogicalAgg { group_key: [t1.y], aggs: [] }
               LogicalScan { table: t1, columns: [t1.y] }
             LogicalProject { exprs: [t2.y, t2.x] }
-              LogicalScan { table: t2, columns: [t2.x, t2.y] }
+              LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: IsNotNull(t2.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -125,7 +125,7 @@
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [t1.y] }
           LogicalProject { exprs: [t2.y, 1:Int32] }
-            LogicalScan { table: t2, columns: [t2.y] }
+            LogicalScan { table: t2, output_columns: [t2.y], required_columns: [y], predicate: IsNotNull(t2.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -149,7 +149,7 @@
             LogicalAgg { group_key: [t1.y], aggs: [] }
               LogicalScan { table: t1, columns: [t1.y] }
             LogicalProject { exprs: [t2.y, 1:Int32] }
-              LogicalScan { table: t2, columns: [t2.y] }
+              LogicalScan { table: t2, output_columns: [t2.y], required_columns: [y], predicate: IsNotNull(t2.y) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -278,42 +278,42 @@
     select min(v1), (select max(v2)) from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t group by v2;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in SELECT */
     create table t (v1 int, v2 int);
     select min(v1), (select v2) from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated agg column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select max(v2));
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t group by v2 having min(v1) > (select v2);
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated non-group column in HAVING */
     create table t (v1 int, v2 int);
     select 1 from t having min(v1) > (select v2);
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated agg column belongs to outer query */
     create table t (v1 int, v2 int);
@@ -324,7 +324,7 @@
     from t;
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* uncorrelated subquery in HAVING */
     create table a (a1 int, a2 int);
@@ -358,7 +358,7 @@
     );
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     /* correlated column with depth>1 in HAVING */
     create table a (a1 int, a2 int);
@@ -371,7 +371,7 @@
     );
   planner_error: |-
     Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
-    Tracking issue: https://github.com/singularity-data/risingwave/issues/2275
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/2275
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -455,7 +455,7 @@
                     LogicalScan { table: a, columns: [a.a3] }
                     LogicalScan { table: b, columns: [b.b2] }
                 LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
-                  LogicalScan { table: c, columns: [c.c2, c.c3] }
+                  LogicalScan { table: c, output_columns: [c.c2, c.c3], required_columns: [c2, c3], predicate: IsNotNull(c.c3) AND IsNotNull(c.c2) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -488,7 +488,7 @@
             LogicalAgg { group_key: [a.z], aggs: [] }
               LogicalScan { table: a, columns: [a.z] }
             LogicalProject { exprs: [b.z, 1:Int32] }
-              LogicalScan { table: b, columns: [b.z] }
+              LogicalScan { table: b, output_columns: [b.z], required_columns: [z], predicate: IsNotNull(b.z) }
 - sql: |
     create table a(x int, y varchar, z int);
     create table b(x varchar, y int, z int);
@@ -502,7 +502,7 @@
             LogicalAgg { group_key: [a.z], aggs: [] }
               LogicalScan { table: a, columns: [a.z] }
             LogicalProject { exprs: [b.z, b.x, ',':Varchar] }
-              LogicalScan { table: b, columns: [b.x, b.z] }
+              LogicalScan { table: b, output_columns: [b.x, b.z], required_columns: [x, z], predicate: IsNotNull(b.z) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -518,7 +518,7 @@
               LogicalAgg { group_key: [a.z], aggs: [] }
                 LogicalScan { table: a, columns: [a.z] }
               LogicalProject { exprs: [b.z, b.x] }
-                LogicalScan { table: b, columns: [b.x, b.z] }
+                LogicalScan { table: b, output_columns: [b.x, b.z], required_columns: [x, z], predicate: IsNotNull(b.z) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -533,7 +533,7 @@
             LogicalAgg { group_key: [a.z], aggs: [] }
               LogicalScan { table: a, columns: [a.z] }
             LogicalProject { exprs: [b.z, b.x] }
-              LogicalScan { table: b, columns: [b.x, b.z] }
+              LogicalScan { table: b, output_columns: [b.x, b.z], required_columns: [x, z], predicate: IsNotNull(b.z) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -543,8 +543,8 @@
     LogicalJoin { type: LeftSemi, on: (t1.x = t2.x), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
       LogicalJoin { type: LeftSemi, on: (t2.y = t3.y) AND (t2.x = t3.x), output: [t2.x] }
-        LogicalScan { table: t2, columns: [t2.x, t2.y] }
-        LogicalScan { table: t3, columns: [t3.x, t3.y] }
+        LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: IsNotNull(t2.x) }
+        LogicalScan { table: t3, output_columns: [t3.x, t3.y], required_columns: [x, y], predicate: IsNotNull(t3.x) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -554,13 +554,10 @@
     LogicalJoin { type: LeftSemi, on: (t1.y = t1.y), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
       LogicalJoin { type: Inner, on: (t2.x = t3.x) AND (t1.y = t3.y), output: [t1.y] }
-        LogicalJoin { type: Inner, on: (t1.y = t1.y), output: [t1.y, t2.x] }
-          LogicalJoin { type: Inner, on: (t1.y = t2.y), output: [t1.y, t2.x] }
-            LogicalAgg { group_key: [t1.y], aggs: [] }
-              LogicalScan { table: t1, columns: [t1.y] }
-            LogicalScan { table: t2, columns: [t2.x, t2.y] }
+        LogicalJoin { type: Inner, on: (t1.y = t2.y), output: [t1.y, t2.x] }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [t1.y] }
+          LogicalScan { table: t2, columns: [t2.x, t2.y] }
         LogicalScan { table: t3, columns: [t3.x, t3.y] }
 - sql: |
     create table t1(x int, y int);
@@ -582,8 +579,8 @@
     LogicalJoin { type: LeftAnti, on: (t1.x = t2.x), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
       LogicalJoin { type: LeftAnti, on: (t2.y = t3.y) AND (t2.x = t3.x), output: [t2.x] }
-        LogicalScan { table: t2, columns: [t2.x, t2.y] }
-        LogicalScan { table: t3, columns: [t3.x, t3.y] }
+        LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: IsNotNull(t2.x) }
+        LogicalScan { table: t3, output_columns: [t3.x, t3.y], required_columns: [x, y], predicate: IsNotNull(t3.x) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -592,31 +589,26 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t1.y), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalJoin { type: LeftOuter, on: (t1.y = t2.y) AND (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y), output: [t1.y] }
+      LogicalJoin { type: LeftOuter, on: (t1.y = t2.y) AND (t2.x = t3.x) AND (t1.y = t3.y), output: [t1.y] }
         LogicalJoin { type: Inner, on: true, output: all }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [t1.y] }
           LogicalScan { table: t2, columns: [t2.x, t2.y] }
-        LogicalJoin { type: Inner, on: true, output: all }
-          LogicalAgg { group_key: [t1.y], aggs: [] }
-            LogicalScan { table: t1, columns: [t1.y] }
-          LogicalScan { table: t3, columns: [t3.x, t3.y] }
+        LogicalScan { table: t3, columns: [t3.x, t3.y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
     select * from t1 where exists(select t2.x from t2 right join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: (t1.y = t1.y), output: all }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.x), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      LogicalJoin { type: RightOuter, on: (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y), output: [t1.y] }
-        LogicalJoin { type: Inner, on: (t1.y = t2.y), output: [t1.y, t2.x] }
-          LogicalAgg { group_key: [t1.y], aggs: [] }
-            LogicalScan { table: t1, columns: [t1.y] }
-          LogicalScan { table: t2, columns: [t2.x, t2.y] }
+      LogicalJoin { type: RightOuter, on: (t2.x = t3.x) AND (t2.x = t3.y), output: [t2.x] }
+        LogicalScan { table: t2, output_columns: [t2.x], required_columns: [x, y], predicate: (t2.x = t2.y) }
         LogicalJoin { type: Inner, on: true, output: all }
-          LogicalAgg { group_key: [t1.y], aggs: [] }
-            LogicalScan { table: t1, columns: [t1.y] }
+          LogicalProject { exprs: [] }
+            LogicalAgg { group_key: [t1.y], aggs: [] }
+              LogicalScan { table: t1, columns: [t1.y] }
           LogicalScan { table: t3, columns: [t3.x, t3.y] }
 - sql: |
     create table t1(x int, y int);
@@ -644,12 +636,12 @@
     LogicalJoin { type: LeftSemi, on: (t1.x = t2.x), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
       LogicalJoin { type: LeftSemi, on: (t2.y = (t3.y + t2.y)) AND (t2.y = t2.y) AND (t2.x = t3.x), output: [t2.x] }
-        LogicalScan { table: t2, columns: [t2.x, t2.y] }
+        LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: IsNotNull(t2.x) }
         LogicalProject { exprs: [t3.x, t2.y, (t3.y + t2.y)] }
           LogicalJoin { type: Inner, on: true, output: [t3.x, t2.y, t3.y] }
             LogicalAgg { group_key: [t2.y], aggs: [] }
               LogicalScan { table: t2, columns: [t2.y] }
-            LogicalScan { table: t3, columns: [t3.x, t3.y] }
+            LogicalScan { table: t3, output_columns: [t3.x, t3.y], required_columns: [x, y], predicate: IsNotNull(t3.x) }
 - sql: |
     create table t1 (a int, b int);
     create table t2 (b int, c int);
@@ -672,10 +664,8 @@
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y), output: all }
       LogicalScan { table: t1, columns: [t1.x, t1.y] }
       LogicalJoin { type: Inner, on: (t2.x = t3.x), output: [t2.y] }
-        LogicalJoin { type: Inner, on: (t2.y = t1.y), output: [t2.x, t2.y] }
-          LogicalScan { table: t2, columns: [t2.x, t2.y] }
-          LogicalAgg { group_key: [t1.y], aggs: [] }
-            LogicalScan { table: t1, columns: [t1.y] }
+        LogicalProject { exprs: [t2.y, t2.x] }
+          LogicalScan { table: t2, output_columns: [t2.x, t2.y], required_columns: [x, y], predicate: IsNotNull(t2.y) }
         LogicalScan { table: t3, columns: [t3.x] }
 - sql: |
     create table a (a1 int, a2 int);
@@ -689,4 +679,4 @@
           LogicalAgg { group_key: [a.a2], aggs: [] }
             LogicalScan { table: a, columns: [a.a2] }
           LogicalProject { exprs: [b.b2, b.b1] }
-            LogicalScan { table: b, columns: [b.b1, b.b2] }
+            LogicalScan { table: b, output_columns: [b.b1, b.b2], required_columns: [b1, b2], predicate: IsNotNull(b.b2) }

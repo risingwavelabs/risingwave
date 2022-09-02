@@ -73,7 +73,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/singularity-data/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
+source = "git+https://github.com/risingwavelabs/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -2608,7 +2608,7 @@ dependencies = [
 [[package]]
 name = "lru"
 version = "0.7.6"
-source = "git+https://github.com/singularity-data/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
+source = "git+https://github.com/risingwavelabs/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30#e0e9ddaf8e4a51c244a03676734437e68a336b30"
 dependencies = [
  "hashbrown 0.11.2",
 ]
@@ -3392,6 +3392,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
+ "itertools",
  "madsim-tokio",
  "regex",
  "thiserror",
@@ -4116,6 +4117,7 @@ dependencies = [
  "criterion",
  "either",
  "farmhash",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "itertools",
@@ -4250,6 +4252,7 @@ dependencies = [
  "crc32fast",
  "either",
  "enum-as-inner",
+ "fixedbitset",
  "futures",
  "futures-async-stream",
  "humantime",
@@ -4292,6 +4295,7 @@ dependencies = [
 name = "risingwave_common_service"
 version = "0.1.11"
 dependencies = [
+ "async-trait",
  "hyper",
  "madsim-tokio",
  "madsim-tonic",
@@ -4555,6 +4559,8 @@ dependencies = [
  "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
+ "serde",
+ "serde_derive",
  "serde_json",
  "sha2",
  "smallvec",
@@ -4606,6 +4612,7 @@ dependencies = [
 name = "risingwave_hummock_test"
 version = "0.1.11"
 dependencies = [
+ "async-trait",
  "bytes",
  "fail",
  "futures",
@@ -4614,6 +4621,8 @@ dependencies = [
  "parking_lot 0.12.1",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_common_service",
+ "risingwave_compute",
  "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_object_store",
@@ -4694,6 +4703,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
+ "crc32fast",
  "fail",
  "futures",
  "hyper",
@@ -4793,6 +4803,7 @@ dependencies = [
  "risingwave_compute",
  "risingwave_frontend",
  "risingwave_meta",
+ "risingwave_sqlsmith",
  "sqllogictest",
  "tokio-postgres",
  "tracing",

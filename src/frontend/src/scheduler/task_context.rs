@@ -19,6 +19,7 @@ use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::SourceManagerRef;
 
 use crate::catalog::pg_catalog::SysCatalogReaderImpl;
@@ -70,5 +71,9 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn get_task_metrics(&self) -> Option<BatchTaskMetrics> {
         None
+    }
+
+    fn client_pool(&self) -> ComputeClientPoolRef {
+        self.env.client_pool()
     }
 }

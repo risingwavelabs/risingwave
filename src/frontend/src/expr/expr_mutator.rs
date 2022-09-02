@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery, TableFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
+    TableFunction, WindowFunction,
 };
 
 /// with the same visit logic of `ExprVisitor`, but mutable.
@@ -27,6 +28,7 @@ pub trait ExprMutator {
             ExprImpl::Subquery(inner) => self.visit_subquery(inner),
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
             ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
+            ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &mut FunctionCall) {
@@ -50,5 +52,11 @@ pub trait ExprMutator {
             .args
             .iter_mut()
             .for_each(|expr| self.visit_expr(expr))
+    }
+    fn visit_window_function(&mut self, func_call: &mut WindowFunction) {
+        func_call
+            .args
+            .iter_mut()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }

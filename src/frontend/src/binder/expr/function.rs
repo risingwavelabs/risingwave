@@ -20,15 +20,14 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
-use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
+use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{
-    AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
-    TableFunction, TableFunctionType,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, TableFunction,
+    TableFunctionType, WindowFunction, WindowFunctionType,
 };
-use crate::optimizer::property::Direction;
 use crate::utils::Condition;
 
 impl Binder {
@@ -42,14 +41,6 @@ impl Binder {
             )
             .into());
         };
-
-        if f.over.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                format!("over window function: {}", f.name),
-                3646.into(),
-            )
-            .into());
-        }
 
         // agg calls
         let agg_kind = match function_name.as_str() {
@@ -65,6 +56,13 @@ impl Binder {
             _ => None,
         };
         if let Some(kind) = agg_kind {
+            if f.over.is_some() {
+                return Err(ErrorCode::NotImplemented(
+                    format!("aggregate function as over window function: {}", kind),
+                    4978.into(),
+                )
+                .into());
+            }
             return self.bind_agg(f, kind);
         }
 
@@ -76,12 +74,17 @@ impl Binder {
                 .into());
         }
 
-        let mut inputs = f
+        let inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
             .flatten_ok()
             .try_collect()?;
+
+        // window function
+        if let Some(window_spec) = f.over {
+            return self.bind_window_function(window_spec, function_name, inputs);
+        }
 
         // table function
         let table_function_type = TableFunctionType::from_str(function_name.as_str());
@@ -91,6 +94,7 @@ impl Binder {
         }
 
         // normal function
+        let mut inputs = inputs;
         let function_type = match function_name.as_str() {
             // comparison
             "booleq" => {
@@ -222,7 +226,11 @@ impl Binder {
 
         let filter = match f.filter {
             Some(filter) => {
+                let mut clause = Some(Clause::Filter);
+                std::mem::swap(&mut self.context.clause, &mut clause);
                 let expr = self.bind_expr(*filter)?;
+                self.context.clause = clause;
+
                 if expr.return_type() != DataType::Boolean {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "the type of filter clause should be boolean, but found {:?}",
@@ -231,14 +239,23 @@ impl Binder {
                     .into());
                 }
                 if expr.has_subquery() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "subquery in filter clause is not supported".to_string(),
+                    return Err(ErrorCode::NotImplemented(
+                        "subquery in filter clause".to_string(),
+                        None.into(),
                     )
                     .into());
                 }
                 if expr.has_agg_call() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "aggregation function in filter clause is not supported".to_string(),
+                    return Err(ErrorCode::NotImplemented(
+                        "aggregation function in filter clause".to_string(),
+                        None.into(),
+                    )
+                    .into());
+                }
+                if expr.has_table_function() {
+                    return Err(ErrorCode::NotImplemented(
+                        "table function in filter clause".to_string(),
+                        None.into(),
                     )
                     .into());
                 }
@@ -255,31 +272,48 @@ impl Binder {
             )
             .into());
         }
-        let order_by = AggOrderBy::new(
+        let order_by = OrderBy::new(
             f.order_by
                 .into_iter()
-                .map(|e| -> Result<AggOrderByExpr> {
-                    let expr = self.bind_expr(e.expr)?;
-                    let direction = match e.asc {
-                        None | Some(true) => Direction::Asc,
-                        Some(false) => Direction::Desc,
-                    };
-                    let nulls_first = e.nulls_first.unwrap_or_else(|| match direction {
-                        Direction::Asc => false,
-                        Direction::Desc => true,
-                        Direction::Any => unreachable!(),
-                    });
-                    Ok(AggOrderByExpr {
-                        expr,
-                        direction,
-                        nulls_first,
-                    })
-                })
+                .map(|e| self.bind_order_by_expr(e))
                 .try_collect()?,
         );
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
             kind, inputs, f.distinct, order_by, filter,
         )?)))
+    }
+
+    pub(super) fn bind_window_function(
+        &mut self,
+        WindowSpec {
+            partition_by,
+            order_by,
+            window_frame,
+        }: WindowSpec,
+        function_name: String,
+        inputs: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        self.ensure_window_function_allowed()?;
+        if let Some(window_frame) = window_frame {
+            return Err(ErrorCode::NotImplemented(
+                format!("window frame: {}", window_frame),
+                None.into(),
+            )
+            .into());
+        }
+        let window_function_type = WindowFunctionType::from_str(&function_name)?;
+        let partition_by = partition_by
+            .into_iter()
+            .map(|arg| self.bind_expr(arg))
+            .try_collect()?;
+
+        let order_by = OrderBy::new(
+            order_by
+                .into_iter()
+                .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
+                .collect::<Result<_>>()?,
+        );
+        Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
     }
 
     fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
@@ -325,14 +359,36 @@ impl Binder {
         ])
     }
 
+    fn ensure_window_function_allowed(&self) -> Result<()> {
+        if let Some(clause) = self.context.clause {
+            match clause {
+                Clause::Where
+                | Clause::Values
+                | Clause::GroupBy
+                | Clause::Having
+                | Clause::Filter => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "window functions are not allowed in {}",
+                        clause
+                    ))
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
-            if clause == Clause::Values || clause == Clause::Where {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "aggregate functions are not allowed in {}",
-                    clause
-                ))
-                .into());
+            match clause {
+                Clause::Where | Clause::Values => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "aggregate functions are not allowed in {}",
+                        clause
+                    ))
+                    .into())
+                }
+                Clause::Having | Clause::Filter | Clause::GroupBy => {}
             }
         }
         Ok(())
@@ -340,12 +396,15 @@ impl Binder {
 
     fn ensure_table_function_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
-            if clause == Clause::Values || clause == Clause::Where {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "table functions are not allowed in {}",
-                    clause
-                ))
-                .into());
+            match clause {
+                Clause::Where | Clause::Values => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "table functions are not allowed in {}",
+                        clause
+                    ))
+                    .into());
+                }
+                Clause::GroupBy | Clause::Having | Clause::Filter => {}
             }
         }
         Ok(())
