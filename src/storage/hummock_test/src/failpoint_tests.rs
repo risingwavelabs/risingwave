@@ -49,8 +49,6 @@ async fn test_failpoints_state_store_read_upload() {
     )
     .unwrap();
 
-    let local_version_manager = hummock_storage.local_version_manager();
-
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
         (anchor.clone(), StorageValue::new_default_put("111")),
@@ -105,9 +103,6 @@ async fn test_failpoints_state_store_read_upload() {
     // sync epoch1 test the read_error
     let ssts = hummock_storage.sync(1).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(1, ssts).await.unwrap();
-    local_version_manager
-        .refresh_version(meta_client.as_ref())
-        .await;
     // clear block cache
     sstable_store.clear_block_cache();
     sstable_store.clear_meta_cache();
@@ -161,9 +156,6 @@ async fn test_failpoints_state_store_read_upload() {
 
     let ssts = hummock_storage.sync(3).await.unwrap().uncommitted_ssts;
     meta_client.commit_epoch(3, ssts).await.unwrap();
-    local_version_manager
-        .refresh_version(meta_client.as_ref())
-        .await;
 
     let value = hummock_storage
         .get(
