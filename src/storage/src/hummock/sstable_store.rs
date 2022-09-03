@@ -393,7 +393,6 @@ impl SstableStore {
         &self,
         sst: &Sstable,
         block_index: Option<usize>,
-        // ToDo: What about `CachePolicy` and `StoreLocalStatistic`?
     ) -> HummockResult<BlockStream> {
         let start_pos = match block_index {
             None => None,

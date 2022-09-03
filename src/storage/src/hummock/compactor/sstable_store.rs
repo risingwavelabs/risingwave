@@ -137,8 +137,6 @@ impl CompactorSstableStore {
         sst: &Sstable,
         block_index: Option<usize>,
     ) -> HummockResult<BlockStream> {
-        // ToDo:
-        //   - What about `StoreLocalStatistic`?
         self.sstable_store.get_block_stream(sst, block_index).await
     }
 }

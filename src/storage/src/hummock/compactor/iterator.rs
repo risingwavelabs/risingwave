@@ -14,6 +14,9 @@
 
 use std::cmp::Ordering;
 use std::future::Future;
+use std::sync::atomic::AtomicU64;
+use std::sync::{atomic, Arc};
+use std::time::Instant;
 
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::VersionedComparator;
@@ -22,7 +25,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::compactor::CompactorSstableStoreRef;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockIterator, BlockStream, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, BlockStream, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
@@ -35,6 +38,9 @@ struct SstableStreamIterator {
 
     /// The maximum number of remaining blocks that iterator will download and read.
     remaining_blocks: usize,
+
+    /// Counts the time used for IO.
+    stats_ptr: Arc<AtomicU64>,
 }
 
 impl SstableStreamIterator {
@@ -52,11 +58,16 @@ impl SstableStreamIterator {
 
     /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockStream`].
     /// The iterator reads at most `max_block_count` from the stream.
-    pub fn new(block_stream: BlockStream, max_block_count: usize) -> Self {
+    pub fn new(
+        block_stream: BlockStream,
+        max_block_count: usize,
+        stats: &StoreLocalStatistic,
+    ) -> Self {
         Self {
             block_stream,
             block_iter: None,
             remaining_blocks: max_block_count,
+            stats_ptr: stats.remote_io_time.clone(),
         }
     }
 
@@ -94,7 +105,7 @@ impl SstableStreamIterator {
     /// `self.block_iter` to `None`.
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
-        if self.remaining_blocks > 0 && let Some(block) = self.block_stream.next().await? {
+        if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().await? {
             let mut block_iter = BlockIterator::new(block);
             block_iter.seek_to_first();
 
@@ -106,6 +117,17 @@ impl SstableStreamIterator {
         }
 
         Ok(())
+    }
+
+    /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
+    async fn download_next_block(&mut self) -> HummockResult<Option<BlockHolder>> {
+        let now = Instant::now();
+        let result = self.block_stream.next().await;
+        let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+        self.stats_ptr
+            .fetch_add(add as u64, atomic::Ordering::Relaxed);
+
+        result
     }
 
     /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
@@ -215,13 +237,20 @@ impl ConcatSstableIterator {
                 return Ok(());
             }
 
+            let stats_ptr = self.stats.remote_io_time.clone();
+            let now = Instant::now();
+
             let block_stream = self
                 .sstable_store
                 .get_stream(table.value(), Some(start_index))
                 .await?;
 
+            // Determine time needed to open stream.
+            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+            stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
+
             let mut sstable_iter =
-                SstableStreamIterator::new(block_stream, end_index - start_index);
+                SstableStreamIterator::new(block_stream, end_index - start_index, &self.stats);
             sstable_iter.seek(seek_key).await?;
 
             self.sstable_iter = Some(sstable_iter);
