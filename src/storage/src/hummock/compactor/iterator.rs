@@ -30,7 +30,7 @@ use crate::monitor::StoreLocalStatistic;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
 struct SstableStreamIterator {
-    /// The downloading stream of the current block.
+    /// The downloading stream.
     block_stream: BlockStream,
 
     /// Iterates over the KV-pairs of the current block.
