@@ -14,8 +14,6 @@
 
 #[cfg(test)]
 mod compactor_tests;
-#[cfg(all(test, feature = "failpoints"))]
-mod failpoint_tests;
 #[cfg(test)]
 mod local_version_manager_tests;
 #[cfg(test)]
