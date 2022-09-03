@@ -113,7 +113,7 @@ pub struct BlockStream {
     byte_stream: Box<dyn AsyncRead + Unpin + Send + Sync>,
 
     /// The index of the next block. Note that `block_idx` is relative to the start index of the
-    /// stream (and is compatible with `block_len_vec`); it is not relative to the corresponding
+    /// stream (and is compatible with `block_size_vec`); it is not relative to the corresponding
     /// SST. That is, if streaming starts at block 2 of a given SST `T`, then `block_idx = 0`
     /// refers to the third block of `T`.
     block_idx: usize,
@@ -311,31 +311,6 @@ impl SstableStore {
             .delete(&data_path)
             .await
             .map_err(HummockError::object_io_error)
-    }
-
-    /// Returns a [`BlockHolder`] of the specified block if it is stored in cache, otherwise `None`.
-    pub async fn get_from_cache(
-        &self,
-        sst: &Sstable,
-        block_index: u64,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<Option<BlockHolder>> {
-        stats.cache_data_block_total += 1;
-
-        fail_point!("disable_block_cache", |_| Ok(None));
-
-        match self.block_cache.get(sst.id, block_index) {
-            Some(block) => Ok(Some(block)),
-            None => match self
-                .tiered_cache
-                .get(&(sst.id, block_index))
-                .await
-                .map_err(HummockError::tiered_cache)?
-            {
-                Some(holder) => Ok(Some(BlockHolder::from_tiered_cache(holder.into_inner()))),
-                None => Ok(None),
-            },
-        }
     }
 
     pub async fn get(

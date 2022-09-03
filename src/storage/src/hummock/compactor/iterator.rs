@@ -61,10 +61,10 @@ impl SstableStreamIterator {
     }
 
     /// Initialises the iterator by moving it to the first KV-pair in the stream's first block where
-    /// key >= `start_key`. If that block does not contain such a KV-pair, the iterator continues to
-    /// the first KV-pair of the next block. If `start_key` is not given, the iterator will move to
+    /// key >= `seek_key`. If that block does not contain such a KV-pair, the iterator continues to
+    /// the first KV-pair of the next block. If `seek_key` is not given, the iterator will move to
     /// the very first KV-pair of the stream's first block.
-    pub async fn start(&mut self, start_key: Option<&[u8]>) -> HummockResult<()> {
+    pub async fn seek(&mut self, seek_key: Option<&[u8]>) -> HummockResult<()> {
         // Load first block.
         self.next_block().await?;
 
@@ -72,20 +72,16 @@ impl SstableStreamIterator {
         // `next_block()` loads a new block (i.e., `block_iter` is not `None`), then `block_iter` is
         // also valid and pointing on the block's first KV-pair.
 
-        if let (Some(block_iter), Some(key)) = (self.block_iter.as_mut(), start_key) {
-            // We now search for `key` in the current block. If `key` is larger than anything stored
-            // in the current block, then `block_iter` searches through the whole block and
-            // eventually ends in an invalid state. We therefore move to the start of the next
-            // block.
-
-            block_iter.seek(key);
+        if let (Some(block_iter), Some(seek_key)) = (self.block_iter.as_mut(), seek_key) {
+            block_iter.seek(seek_key);
             if !block_iter.is_valid() {
+                // `seek_key` is larger than everything in the first block.
                 self.next_block().await?;
             }
         }
 
-        // Reached end of stream?
         if self.block_iter.is_none() {
+            // End of stream.
             self.remaining_blocks = 0;
         }
 
@@ -99,9 +95,11 @@ impl SstableStreamIterator {
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
         if self.remaining_blocks > 0 && let Some(block) = self.block_stream.next().await? {
+            let mut block_iter = BlockIterator::new(block);
+            block_iter.seek_to_first();
+
             self.remaining_blocks -= 1;
-            self.block_iter = Some(BlockIterator::new(block));
-            self.block_iter.as_mut().unwrap().seek_to_first();
+            self.block_iter = Some(block_iter);
         } else {
             self.remaining_blocks = 0;
             self.block_iter = None;
@@ -111,24 +109,19 @@ impl SstableStreamIterator {
     }
 
     /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
-    /// the next position is invalid, the function return `Ok(())`.
+    /// the next position is invalid, the function returns `Ok(())`.
     ///
     /// Do not use `next()` to initialise the iterator (i.e. do not use it to find the first
-    /// KV-pair). Instead, use `start()`. Afterwards, use `next()` to reach the second KV-pair and
+    /// KV-pair). Instead, use `seek()`. Afterwards, use `next()` to reach the second KV-pair and
     /// onwards.
     pub async fn next(&mut self) -> HummockResult<()> {
-        // Ensure iterator is valid.
         if !self.is_valid() {
             return Ok(());
         }
 
-        // Unwrap internal iterator.
-        let block_iter = self.block_iter.as_mut().unwrap();
-
-        // Can we continue in current block?
+        let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
         if !block_iter.is_valid() {
-            // No, block is exhausted. We need to load the next block.
             self.next_block().await?;
         }
 
@@ -191,58 +184,49 @@ impl ConcatSstableIterator {
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
     /// The function assumes that `seek_key` is at most as large as the maximum key in the SST.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        // Always reset iterator.
         self.sstable_iter.take();
 
-        if idx >= self.tables.len() {
-            // Index out of range.
-            return Ok(());
-        }
+        if idx < self.tables.len() {
+            let table = self
+                .sstable_store
+                .sstable(self.tables[idx].id, &mut self.stats)
+                .await?;
+            let block_metas = &table.value().meta.block_metas;
 
-        let table = self
-            .sstable_store
-            .sstable(self.tables[idx].id, &mut self.stats)
-            .await?;
-        let block_metas = &table.value().meta.block_metas;
-
-        let start_index /* inclusive */ = if self.key_range.left.is_empty() {
-            0
-        } else {
-            block_metas
-                .partition_point(|block| {
-                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
+            let start_index = if self.key_range.left.is_empty() {
+                0
+            } else {
+                block_metas
+                    .partition_point(|block| {
+                        VersionedComparator::compare_key(&block.smallest_key, &self.key_range.left)
+                            != Ordering::Greater
+                    })
+                    .saturating_sub(1)
+            };
+            let end_index = if self.key_range.right.is_empty() {
+                block_metas.len()
+            } else {
+                block_metas.partition_point(|block| {
+                    VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
                         != Ordering::Greater
                 })
-                .saturating_sub(1)
-        };
+            };
+            if end_index <= start_index {
+                return Ok(());
+            }
 
-        let end_index /* exclusive */ = if self.key_range.right.is_empty() {
-            block_metas.len()
-        } else {
-            block_metas.partition_point(|block| {
-                VersionedComparator::compare_key(&block.smallest_key, &self.key_range.right)
-                    != Ordering::Greater
-            })
-        };
+            let block_stream = self
+                .sstable_store
+                .get_stream(table.value(), Some(start_index))
+                .await?;
 
-        if end_index <= start_index {
-            // Empty range.
-            return Ok(());
+            let mut sstable_iter =
+                SstableStreamIterator::new(block_stream, end_index - start_index);
+            sstable_iter.seek(seek_key).await?;
+
+            self.sstable_iter = Some(sstable_iter);
+            self.cur_idx = idx;
         }
-
-        // ToDo: Test if there are blocks cached.
-
-        let block_stream = self
-            .sstable_store
-            .get_stream(table.value(), Some(start_index))
-            .await?;
-
-        let mut sstable_iter = SstableStreamIterator::new(block_stream, end_index - start_index);
-        sstable_iter.start(seek_key).await?;
-
-        self.sstable_iter = Some(sstable_iter);
-        self.cur_idx = idx;
-
         Ok(())
     }
 }
@@ -291,14 +275,8 @@ impl HummockIterator for ConcatSstableIterator {
         async {
             let table_idx = self.tables.partition_point(|table| {
                 // We use the maximum key of an SST for the search. That way, we guarantee that the
-                // resulting SST either contains that key or the next-larger KV-pair. Subsequently,
+                // resulting SST contains either that key or the next-larger KV-pair. Subsequently,
                 // we avoid calling `seek_idx()` twice if the determined SST does not contain `key`.
-
-                // Assume we have two SSTs `A: [k l m]` and `B: [s t u]`, and that we search for the
-                // key `p`. If we search using the min. key of an SST, our search would result in
-                // `A`, we then search in `A`, receive an invalid iterator, and restart the search
-                // with `B`. If we use the max. key instead, then the search results in `B` and the
-                // created iterator is always valid.
 
                 // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
                 // (including its max. key) produce the same search result.
