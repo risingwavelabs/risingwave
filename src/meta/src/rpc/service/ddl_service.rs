@@ -21,7 +21,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tokio::sync::RwLock;
@@ -227,8 +227,7 @@ where
         let version = self.catalog_manager.drop_sink(sink_id).await?;
 
         // 2. drop sink in stream manager
-        let _table_fragments = self
-            .stream_manager
+        self.stream_manager
             .drop_materialized_view(&TableId::new(sink_id))
             .await?;
 
@@ -283,13 +282,9 @@ where
             .await?;
 
         // 2. drop mv in stream manager
-        let table_fragments = self
-            .stream_manager
+        self.stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
-
-        self.notify_table_mapping(&table_fragments, Operation::Delete)
-            .await;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -410,22 +405,6 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn notify_table_mapping(&self, table_fragment: &TableFragments, operation: Operation) {
-        for fragment in table_fragment.fragments.values() {
-            if !fragment.state_table_ids.is_empty() {
-                let mut mapping = fragment
-                    .vnode_mapping
-                    .clone()
-                    .expect("no data distribution found");
-                mapping.fragment_id = fragment.fragment_id;
-                self.env
-                    .notification_manager()
-                    .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
-                    .await;
-            }
-        }
-    }
-
     /// `create_stream_job` creates a stream job and returns the version of the catalog.
     async fn create_stream_job(
         &self,
@@ -593,7 +572,8 @@ where
         ctx: &CreateMaterializedViewContext,
     ) -> MetaResult<u64> {
         // 1. notify vnode mapping.
-        self.notify_table_mapping(table_fragments, Operation::Add)
+        self.fragment_manager
+            .notify_fragment_mapping(table_fragments, Operation::Add)
             .await;
 
         // 2. finish procedure.
@@ -721,13 +701,9 @@ where
         // 2. Drop source and mv separately.
         // Note: we need to drop the materialized view to unmap the source_id to fragment_ids in
         // `SourceManager` before we can drop the source
-        let table_fragments = self
-            .stream_manager
+        self.stream_manager
             .drop_materialized_view(&TableId::new(table_id))
             .await?;
-
-        self.notify_table_mapping(&table_fragments, Operation::Delete)
-            .await;
 
         self.source_manager.drop_source(source_id).await?;
 
