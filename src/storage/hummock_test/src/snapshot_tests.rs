@@ -174,7 +174,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 }
 
-async fn test_snapshot_range_scan_inner() {
+async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -208,6 +208,15 @@ async fn test_snapshot_range_scan_inner() {
         )
         .await
         .unwrap();
+    if enable_sync {
+        let ssts = hummock_storage.sync(epoch).await.unwrap().uncommitted_ssts;
+        if enable_commit {
+            mock_hummock_meta_client
+                .commit_epoch(epoch, ssts)
+                .await
+                .unwrap();
+        }
+    }
     macro_rules! key {
         ($idx:expr) => {
             Bytes::from(stringify!($idx)).to_vec()
@@ -306,7 +315,17 @@ async fn test_snapshot_with_commit() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan() {
-    test_snapshot_range_scan_inner().await;
+    test_snapshot_range_scan_inner(false, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_sync() {
+    test_snapshot_range_scan_inner(true, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_range_scan_with_commit() {
+    test_snapshot_range_scan_inner(true, true).await;
 }
 
 #[tokio::test]
