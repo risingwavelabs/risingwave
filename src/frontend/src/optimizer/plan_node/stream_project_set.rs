@@ -68,7 +68,7 @@ impl PlanTreeNodeUnary for StreamProjectSet {
 impl_plan_tree_node_for_unary! { StreamProjectSet }
 
 impl ToStreamProst for StreamProjectSet {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::ProjectSet(ProjectSetNode {
             select_list: self
                 .logical

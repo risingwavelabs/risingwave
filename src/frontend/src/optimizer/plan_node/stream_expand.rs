@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use itertools::Itertools;
+
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ExpandNode;
@@ -74,7 +74,7 @@ impl PlanTreeNodeUnary for StreamExpand {
 impl_plan_tree_node_for_unary! { StreamExpand }
 
 impl ToStreamProst for StreamExpand {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Expand(ExpandNode {
             column_subsets: self
                 .column_subsets()

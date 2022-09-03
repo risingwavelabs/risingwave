@@ -62,7 +62,7 @@ impl ToStreamProst for StreamGroupTopN {
         if self.logical.limit() == 0 {
             panic!("topN's limit shouldn't be 0.");
         }
-        let mut table = self
+        let table = self
             .logical
             .infer_internal_table_catalog(Some(&self.group_key))
             .with_id(state.gen_table_id_wrapped());

@@ -249,7 +249,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
 impl ToStreamProst for StreamMaterialize {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::Materialize(MaterializeNode {

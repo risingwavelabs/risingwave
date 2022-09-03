@@ -146,7 +146,7 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
 impl_plan_tree_node_for_binary! { StreamDeltaJoin }
 
 impl ToStreamProst for StreamDeltaJoin {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         let left = self.left();
         let right = self.right();
         let left_table = left.as_stream_index_scan().unwrap();

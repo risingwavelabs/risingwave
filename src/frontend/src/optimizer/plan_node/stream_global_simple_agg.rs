@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use itertools::Itertools;
+
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;

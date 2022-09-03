@@ -67,7 +67,7 @@ impl fmt::Display for StreamSource {
 }
 
 impl ToStreamProst for StreamSource {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Source(SourceNode {
             source_id: self.logical.source_catalog.id,
             column_ids: self

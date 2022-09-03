@@ -75,7 +75,7 @@ impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
 impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
 
 impl ToStreamProst for StreamLocalSimpleAgg {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self

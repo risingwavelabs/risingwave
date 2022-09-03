@@ -79,7 +79,7 @@ impl fmt::Display for StreamSink {
 }
 
 impl ToStreamProst for StreamSink {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
         let input = self.input.clone();

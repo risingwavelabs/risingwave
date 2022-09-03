@@ -133,7 +133,7 @@ impl fmt::Display for StreamTableScan {
 }
 
 impl ToStreamProst for StreamTableScan {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
