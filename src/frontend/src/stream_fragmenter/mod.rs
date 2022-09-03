@@ -34,7 +34,7 @@ use crate::optimizer::PlanRef;
 /// The mutable state when building fragment graph.
 #[derive(Derivative)]
 #[derivative(Default)]
-pub(crate) struct BuildFragmentGraphState {
+pub struct BuildFragmentGraphState {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// local fragment id
@@ -263,51 +263,4 @@ fn build_fragment(
         })
         .collect::<Result<_>>()?;
     Ok(stream_node)
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_pb::catalog::{Table, Table as ProstTable};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::expr::agg_call::{Arg, Type};
-    use risingwave_pb::expr::{AggCall, InputRefExpr};
-    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
-    use risingwave_pb::stream_plan::*;
-
-    use super::*;
-
-    fn make_sum_aggcall(idx: i32) -> AggCall {
-        AggCall {
-            r#type: Type::Sum as i32,
-            args: vec![Arg {
-                input: Some(InputRefExpr { column_idx: idx }),
-                r#type: Some(DataType {
-                    type_name: TypeName::Int64 as i32,
-                    ..Default::default()
-                }),
-            }],
-            return_type: Some(DataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            distinct: false,
-            order_by_fields: vec![],
-            filter: None,
-        }
-    }
-
-    fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
-        ColumnCatalog {
-            column_desc: Some(ColumnDesc {
-                column_type: Some(DataType {
-                    type_name: column_type as i32,
-                    ..Default::default()
-                }),
-                column_id,
-                ..Default::default()
-            }),
-            is_hidden: false,
-        }
-    }
 }
