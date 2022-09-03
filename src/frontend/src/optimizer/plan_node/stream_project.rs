@@ -18,7 +18,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::{expr::Expr, stream_fragmenter::BuildFragmentGraphState};
+use crate::expr::Expr;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.

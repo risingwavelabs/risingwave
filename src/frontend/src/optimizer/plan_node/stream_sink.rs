@@ -19,7 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanBase, PlanRef, ToStreamProst};
-use crate::{optimizer::plan_node::PlanTreeNodeUnary, stream_fragmenter::BuildFragmentGraphState};
+use crate::optimizer::plan_node::PlanTreeNodeUnary;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]

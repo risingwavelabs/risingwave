@@ -18,9 +18,8 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
-use crate::stream_fragmenter::BuildFragmentGraphState;
-
 use super::{LogicalProjectSet, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone)]
 pub struct StreamProjectSet {

@@ -29,7 +29,7 @@ pub trait ToBatchProst {
     }
 }
 
-pub trait ToStreamProst {
+pub(crate) trait ToStreamProst {
     fn to_stream_prost_body(
         &self,
         state: &mut BuildFragmentGraphState,
