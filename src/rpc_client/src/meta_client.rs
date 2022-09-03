@@ -450,6 +450,18 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
+    async fn get_current_version(&self) -> Result<HummockVersion> {
+        let req = GetCurrentVersionRequest {
+            context_id: self.worker_id(),
+        };
+        Ok(self
+            .inner
+            .get_current_version(req)
+            .await?
+            .current_version
+            .unwrap())
+    }
+
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
@@ -674,6 +686,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
+            ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }

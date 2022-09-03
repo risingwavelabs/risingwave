@@ -22,7 +22,8 @@ use risingwave_hummock_sdk::{
     SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -66,6 +67,10 @@ impl HummockMetaClient for MockHummockMetaClient {
             .unpin_version_before(self.context_id, unpin_version_before)
             .await
             .map_err(mock_err)
+    }
+
+    async fn get_current_version(&self) -> Result<HummockVersion> {
+        Ok(self.hummock_manager.get_current_version().await)
     }
 
     async fn pin_snapshot(&self) -> Result<HummockSnapshot> {

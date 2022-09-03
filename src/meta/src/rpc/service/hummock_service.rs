@@ -103,6 +103,17 @@ where
         Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
     }
 
+    async fn get_current_version(
+        &self,
+        _request: Request<GetCurrentVersionRequest>,
+    ) -> Result<Response<GetCurrentVersionResponse>, Status> {
+        let current_version = self.hummock_manager.get_current_version().await;
+        Ok(Response::new(GetCurrentVersionResponse {
+            status: None,
+            current_version: Some(current_version),
+        }))
+    }
+
     async fn report_compaction_tasks(
         &self,
         request: Request<ReportCompactionTasksRequest>,

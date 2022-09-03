@@ -59,6 +59,8 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum HummockCommands {
+    /// list latest Hummock version on meta node
+    ListVersion,
     /// list all Hummock key-value pairs
     ListKv {
         #[clap(short, long = "epoch", default_value_t = u64::MAX)]
@@ -67,6 +69,7 @@ enum HummockCommands {
         #[clap(short, long = "table-id")]
         table_id: Option<u32>,
     },
+    SstDump,
     /// trigger a targeted compaction through compaction_group_id
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
@@ -114,9 +117,13 @@ enum MetaCommands {
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
+        Commands::Hummock(HummockCommands::ListVersion) => {
+            cmd_impl::hummock::list_version().await?;
+        }
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
             cmd_impl::hummock::list_kv(epoch, table_id).await?;
         }
+        Commands::Hummock(HummockCommands::SstDump) => cmd_impl::hummock::sst_dump().await.unwrap(),
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
             table_id,
