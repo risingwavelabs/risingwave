@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::RequiredDist;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Streaming local simple agg.
 /// Should only be used for stateless agg, including sum, count and append-only min/max.
@@ -74,7 +75,7 @@ impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
 impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
 
 impl ToStreamProst for StreamLocalSimpleAgg {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self

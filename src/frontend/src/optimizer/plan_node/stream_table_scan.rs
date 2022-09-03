@@ -25,6 +25,7 @@ use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -132,7 +133,7 @@ impl fmt::Display for StreamTableScan {
 }
 
 impl ToStreamProst for StreamTableScan {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }

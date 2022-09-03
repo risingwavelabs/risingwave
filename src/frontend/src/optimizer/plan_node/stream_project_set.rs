@@ -18,6 +18,8 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
+use crate::stream_fragmenter::BuildFragmentGraphState;
+
 use super::{LogicalProjectSet, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 
 #[derive(Debug, Clone)]
@@ -67,7 +69,7 @@ impl PlanTreeNodeUnary for StreamProjectSet {
 impl_plan_tree_node_for_unary! { StreamProjectSet }
 
 impl ToStreamProst for StreamProjectSet {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::ProjectSet(ProjectSetNode {
             select_list: self
                 .logical

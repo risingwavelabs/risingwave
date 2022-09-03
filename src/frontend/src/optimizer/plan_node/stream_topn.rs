@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, FieldOrder};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -69,7 +70,7 @@ impl PlanTreeNodeUnary for StreamTopN {
 impl_plan_tree_node_for_unary! { StreamTopN }
 
 impl ToStreamProst for StreamTopN {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         if self.input().append_only() {
             let column_orders = self
@@ -85,7 +86,8 @@ impl ToStreamProst for StreamTopN {
                 limit: self.logical.limit() as u64,
                 offset: self.logical.offset() as u64,
                 distribution_key: vec![], // TODO: seems unnecessary
-                ..Default::default()
+                table_id_l: state.gen_table_id(),
+                table_id_h: state.gen_table_id(),
             };
             ProstStreamNode::AppendOnlyTopN(node)
         } else {
@@ -95,6 +97,7 @@ impl ToStreamProst for StreamTopN {
                 table: Some(
                     self.logical
                         .infer_internal_table_catalog(None)
+                        .with_id(state.gen_table_id_wrapped())
                         .to_state_table_prost(),
                 ),
             };

@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::{LogicalSource, PlanBase, ToStreamProst};
 use crate::catalog::TableId;
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
@@ -66,7 +67,7 @@ impl fmt::Display for StreamSource {
 }
 
 impl ToStreamProst for StreamSource {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Source(SourceNode {
             source_id: self.logical.source_catalog.id,
             column_ids: self

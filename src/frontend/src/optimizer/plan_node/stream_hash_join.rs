@@ -31,6 +31,7 @@ use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -193,7 +194,7 @@ impl PlanTreeNodeBinary for StreamHashJoin {
 impl_plan_tree_node_for_binary! { StreamHashJoin }
 
 impl ToStreamProst for StreamHashJoin {
-    fn to_stream_prost_body(&self) -> NodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let left_key_indices = self.eq_join_predicate.left_eq_indexes();
         let right_key_indices = self.eq_join_predicate.right_eq_indexes();
         let left_key_indices_prost = left_key_indices.iter().map(|idx| *idx as i32).collect_vec();
@@ -213,10 +214,13 @@ impl ToStreamProst for StreamHashJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             left_table: Some(
-                infer_internal_table_catalog(self.left(), left_key_indices).to_state_table_prost(),
+                infer_internal_table_catalog(self.left(), left_key_indices)
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_state_table_prost(),
             ),
             right_table: Some(
                 infer_internal_table_catalog(self.right(), right_key_indices)
+                    .with_id(state.gen_table_id_wrapped())
                     .to_state_table_prost(),
             ),
             output_indices: self

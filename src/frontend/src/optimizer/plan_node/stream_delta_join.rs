@@ -23,6 +23,7 @@ use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, 
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
@@ -145,7 +146,7 @@ impl PlanTreeNodeBinary for StreamDeltaJoin {
 impl_plan_tree_node_for_binary! { StreamDeltaJoin }
 
 impl ToStreamProst for StreamDeltaJoin {
-    fn to_stream_prost_body(&self) -> NodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let left = self.left();
         let right = self.right();
         let left_table = left.as_stream_index_scan().unwrap();

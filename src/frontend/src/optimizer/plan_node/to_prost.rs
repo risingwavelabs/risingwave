@@ -30,7 +30,10 @@ pub trait ToBatchProst {
 }
 
 pub trait ToStreamProst {
-    fn to_stream_prost_body(&self) -> pb_stream_node::NodeBody {
+    fn to_stream_prost_body(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> pb_stream_node::NodeBody {
         unimplemented!()
     }
 }
@@ -63,7 +66,7 @@ macro_rules! ban_to_stream_prost {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToStreamProst for [<$convention $name>] {
-                fn to_stream_prost_body(&self) -> pb_stream_node::NodeBody {
+                fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> pb_stream_node::NodeBody {
                     panic!("convert into distributed is only allowed on stream plan")
                 }
             })*

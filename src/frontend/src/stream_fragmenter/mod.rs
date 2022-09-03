@@ -67,16 +67,21 @@ impl BuildFragmentGraphState {
     }
 
     /// Generate an table id
-    fn gen_table_id(&mut self) -> u32 {
+    pub fn gen_table_id(&mut self) -> u32 {
         let ret = self.next_table_id;
         self.next_table_id += 1;
         ret
+    }
+
+    /// Generate an table id
+    pub fn gen_table_id_wrapped(&mut self) -> TableId {
+        TableId::new(self.gen_table_id())
     }
 }
 
 pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     let mut state = BuildFragmentGraphState::default();
-    let stream_node = plan_node.to_stream_prost();
+    let stream_node = plan_node.to_stream_prost(&mut state);
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
     fragment_graph.dependent_table_ids = state

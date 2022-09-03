@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
@@ -89,22 +90,26 @@ impl PlanTreeNodeUnary for StreamHashAgg {
 impl_plan_tree_node_for_unary! { StreamHashAgg }
 
 impl ToStreamProst for StreamHashAgg {
-    fn to_stream_prost_body(&self) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let (internal_tables, column_mappings) = self
             .logical
             .infer_internal_table_catalog(self.vnode_col_idx);
         ProstStreamNode::HashAgg(HashAggNode {
-            group_key: self.group_key().iter().map(|idx| *idx as u32).collect_vec(),
+            group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             agg_calls: self
                 .agg_calls()
                 .iter()
                 .map(PlanAggCall::to_protobuf)
-                .collect_vec(),
+                .collect(),
             internal_tables: internal_tables
                 .into_iter()
-                .map(|table_catalog| table_catalog.to_state_table_prost())
-                .collect_vec(),
+                .map(|table| {
+                    table
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_state_table_prost()
+                })
+                .collect(),
             column_mappings: column_mappings
                 .into_iter()
                 .map(|v| ColumnMapping {
