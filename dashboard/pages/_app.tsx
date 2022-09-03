@@ -15,13 +15,16 @@
  *
  */
 import '../styles/global.css'
+import 'bootstrap-icons/font/bootstrap-icons.css'
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import Layout from "../components/Layout";
+import type { AppProps } from 'next/app'
+import { ChakraProvider } from '@chakra-ui/react'
+import Layout from '../components/Layout';
 
 // The entry point of the website. It is used to define some global variables.
-export default function App({ Component, pageProps }) {
+function App({ Component, pageProps }: AppProps) {
 
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -32,10 +35,9 @@ export default function App({ Component, pageProps }) {
     router.events.on('routeChangeError', () => setIsLoading(false));
   }, [])
 
-  return (
-    <Layout>
-      {isLoading ? <p>Loading...</p> : <Component {...pageProps} />}
-    </Layout>
-  );
+  return <ChakraProvider>
+    <Layout><Component {...pageProps} /></Layout>
+  </ChakraProvider>
 }
 
+export default App

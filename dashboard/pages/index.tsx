@@ -14,14 +14,11 @@
  * limitations under the License.
  *
  */
-import React from 'react';
+
+import { Box, Text } from "@chakra-ui/react";
 
 export default function Home() {
   return (
-    <>
-      <div >
-        Welcome
-      </div>
-    </>
+    <Box p={3}><Text>Home</Text></Box>
   );
 }

@@ -7,20 +7,24 @@
     "build-static": "next build && next export"
   },
   "dependencies": {
-    "@emotion/react": "^11.7.1",
-    "@emotion/styled": "^11.6.0",
+    "@chakra-ui/react": "^2.3.1",
+    "@emotion/react": "^11.10.4",
+    "@emotion/styled": "^11.10.4",
     "@mui/icons-material": "^5.3.1",
     "@mui/material": "^5.3.1",
+    "bootstrap-icons": "^1.9.1",
     "d3": "^7.3.0",
     "fabric": "^5.2.1",
+    "framer-motion": "^6.5.1",
     "lodash": "^4.17.21",
     "next": "^12.0.9",
-    "react": "17.0.2",
-    "react-dom": "17.0.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "react-syntax-highlighter": "^15.5.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^5.16.2",
-    "@testing-library/react": "^12.1.2"
+    "@testing-library/react": "^13.3.0",
+    "typescript": "^4.8.2"
   }
 }
