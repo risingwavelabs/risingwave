@@ -18,6 +18,7 @@ use bytes::Bytes;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
@@ -74,7 +75,7 @@ macro_rules! assert_count_backward_range_scan {
     }};
 }
 
-async fn test_snapshot_inner() {
+async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -106,6 +107,15 @@ async fn test_snapshot_inner() {
         )
         .await
         .unwrap();
+    if enable_sync {
+        let ssts = hummock_storage.sync(epoch1).await.unwrap().uncommitted_ssts;
+        if enable_commit {
+            mock_hummock_meta_client
+                .commit_epoch(epoch1, ssts)
+                .await
+                .unwrap();
+        }
+    }
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
     let epoch2 = epoch1 + 1;
@@ -123,6 +133,15 @@ async fn test_snapshot_inner() {
         )
         .await
         .unwrap();
+    if enable_sync {
+        let ssts = hummock_storage.sync(epoch2).await.unwrap().uncommitted_ssts;
+        if enable_commit {
+            mock_hummock_meta_client
+                .commit_epoch(epoch2, ssts)
+                .await
+                .unwrap();
+        }
+    }
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
@@ -141,6 +160,15 @@ async fn test_snapshot_inner() {
         )
         .await
         .unwrap();
+    if enable_sync {
+        let ssts = hummock_storage.sync(epoch3).await.unwrap().uncommitted_ssts;
+        if enable_commit {
+            mock_hummock_meta_client
+                .commit_epoch(epoch3, ssts)
+                .await
+                .unwrap();
+        }
+    }
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
@@ -263,7 +291,17 @@ async fn test_snapshot_backward_range_scan_inner() {
 
 #[tokio::test]
 async fn test_snapshot() {
-    test_snapshot_inner().await;
+    test_snapshot_inner(false, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_with_sync() {
+    test_snapshot_inner(true, false).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_with_commit() {
+    test_snapshot_inner(true, true).await;
 }
 
 #[tokio::test]
