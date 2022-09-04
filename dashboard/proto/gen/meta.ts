@@ -33,7 +33,7 @@ export interface HeartbeatRequest {
 }
 
 export interface HeartbeatRequest_ExtraInfo {
-  hummockGcWatermark: number | undefined;
+  info?: { $case: "hummockGcWatermark"; hummockGcWatermark: number };
 }
 
 export interface HeartbeatResponse {
@@ -266,18 +266,19 @@ export interface SubscribeResponse {
   status: Status | undefined;
   operation: SubscribeResponse_Operation;
   version: number;
-  node: WorkerNode | undefined;
-  database: Database | undefined;
-  schema: Schema | undefined;
-  table: Table | undefined;
-  source: Source | undefined;
-  sink: Sink | undefined;
-  index: Index | undefined;
-  user: UserInfo | undefined;
-  hummockSnapshot: HummockSnapshot | undefined;
-  parallelUnitMapping: ParallelUnitMapping | undefined;
-  hummockVersionDeltas: HummockVersionDeltas | undefined;
-  snapshot: MetaSnapshot | undefined;
+  info?:
+    | { $case: "node"; node: WorkerNode }
+    | { $case: "database"; database: Database }
+    | { $case: "schema"; schema: Schema }
+    | { $case: "table"; table: Table }
+    | { $case: "source"; source: Source }
+    | { $case: "sink"; sink: Sink }
+    | { $case: "index"; index: Index }
+    | { $case: "user"; user: UserInfo }
+    | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
+    | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
+    | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
+    | { $case: "snapshot"; snapshot: MetaSnapshot };
 }
 
 export enum SubscribeResponse_Operation {
@@ -437,13 +438,13 @@ export const HeartbeatRequest = {
 };
 
 function createBaseHeartbeatRequest_ExtraInfo(): HeartbeatRequest_ExtraInfo {
-  return { hummockGcWatermark: undefined };
+  return { info: undefined };
 }
 
 export const HeartbeatRequest_ExtraInfo = {
   encode(message: HeartbeatRequest_ExtraInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.hummockGcWatermark !== undefined) {
-      writer.uint32(8).uint64(message.hummockGcWatermark);
+    if (message.info?.$case === "hummockGcWatermark") {
+      writer.uint32(8).uint64(message.info.hummockGcWatermark);
     }
     return writer;
   },
@@ -456,7 +457,7 @@ export const HeartbeatRequest_ExtraInfo = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          message.hummockGcWatermark = longToNumber(reader.uint64() as Long);
+          message.info = { $case: "hummockGcWatermark", hummockGcWatermark: longToNumber(reader.uint64() as Long) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -467,18 +468,29 @@ export const HeartbeatRequest_ExtraInfo = {
   },
 
   fromJSON(object: any): HeartbeatRequest_ExtraInfo {
-    return { hummockGcWatermark: isSet(object.hummockGcWatermark) ? Number(object.hummockGcWatermark) : undefined };
+    return {
+      info: isSet(object.hummockGcWatermark)
+        ? { $case: "hummockGcWatermark", hummockGcWatermark: Number(object.hummockGcWatermark) }
+        : undefined,
+    };
   },
 
   toJSON(message: HeartbeatRequest_ExtraInfo): unknown {
     const obj: any = {};
-    message.hummockGcWatermark !== undefined && (obj.hummockGcWatermark = Math.round(message.hummockGcWatermark));
+    message.info?.$case === "hummockGcWatermark" &&
+      (obj.hummockGcWatermark = Math.round(message.info?.hummockGcWatermark));
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<HeartbeatRequest_ExtraInfo>, I>>(object: I): HeartbeatRequest_ExtraInfo {
     const message = createBaseHeartbeatRequest_ExtraInfo();
-    message.hummockGcWatermark = object.hummockGcWatermark ?? undefined;
+    if (
+      object.info?.$case === "hummockGcWatermark" &&
+      object.info?.hummockGcWatermark !== undefined &&
+      object.info?.hummockGcWatermark !== null
+    ) {
+      message.info = { $case: "hummockGcWatermark", hummockGcWatermark: object.info.hummockGcWatermark };
+    }
     return message;
   },
 };
@@ -2223,23 +2235,7 @@ export const MetaSnapshot = {
 };
 
 function createBaseSubscribeResponse(): SubscribeResponse {
-  return {
-    status: undefined,
-    operation: 0,
-    version: 0,
-    node: undefined,
-    database: undefined,
-    schema: undefined,
-    table: undefined,
-    source: undefined,
-    sink: undefined,
-    index: undefined,
-    user: undefined,
-    hummockSnapshot: undefined,
-    parallelUnitMapping: undefined,
-    hummockVersionDeltas: undefined,
-    snapshot: undefined,
-  };
+  return { status: undefined, operation: 0, version: 0, info: undefined };
 }
 
 export const SubscribeResponse = {
@@ -2253,41 +2249,41 @@ export const SubscribeResponse = {
     if (message.version !== 0) {
       writer.uint32(24).uint64(message.version);
     }
-    if (message.node !== undefined) {
-      WorkerNode.encode(message.node, writer.uint32(34).fork()).ldelim();
+    if (message.info?.$case === "node") {
+      WorkerNode.encode(message.info.node, writer.uint32(34).fork()).ldelim();
     }
-    if (message.database !== undefined) {
-      Database.encode(message.database, writer.uint32(42).fork()).ldelim();
+    if (message.info?.$case === "database") {
+      Database.encode(message.info.database, writer.uint32(42).fork()).ldelim();
     }
-    if (message.schema !== undefined) {
-      Schema.encode(message.schema, writer.uint32(50).fork()).ldelim();
+    if (message.info?.$case === "schema") {
+      Schema.encode(message.info.schema, writer.uint32(50).fork()).ldelim();
     }
-    if (message.table !== undefined) {
-      Table.encode(message.table, writer.uint32(58).fork()).ldelim();
+    if (message.info?.$case === "table") {
+      Table.encode(message.info.table, writer.uint32(58).fork()).ldelim();
     }
-    if (message.source !== undefined) {
-      Source.encode(message.source, writer.uint32(66).fork()).ldelim();
+    if (message.info?.$case === "source") {
+      Source.encode(message.info.source, writer.uint32(66).fork()).ldelim();
     }
-    if (message.sink !== undefined) {
-      Sink.encode(message.sink, writer.uint32(74).fork()).ldelim();
+    if (message.info?.$case === "sink") {
+      Sink.encode(message.info.sink, writer.uint32(74).fork()).ldelim();
     }
-    if (message.index !== undefined) {
-      Index.encode(message.index, writer.uint32(82).fork()).ldelim();
+    if (message.info?.$case === "index") {
+      Index.encode(message.info.index, writer.uint32(82).fork()).ldelim();
     }
-    if (message.user !== undefined) {
-      UserInfo.encode(message.user, writer.uint32(90).fork()).ldelim();
+    if (message.info?.$case === "user") {
+      UserInfo.encode(message.info.user, writer.uint32(90).fork()).ldelim();
     }
-    if (message.hummockSnapshot !== undefined) {
-      HummockSnapshot.encode(message.hummockSnapshot, writer.uint32(98).fork()).ldelim();
+    if (message.info?.$case === "hummockSnapshot") {
+      HummockSnapshot.encode(message.info.hummockSnapshot, writer.uint32(98).fork()).ldelim();
     }
-    if (message.parallelUnitMapping !== undefined) {
-      ParallelUnitMapping.encode(message.parallelUnitMapping, writer.uint32(106).fork()).ldelim();
+    if (message.info?.$case === "parallelUnitMapping") {
+      ParallelUnitMapping.encode(message.info.parallelUnitMapping, writer.uint32(106).fork()).ldelim();
     }
-    if (message.hummockVersionDeltas !== undefined) {
-      HummockVersionDeltas.encode(message.hummockVersionDeltas, writer.uint32(114).fork()).ldelim();
+    if (message.info?.$case === "hummockVersionDeltas") {
+      HummockVersionDeltas.encode(message.info.hummockVersionDeltas, writer.uint32(114).fork()).ldelim();
     }
-    if (message.snapshot !== undefined) {
-      MetaSnapshot.encode(message.snapshot, writer.uint32(162).fork()).ldelim();
+    if (message.info?.$case === "snapshot") {
+      MetaSnapshot.encode(message.info.snapshot, writer.uint32(162).fork()).ldelim();
     }
     return writer;
   },
@@ -2309,40 +2305,46 @@ export const SubscribeResponse = {
           message.version = longToNumber(reader.uint64() as Long);
           break;
         case 4:
-          message.node = WorkerNode.decode(reader, reader.uint32());
+          message.info = { $case: "node", node: WorkerNode.decode(reader, reader.uint32()) };
           break;
         case 5:
-          message.database = Database.decode(reader, reader.uint32());
+          message.info = { $case: "database", database: Database.decode(reader, reader.uint32()) };
           break;
         case 6:
-          message.schema = Schema.decode(reader, reader.uint32());
+          message.info = { $case: "schema", schema: Schema.decode(reader, reader.uint32()) };
           break;
         case 7:
-          message.table = Table.decode(reader, reader.uint32());
+          message.info = { $case: "table", table: Table.decode(reader, reader.uint32()) };
           break;
         case 8:
-          message.source = Source.decode(reader, reader.uint32());
+          message.info = { $case: "source", source: Source.decode(reader, reader.uint32()) };
           break;
         case 9:
-          message.sink = Sink.decode(reader, reader.uint32());
+          message.info = { $case: "sink", sink: Sink.decode(reader, reader.uint32()) };
           break;
         case 10:
-          message.index = Index.decode(reader, reader.uint32());
+          message.info = { $case: "index", index: Index.decode(reader, reader.uint32()) };
           break;
         case 11:
-          message.user = UserInfo.decode(reader, reader.uint32());
+          message.info = { $case: "user", user: UserInfo.decode(reader, reader.uint32()) };
           break;
         case 12:
-          message.hummockSnapshot = HummockSnapshot.decode(reader, reader.uint32());
+          message.info = { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.decode(reader, reader.uint32()) };
           break;
         case 13:
-          message.parallelUnitMapping = ParallelUnitMapping.decode(reader, reader.uint32());
+          message.info = {
+            $case: "parallelUnitMapping",
+            parallelUnitMapping: ParallelUnitMapping.decode(reader, reader.uint32()),
+          };
           break;
         case 14:
-          message.hummockVersionDeltas = HummockVersionDeltas.decode(reader, reader.uint32());
+          message.info = {
+            $case: "hummockVersionDeltas",
+            hummockVersionDeltas: HummockVersionDeltas.decode(reader, reader.uint32()),
+          };
           break;
         case 20:
-          message.snapshot = MetaSnapshot.decode(reader, reader.uint32());
+          message.info = { $case: "snapshot", snapshot: MetaSnapshot.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -2357,22 +2359,37 @@ export const SubscribeResponse = {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       operation: isSet(object.operation) ? subscribeResponse_OperationFromJSON(object.operation) : 0,
       version: isSet(object.version) ? Number(object.version) : 0,
-      node: isSet(object.node) ? WorkerNode.fromJSON(object.node) : undefined,
-      database: isSet(object.database) ? Database.fromJSON(object.database) : undefined,
-      schema: isSet(object.schema) ? Schema.fromJSON(object.schema) : undefined,
-      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      source: isSet(object.source) ? Source.fromJSON(object.source) : undefined,
-      sink: isSet(object.sink) ? Sink.fromJSON(object.sink) : undefined,
-      index: isSet(object.index) ? Index.fromJSON(object.index) : undefined,
-      user: isSet(object.user) ? UserInfo.fromJSON(object.user) : undefined,
-      hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
-      parallelUnitMapping: isSet(object.parallelUnitMapping)
-        ? ParallelUnitMapping.fromJSON(object.parallelUnitMapping)
+      info: isSet(object.node)
+        ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
+        : isSet(object.database)
+        ? { $case: "database", database: Database.fromJSON(object.database) }
+        : isSet(object.schema)
+        ? { $case: "schema", schema: Schema.fromJSON(object.schema) }
+        : isSet(object.table)
+        ? { $case: "table", table: Table.fromJSON(object.table) }
+        : isSet(object.source)
+        ? { $case: "source", source: Source.fromJSON(object.source) }
+        : isSet(object.sink)
+        ? { $case: "sink", sink: Sink.fromJSON(object.sink) }
+        : isSet(object.index)
+        ? { $case: "index", index: Index.fromJSON(object.index) }
+        : isSet(object.user)
+        ? { $case: "user", user: UserInfo.fromJSON(object.user) }
+        : isSet(object.hummockSnapshot)
+        ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
+        : isSet(object.parallelUnitMapping)
+        ? {
+          $case: "parallelUnitMapping",
+          parallelUnitMapping: ParallelUnitMapping.fromJSON(object.parallelUnitMapping),
+        }
+        : isSet(object.hummockVersionDeltas)
+        ? {
+          $case: "hummockVersionDeltas",
+          hummockVersionDeltas: HummockVersionDeltas.fromJSON(object.hummockVersionDeltas),
+        }
+        : isSet(object.snapshot)
+        ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
         : undefined,
-      hummockVersionDeltas: isSet(object.hummockVersionDeltas)
-        ? HummockVersionDeltas.fromJSON(object.hummockVersionDeltas)
-        : undefined,
-      snapshot: isSet(object.snapshot) ? MetaSnapshot.fromJSON(object.snapshot) : undefined,
     };
   },
 
@@ -2381,24 +2398,31 @@ export const SubscribeResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.operation !== undefined && (obj.operation = subscribeResponse_OperationToJSON(message.operation));
     message.version !== undefined && (obj.version = Math.round(message.version));
-    message.node !== undefined && (obj.node = message.node ? WorkerNode.toJSON(message.node) : undefined);
-    message.database !== undefined && (obj.database = message.database ? Database.toJSON(message.database) : undefined);
-    message.schema !== undefined && (obj.schema = message.schema ? Schema.toJSON(message.schema) : undefined);
-    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.source !== undefined && (obj.source = message.source ? Source.toJSON(message.source) : undefined);
-    message.sink !== undefined && (obj.sink = message.sink ? Sink.toJSON(message.sink) : undefined);
-    message.index !== undefined && (obj.index = message.index ? Index.toJSON(message.index) : undefined);
-    message.user !== undefined && (obj.user = message.user ? UserInfo.toJSON(message.user) : undefined);
-    message.hummockSnapshot !== undefined &&
-      (obj.hummockSnapshot = message.hummockSnapshot ? HummockSnapshot.toJSON(message.hummockSnapshot) : undefined);
-    message.parallelUnitMapping !== undefined && (obj.parallelUnitMapping = message.parallelUnitMapping
-      ? ParallelUnitMapping.toJSON(message.parallelUnitMapping)
+    message.info?.$case === "node" &&
+      (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
+    message.info?.$case === "database" &&
+      (obj.database = message.info?.database ? Database.toJSON(message.info?.database) : undefined);
+    message.info?.$case === "schema" &&
+      (obj.schema = message.info?.schema ? Schema.toJSON(message.info?.schema) : undefined);
+    message.info?.$case === "table" &&
+      (obj.table = message.info?.table ? Table.toJSON(message.info?.table) : undefined);
+    message.info?.$case === "source" &&
+      (obj.source = message.info?.source ? Source.toJSON(message.info?.source) : undefined);
+    message.info?.$case === "sink" && (obj.sink = message.info?.sink ? Sink.toJSON(message.info?.sink) : undefined);
+    message.info?.$case === "index" &&
+      (obj.index = message.info?.index ? Index.toJSON(message.info?.index) : undefined);
+    message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
+    message.info?.$case === "hummockSnapshot" && (obj.hummockSnapshot = message.info?.hummockSnapshot
+      ? HummockSnapshot.toJSON(message.info?.hummockSnapshot)
       : undefined);
-    message.hummockVersionDeltas !== undefined && (obj.hummockVersionDeltas = message.hummockVersionDeltas
-      ? HummockVersionDeltas.toJSON(message.hummockVersionDeltas)
+    message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
+      ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
       : undefined);
-    message.snapshot !== undefined &&
-      (obj.snapshot = message.snapshot ? MetaSnapshot.toJSON(message.snapshot) : undefined);
+    message.info?.$case === "hummockVersionDeltas" && (obj.hummockVersionDeltas = message.info?.hummockVersionDeltas
+      ? HummockVersionDeltas.toJSON(message.info?.hummockVersionDeltas)
+      : undefined);
+    message.info?.$case === "snapshot" &&
+      (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
     return obj;
   },
 
@@ -2409,34 +2433,63 @@ export const SubscribeResponse = {
       : undefined;
     message.operation = object.operation ?? 0;
     message.version = object.version ?? 0;
-    message.node = (object.node !== undefined && object.node !== null)
-      ? WorkerNode.fromPartial(object.node)
-      : undefined;
-    message.database = (object.database !== undefined && object.database !== null)
-      ? Database.fromPartial(object.database)
-      : undefined;
-    message.schema = (object.schema !== undefined && object.schema !== null)
-      ? Schema.fromPartial(object.schema)
-      : undefined;
-    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.source = (object.source !== undefined && object.source !== null)
-      ? Source.fromPartial(object.source)
-      : undefined;
-    message.sink = (object.sink !== undefined && object.sink !== null) ? Sink.fromPartial(object.sink) : undefined;
-    message.index = (object.index !== undefined && object.index !== null) ? Index.fromPartial(object.index) : undefined;
-    message.user = (object.user !== undefined && object.user !== null) ? UserInfo.fromPartial(object.user) : undefined;
-    message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
-      ? HummockSnapshot.fromPartial(object.hummockSnapshot)
-      : undefined;
-    message.parallelUnitMapping = (object.parallelUnitMapping !== undefined && object.parallelUnitMapping !== null)
-      ? ParallelUnitMapping.fromPartial(object.parallelUnitMapping)
-      : undefined;
-    message.hummockVersionDeltas = (object.hummockVersionDeltas !== undefined && object.hummockVersionDeltas !== null)
-      ? HummockVersionDeltas.fromPartial(object.hummockVersionDeltas)
-      : undefined;
-    message.snapshot = (object.snapshot !== undefined && object.snapshot !== null)
-      ? MetaSnapshot.fromPartial(object.snapshot)
-      : undefined;
+    if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
+      message.info = { $case: "node", node: WorkerNode.fromPartial(object.info.node) };
+    }
+    if (object.info?.$case === "database" && object.info?.database !== undefined && object.info?.database !== null) {
+      message.info = { $case: "database", database: Database.fromPartial(object.info.database) };
+    }
+    if (object.info?.$case === "schema" && object.info?.schema !== undefined && object.info?.schema !== null) {
+      message.info = { $case: "schema", schema: Schema.fromPartial(object.info.schema) };
+    }
+    if (object.info?.$case === "table" && object.info?.table !== undefined && object.info?.table !== null) {
+      message.info = { $case: "table", table: Table.fromPartial(object.info.table) };
+    }
+    if (object.info?.$case === "source" && object.info?.source !== undefined && object.info?.source !== null) {
+      message.info = { $case: "source", source: Source.fromPartial(object.info.source) };
+    }
+    if (object.info?.$case === "sink" && object.info?.sink !== undefined && object.info?.sink !== null) {
+      message.info = { $case: "sink", sink: Sink.fromPartial(object.info.sink) };
+    }
+    if (object.info?.$case === "index" && object.info?.index !== undefined && object.info?.index !== null) {
+      message.info = { $case: "index", index: Index.fromPartial(object.info.index) };
+    }
+    if (object.info?.$case === "user" && object.info?.user !== undefined && object.info?.user !== null) {
+      message.info = { $case: "user", user: UserInfo.fromPartial(object.info.user) };
+    }
+    if (
+      object.info?.$case === "hummockSnapshot" &&
+      object.info?.hummockSnapshot !== undefined &&
+      object.info?.hummockSnapshot !== null
+    ) {
+      message.info = {
+        $case: "hummockSnapshot",
+        hummockSnapshot: HummockSnapshot.fromPartial(object.info.hummockSnapshot),
+      };
+    }
+    if (
+      object.info?.$case === "parallelUnitMapping" &&
+      object.info?.parallelUnitMapping !== undefined &&
+      object.info?.parallelUnitMapping !== null
+    ) {
+      message.info = {
+        $case: "parallelUnitMapping",
+        parallelUnitMapping: ParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
+      };
+    }
+    if (
+      object.info?.$case === "hummockVersionDeltas" &&
+      object.info?.hummockVersionDeltas !== undefined &&
+      object.info?.hummockVersionDeltas !== null
+    ) {
+      message.info = {
+        $case: "hummockVersionDeltas",
+        hummockVersionDeltas: HummockVersionDeltas.fromPartial(object.info.hummockVersionDeltas),
+      };
+    }
+    if (object.info?.$case === "snapshot" && object.info?.snapshot !== undefined && object.info?.snapshot !== null) {
+      message.info = { $case: "snapshot", snapshot: MetaSnapshot.fromPartial(object.info.snapshot) };
+    }
     return message;
   },
 };
@@ -3038,6 +3091,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 

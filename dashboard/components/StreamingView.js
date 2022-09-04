@@ -16,19 +16,12 @@
  */
 import createView, { computeNodeAddrToSideColor } from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef, useState } from 'react';
-import styled from '@emotion/styled';
-import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
-import CircularProgress from '@mui/material/CircularProgress';
-import SearchIcon from '@mui/icons-material/Search';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import { Stack, Tabs, Tab, Button } from "@mui/material";
 import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton, Autocomplete, TextField, FormControlLabel, Switch, Divider } from '@mui/material';
 import { CanvasEngine } from "../lib/graaphEngine/canvasEngine";
 import useWindowSize from "../hook/useWindowSize";
-import { Close } from "@mui/icons-material";
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { stackoverflowDark } from 'react-syntax-highlighter/dist/cjs/styles/hljs';
-
+import styled from '@emotion/styled';
 
 const SvgBox = styled('div')(() => ({
   padding: "10px",

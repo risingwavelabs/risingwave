@@ -46,8 +46,10 @@ export interface Source {
   schemaId: number;
   databaseId: number;
   name: string;
-  streamSource: StreamSourceInfo | undefined;
-  tableSource: TableSourceInfo | undefined;
+  info?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
+    $case: "tableSource";
+    tableSource: TableSourceInfo;
+  };
   owner: number;
 }
 
@@ -91,7 +93,7 @@ export interface Table {
   columns: ColumnCatalog[];
   orderKey: ColumnOrder[];
   dependentRelations: number[];
-  associatedSourceId: number | undefined;
+  optionalAssociatedSourceId?: { $case: "associatedSourceId"; associatedSourceId: number };
   isIndex: boolean;
   indexOnId: number;
   distributionKey: number[];
@@ -537,7 +539,7 @@ export const TableSourceInfo_PropertiesEntry = {
 };
 
 function createBaseSource(): Source {
-  return { id: 0, schemaId: 0, databaseId: 0, name: "", streamSource: undefined, tableSource: undefined, owner: 0 };
+  return { id: 0, schemaId: 0, databaseId: 0, name: "", info: undefined, owner: 0 };
 }
 
 export const Source = {
@@ -554,11 +556,11 @@ export const Source = {
     if (message.name !== "") {
       writer.uint32(34).string(message.name);
     }
-    if (message.streamSource !== undefined) {
-      StreamSourceInfo.encode(message.streamSource, writer.uint32(42).fork()).ldelim();
+    if (message.info?.$case === "streamSource") {
+      StreamSourceInfo.encode(message.info.streamSource, writer.uint32(42).fork()).ldelim();
     }
-    if (message.tableSource !== undefined) {
-      TableSourceInfo.encode(message.tableSource, writer.uint32(50).fork()).ldelim();
+    if (message.info?.$case === "tableSource") {
+      TableSourceInfo.encode(message.info.tableSource, writer.uint32(50).fork()).ldelim();
     }
     if (message.owner !== 0) {
       writer.uint32(56).uint32(message.owner);
@@ -586,10 +588,10 @@ export const Source = {
           message.name = reader.string();
           break;
         case 5:
-          message.streamSource = StreamSourceInfo.decode(reader, reader.uint32());
+          message.info = { $case: "streamSource", streamSource: StreamSourceInfo.decode(reader, reader.uint32()) };
           break;
         case 6:
-          message.tableSource = TableSourceInfo.decode(reader, reader.uint32());
+          message.info = { $case: "tableSource", tableSource: TableSourceInfo.decode(reader, reader.uint32()) };
           break;
         case 7:
           message.owner = reader.uint32();
@@ -608,8 +610,11 @@ export const Source = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      streamSource: isSet(object.streamSource) ? StreamSourceInfo.fromJSON(object.streamSource) : undefined,
-      tableSource: isSet(object.tableSource) ? TableSourceInfo.fromJSON(object.tableSource) : undefined,
+      info: isSet(object.streamSource)
+        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
+        : isSet(object.tableSource)
+        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
+        : undefined,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
     };
   },
@@ -620,10 +625,10 @@ export const Source = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
-    message.streamSource !== undefined &&
-      (obj.streamSource = message.streamSource ? StreamSourceInfo.toJSON(message.streamSource) : undefined);
-    message.tableSource !== undefined &&
-      (obj.tableSource = message.tableSource ? TableSourceInfo.toJSON(message.tableSource) : undefined);
+    message.info?.$case === "streamSource" &&
+      (obj.streamSource = message.info?.streamSource ? StreamSourceInfo.toJSON(message.info?.streamSource) : undefined);
+    message.info?.$case === "tableSource" &&
+      (obj.tableSource = message.info?.tableSource ? TableSourceInfo.toJSON(message.info?.tableSource) : undefined);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     return obj;
   },
@@ -634,12 +639,20 @@ export const Source = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
-    message.streamSource = (object.streamSource !== undefined && object.streamSource !== null)
-      ? StreamSourceInfo.fromPartial(object.streamSource)
-      : undefined;
-    message.tableSource = (object.tableSource !== undefined && object.tableSource !== null)
-      ? TableSourceInfo.fromPartial(object.tableSource)
-      : undefined;
+    if (
+      object.info?.$case === "streamSource" &&
+      object.info?.streamSource !== undefined &&
+      object.info?.streamSource !== null
+    ) {
+      message.info = { $case: "streamSource", streamSource: StreamSourceInfo.fromPartial(object.info.streamSource) };
+    }
+    if (
+      object.info?.$case === "tableSource" &&
+      object.info?.tableSource !== undefined &&
+      object.info?.tableSource !== null
+    ) {
+      message.info = { $case: "tableSource", tableSource: TableSourceInfo.fromPartial(object.info.tableSource) };
+    }
     message.owner = object.owner ?? 0;
     return message;
   },
@@ -982,7 +995,7 @@ function createBaseTable(): Table {
     columns: [],
     orderKey: [],
     dependentRelations: [],
-    associatedSourceId: undefined,
+    optionalAssociatedSourceId: undefined,
     isIndex: false,
     indexOnId: 0,
     distributionKey: [],
@@ -1020,8 +1033,8 @@ export const Table = {
       writer.uint32(v);
     }
     writer.ldelim();
-    if (message.associatedSourceId !== undefined) {
-      writer.uint32(72).uint32(message.associatedSourceId);
+    if (message.optionalAssociatedSourceId?.$case === "associatedSourceId") {
+      writer.uint32(72).uint32(message.optionalAssociatedSourceId.associatedSourceId);
     }
     if (message.isIndex === true) {
       writer.uint32(80).bool(message.isIndex);
@@ -1093,7 +1106,7 @@ export const Table = {
           }
           break;
         case 9:
-          message.associatedSourceId = reader.uint32();
+          message.optionalAssociatedSourceId = { $case: "associatedSourceId", associatedSourceId: reader.uint32() };
           break;
         case 10:
           message.isIndex = reader.bool();
@@ -1158,7 +1171,9 @@ export const Table = {
       dependentRelations: Array.isArray(object?.dependentRelations)
         ? object.dependentRelations.map((e: any) => Number(e))
         : [],
-      associatedSourceId: isSet(object.associatedSourceId) ? Number(object.associatedSourceId) : undefined,
+      optionalAssociatedSourceId: isSet(object.associatedSourceId)
+        ? { $case: "associatedSourceId", associatedSourceId: Number(object.associatedSourceId) }
+        : undefined,
       isIndex: isSet(object.isIndex) ? Boolean(object.isIndex) : false,
       indexOnId: isSet(object.indexOnId) ? Number(object.indexOnId) : 0,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
@@ -1197,7 +1212,8 @@ export const Table = {
     } else {
       obj.dependentRelations = [];
     }
-    message.associatedSourceId !== undefined && (obj.associatedSourceId = Math.round(message.associatedSourceId));
+    message.optionalAssociatedSourceId?.$case === "associatedSourceId" &&
+      (obj.associatedSourceId = Math.round(message.optionalAssociatedSourceId?.associatedSourceId));
     message.isIndex !== undefined && (obj.isIndex = message.isIndex);
     message.indexOnId !== undefined && (obj.indexOnId = Math.round(message.indexOnId));
     if (message.distributionKey) {
@@ -1233,7 +1249,16 @@ export const Table = {
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
     message.orderKey = object.orderKey?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
-    message.associatedSourceId = object.associatedSourceId ?? undefined;
+    if (
+      object.optionalAssociatedSourceId?.$case === "associatedSourceId" &&
+      object.optionalAssociatedSourceId?.associatedSourceId !== undefined &&
+      object.optionalAssociatedSourceId?.associatedSourceId !== null
+    ) {
+      message.optionalAssociatedSourceId = {
+        $case: "associatedSourceId",
+        associatedSourceId: object.optionalAssociatedSourceId.associatedSourceId,
+      };
+    }
     message.isIndex = object.isIndex ?? false;
     message.indexOnId = object.indexOnId ?? 0;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
@@ -1478,6 +1503,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 

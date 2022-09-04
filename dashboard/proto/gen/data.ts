@@ -5,7 +5,7 @@ import { Buffer } from "./common";
 
 export const protobufPackage = "data";
 
-export enum ArrayType {
+export enum RwArrayType {
   UNSPECIFIED = 0,
   INT16 = 1,
   INT32 = 2,
@@ -24,93 +24,93 @@ export enum ArrayType {
   UNRECOGNIZED = -1,
 }
 
-export function arrayTypeFromJSON(object: any): ArrayType {
+export function rwArrayTypeFromJSON(object: any): RwArrayType {
   switch (object) {
     case 0:
     case "UNSPECIFIED":
-      return ArrayType.UNSPECIFIED;
+      return RwArrayType.UNSPECIFIED;
     case 1:
     case "INT16":
-      return ArrayType.INT16;
+      return RwArrayType.INT16;
     case 2:
     case "INT32":
-      return ArrayType.INT32;
+      return RwArrayType.INT32;
     case 3:
     case "INT64":
-      return ArrayType.INT64;
+      return RwArrayType.INT64;
     case 4:
     case "FLOAT32":
-      return ArrayType.FLOAT32;
+      return RwArrayType.FLOAT32;
     case 5:
     case "FLOAT64":
-      return ArrayType.FLOAT64;
+      return RwArrayType.FLOAT64;
     case 6:
     case "UTF8":
-      return ArrayType.UTF8;
+      return RwArrayType.UTF8;
     case 7:
     case "BOOL":
-      return ArrayType.BOOL;
+      return RwArrayType.BOOL;
     case 8:
     case "DECIMAL":
-      return ArrayType.DECIMAL;
+      return RwArrayType.DECIMAL;
     case 9:
     case "DATE":
-      return ArrayType.DATE;
+      return RwArrayType.DATE;
     case 10:
     case "TIME":
-      return ArrayType.TIME;
+      return RwArrayType.TIME;
     case 11:
     case "TIMESTAMP":
-      return ArrayType.TIMESTAMP;
+      return RwArrayType.TIMESTAMP;
     case 12:
     case "INTERVAL":
-      return ArrayType.INTERVAL;
+      return RwArrayType.INTERVAL;
     case 13:
     case "STRUCT":
-      return ArrayType.STRUCT;
+      return RwArrayType.STRUCT;
     case 14:
     case "LIST":
-      return ArrayType.LIST;
+      return RwArrayType.LIST;
     case -1:
     case "UNRECOGNIZED":
     default:
-      return ArrayType.UNRECOGNIZED;
+      return RwArrayType.UNRECOGNIZED;
   }
 }
 
-export function arrayTypeToJSON(object: ArrayType): string {
+export function rwArrayTypeToJSON(object: RwArrayType): string {
   switch (object) {
-    case ArrayType.UNSPECIFIED:
+    case RwArrayType.UNSPECIFIED:
       return "UNSPECIFIED";
-    case ArrayType.INT16:
+    case RwArrayType.INT16:
       return "INT16";
-    case ArrayType.INT32:
+    case RwArrayType.INT32:
       return "INT32";
-    case ArrayType.INT64:
+    case RwArrayType.INT64:
       return "INT64";
-    case ArrayType.FLOAT32:
+    case RwArrayType.FLOAT32:
       return "FLOAT32";
-    case ArrayType.FLOAT64:
+    case RwArrayType.FLOAT64:
       return "FLOAT64";
-    case ArrayType.UTF8:
+    case RwArrayType.UTF8:
       return "UTF8";
-    case ArrayType.BOOL:
+    case RwArrayType.BOOL:
       return "BOOL";
-    case ArrayType.DECIMAL:
+    case RwArrayType.DECIMAL:
       return "DECIMAL";
-    case ArrayType.DATE:
+    case RwArrayType.DATE:
       return "DATE";
-    case ArrayType.TIME:
+    case RwArrayType.TIME:
       return "TIME";
-    case ArrayType.TIMESTAMP:
+    case RwArrayType.TIMESTAMP:
       return "TIMESTAMP";
-    case ArrayType.INTERVAL:
+    case RwArrayType.INTERVAL:
       return "INTERVAL";
-    case ArrayType.STRUCT:
+    case RwArrayType.STRUCT:
       return "STRUCT";
-    case ArrayType.LIST:
+    case RwArrayType.LIST:
       return "LIST";
-    case ArrayType.UNRECOGNIZED:
+    case RwArrayType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -418,23 +418,23 @@ export function dataType_TypeNameToJSON(object: DataType_TypeName): string {
   }
 }
 
-export interface StructArrayData {
-  childrenArray: Array[];
+export interface StructRwArrayData {
+  childrenArray: RwArray[];
   childrenType: DataType[];
 }
 
-export interface ListArrayData {
+export interface ListRwArrayData {
   offsets: number[];
-  value: Array | undefined;
+  value: RwArray | undefined;
   valueType: DataType | undefined;
 }
 
-export interface Array {
-  arrayType: ArrayType;
+export interface RwArray {
+  arrayType: RwArrayType;
   nullBitmap: Buffer | undefined;
   values: Buffer[];
-  structArrayData: StructArrayData | undefined;
-  listArrayData: ListArrayData | undefined;
+  structArrayData: StructRwArrayData | undefined;
+  listArrayData: ListRwArrayData | undefined;
 }
 
 /**
@@ -443,7 +443,7 @@ export interface Array {
  * but capable of extending in future by add other fields.
  */
 export interface Column {
-  array: Array | undefined;
+  array: RwArray | undefined;
 }
 
 export interface DataChunk {
@@ -644,14 +644,14 @@ export const DataType = {
   },
 };
 
-function createBaseStructArrayData(): StructArrayData {
+function createBaseStructRwArrayData(): StructRwArrayData {
   return { childrenArray: [], childrenType: [] };
 }
 
-export const StructArrayData = {
-  encode(message: StructArrayData, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const StructRwArrayData = {
+  encode(message: StructRwArrayData, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     for (const v of message.childrenArray) {
-      Array.encode(v!, writer.uint32(10).fork()).ldelim();
+      RwArray.encode(v!, writer.uint32(10).fork()).ldelim();
     }
     for (const v of message.childrenType) {
       DataType.encode(v!, writer.uint32(18).fork()).ldelim();
@@ -659,15 +659,15 @@ export const StructArrayData = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): StructArrayData {
+  decode(input: _m0.Reader | Uint8Array, length?: number): StructRwArrayData {
     const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStructArrayData();
+    const message = createBaseStructRwArrayData();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          message.childrenArray.push(Array.decode(reader, reader.uint32()));
+          message.childrenArray.push(RwArray.decode(reader, reader.uint32()));
           break;
         case 2:
           message.childrenType.push(DataType.decode(reader, reader.uint32()));
@@ -680,10 +680,10 @@ export const StructArrayData = {
     return message;
   },
 
-  fromJSON(object: any): StructArrayData {
+  fromJSON(object: any): StructRwArrayData {
     return {
       childrenArray: Array.isArray(object?.childrenArray)
-        ? object.childrenArray.map((e: any) => Array.fromJSON(e))
+        ? object.childrenArray.map((e: any) => RwArray.fromJSON(e))
         : [],
       childrenType: Array.isArray(object?.childrenType)
         ? object.childrenType.map((e: any) => DataType.fromJSON(e))
@@ -691,10 +691,10 @@ export const StructArrayData = {
     };
   },
 
-  toJSON(message: StructArrayData): unknown {
+  toJSON(message: StructRwArrayData): unknown {
     const obj: any = {};
     if (message.childrenArray) {
-      obj.childrenArray = message.childrenArray.map((e) => e ? Array.toJSON(e) : undefined);
+      obj.childrenArray = message.childrenArray.map((e) => e ? RwArray.toJSON(e) : undefined);
     } else {
       obj.childrenArray = [];
     }
@@ -706,27 +706,27 @@ export const StructArrayData = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<StructArrayData>, I>>(object: I): StructArrayData {
-    const message = createBaseStructArrayData();
-    message.childrenArray = object.childrenArray?.map((e) => Array.fromPartial(e)) || [];
+  fromPartial<I extends Exact<DeepPartial<StructRwArrayData>, I>>(object: I): StructRwArrayData {
+    const message = createBaseStructRwArrayData();
+    message.childrenArray = object.childrenArray?.map((e) => RwArray.fromPartial(e)) || [];
     message.childrenType = object.childrenType?.map((e) => DataType.fromPartial(e)) || [];
     return message;
   },
 };
 
-function createBaseListArrayData(): ListArrayData {
+function createBaseListRwArrayData(): ListRwArrayData {
   return { offsets: [], value: undefined, valueType: undefined };
 }
 
-export const ListArrayData = {
-  encode(message: ListArrayData, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const ListRwArrayData = {
+  encode(message: ListRwArrayData, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     writer.uint32(10).fork();
     for (const v of message.offsets) {
       writer.uint32(v);
     }
     writer.ldelim();
     if (message.value !== undefined) {
-      Array.encode(message.value, writer.uint32(18).fork()).ldelim();
+      RwArray.encode(message.value, writer.uint32(18).fork()).ldelim();
     }
     if (message.valueType !== undefined) {
       DataType.encode(message.valueType, writer.uint32(26).fork()).ldelim();
@@ -734,10 +734,10 @@ export const ListArrayData = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): ListArrayData {
+  decode(input: _m0.Reader | Uint8Array, length?: number): ListRwArrayData {
     const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseListArrayData();
+    const message = createBaseListRwArrayData();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -752,7 +752,7 @@ export const ListArrayData = {
           }
           break;
         case 2:
-          message.value = Array.decode(reader, reader.uint32());
+          message.value = RwArray.decode(reader, reader.uint32());
           break;
         case 3:
           message.valueType = DataType.decode(reader, reader.uint32());
@@ -765,31 +765,33 @@ export const ListArrayData = {
     return message;
   },
 
-  fromJSON(object: any): ListArrayData {
+  fromJSON(object: any): ListRwArrayData {
     return {
       offsets: Array.isArray(object?.offsets) ? object.offsets.map((e: any) => Number(e)) : [],
-      value: isSet(object.value) ? Array.fromJSON(object.value) : undefined,
+      value: isSet(object.value) ? RwArray.fromJSON(object.value) : undefined,
       valueType: isSet(object.valueType) ? DataType.fromJSON(object.valueType) : undefined,
     };
   },
 
-  toJSON(message: ListArrayData): unknown {
+  toJSON(message: ListRwArrayData): unknown {
     const obj: any = {};
     if (message.offsets) {
       obj.offsets = message.offsets.map((e) => Math.round(e));
     } else {
       obj.offsets = [];
     }
-    message.value !== undefined && (obj.value = message.value ? Array.toJSON(message.value) : undefined);
+    message.value !== undefined && (obj.value = message.value ? RwArray.toJSON(message.value) : undefined);
     message.valueType !== undefined &&
       (obj.valueType = message.valueType ? DataType.toJSON(message.valueType) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<ListArrayData>, I>>(object: I): ListArrayData {
-    const message = createBaseListArrayData();
+  fromPartial<I extends Exact<DeepPartial<ListRwArrayData>, I>>(object: I): ListRwArrayData {
+    const message = createBaseListRwArrayData();
     message.offsets = object.offsets?.map((e) => e) || [];
-    message.value = (object.value !== undefined && object.value !== null) ? Array.fromPartial(object.value) : undefined;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? RwArray.fromPartial(object.value)
+      : undefined;
     message.valueType = (object.valueType !== undefined && object.valueType !== null)
       ? DataType.fromPartial(object.valueType)
       : undefined;
@@ -797,12 +799,12 @@ export const ListArrayData = {
   },
 };
 
-function createBaseArray(): Array {
+function createBaseRwArray(): RwArray {
   return { arrayType: 0, nullBitmap: undefined, values: [], structArrayData: undefined, listArrayData: undefined };
 }
 
-export const Array = {
-  encode(message: Array, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const RwArray = {
+  encode(message: RwArray, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.arrayType !== 0) {
       writer.uint32(8).int32(message.arrayType);
     }
@@ -813,18 +815,18 @@ export const Array = {
       Buffer.encode(v!, writer.uint32(26).fork()).ldelim();
     }
     if (message.structArrayData !== undefined) {
-      StructArrayData.encode(message.structArrayData, writer.uint32(34).fork()).ldelim();
+      StructRwArrayData.encode(message.structArrayData, writer.uint32(34).fork()).ldelim();
     }
     if (message.listArrayData !== undefined) {
-      ListArrayData.encode(message.listArrayData, writer.uint32(42).fork()).ldelim();
+      ListRwArrayData.encode(message.listArrayData, writer.uint32(42).fork()).ldelim();
     }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): Array {
+  decode(input: _m0.Reader | Uint8Array, length?: number): RwArray {
     const reader = input instanceof _m0.Reader ? input : new _m0.Reader(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseArray();
+    const message = createBaseRwArray();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -838,10 +840,10 @@ export const Array = {
           message.values.push(Buffer.decode(reader, reader.uint32()));
           break;
         case 4:
-          message.structArrayData = StructArrayData.decode(reader, reader.uint32());
+          message.structArrayData = StructRwArrayData.decode(reader, reader.uint32());
           break;
         case 5:
-          message.listArrayData = ListArrayData.decode(reader, reader.uint32());
+          message.listArrayData = ListRwArrayData.decode(reader, reader.uint32());
           break;
         default:
           reader.skipType(tag & 7);
@@ -851,19 +853,19 @@ export const Array = {
     return message;
   },
 
-  fromJSON(object: any): Array {
+  fromJSON(object: any): RwArray {
     return {
-      arrayType: isSet(object.arrayType) ? arrayTypeFromJSON(object.arrayType) : 0,
+      arrayType: isSet(object.arrayType) ? rwArrayTypeFromJSON(object.arrayType) : 0,
       nullBitmap: isSet(object.nullBitmap) ? Buffer.fromJSON(object.nullBitmap) : undefined,
       values: Array.isArray(object?.values) ? object.values.map((e: any) => Buffer.fromJSON(e)) : [],
-      structArrayData: isSet(object.structArrayData) ? StructArrayData.fromJSON(object.structArrayData) : undefined,
-      listArrayData: isSet(object.listArrayData) ? ListArrayData.fromJSON(object.listArrayData) : undefined,
+      structArrayData: isSet(object.structArrayData) ? StructRwArrayData.fromJSON(object.structArrayData) : undefined,
+      listArrayData: isSet(object.listArrayData) ? ListRwArrayData.fromJSON(object.listArrayData) : undefined,
     };
   },
 
-  toJSON(message: Array): unknown {
+  toJSON(message: RwArray): unknown {
     const obj: any = {};
-    message.arrayType !== undefined && (obj.arrayType = arrayTypeToJSON(message.arrayType));
+    message.arrayType !== undefined && (obj.arrayType = rwArrayTypeToJSON(message.arrayType));
     message.nullBitmap !== undefined &&
       (obj.nullBitmap = message.nullBitmap ? Buffer.toJSON(message.nullBitmap) : undefined);
     if (message.values) {
@@ -872,24 +874,24 @@ export const Array = {
       obj.values = [];
     }
     message.structArrayData !== undefined &&
-      (obj.structArrayData = message.structArrayData ? StructArrayData.toJSON(message.structArrayData) : undefined);
+      (obj.structArrayData = message.structArrayData ? StructRwArrayData.toJSON(message.structArrayData) : undefined);
     message.listArrayData !== undefined &&
-      (obj.listArrayData = message.listArrayData ? ListArrayData.toJSON(message.listArrayData) : undefined);
+      (obj.listArrayData = message.listArrayData ? ListRwArrayData.toJSON(message.listArrayData) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<Array>, I>>(object: I): Array {
-    const message = createBaseArray();
+  fromPartial<I extends Exact<DeepPartial<RwArray>, I>>(object: I): RwArray {
+    const message = createBaseRwArray();
     message.arrayType = object.arrayType ?? 0;
     message.nullBitmap = (object.nullBitmap !== undefined && object.nullBitmap !== null)
       ? Buffer.fromPartial(object.nullBitmap)
       : undefined;
     message.values = object.values?.map((e) => Buffer.fromPartial(e)) || [];
     message.structArrayData = (object.structArrayData !== undefined && object.structArrayData !== null)
-      ? StructArrayData.fromPartial(object.structArrayData)
+      ? StructRwArrayData.fromPartial(object.structArrayData)
       : undefined;
     message.listArrayData = (object.listArrayData !== undefined && object.listArrayData !== null)
-      ? ListArrayData.fromPartial(object.listArrayData)
+      ? ListRwArrayData.fromPartial(object.listArrayData)
       : undefined;
     return message;
   },
@@ -902,7 +904,7 @@ function createBaseColumn(): Column {
 export const Column = {
   encode(message: Column, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.array !== undefined) {
-      Array.encode(message.array, writer.uint32(18).fork()).ldelim();
+      RwArray.encode(message.array, writer.uint32(18).fork()).ldelim();
     }
     return writer;
   },
@@ -915,7 +917,7 @@ export const Column = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 2:
-          message.array = Array.decode(reader, reader.uint32());
+          message.array = RwArray.decode(reader, reader.uint32());
           break;
         default:
           reader.skipType(tag & 7);
@@ -926,18 +928,20 @@ export const Column = {
   },
 
   fromJSON(object: any): Column {
-    return { array: isSet(object.array) ? Array.fromJSON(object.array) : undefined };
+    return { array: isSet(object.array) ? RwArray.fromJSON(object.array) : undefined };
   },
 
   toJSON(message: Column): unknown {
     const obj: any = {};
-    message.array !== undefined && (obj.array = message.array ? Array.toJSON(message.array) : undefined);
+    message.array !== undefined && (obj.array = message.array ? RwArray.toJSON(message.array) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<Column>, I>>(object: I): Column {
     const message = createBaseColumn();
-    message.array = (object.array !== undefined && object.array !== null) ? Array.fromPartial(object.array) : undefined;
+    message.array = (object.array !== undefined && object.array !== null)
+      ? RwArray.fromPartial(object.array)
+      : undefined;
     return message;
   },
 };
@@ -1205,6 +1209,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 

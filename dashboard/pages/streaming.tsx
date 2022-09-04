@@ -15,11 +15,44 @@
  *
  */
 
-import { Box, Text } from "@chakra-ui/react";
+import { Box, Text, useToast } from "@chakra-ui/react";
+import { useEffect, useState } from "react";
 import Title from "../components/Title";
+import { Table } from "../proto/gen/catalog";
+import { ActorLocation } from "../proto/gen/meta";
+import { getActors, getMaterializedViews } from "./api/streaming";
+import StreamingView from '../components/StreamingView'
+import NoData from '../components/NoData'
 
 export default function Streaming() {
+    const toast = useToast();
+    const [actorProtoList, setActorProtoList] = useState<ActorLocation[]>([]);
+    const [mvList, setMvList] = useState<Table[]>([]);
+
+    useEffect(() => {
+        async function doFetch() {
+            try {
+                setActorProtoList(await getActors());
+                setMvList(await getMaterializedViews());
+            } catch (e: any) {
+                toast({
+                    title: 'Error Occurred',
+                    description: e.toString(),
+                    status: 'error',
+                    duration: 5000,
+                    isClosable: true,
+                })
+                console.error(e);
+            }
+        }
+        doFetch();
+        return () => { }
+    }, []);
+
     return (
-        <Box p={3}><Title>Streaming</Title></Box>
+        <Box p={3}>
+            <Title>Streaming</Title>
+            <NoData />
+        </Box>
     );
 }

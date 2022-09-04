@@ -79,12 +79,13 @@ export interface UserInfo {
 
 /** GrantPrivilege defines a privilege granted to a user. */
 export interface GrantPrivilege {
-  databaseId: number | undefined;
-  schemaId: number | undefined;
-  tableId: number | undefined;
-  sourceId: number | undefined;
-  allTablesSchemaId: number | undefined;
-  allSourcesSchemaId: number | undefined;
+  object?:
+    | { $case: "databaseId"; databaseId: number }
+    | { $case: "schemaId"; schemaId: number }
+    | { $case: "tableId"; tableId: number }
+    | { $case: "sourceId"; sourceId: number }
+    | { $case: "allTablesSchemaId"; allTablesSchemaId: number }
+    | { $case: "allSourcesSchemaId"; allSourcesSchemaId: number };
   actionWithOpts: GrantPrivilege_ActionWithGrantOption[];
 }
 
@@ -472,36 +473,28 @@ export const UserInfo = {
 };
 
 function createBaseGrantPrivilege(): GrantPrivilege {
-  return {
-    databaseId: undefined,
-    schemaId: undefined,
-    tableId: undefined,
-    sourceId: undefined,
-    allTablesSchemaId: undefined,
-    allSourcesSchemaId: undefined,
-    actionWithOpts: [],
-  };
+  return { object: undefined, actionWithOpts: [] };
 }
 
 export const GrantPrivilege = {
   encode(message: GrantPrivilege, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.databaseId !== undefined) {
-      writer.uint32(8).uint32(message.databaseId);
+    if (message.object?.$case === "databaseId") {
+      writer.uint32(8).uint32(message.object.databaseId);
     }
-    if (message.schemaId !== undefined) {
-      writer.uint32(16).uint32(message.schemaId);
+    if (message.object?.$case === "schemaId") {
+      writer.uint32(16).uint32(message.object.schemaId);
     }
-    if (message.tableId !== undefined) {
-      writer.uint32(24).uint32(message.tableId);
+    if (message.object?.$case === "tableId") {
+      writer.uint32(24).uint32(message.object.tableId);
     }
-    if (message.sourceId !== undefined) {
-      writer.uint32(32).uint32(message.sourceId);
+    if (message.object?.$case === "sourceId") {
+      writer.uint32(32).uint32(message.object.sourceId);
     }
-    if (message.allTablesSchemaId !== undefined) {
-      writer.uint32(40).uint32(message.allTablesSchemaId);
+    if (message.object?.$case === "allTablesSchemaId") {
+      writer.uint32(40).uint32(message.object.allTablesSchemaId);
     }
-    if (message.allSourcesSchemaId !== undefined) {
-      writer.uint32(48).uint32(message.allSourcesSchemaId);
+    if (message.object?.$case === "allSourcesSchemaId") {
+      writer.uint32(48).uint32(message.object.allSourcesSchemaId);
     }
     for (const v of message.actionWithOpts) {
       GrantPrivilege_ActionWithGrantOption.encode(v!, writer.uint32(58).fork()).ldelim();
@@ -517,22 +510,22 @@ export const GrantPrivilege = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          message.databaseId = reader.uint32();
+          message.object = { $case: "databaseId", databaseId: reader.uint32() };
           break;
         case 2:
-          message.schemaId = reader.uint32();
+          message.object = { $case: "schemaId", schemaId: reader.uint32() };
           break;
         case 3:
-          message.tableId = reader.uint32();
+          message.object = { $case: "tableId", tableId: reader.uint32() };
           break;
         case 4:
-          message.sourceId = reader.uint32();
+          message.object = { $case: "sourceId", sourceId: reader.uint32() };
           break;
         case 5:
-          message.allTablesSchemaId = reader.uint32();
+          message.object = { $case: "allTablesSchemaId", allTablesSchemaId: reader.uint32() };
           break;
         case 6:
-          message.allSourcesSchemaId = reader.uint32();
+          message.object = { $case: "allSourcesSchemaId", allSourcesSchemaId: reader.uint32() };
           break;
         case 7:
           message.actionWithOpts.push(GrantPrivilege_ActionWithGrantOption.decode(reader, reader.uint32()));
@@ -547,12 +540,19 @@ export const GrantPrivilege = {
 
   fromJSON(object: any): GrantPrivilege {
     return {
-      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : undefined,
-      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : undefined,
-      tableId: isSet(object.tableId) ? Number(object.tableId) : undefined,
-      sourceId: isSet(object.sourceId) ? Number(object.sourceId) : undefined,
-      allTablesSchemaId: isSet(object.allTablesSchemaId) ? Number(object.allTablesSchemaId) : undefined,
-      allSourcesSchemaId: isSet(object.allSourcesSchemaId) ? Number(object.allSourcesSchemaId) : undefined,
+      object: isSet(object.databaseId)
+        ? { $case: "databaseId", databaseId: Number(object.databaseId) }
+        : isSet(object.schemaId)
+        ? { $case: "schemaId", schemaId: Number(object.schemaId) }
+        : isSet(object.tableId)
+        ? { $case: "tableId", tableId: Number(object.tableId) }
+        : isSet(object.sourceId)
+        ? { $case: "sourceId", sourceId: Number(object.sourceId) }
+        : isSet(object.allTablesSchemaId)
+        ? { $case: "allTablesSchemaId", allTablesSchemaId: Number(object.allTablesSchemaId) }
+        : isSet(object.allSourcesSchemaId)
+        ? { $case: "allSourcesSchemaId", allSourcesSchemaId: Number(object.allSourcesSchemaId) }
+        : undefined,
       actionWithOpts: Array.isArray(object?.actionWithOpts)
         ? object.actionWithOpts.map((e: any) => GrantPrivilege_ActionWithGrantOption.fromJSON(e))
         : [],
@@ -561,12 +561,14 @@ export const GrantPrivilege = {
 
   toJSON(message: GrantPrivilege): unknown {
     const obj: any = {};
-    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
-    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
-    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
-    message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
-    message.allTablesSchemaId !== undefined && (obj.allTablesSchemaId = Math.round(message.allTablesSchemaId));
-    message.allSourcesSchemaId !== undefined && (obj.allSourcesSchemaId = Math.round(message.allSourcesSchemaId));
+    message.object?.$case === "databaseId" && (obj.databaseId = Math.round(message.object?.databaseId));
+    message.object?.$case === "schemaId" && (obj.schemaId = Math.round(message.object?.schemaId));
+    message.object?.$case === "tableId" && (obj.tableId = Math.round(message.object?.tableId));
+    message.object?.$case === "sourceId" && (obj.sourceId = Math.round(message.object?.sourceId));
+    message.object?.$case === "allTablesSchemaId" &&
+      (obj.allTablesSchemaId = Math.round(message.object?.allTablesSchemaId));
+    message.object?.$case === "allSourcesSchemaId" &&
+      (obj.allSourcesSchemaId = Math.round(message.object?.allSourcesSchemaId));
     if (message.actionWithOpts) {
       obj.actionWithOpts = message.actionWithOpts.map((e) =>
         e ? GrantPrivilege_ActionWithGrantOption.toJSON(e) : undefined
@@ -579,12 +581,40 @@ export const GrantPrivilege = {
 
   fromPartial<I extends Exact<DeepPartial<GrantPrivilege>, I>>(object: I): GrantPrivilege {
     const message = createBaseGrantPrivilege();
-    message.databaseId = object.databaseId ?? undefined;
-    message.schemaId = object.schemaId ?? undefined;
-    message.tableId = object.tableId ?? undefined;
-    message.sourceId = object.sourceId ?? undefined;
-    message.allTablesSchemaId = object.allTablesSchemaId ?? undefined;
-    message.allSourcesSchemaId = object.allSourcesSchemaId ?? undefined;
+    if (
+      object.object?.$case === "databaseId" &&
+      object.object?.databaseId !== undefined &&
+      object.object?.databaseId !== null
+    ) {
+      message.object = { $case: "databaseId", databaseId: object.object.databaseId };
+    }
+    if (
+      object.object?.$case === "schemaId" && object.object?.schemaId !== undefined && object.object?.schemaId !== null
+    ) {
+      message.object = { $case: "schemaId", schemaId: object.object.schemaId };
+    }
+    if (object.object?.$case === "tableId" && object.object?.tableId !== undefined && object.object?.tableId !== null) {
+      message.object = { $case: "tableId", tableId: object.object.tableId };
+    }
+    if (
+      object.object?.$case === "sourceId" && object.object?.sourceId !== undefined && object.object?.sourceId !== null
+    ) {
+      message.object = { $case: "sourceId", sourceId: object.object.sourceId };
+    }
+    if (
+      object.object?.$case === "allTablesSchemaId" &&
+      object.object?.allTablesSchemaId !== undefined &&
+      object.object?.allTablesSchemaId !== null
+    ) {
+      message.object = { $case: "allTablesSchemaId", allTablesSchemaId: object.object.allTablesSchemaId };
+    }
+    if (
+      object.object?.$case === "allSourcesSchemaId" &&
+      object.object?.allSourcesSchemaId !== undefined &&
+      object.object?.allSourcesSchemaId !== null
+    ) {
+      message.object = { $case: "allSourcesSchemaId", allSourcesSchemaId: object.object.allSourcesSchemaId };
+    }
     message.actionWithOpts = object.actionWithOpts?.map((e) => GrantPrivilege_ActionWithGrantOption.fromPartial(e)) ||
       [];
     return message;
@@ -1383,6 +1413,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 

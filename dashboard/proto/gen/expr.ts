@@ -8,9 +8,10 @@ export const protobufPackage = "expr";
 export interface ExprNode {
   exprType: ExprNode_Type;
   returnType: DataType | undefined;
-  inputRef: InputRefExpr | undefined;
-  constant: ConstantValue | undefined;
-  funcCall: FunctionCall | undefined;
+  rexNode?: { $case: "inputRef"; inputRef: InputRefExpr } | { $case: "constant"; constant: ConstantValue } | {
+    $case: "funcCall";
+    funcCall: FunctionCall;
+  };
 }
 
 export enum ExprNode_Type {
@@ -580,8 +581,7 @@ export interface InputRefExpr {
  * ```
  */
 export interface ProjectSetSelectItem {
-  expr: ExprNode | undefined;
-  tableFunction: TableFunction | undefined;
+  selectItem?: { $case: "expr"; expr: ExprNode } | { $case: "tableFunction"; tableFunction: TableFunction };
 }
 
 export interface ConstantValue {
@@ -712,7 +712,7 @@ export interface AggCall_OrderByField {
 }
 
 function createBaseExprNode(): ExprNode {
-  return { exprType: 0, returnType: undefined, inputRef: undefined, constant: undefined, funcCall: undefined };
+  return { exprType: 0, returnType: undefined, rexNode: undefined };
 }
 
 export const ExprNode = {
@@ -723,14 +723,14 @@ export const ExprNode = {
     if (message.returnType !== undefined) {
       DataType.encode(message.returnType, writer.uint32(26).fork()).ldelim();
     }
-    if (message.inputRef !== undefined) {
-      InputRefExpr.encode(message.inputRef, writer.uint32(34).fork()).ldelim();
+    if (message.rexNode?.$case === "inputRef") {
+      InputRefExpr.encode(message.rexNode.inputRef, writer.uint32(34).fork()).ldelim();
     }
-    if (message.constant !== undefined) {
-      ConstantValue.encode(message.constant, writer.uint32(42).fork()).ldelim();
+    if (message.rexNode?.$case === "constant") {
+      ConstantValue.encode(message.rexNode.constant, writer.uint32(42).fork()).ldelim();
     }
-    if (message.funcCall !== undefined) {
-      FunctionCall.encode(message.funcCall, writer.uint32(50).fork()).ldelim();
+    if (message.rexNode?.$case === "funcCall") {
+      FunctionCall.encode(message.rexNode.funcCall, writer.uint32(50).fork()).ldelim();
     }
     return writer;
   },
@@ -749,13 +749,13 @@ export const ExprNode = {
           message.returnType = DataType.decode(reader, reader.uint32());
           break;
         case 4:
-          message.inputRef = InputRefExpr.decode(reader, reader.uint32());
+          message.rexNode = { $case: "inputRef", inputRef: InputRefExpr.decode(reader, reader.uint32()) };
           break;
         case 5:
-          message.constant = ConstantValue.decode(reader, reader.uint32());
+          message.rexNode = { $case: "constant", constant: ConstantValue.decode(reader, reader.uint32()) };
           break;
         case 6:
-          message.funcCall = FunctionCall.decode(reader, reader.uint32());
+          message.rexNode = { $case: "funcCall", funcCall: FunctionCall.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -769,9 +769,13 @@ export const ExprNode = {
     return {
       exprType: isSet(object.exprType) ? exprNode_TypeFromJSON(object.exprType) : 0,
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
-      inputRef: isSet(object.inputRef) ? InputRefExpr.fromJSON(object.inputRef) : undefined,
-      constant: isSet(object.constant) ? ConstantValue.fromJSON(object.constant) : undefined,
-      funcCall: isSet(object.funcCall) ? FunctionCall.fromJSON(object.funcCall) : undefined,
+      rexNode: isSet(object.inputRef)
+        ? { $case: "inputRef", inputRef: InputRefExpr.fromJSON(object.inputRef) }
+        : isSet(object.constant)
+        ? { $case: "constant", constant: ConstantValue.fromJSON(object.constant) }
+        : isSet(object.funcCall)
+        ? { $case: "funcCall", funcCall: FunctionCall.fromJSON(object.funcCall) }
+        : undefined,
     };
   },
 
@@ -780,12 +784,12 @@ export const ExprNode = {
     message.exprType !== undefined && (obj.exprType = exprNode_TypeToJSON(message.exprType));
     message.returnType !== undefined &&
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
-    message.inputRef !== undefined &&
-      (obj.inputRef = message.inputRef ? InputRefExpr.toJSON(message.inputRef) : undefined);
-    message.constant !== undefined &&
-      (obj.constant = message.constant ? ConstantValue.toJSON(message.constant) : undefined);
-    message.funcCall !== undefined &&
-      (obj.funcCall = message.funcCall ? FunctionCall.toJSON(message.funcCall) : undefined);
+    message.rexNode?.$case === "inputRef" &&
+      (obj.inputRef = message.rexNode?.inputRef ? InputRefExpr.toJSON(message.rexNode?.inputRef) : undefined);
+    message.rexNode?.$case === "constant" &&
+      (obj.constant = message.rexNode?.constant ? ConstantValue.toJSON(message.rexNode?.constant) : undefined);
+    message.rexNode?.$case === "funcCall" &&
+      (obj.funcCall = message.rexNode?.funcCall ? FunctionCall.toJSON(message.rexNode?.funcCall) : undefined);
     return obj;
   },
 
@@ -795,15 +799,27 @@ export const ExprNode = {
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
       : undefined;
-    message.inputRef = (object.inputRef !== undefined && object.inputRef !== null)
-      ? InputRefExpr.fromPartial(object.inputRef)
-      : undefined;
-    message.constant = (object.constant !== undefined && object.constant !== null)
-      ? ConstantValue.fromPartial(object.constant)
-      : undefined;
-    message.funcCall = (object.funcCall !== undefined && object.funcCall !== null)
-      ? FunctionCall.fromPartial(object.funcCall)
-      : undefined;
+    if (
+      object.rexNode?.$case === "inputRef" &&
+      object.rexNode?.inputRef !== undefined &&
+      object.rexNode?.inputRef !== null
+    ) {
+      message.rexNode = { $case: "inputRef", inputRef: InputRefExpr.fromPartial(object.rexNode.inputRef) };
+    }
+    if (
+      object.rexNode?.$case === "constant" &&
+      object.rexNode?.constant !== undefined &&
+      object.rexNode?.constant !== null
+    ) {
+      message.rexNode = { $case: "constant", constant: ConstantValue.fromPartial(object.rexNode.constant) };
+    }
+    if (
+      object.rexNode?.$case === "funcCall" &&
+      object.rexNode?.funcCall !== undefined &&
+      object.rexNode?.funcCall !== null
+    ) {
+      message.rexNode = { $case: "funcCall", funcCall: FunctionCall.fromPartial(object.rexNode.funcCall) };
+    }
     return message;
   },
 };
@@ -930,16 +946,16 @@ export const InputRefExpr = {
 };
 
 function createBaseProjectSetSelectItem(): ProjectSetSelectItem {
-  return { expr: undefined, tableFunction: undefined };
+  return { selectItem: undefined };
 }
 
 export const ProjectSetSelectItem = {
   encode(message: ProjectSetSelectItem, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.expr !== undefined) {
-      ExprNode.encode(message.expr, writer.uint32(10).fork()).ldelim();
+    if (message.selectItem?.$case === "expr") {
+      ExprNode.encode(message.selectItem.expr, writer.uint32(10).fork()).ldelim();
     }
-    if (message.tableFunction !== undefined) {
-      TableFunction.encode(message.tableFunction, writer.uint32(18).fork()).ldelim();
+    if (message.selectItem?.$case === "tableFunction") {
+      TableFunction.encode(message.selectItem.tableFunction, writer.uint32(18).fork()).ldelim();
     }
     return writer;
   },
@@ -952,10 +968,10 @@ export const ProjectSetSelectItem = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          message.expr = ExprNode.decode(reader, reader.uint32());
+          message.selectItem = { $case: "expr", expr: ExprNode.decode(reader, reader.uint32()) };
           break;
         case 2:
-          message.tableFunction = TableFunction.decode(reader, reader.uint32());
+          message.selectItem = { $case: "tableFunction", tableFunction: TableFunction.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -967,25 +983,41 @@ export const ProjectSetSelectItem = {
 
   fromJSON(object: any): ProjectSetSelectItem {
     return {
-      expr: isSet(object.expr) ? ExprNode.fromJSON(object.expr) : undefined,
-      tableFunction: isSet(object.tableFunction) ? TableFunction.fromJSON(object.tableFunction) : undefined,
+      selectItem: isSet(object.expr)
+        ? { $case: "expr", expr: ExprNode.fromJSON(object.expr) }
+        : isSet(object.tableFunction)
+        ? { $case: "tableFunction", tableFunction: TableFunction.fromJSON(object.tableFunction) }
+        : undefined,
     };
   },
 
   toJSON(message: ProjectSetSelectItem): unknown {
     const obj: any = {};
-    message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
-    message.tableFunction !== undefined &&
-      (obj.tableFunction = message.tableFunction ? TableFunction.toJSON(message.tableFunction) : undefined);
+    message.selectItem?.$case === "expr" &&
+      (obj.expr = message.selectItem?.expr ? ExprNode.toJSON(message.selectItem?.expr) : undefined);
+    message.selectItem?.$case === "tableFunction" && (obj.tableFunction = message.selectItem?.tableFunction
+      ? TableFunction.toJSON(message.selectItem?.tableFunction)
+      : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ProjectSetSelectItem>, I>>(object: I): ProjectSetSelectItem {
     const message = createBaseProjectSetSelectItem();
-    message.expr = (object.expr !== undefined && object.expr !== null) ? ExprNode.fromPartial(object.expr) : undefined;
-    message.tableFunction = (object.tableFunction !== undefined && object.tableFunction !== null)
-      ? TableFunction.fromPartial(object.tableFunction)
-      : undefined;
+    if (
+      object.selectItem?.$case === "expr" && object.selectItem?.expr !== undefined && object.selectItem?.expr !== null
+    ) {
+      message.selectItem = { $case: "expr", expr: ExprNode.fromPartial(object.selectItem.expr) };
+    }
+    if (
+      object.selectItem?.$case === "tableFunction" &&
+      object.selectItem?.tableFunction !== undefined &&
+      object.selectItem?.tableFunction !== null
+    ) {
+      message.selectItem = {
+        $case: "tableFunction",
+        tableFunction: TableFunction.fromPartial(object.selectItem.tableFunction),
+      };
+    }
     return message;
   },
 };
@@ -1486,6 +1518,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 

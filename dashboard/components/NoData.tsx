@@ -1,3 +1,5 @@
+import { Flex } from "@chakra-ui/react";
+
 /*
  * Copyright 2022 Singularity Data
  *
@@ -14,12 +16,15 @@
  * limitations under the License.
  *
  */
-export default function NoData() {
-  return (
-    <>
-      <div>
-        <span style={{ fontWeight: "lighter" }}>No data presented.</span>
-      </div>
-    </>
-  )
+
+function NoData() {
+  return <Flex w="full"
+    alignItems="center"
+    justifyContent="center"
+    h="80vh"
+  >
+    No Data Available
+  </Flex>
 }
+
+export default NoData;

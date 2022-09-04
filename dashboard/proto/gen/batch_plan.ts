@@ -213,7 +213,7 @@ export interface LocalExecutePlan {
 export interface ExchangeSource {
   taskOutputId: TaskOutputId | undefined;
   host: HostAddress | undefined;
-  plan: LocalExecutePlan | undefined;
+  localExecutePlan?: { $case: "plan"; plan: LocalExecutePlan };
 }
 
 export interface ExchangeNode {
@@ -242,30 +242,31 @@ export interface UnionNode {
 
 export interface PlanNode {
   children: PlanNode[];
-  insert: InsertNode | undefined;
-  delete: DeleteNode | undefined;
-  update: UpdateNode | undefined;
-  project: ProjectNode | undefined;
-  hashAgg: HashAggNode | undefined;
-  filter: FilterNode | undefined;
-  exchange: ExchangeNode | undefined;
-  orderBy: OrderByNode | undefined;
-  nestedLoopJoin: NestedLoopJoinNode | undefined;
-  topN: TopNNode | undefined;
-  sortAgg: SortAggNode | undefined;
-  rowSeqScan: RowSeqScanNode | undefined;
-  limit: LimitNode | undefined;
-  values: ValuesNode | undefined;
-  hashJoin: HashJoinNode | undefined;
-  mergeSortExchange: MergeSortExchangeNode | undefined;
-  sortMergeJoin: SortMergeJoinNode | undefined;
-  hopWindow: HopWindowNode | undefined;
-  tableFunction: TableFunctionNode | undefined;
-  sysRowSeqScan: SysRowSeqScanNode | undefined;
-  expand: ExpandNode | undefined;
-  lookupJoin: LookupJoinNode | undefined;
-  projectSet: ProjectSetNode | undefined;
-  union: UnionNode | undefined;
+  nodeBody?:
+    | { $case: "insert"; insert: InsertNode }
+    | { $case: "delete"; delete: DeleteNode }
+    | { $case: "update"; update: UpdateNode }
+    | { $case: "project"; project: ProjectNode }
+    | { $case: "hashAgg"; hashAgg: HashAggNode }
+    | { $case: "filter"; filter: FilterNode }
+    | { $case: "exchange"; exchange: ExchangeNode }
+    | { $case: "orderBy"; orderBy: OrderByNode }
+    | { $case: "nestedLoopJoin"; nestedLoopJoin: NestedLoopJoinNode }
+    | { $case: "topN"; topN: TopNNode }
+    | { $case: "sortAgg"; sortAgg: SortAggNode }
+    | { $case: "rowSeqScan"; rowSeqScan: RowSeqScanNode }
+    | { $case: "limit"; limit: LimitNode }
+    | { $case: "values"; values: ValuesNode }
+    | { $case: "hashJoin"; hashJoin: HashJoinNode }
+    | { $case: "mergeSortExchange"; mergeSortExchange: MergeSortExchangeNode }
+    | { $case: "sortMergeJoin"; sortMergeJoin: SortMergeJoinNode }
+    | { $case: "hopWindow"; hopWindow: HopWindowNode }
+    | { $case: "tableFunction"; tableFunction: TableFunctionNode }
+    | { $case: "sysRowSeqScan"; sysRowSeqScan: SysRowSeqScanNode }
+    | { $case: "expand"; expand: ExpandNode }
+    | { $case: "lookupJoin"; lookupJoin: LookupJoinNode }
+    | { $case: "projectSet"; projectSet: ProjectSetNode }
+    | { $case: "union"; union: UnionNode };
   identity: string;
 }
 
@@ -277,8 +278,10 @@ export interface PlanNode {
  */
 export interface ExchangeInfo {
   mode: ExchangeInfo_DistributionMode;
-  broadcastInfo: ExchangeInfo_BroadcastInfo | undefined;
-  hashInfo: ExchangeInfo_HashInfo | undefined;
+  distribution?: { $case: "broadcastInfo"; broadcastInfo: ExchangeInfo_BroadcastInfo } | {
+    $case: "hashInfo";
+    hashInfo: ExchangeInfo_HashInfo;
+  };
 }
 
 export enum ExchangeInfo_DistributionMode {
@@ -2336,7 +2339,7 @@ export const LocalExecutePlan = {
 };
 
 function createBaseExchangeSource(): ExchangeSource {
-  return { taskOutputId: undefined, host: undefined, plan: undefined };
+  return { taskOutputId: undefined, host: undefined, localExecutePlan: undefined };
 }
 
 export const ExchangeSource = {
@@ -2347,8 +2350,8 @@ export const ExchangeSource = {
     if (message.host !== undefined) {
       HostAddress.encode(message.host, writer.uint32(18).fork()).ldelim();
     }
-    if (message.plan !== undefined) {
-      LocalExecutePlan.encode(message.plan, writer.uint32(26).fork()).ldelim();
+    if (message.localExecutePlan?.$case === "plan") {
+      LocalExecutePlan.encode(message.localExecutePlan.plan, writer.uint32(26).fork()).ldelim();
     }
     return writer;
   },
@@ -2367,7 +2370,7 @@ export const ExchangeSource = {
           message.host = HostAddress.decode(reader, reader.uint32());
           break;
         case 3:
-          message.plan = LocalExecutePlan.decode(reader, reader.uint32());
+          message.localExecutePlan = { $case: "plan", plan: LocalExecutePlan.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -2381,7 +2384,9 @@ export const ExchangeSource = {
     return {
       taskOutputId: isSet(object.taskOutputId) ? TaskOutputId.fromJSON(object.taskOutputId) : undefined,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
-      plan: isSet(object.plan) ? LocalExecutePlan.fromJSON(object.plan) : undefined,
+      localExecutePlan: isSet(object.plan)
+        ? { $case: "plan", plan: LocalExecutePlan.fromJSON(object.plan) }
+        : undefined,
     };
   },
 
@@ -2390,7 +2395,8 @@ export const ExchangeSource = {
     message.taskOutputId !== undefined &&
       (obj.taskOutputId = message.taskOutputId ? TaskOutputId.toJSON(message.taskOutputId) : undefined);
     message.host !== undefined && (obj.host = message.host ? HostAddress.toJSON(message.host) : undefined);
-    message.plan !== undefined && (obj.plan = message.plan ? LocalExecutePlan.toJSON(message.plan) : undefined);
+    message.localExecutePlan?.$case === "plan" &&
+      (obj.plan = message.localExecutePlan?.plan ? LocalExecutePlan.toJSON(message.localExecutePlan?.plan) : undefined);
     return obj;
   },
 
@@ -2402,9 +2408,13 @@ export const ExchangeSource = {
     message.host = (object.host !== undefined && object.host !== null)
       ? HostAddress.fromPartial(object.host)
       : undefined;
-    message.plan = (object.plan !== undefined && object.plan !== null)
-      ? LocalExecutePlan.fromPartial(object.plan)
-      : undefined;
+    if (
+      object.localExecutePlan?.$case === "plan" &&
+      object.localExecutePlan?.plan !== undefined &&
+      object.localExecutePlan?.plan !== null
+    ) {
+      message.localExecutePlan = { $case: "plan", plan: LocalExecutePlan.fromPartial(object.localExecutePlan.plan) };
+    }
     return message;
   },
 };
@@ -2772,34 +2782,7 @@ export const UnionNode = {
 };
 
 function createBasePlanNode(): PlanNode {
-  return {
-    children: [],
-    insert: undefined,
-    delete: undefined,
-    update: undefined,
-    project: undefined,
-    hashAgg: undefined,
-    filter: undefined,
-    exchange: undefined,
-    orderBy: undefined,
-    nestedLoopJoin: undefined,
-    topN: undefined,
-    sortAgg: undefined,
-    rowSeqScan: undefined,
-    limit: undefined,
-    values: undefined,
-    hashJoin: undefined,
-    mergeSortExchange: undefined,
-    sortMergeJoin: undefined,
-    hopWindow: undefined,
-    tableFunction: undefined,
-    sysRowSeqScan: undefined,
-    expand: undefined,
-    lookupJoin: undefined,
-    projectSet: undefined,
-    union: undefined,
-    identity: "",
-  };
+  return { children: [], nodeBody: undefined, identity: "" };
 }
 
 export const PlanNode = {
@@ -2807,77 +2790,77 @@ export const PlanNode = {
     for (const v of message.children) {
       PlanNode.encode(v!, writer.uint32(10).fork()).ldelim();
     }
-    if (message.insert !== undefined) {
-      InsertNode.encode(message.insert, writer.uint32(18).fork()).ldelim();
+    if (message.nodeBody?.$case === "insert") {
+      InsertNode.encode(message.nodeBody.insert, writer.uint32(18).fork()).ldelim();
     }
-    if (message.delete !== undefined) {
-      DeleteNode.encode(message.delete, writer.uint32(26).fork()).ldelim();
+    if (message.nodeBody?.$case === "delete") {
+      DeleteNode.encode(message.nodeBody.delete, writer.uint32(26).fork()).ldelim();
     }
-    if (message.update !== undefined) {
-      UpdateNode.encode(message.update, writer.uint32(34).fork()).ldelim();
+    if (message.nodeBody?.$case === "update") {
+      UpdateNode.encode(message.nodeBody.update, writer.uint32(34).fork()).ldelim();
     }
-    if (message.project !== undefined) {
-      ProjectNode.encode(message.project, writer.uint32(42).fork()).ldelim();
+    if (message.nodeBody?.$case === "project") {
+      ProjectNode.encode(message.nodeBody.project, writer.uint32(42).fork()).ldelim();
     }
-    if (message.hashAgg !== undefined) {
-      HashAggNode.encode(message.hashAgg, writer.uint32(58).fork()).ldelim();
+    if (message.nodeBody?.$case === "hashAgg") {
+      HashAggNode.encode(message.nodeBody.hashAgg, writer.uint32(58).fork()).ldelim();
     }
-    if (message.filter !== undefined) {
-      FilterNode.encode(message.filter, writer.uint32(66).fork()).ldelim();
+    if (message.nodeBody?.$case === "filter") {
+      FilterNode.encode(message.nodeBody.filter, writer.uint32(66).fork()).ldelim();
     }
-    if (message.exchange !== undefined) {
-      ExchangeNode.encode(message.exchange, writer.uint32(74).fork()).ldelim();
+    if (message.nodeBody?.$case === "exchange") {
+      ExchangeNode.encode(message.nodeBody.exchange, writer.uint32(74).fork()).ldelim();
     }
-    if (message.orderBy !== undefined) {
-      OrderByNode.encode(message.orderBy, writer.uint32(82).fork()).ldelim();
+    if (message.nodeBody?.$case === "orderBy") {
+      OrderByNode.encode(message.nodeBody.orderBy, writer.uint32(82).fork()).ldelim();
     }
-    if (message.nestedLoopJoin !== undefined) {
-      NestedLoopJoinNode.encode(message.nestedLoopJoin, writer.uint32(90).fork()).ldelim();
+    if (message.nodeBody?.$case === "nestedLoopJoin") {
+      NestedLoopJoinNode.encode(message.nodeBody.nestedLoopJoin, writer.uint32(90).fork()).ldelim();
     }
-    if (message.topN !== undefined) {
-      TopNNode.encode(message.topN, writer.uint32(114).fork()).ldelim();
+    if (message.nodeBody?.$case === "topN") {
+      TopNNode.encode(message.nodeBody.topN, writer.uint32(114).fork()).ldelim();
     }
-    if (message.sortAgg !== undefined) {
-      SortAggNode.encode(message.sortAgg, writer.uint32(122).fork()).ldelim();
+    if (message.nodeBody?.$case === "sortAgg") {
+      SortAggNode.encode(message.nodeBody.sortAgg, writer.uint32(122).fork()).ldelim();
     }
-    if (message.rowSeqScan !== undefined) {
-      RowSeqScanNode.encode(message.rowSeqScan, writer.uint32(130).fork()).ldelim();
+    if (message.nodeBody?.$case === "rowSeqScan") {
+      RowSeqScanNode.encode(message.nodeBody.rowSeqScan, writer.uint32(130).fork()).ldelim();
     }
-    if (message.limit !== undefined) {
-      LimitNode.encode(message.limit, writer.uint32(138).fork()).ldelim();
+    if (message.nodeBody?.$case === "limit") {
+      LimitNode.encode(message.nodeBody.limit, writer.uint32(138).fork()).ldelim();
     }
-    if (message.values !== undefined) {
-      ValuesNode.encode(message.values, writer.uint32(146).fork()).ldelim();
+    if (message.nodeBody?.$case === "values") {
+      ValuesNode.encode(message.nodeBody.values, writer.uint32(146).fork()).ldelim();
     }
-    if (message.hashJoin !== undefined) {
-      HashJoinNode.encode(message.hashJoin, writer.uint32(154).fork()).ldelim();
+    if (message.nodeBody?.$case === "hashJoin") {
+      HashJoinNode.encode(message.nodeBody.hashJoin, writer.uint32(154).fork()).ldelim();
     }
-    if (message.mergeSortExchange !== undefined) {
-      MergeSortExchangeNode.encode(message.mergeSortExchange, writer.uint32(170).fork()).ldelim();
+    if (message.nodeBody?.$case === "mergeSortExchange") {
+      MergeSortExchangeNode.encode(message.nodeBody.mergeSortExchange, writer.uint32(170).fork()).ldelim();
     }
-    if (message.sortMergeJoin !== undefined) {
-      SortMergeJoinNode.encode(message.sortMergeJoin, writer.uint32(178).fork()).ldelim();
+    if (message.nodeBody?.$case === "sortMergeJoin") {
+      SortMergeJoinNode.encode(message.nodeBody.sortMergeJoin, writer.uint32(178).fork()).ldelim();
     }
-    if (message.hopWindow !== undefined) {
-      HopWindowNode.encode(message.hopWindow, writer.uint32(202).fork()).ldelim();
+    if (message.nodeBody?.$case === "hopWindow") {
+      HopWindowNode.encode(message.nodeBody.hopWindow, writer.uint32(202).fork()).ldelim();
     }
-    if (message.tableFunction !== undefined) {
-      TableFunctionNode.encode(message.tableFunction, writer.uint32(210).fork()).ldelim();
+    if (message.nodeBody?.$case === "tableFunction") {
+      TableFunctionNode.encode(message.nodeBody.tableFunction, writer.uint32(210).fork()).ldelim();
     }
-    if (message.sysRowSeqScan !== undefined) {
-      SysRowSeqScanNode.encode(message.sysRowSeqScan, writer.uint32(218).fork()).ldelim();
+    if (message.nodeBody?.$case === "sysRowSeqScan") {
+      SysRowSeqScanNode.encode(message.nodeBody.sysRowSeqScan, writer.uint32(218).fork()).ldelim();
     }
-    if (message.expand !== undefined) {
-      ExpandNode.encode(message.expand, writer.uint32(226).fork()).ldelim();
+    if (message.nodeBody?.$case === "expand") {
+      ExpandNode.encode(message.nodeBody.expand, writer.uint32(226).fork()).ldelim();
     }
-    if (message.lookupJoin !== undefined) {
-      LookupJoinNode.encode(message.lookupJoin, writer.uint32(234).fork()).ldelim();
+    if (message.nodeBody?.$case === "lookupJoin") {
+      LookupJoinNode.encode(message.nodeBody.lookupJoin, writer.uint32(234).fork()).ldelim();
     }
-    if (message.projectSet !== undefined) {
-      ProjectSetNode.encode(message.projectSet, writer.uint32(242).fork()).ldelim();
+    if (message.nodeBody?.$case === "projectSet") {
+      ProjectSetNode.encode(message.nodeBody.projectSet, writer.uint32(242).fork()).ldelim();
     }
-    if (message.union !== undefined) {
-      UnionNode.encode(message.union, writer.uint32(250).fork()).ldelim();
+    if (message.nodeBody?.$case === "union") {
+      UnionNode.encode(message.nodeBody.union, writer.uint32(250).fork()).ldelim();
     }
     if (message.identity !== "") {
       writer.uint32(194).string(message.identity);
@@ -2896,76 +2879,91 @@ export const PlanNode = {
           message.children.push(PlanNode.decode(reader, reader.uint32()));
           break;
         case 2:
-          message.insert = InsertNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "insert", insert: InsertNode.decode(reader, reader.uint32()) };
           break;
         case 3:
-          message.delete = DeleteNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "delete", delete: DeleteNode.decode(reader, reader.uint32()) };
           break;
         case 4:
-          message.update = UpdateNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "update", update: UpdateNode.decode(reader, reader.uint32()) };
           break;
         case 5:
-          message.project = ProjectNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "project", project: ProjectNode.decode(reader, reader.uint32()) };
           break;
         case 7:
-          message.hashAgg = HashAggNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "hashAgg", hashAgg: HashAggNode.decode(reader, reader.uint32()) };
           break;
         case 8:
-          message.filter = FilterNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "filter", filter: FilterNode.decode(reader, reader.uint32()) };
           break;
         case 9:
-          message.exchange = ExchangeNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "exchange", exchange: ExchangeNode.decode(reader, reader.uint32()) };
           break;
         case 10:
-          message.orderBy = OrderByNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "orderBy", orderBy: OrderByNode.decode(reader, reader.uint32()) };
           break;
         case 11:
-          message.nestedLoopJoin = NestedLoopJoinNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "nestedLoopJoin",
+            nestedLoopJoin: NestedLoopJoinNode.decode(reader, reader.uint32()),
+          };
           break;
         case 14:
-          message.topN = TopNNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "topN", topN: TopNNode.decode(reader, reader.uint32()) };
           break;
         case 15:
-          message.sortAgg = SortAggNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "sortAgg", sortAgg: SortAggNode.decode(reader, reader.uint32()) };
           break;
         case 16:
-          message.rowSeqScan = RowSeqScanNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "rowSeqScan", rowSeqScan: RowSeqScanNode.decode(reader, reader.uint32()) };
           break;
         case 17:
-          message.limit = LimitNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "limit", limit: LimitNode.decode(reader, reader.uint32()) };
           break;
         case 18:
-          message.values = ValuesNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "values", values: ValuesNode.decode(reader, reader.uint32()) };
           break;
         case 19:
-          message.hashJoin = HashJoinNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "hashJoin", hashJoin: HashJoinNode.decode(reader, reader.uint32()) };
           break;
         case 21:
-          message.mergeSortExchange = MergeSortExchangeNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "mergeSortExchange",
+            mergeSortExchange: MergeSortExchangeNode.decode(reader, reader.uint32()),
+          };
           break;
         case 22:
-          message.sortMergeJoin = SortMergeJoinNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "sortMergeJoin",
+            sortMergeJoin: SortMergeJoinNode.decode(reader, reader.uint32()),
+          };
           break;
         case 25:
-          message.hopWindow = HopWindowNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "hopWindow", hopWindow: HopWindowNode.decode(reader, reader.uint32()) };
           break;
         case 26:
-          message.tableFunction = TableFunctionNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "tableFunction",
+            tableFunction: TableFunctionNode.decode(reader, reader.uint32()),
+          };
           break;
         case 27:
-          message.sysRowSeqScan = SysRowSeqScanNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "sysRowSeqScan",
+            sysRowSeqScan: SysRowSeqScanNode.decode(reader, reader.uint32()),
+          };
           break;
         case 28:
-          message.expand = ExpandNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "expand", expand: ExpandNode.decode(reader, reader.uint32()) };
           break;
         case 29:
-          message.lookupJoin = LookupJoinNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "lookupJoin", lookupJoin: LookupJoinNode.decode(reader, reader.uint32()) };
           break;
         case 30:
-          message.projectSet = ProjectSetNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "projectSet", projectSet: ProjectSetNode.decode(reader, reader.uint32()) };
           break;
         case 31:
-          message.union = UnionNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "union", union: UnionNode.decode(reader, reader.uint32()) };
           break;
         case 24:
           message.identity = reader.string();
@@ -2981,32 +2979,55 @@ export const PlanNode = {
   fromJSON(object: any): PlanNode {
     return {
       children: Array.isArray(object?.children) ? object.children.map((e: any) => PlanNode.fromJSON(e)) : [],
-      insert: isSet(object.insert) ? InsertNode.fromJSON(object.insert) : undefined,
-      delete: isSet(object.delete) ? DeleteNode.fromJSON(object.delete) : undefined,
-      update: isSet(object.update) ? UpdateNode.fromJSON(object.update) : undefined,
-      project: isSet(object.project) ? ProjectNode.fromJSON(object.project) : undefined,
-      hashAgg: isSet(object.hashAgg) ? HashAggNode.fromJSON(object.hashAgg) : undefined,
-      filter: isSet(object.filter) ? FilterNode.fromJSON(object.filter) : undefined,
-      exchange: isSet(object.exchange) ? ExchangeNode.fromJSON(object.exchange) : undefined,
-      orderBy: isSet(object.orderBy) ? OrderByNode.fromJSON(object.orderBy) : undefined,
-      nestedLoopJoin: isSet(object.nestedLoopJoin) ? NestedLoopJoinNode.fromJSON(object.nestedLoopJoin) : undefined,
-      topN: isSet(object.topN) ? TopNNode.fromJSON(object.topN) : undefined,
-      sortAgg: isSet(object.sortAgg) ? SortAggNode.fromJSON(object.sortAgg) : undefined,
-      rowSeqScan: isSet(object.rowSeqScan) ? RowSeqScanNode.fromJSON(object.rowSeqScan) : undefined,
-      limit: isSet(object.limit) ? LimitNode.fromJSON(object.limit) : undefined,
-      values: isSet(object.values) ? ValuesNode.fromJSON(object.values) : undefined,
-      hashJoin: isSet(object.hashJoin) ? HashJoinNode.fromJSON(object.hashJoin) : undefined,
-      mergeSortExchange: isSet(object.mergeSortExchange)
-        ? MergeSortExchangeNode.fromJSON(object.mergeSortExchange)
+      nodeBody: isSet(object.insert)
+        ? { $case: "insert", insert: InsertNode.fromJSON(object.insert) }
+        : isSet(object.delete)
+        ? { $case: "delete", delete: DeleteNode.fromJSON(object.delete) }
+        : isSet(object.update)
+        ? { $case: "update", update: UpdateNode.fromJSON(object.update) }
+        : isSet(object.project)
+        ? { $case: "project", project: ProjectNode.fromJSON(object.project) }
+        : isSet(object.hashAgg)
+        ? { $case: "hashAgg", hashAgg: HashAggNode.fromJSON(object.hashAgg) }
+        : isSet(object.filter)
+        ? { $case: "filter", filter: FilterNode.fromJSON(object.filter) }
+        : isSet(object.exchange)
+        ? { $case: "exchange", exchange: ExchangeNode.fromJSON(object.exchange) }
+        : isSet(object.orderBy)
+        ? { $case: "orderBy", orderBy: OrderByNode.fromJSON(object.orderBy) }
+        : isSet(object.nestedLoopJoin)
+        ? { $case: "nestedLoopJoin", nestedLoopJoin: NestedLoopJoinNode.fromJSON(object.nestedLoopJoin) }
+        : isSet(object.topN)
+        ? { $case: "topN", topN: TopNNode.fromJSON(object.topN) }
+        : isSet(object.sortAgg)
+        ? { $case: "sortAgg", sortAgg: SortAggNode.fromJSON(object.sortAgg) }
+        : isSet(object.rowSeqScan)
+        ? { $case: "rowSeqScan", rowSeqScan: RowSeqScanNode.fromJSON(object.rowSeqScan) }
+        : isSet(object.limit)
+        ? { $case: "limit", limit: LimitNode.fromJSON(object.limit) }
+        : isSet(object.values)
+        ? { $case: "values", values: ValuesNode.fromJSON(object.values) }
+        : isSet(object.hashJoin)
+        ? { $case: "hashJoin", hashJoin: HashJoinNode.fromJSON(object.hashJoin) }
+        : isSet(object.mergeSortExchange)
+        ? { $case: "mergeSortExchange", mergeSortExchange: MergeSortExchangeNode.fromJSON(object.mergeSortExchange) }
+        : isSet(object.sortMergeJoin)
+        ? { $case: "sortMergeJoin", sortMergeJoin: SortMergeJoinNode.fromJSON(object.sortMergeJoin) }
+        : isSet(object.hopWindow)
+        ? { $case: "hopWindow", hopWindow: HopWindowNode.fromJSON(object.hopWindow) }
+        : isSet(object.tableFunction)
+        ? { $case: "tableFunction", tableFunction: TableFunctionNode.fromJSON(object.tableFunction) }
+        : isSet(object.sysRowSeqScan)
+        ? { $case: "sysRowSeqScan", sysRowSeqScan: SysRowSeqScanNode.fromJSON(object.sysRowSeqScan) }
+        : isSet(object.expand)
+        ? { $case: "expand", expand: ExpandNode.fromJSON(object.expand) }
+        : isSet(object.lookupJoin)
+        ? { $case: "lookupJoin", lookupJoin: LookupJoinNode.fromJSON(object.lookupJoin) }
+        : isSet(object.projectSet)
+        ? { $case: "projectSet", projectSet: ProjectSetNode.fromJSON(object.projectSet) }
+        : isSet(object.union)
+        ? { $case: "union", union: UnionNode.fromJSON(object.union) }
         : undefined,
-      sortMergeJoin: isSet(object.sortMergeJoin) ? SortMergeJoinNode.fromJSON(object.sortMergeJoin) : undefined,
-      hopWindow: isSet(object.hopWindow) ? HopWindowNode.fromJSON(object.hopWindow) : undefined,
-      tableFunction: isSet(object.tableFunction) ? TableFunctionNode.fromJSON(object.tableFunction) : undefined,
-      sysRowSeqScan: isSet(object.sysRowSeqScan) ? SysRowSeqScanNode.fromJSON(object.sysRowSeqScan) : undefined,
-      expand: isSet(object.expand) ? ExpandNode.fromJSON(object.expand) : undefined,
-      lookupJoin: isSet(object.lookupJoin) ? LookupJoinNode.fromJSON(object.lookupJoin) : undefined,
-      projectSet: isSet(object.projectSet) ? ProjectSetNode.fromJSON(object.projectSet) : undefined,
-      union: isSet(object.union) ? UnionNode.fromJSON(object.union) : undefined,
       identity: isSet(object.identity) ? String(object.identity) : "",
     };
   },
@@ -3018,42 +3039,59 @@ export const PlanNode = {
     } else {
       obj.children = [];
     }
-    message.insert !== undefined && (obj.insert = message.insert ? InsertNode.toJSON(message.insert) : undefined);
-    message.delete !== undefined && (obj.delete = message.delete ? DeleteNode.toJSON(message.delete) : undefined);
-    message.update !== undefined && (obj.update = message.update ? UpdateNode.toJSON(message.update) : undefined);
-    message.project !== undefined && (obj.project = message.project ? ProjectNode.toJSON(message.project) : undefined);
-    message.hashAgg !== undefined && (obj.hashAgg = message.hashAgg ? HashAggNode.toJSON(message.hashAgg) : undefined);
-    message.filter !== undefined && (obj.filter = message.filter ? FilterNode.toJSON(message.filter) : undefined);
-    message.exchange !== undefined &&
-      (obj.exchange = message.exchange ? ExchangeNode.toJSON(message.exchange) : undefined);
-    message.orderBy !== undefined && (obj.orderBy = message.orderBy ? OrderByNode.toJSON(message.orderBy) : undefined);
-    message.nestedLoopJoin !== undefined &&
-      (obj.nestedLoopJoin = message.nestedLoopJoin ? NestedLoopJoinNode.toJSON(message.nestedLoopJoin) : undefined);
-    message.topN !== undefined && (obj.topN = message.topN ? TopNNode.toJSON(message.topN) : undefined);
-    message.sortAgg !== undefined && (obj.sortAgg = message.sortAgg ? SortAggNode.toJSON(message.sortAgg) : undefined);
-    message.rowSeqScan !== undefined &&
-      (obj.rowSeqScan = message.rowSeqScan ? RowSeqScanNode.toJSON(message.rowSeqScan) : undefined);
-    message.limit !== undefined && (obj.limit = message.limit ? LimitNode.toJSON(message.limit) : undefined);
-    message.values !== undefined && (obj.values = message.values ? ValuesNode.toJSON(message.values) : undefined);
-    message.hashJoin !== undefined &&
-      (obj.hashJoin = message.hashJoin ? HashJoinNode.toJSON(message.hashJoin) : undefined);
-    message.mergeSortExchange !== undefined && (obj.mergeSortExchange = message.mergeSortExchange
-      ? MergeSortExchangeNode.toJSON(message.mergeSortExchange)
+    message.nodeBody?.$case === "insert" &&
+      (obj.insert = message.nodeBody?.insert ? InsertNode.toJSON(message.nodeBody?.insert) : undefined);
+    message.nodeBody?.$case === "delete" &&
+      (obj.delete = message.nodeBody?.delete ? DeleteNode.toJSON(message.nodeBody?.delete) : undefined);
+    message.nodeBody?.$case === "update" &&
+      (obj.update = message.nodeBody?.update ? UpdateNode.toJSON(message.nodeBody?.update) : undefined);
+    message.nodeBody?.$case === "project" &&
+      (obj.project = message.nodeBody?.project ? ProjectNode.toJSON(message.nodeBody?.project) : undefined);
+    message.nodeBody?.$case === "hashAgg" &&
+      (obj.hashAgg = message.nodeBody?.hashAgg ? HashAggNode.toJSON(message.nodeBody?.hashAgg) : undefined);
+    message.nodeBody?.$case === "filter" &&
+      (obj.filter = message.nodeBody?.filter ? FilterNode.toJSON(message.nodeBody?.filter) : undefined);
+    message.nodeBody?.$case === "exchange" &&
+      (obj.exchange = message.nodeBody?.exchange ? ExchangeNode.toJSON(message.nodeBody?.exchange) : undefined);
+    message.nodeBody?.$case === "orderBy" &&
+      (obj.orderBy = message.nodeBody?.orderBy ? OrderByNode.toJSON(message.nodeBody?.orderBy) : undefined);
+    message.nodeBody?.$case === "nestedLoopJoin" && (obj.nestedLoopJoin = message.nodeBody?.nestedLoopJoin
+      ? NestedLoopJoinNode.toJSON(message.nodeBody?.nestedLoopJoin)
       : undefined);
-    message.sortMergeJoin !== undefined &&
-      (obj.sortMergeJoin = message.sortMergeJoin ? SortMergeJoinNode.toJSON(message.sortMergeJoin) : undefined);
-    message.hopWindow !== undefined &&
-      (obj.hopWindow = message.hopWindow ? HopWindowNode.toJSON(message.hopWindow) : undefined);
-    message.tableFunction !== undefined &&
-      (obj.tableFunction = message.tableFunction ? TableFunctionNode.toJSON(message.tableFunction) : undefined);
-    message.sysRowSeqScan !== undefined &&
-      (obj.sysRowSeqScan = message.sysRowSeqScan ? SysRowSeqScanNode.toJSON(message.sysRowSeqScan) : undefined);
-    message.expand !== undefined && (obj.expand = message.expand ? ExpandNode.toJSON(message.expand) : undefined);
-    message.lookupJoin !== undefined &&
-      (obj.lookupJoin = message.lookupJoin ? LookupJoinNode.toJSON(message.lookupJoin) : undefined);
-    message.projectSet !== undefined &&
-      (obj.projectSet = message.projectSet ? ProjectSetNode.toJSON(message.projectSet) : undefined);
-    message.union !== undefined && (obj.union = message.union ? UnionNode.toJSON(message.union) : undefined);
+    message.nodeBody?.$case === "topN" &&
+      (obj.topN = message.nodeBody?.topN ? TopNNode.toJSON(message.nodeBody?.topN) : undefined);
+    message.nodeBody?.$case === "sortAgg" &&
+      (obj.sortAgg = message.nodeBody?.sortAgg ? SortAggNode.toJSON(message.nodeBody?.sortAgg) : undefined);
+    message.nodeBody?.$case === "rowSeqScan" &&
+      (obj.rowSeqScan = message.nodeBody?.rowSeqScan ? RowSeqScanNode.toJSON(message.nodeBody?.rowSeqScan) : undefined);
+    message.nodeBody?.$case === "limit" &&
+      (obj.limit = message.nodeBody?.limit ? LimitNode.toJSON(message.nodeBody?.limit) : undefined);
+    message.nodeBody?.$case === "values" &&
+      (obj.values = message.nodeBody?.values ? ValuesNode.toJSON(message.nodeBody?.values) : undefined);
+    message.nodeBody?.$case === "hashJoin" &&
+      (obj.hashJoin = message.nodeBody?.hashJoin ? HashJoinNode.toJSON(message.nodeBody?.hashJoin) : undefined);
+    message.nodeBody?.$case === "mergeSortExchange" && (obj.mergeSortExchange = message.nodeBody?.mergeSortExchange
+      ? MergeSortExchangeNode.toJSON(message.nodeBody?.mergeSortExchange)
+      : undefined);
+    message.nodeBody?.$case === "sortMergeJoin" && (obj.sortMergeJoin = message.nodeBody?.sortMergeJoin
+      ? SortMergeJoinNode.toJSON(message.nodeBody?.sortMergeJoin)
+      : undefined);
+    message.nodeBody?.$case === "hopWindow" &&
+      (obj.hopWindow = message.nodeBody?.hopWindow ? HopWindowNode.toJSON(message.nodeBody?.hopWindow) : undefined);
+    message.nodeBody?.$case === "tableFunction" && (obj.tableFunction = message.nodeBody?.tableFunction
+      ? TableFunctionNode.toJSON(message.nodeBody?.tableFunction)
+      : undefined);
+    message.nodeBody?.$case === "sysRowSeqScan" && (obj.sysRowSeqScan = message.nodeBody?.sysRowSeqScan
+      ? SysRowSeqScanNode.toJSON(message.nodeBody?.sysRowSeqScan)
+      : undefined);
+    message.nodeBody?.$case === "expand" &&
+      (obj.expand = message.nodeBody?.expand ? ExpandNode.toJSON(message.nodeBody?.expand) : undefined);
+    message.nodeBody?.$case === "lookupJoin" &&
+      (obj.lookupJoin = message.nodeBody?.lookupJoin ? LookupJoinNode.toJSON(message.nodeBody?.lookupJoin) : undefined);
+    message.nodeBody?.$case === "projectSet" &&
+      (obj.projectSet = message.nodeBody?.projectSet ? ProjectSetNode.toJSON(message.nodeBody?.projectSet) : undefined);
+    message.nodeBody?.$case === "union" &&
+      (obj.union = message.nodeBody?.union ? UnionNode.toJSON(message.nodeBody?.union) : undefined);
     message.identity !== undefined && (obj.identity = message.identity);
     return obj;
   },
@@ -3061,83 +3099,172 @@ export const PlanNode = {
   fromPartial<I extends Exact<DeepPartial<PlanNode>, I>>(object: I): PlanNode {
     const message = createBasePlanNode();
     message.children = object.children?.map((e) => PlanNode.fromPartial(e)) || [];
-    message.insert = (object.insert !== undefined && object.insert !== null)
-      ? InsertNode.fromPartial(object.insert)
-      : undefined;
-    message.delete = (object.delete !== undefined && object.delete !== null)
-      ? DeleteNode.fromPartial(object.delete)
-      : undefined;
-    message.update = (object.update !== undefined && object.update !== null)
-      ? UpdateNode.fromPartial(object.update)
-      : undefined;
-    message.project = (object.project !== undefined && object.project !== null)
-      ? ProjectNode.fromPartial(object.project)
-      : undefined;
-    message.hashAgg = (object.hashAgg !== undefined && object.hashAgg !== null)
-      ? HashAggNode.fromPartial(object.hashAgg)
-      : undefined;
-    message.filter = (object.filter !== undefined && object.filter !== null)
-      ? FilterNode.fromPartial(object.filter)
-      : undefined;
-    message.exchange = (object.exchange !== undefined && object.exchange !== null)
-      ? ExchangeNode.fromPartial(object.exchange)
-      : undefined;
-    message.orderBy = (object.orderBy !== undefined && object.orderBy !== null)
-      ? OrderByNode.fromPartial(object.orderBy)
-      : undefined;
-    message.nestedLoopJoin = (object.nestedLoopJoin !== undefined && object.nestedLoopJoin !== null)
-      ? NestedLoopJoinNode.fromPartial(object.nestedLoopJoin)
-      : undefined;
-    message.topN = (object.topN !== undefined && object.topN !== null) ? TopNNode.fromPartial(object.topN) : undefined;
-    message.sortAgg = (object.sortAgg !== undefined && object.sortAgg !== null)
-      ? SortAggNode.fromPartial(object.sortAgg)
-      : undefined;
-    message.rowSeqScan = (object.rowSeqScan !== undefined && object.rowSeqScan !== null)
-      ? RowSeqScanNode.fromPartial(object.rowSeqScan)
-      : undefined;
-    message.limit = (object.limit !== undefined && object.limit !== null)
-      ? LimitNode.fromPartial(object.limit)
-      : undefined;
-    message.values = (object.values !== undefined && object.values !== null)
-      ? ValuesNode.fromPartial(object.values)
-      : undefined;
-    message.hashJoin = (object.hashJoin !== undefined && object.hashJoin !== null)
-      ? HashJoinNode.fromPartial(object.hashJoin)
-      : undefined;
-    message.mergeSortExchange = (object.mergeSortExchange !== undefined && object.mergeSortExchange !== null)
-      ? MergeSortExchangeNode.fromPartial(object.mergeSortExchange)
-      : undefined;
-    message.sortMergeJoin = (object.sortMergeJoin !== undefined && object.sortMergeJoin !== null)
-      ? SortMergeJoinNode.fromPartial(object.sortMergeJoin)
-      : undefined;
-    message.hopWindow = (object.hopWindow !== undefined && object.hopWindow !== null)
-      ? HopWindowNode.fromPartial(object.hopWindow)
-      : undefined;
-    message.tableFunction = (object.tableFunction !== undefined && object.tableFunction !== null)
-      ? TableFunctionNode.fromPartial(object.tableFunction)
-      : undefined;
-    message.sysRowSeqScan = (object.sysRowSeqScan !== undefined && object.sysRowSeqScan !== null)
-      ? SysRowSeqScanNode.fromPartial(object.sysRowSeqScan)
-      : undefined;
-    message.expand = (object.expand !== undefined && object.expand !== null)
-      ? ExpandNode.fromPartial(object.expand)
-      : undefined;
-    message.lookupJoin = (object.lookupJoin !== undefined && object.lookupJoin !== null)
-      ? LookupJoinNode.fromPartial(object.lookupJoin)
-      : undefined;
-    message.projectSet = (object.projectSet !== undefined && object.projectSet !== null)
-      ? ProjectSetNode.fromPartial(object.projectSet)
-      : undefined;
-    message.union = (object.union !== undefined && object.union !== null)
-      ? UnionNode.fromPartial(object.union)
-      : undefined;
+    if (
+      object.nodeBody?.$case === "insert" && object.nodeBody?.insert !== undefined && object.nodeBody?.insert !== null
+    ) {
+      message.nodeBody = { $case: "insert", insert: InsertNode.fromPartial(object.nodeBody.insert) };
+    }
+    if (
+      object.nodeBody?.$case === "delete" && object.nodeBody?.delete !== undefined && object.nodeBody?.delete !== null
+    ) {
+      message.nodeBody = { $case: "delete", delete: DeleteNode.fromPartial(object.nodeBody.delete) };
+    }
+    if (
+      object.nodeBody?.$case === "update" && object.nodeBody?.update !== undefined && object.nodeBody?.update !== null
+    ) {
+      message.nodeBody = { $case: "update", update: UpdateNode.fromPartial(object.nodeBody.update) };
+    }
+    if (
+      object.nodeBody?.$case === "project" &&
+      object.nodeBody?.project !== undefined &&
+      object.nodeBody?.project !== null
+    ) {
+      message.nodeBody = { $case: "project", project: ProjectNode.fromPartial(object.nodeBody.project) };
+    }
+    if (
+      object.nodeBody?.$case === "hashAgg" &&
+      object.nodeBody?.hashAgg !== undefined &&
+      object.nodeBody?.hashAgg !== null
+    ) {
+      message.nodeBody = { $case: "hashAgg", hashAgg: HashAggNode.fromPartial(object.nodeBody.hashAgg) };
+    }
+    if (
+      object.nodeBody?.$case === "filter" && object.nodeBody?.filter !== undefined && object.nodeBody?.filter !== null
+    ) {
+      message.nodeBody = { $case: "filter", filter: FilterNode.fromPartial(object.nodeBody.filter) };
+    }
+    if (
+      object.nodeBody?.$case === "exchange" &&
+      object.nodeBody?.exchange !== undefined &&
+      object.nodeBody?.exchange !== null
+    ) {
+      message.nodeBody = { $case: "exchange", exchange: ExchangeNode.fromPartial(object.nodeBody.exchange) };
+    }
+    if (
+      object.nodeBody?.$case === "orderBy" &&
+      object.nodeBody?.orderBy !== undefined &&
+      object.nodeBody?.orderBy !== null
+    ) {
+      message.nodeBody = { $case: "orderBy", orderBy: OrderByNode.fromPartial(object.nodeBody.orderBy) };
+    }
+    if (
+      object.nodeBody?.$case === "nestedLoopJoin" &&
+      object.nodeBody?.nestedLoopJoin !== undefined &&
+      object.nodeBody?.nestedLoopJoin !== null
+    ) {
+      message.nodeBody = {
+        $case: "nestedLoopJoin",
+        nestedLoopJoin: NestedLoopJoinNode.fromPartial(object.nodeBody.nestedLoopJoin),
+      };
+    }
+    if (object.nodeBody?.$case === "topN" && object.nodeBody?.topN !== undefined && object.nodeBody?.topN !== null) {
+      message.nodeBody = { $case: "topN", topN: TopNNode.fromPartial(object.nodeBody.topN) };
+    }
+    if (
+      object.nodeBody?.$case === "sortAgg" &&
+      object.nodeBody?.sortAgg !== undefined &&
+      object.nodeBody?.sortAgg !== null
+    ) {
+      message.nodeBody = { $case: "sortAgg", sortAgg: SortAggNode.fromPartial(object.nodeBody.sortAgg) };
+    }
+    if (
+      object.nodeBody?.$case === "rowSeqScan" &&
+      object.nodeBody?.rowSeqScan !== undefined &&
+      object.nodeBody?.rowSeqScan !== null
+    ) {
+      message.nodeBody = { $case: "rowSeqScan", rowSeqScan: RowSeqScanNode.fromPartial(object.nodeBody.rowSeqScan) };
+    }
+    if (object.nodeBody?.$case === "limit" && object.nodeBody?.limit !== undefined && object.nodeBody?.limit !== null) {
+      message.nodeBody = { $case: "limit", limit: LimitNode.fromPartial(object.nodeBody.limit) };
+    }
+    if (
+      object.nodeBody?.$case === "values" && object.nodeBody?.values !== undefined && object.nodeBody?.values !== null
+    ) {
+      message.nodeBody = { $case: "values", values: ValuesNode.fromPartial(object.nodeBody.values) };
+    }
+    if (
+      object.nodeBody?.$case === "hashJoin" &&
+      object.nodeBody?.hashJoin !== undefined &&
+      object.nodeBody?.hashJoin !== null
+    ) {
+      message.nodeBody = { $case: "hashJoin", hashJoin: HashJoinNode.fromPartial(object.nodeBody.hashJoin) };
+    }
+    if (
+      object.nodeBody?.$case === "mergeSortExchange" &&
+      object.nodeBody?.mergeSortExchange !== undefined &&
+      object.nodeBody?.mergeSortExchange !== null
+    ) {
+      message.nodeBody = {
+        $case: "mergeSortExchange",
+        mergeSortExchange: MergeSortExchangeNode.fromPartial(object.nodeBody.mergeSortExchange),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "sortMergeJoin" &&
+      object.nodeBody?.sortMergeJoin !== undefined &&
+      object.nodeBody?.sortMergeJoin !== null
+    ) {
+      message.nodeBody = {
+        $case: "sortMergeJoin",
+        sortMergeJoin: SortMergeJoinNode.fromPartial(object.nodeBody.sortMergeJoin),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "hopWindow" &&
+      object.nodeBody?.hopWindow !== undefined &&
+      object.nodeBody?.hopWindow !== null
+    ) {
+      message.nodeBody = { $case: "hopWindow", hopWindow: HopWindowNode.fromPartial(object.nodeBody.hopWindow) };
+    }
+    if (
+      object.nodeBody?.$case === "tableFunction" &&
+      object.nodeBody?.tableFunction !== undefined &&
+      object.nodeBody?.tableFunction !== null
+    ) {
+      message.nodeBody = {
+        $case: "tableFunction",
+        tableFunction: TableFunctionNode.fromPartial(object.nodeBody.tableFunction),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "sysRowSeqScan" &&
+      object.nodeBody?.sysRowSeqScan !== undefined &&
+      object.nodeBody?.sysRowSeqScan !== null
+    ) {
+      message.nodeBody = {
+        $case: "sysRowSeqScan",
+        sysRowSeqScan: SysRowSeqScanNode.fromPartial(object.nodeBody.sysRowSeqScan),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "expand" && object.nodeBody?.expand !== undefined && object.nodeBody?.expand !== null
+    ) {
+      message.nodeBody = { $case: "expand", expand: ExpandNode.fromPartial(object.nodeBody.expand) };
+    }
+    if (
+      object.nodeBody?.$case === "lookupJoin" &&
+      object.nodeBody?.lookupJoin !== undefined &&
+      object.nodeBody?.lookupJoin !== null
+    ) {
+      message.nodeBody = { $case: "lookupJoin", lookupJoin: LookupJoinNode.fromPartial(object.nodeBody.lookupJoin) };
+    }
+    if (
+      object.nodeBody?.$case === "projectSet" &&
+      object.nodeBody?.projectSet !== undefined &&
+      object.nodeBody?.projectSet !== null
+    ) {
+      message.nodeBody = { $case: "projectSet", projectSet: ProjectSetNode.fromPartial(object.nodeBody.projectSet) };
+    }
+    if (object.nodeBody?.$case === "union" && object.nodeBody?.union !== undefined && object.nodeBody?.union !== null) {
+      message.nodeBody = { $case: "union", union: UnionNode.fromPartial(object.nodeBody.union) };
+    }
     message.identity = object.identity ?? "";
     return message;
   },
 };
 
 function createBaseExchangeInfo(): ExchangeInfo {
-  return { mode: 0, broadcastInfo: undefined, hashInfo: undefined };
+  return { mode: 0, distribution: undefined };
 }
 
 export const ExchangeInfo = {
@@ -3145,11 +3272,11 @@ export const ExchangeInfo = {
     if (message.mode !== 0) {
       writer.uint32(8).int32(message.mode);
     }
-    if (message.broadcastInfo !== undefined) {
-      ExchangeInfo_BroadcastInfo.encode(message.broadcastInfo, writer.uint32(18).fork()).ldelim();
+    if (message.distribution?.$case === "broadcastInfo") {
+      ExchangeInfo_BroadcastInfo.encode(message.distribution.broadcastInfo, writer.uint32(18).fork()).ldelim();
     }
-    if (message.hashInfo !== undefined) {
-      ExchangeInfo_HashInfo.encode(message.hashInfo, writer.uint32(26).fork()).ldelim();
+    if (message.distribution?.$case === "hashInfo") {
+      ExchangeInfo_HashInfo.encode(message.distribution.hashInfo, writer.uint32(26).fork()).ldelim();
     }
     return writer;
   },
@@ -3165,10 +3292,13 @@ export const ExchangeInfo = {
           message.mode = reader.int32() as any;
           break;
         case 2:
-          message.broadcastInfo = ExchangeInfo_BroadcastInfo.decode(reader, reader.uint32());
+          message.distribution = {
+            $case: "broadcastInfo",
+            broadcastInfo: ExchangeInfo_BroadcastInfo.decode(reader, reader.uint32()),
+          };
           break;
         case 3:
-          message.hashInfo = ExchangeInfo_HashInfo.decode(reader, reader.uint32());
+          message.distribution = { $case: "hashInfo", hashInfo: ExchangeInfo_HashInfo.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -3181,34 +3311,49 @@ export const ExchangeInfo = {
   fromJSON(object: any): ExchangeInfo {
     return {
       mode: isSet(object.mode) ? exchangeInfo_DistributionModeFromJSON(object.mode) : 0,
-      broadcastInfo: isSet(object.broadcastInfo)
-        ? ExchangeInfo_BroadcastInfo.fromJSON(object.broadcastInfo)
+      distribution: isSet(object.broadcastInfo)
+        ? { $case: "broadcastInfo", broadcastInfo: ExchangeInfo_BroadcastInfo.fromJSON(object.broadcastInfo) }
+        : isSet(object.hashInfo)
+        ? { $case: "hashInfo", hashInfo: ExchangeInfo_HashInfo.fromJSON(object.hashInfo) }
         : undefined,
-      hashInfo: isSet(object.hashInfo) ? ExchangeInfo_HashInfo.fromJSON(object.hashInfo) : undefined,
     };
   },
 
   toJSON(message: ExchangeInfo): unknown {
     const obj: any = {};
     message.mode !== undefined && (obj.mode = exchangeInfo_DistributionModeToJSON(message.mode));
-    message.broadcastInfo !== undefined &&
-      (obj.broadcastInfo = message.broadcastInfo
-        ? ExchangeInfo_BroadcastInfo.toJSON(message.broadcastInfo)
-        : undefined);
-    message.hashInfo !== undefined &&
-      (obj.hashInfo = message.hashInfo ? ExchangeInfo_HashInfo.toJSON(message.hashInfo) : undefined);
+    message.distribution?.$case === "broadcastInfo" && (obj.broadcastInfo = message.distribution?.broadcastInfo
+      ? ExchangeInfo_BroadcastInfo.toJSON(message.distribution?.broadcastInfo)
+      : undefined);
+    message.distribution?.$case === "hashInfo" && (obj.hashInfo = message.distribution?.hashInfo
+      ? ExchangeInfo_HashInfo.toJSON(message.distribution?.hashInfo)
+      : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ExchangeInfo>, I>>(object: I): ExchangeInfo {
     const message = createBaseExchangeInfo();
     message.mode = object.mode ?? 0;
-    message.broadcastInfo = (object.broadcastInfo !== undefined && object.broadcastInfo !== null)
-      ? ExchangeInfo_BroadcastInfo.fromPartial(object.broadcastInfo)
-      : undefined;
-    message.hashInfo = (object.hashInfo !== undefined && object.hashInfo !== null)
-      ? ExchangeInfo_HashInfo.fromPartial(object.hashInfo)
-      : undefined;
+    if (
+      object.distribution?.$case === "broadcastInfo" &&
+      object.distribution?.broadcastInfo !== undefined &&
+      object.distribution?.broadcastInfo !== null
+    ) {
+      message.distribution = {
+        $case: "broadcastInfo",
+        broadcastInfo: ExchangeInfo_BroadcastInfo.fromPartial(object.distribution.broadcastInfo),
+      };
+    }
+    if (
+      object.distribution?.$case === "hashInfo" &&
+      object.distribution?.hashInfo !== undefined &&
+      object.distribution?.hashInfo !== null
+    ) {
+      message.distribution = {
+        $case: "hashInfo",
+        hashInfo: ExchangeInfo_HashInfo.fromPartial(object.distribution.hashInfo),
+      };
+    }
     return message;
   },
 };
@@ -3440,6 +3585,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 

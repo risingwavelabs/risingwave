@@ -225,36 +225,14 @@ export interface ResumeMutation {
 }
 
 export interface Barrier {
-  epoch:
-    | Epoch
-    | undefined;
-  /** Add new dispatchers to some actors, used for creating materialized views. */
-  add:
-    | AddMutation
-    | undefined;
-  /**
-   * Stop a set of actors, used for dropping materialized views. Empty dispatchers will be
-   * automatically removed.
-   */
-  stop:
-    | StopMutation
-    | undefined;
-  /** Update outputs and hash mappings for some dispatchers, used for scaling. */
-  update:
-    | UpdateMutation
-    | undefined;
-  /** Change the split of some sources. */
-  splits:
-    | SourceChangeSplitMutation
-    | undefined;
-  /** Pause the dataflow of the whole streaming graph. */
-  pause:
-    | PauseMutation
-    | undefined;
-  /** Resume the dataflow of the whole streaming graph. */
-  resume:
-    | ResumeMutation
-    | undefined;
+  epoch: Epoch | undefined;
+  mutation?:
+    | { $case: "add"; add: AddMutation }
+    | { $case: "stop"; stop: StopMutation }
+    | { $case: "update"; update: UpdateMutation }
+    | { $case: "splits"; splits: SourceChangeSplitMutation }
+    | { $case: "pause"; pause: PauseMutation }
+    | { $case: "resume"; resume: ResumeMutation };
   /** Used for tracing. */
   span: Uint8Array;
   /** Whether this barrier do checkpoint */
@@ -264,8 +242,7 @@ export interface Barrier {
 }
 
 export interface StreamMessage {
-  streamChunk: StreamChunk | undefined;
-  barrier: Barrier | undefined;
+  streamMessage?: { $case: "streamChunk"; streamChunk: StreamChunk } | { $case: "barrier"; barrier: Barrier };
 }
 
 /** Hash mapping for compute node. Stores mapping from virtual node to actor id. */
@@ -584,14 +561,9 @@ export interface LookupNode {
    * will then apply the column mapping to the combined result.
    */
   columnMapping: number[];
-  /** Table Id of the arrangement (when created along with join plan) */
-  tableId:
-    | number
-    | undefined;
-  /** Table Id of the arrangement (when using index) */
-  indexId:
-    | number
-    | undefined;
+  arrangementTableId?:
+    | { $case: "tableId"; tableId: number }
+    | { $case: "indexId"; indexId: number };
   /** Info about the arrangement */
   arrangementTableInfo:
     | ArrangementInfo
@@ -622,33 +594,32 @@ export interface ProjectSetNode {
 }
 
 export interface StreamNode {
-  source: SourceNode | undefined;
-  project: ProjectNode | undefined;
-  filter: FilterNode | undefined;
-  materialize: MaterializeNode | undefined;
-  localSimpleAgg: SimpleAggNode | undefined;
-  globalSimpleAgg: SimpleAggNode | undefined;
-  hashAgg: HashAggNode | undefined;
-  appendOnlyTopN: AppendOnlyTopNNode | undefined;
-  hashJoin: HashJoinNode | undefined;
-  topN: TopNNode | undefined;
-  hopWindow: HopWindowNode | undefined;
-  merge: MergeNode | undefined;
-  exchange: ExchangeNode | undefined;
-  chain: ChainNode | undefined;
-  batchPlan: BatchPlanNode | undefined;
-  lookup: LookupNode | undefined;
-  arrange: ArrangeNode | undefined;
-  lookupUnion: LookupUnionNode | undefined;
-  union: UnionNode | undefined;
-  deltaIndexJoin: DeltaIndexJoinNode | undefined;
-  sink: SinkNode | undefined;
-  expand: ExpandNode | undefined;
-  dynamicFilter: DynamicFilterNode | undefined;
-  projectSet: ProjectSetNode | undefined;
-  groupTopN:
-    | GroupTopNNode
-    | undefined;
+  nodeBody?:
+    | { $case: "source"; source: SourceNode }
+    | { $case: "project"; project: ProjectNode }
+    | { $case: "filter"; filter: FilterNode }
+    | { $case: "materialize"; materialize: MaterializeNode }
+    | { $case: "localSimpleAgg"; localSimpleAgg: SimpleAggNode }
+    | { $case: "globalSimpleAgg"; globalSimpleAgg: SimpleAggNode }
+    | { $case: "hashAgg"; hashAgg: HashAggNode }
+    | { $case: "appendOnlyTopN"; appendOnlyTopN: AppendOnlyTopNNode }
+    | { $case: "hashJoin"; hashJoin: HashJoinNode }
+    | { $case: "topN"; topN: TopNNode }
+    | { $case: "hopWindow"; hopWindow: HopWindowNode }
+    | { $case: "merge"; merge: MergeNode }
+    | { $case: "exchange"; exchange: ExchangeNode }
+    | { $case: "chain"; chain: ChainNode }
+    | { $case: "batchPlan"; batchPlan: BatchPlanNode }
+    | { $case: "lookup"; lookup: LookupNode }
+    | { $case: "arrange"; arrange: ArrangeNode }
+    | { $case: "lookupUnion"; lookupUnion: LookupUnionNode }
+    | { $case: "union"; union: UnionNode }
+    | { $case: "deltaIndexJoin"; deltaIndexJoin: DeltaIndexJoinNode }
+    | { $case: "sink"; sink: SinkNode }
+    | { $case: "expand"; expand: ExpandNode }
+    | { $case: "dynamicFilter"; dynamicFilter: DynamicFilterNode }
+    | { $case: "projectSet"; projectSet: ProjectSetNode }
+    | { $case: "groupTopN"; groupTopN: GroupTopNNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -1854,18 +1825,7 @@ export const ResumeMutation = {
 };
 
 function createBaseBarrier(): Barrier {
-  return {
-    epoch: undefined,
-    add: undefined,
-    stop: undefined,
-    update: undefined,
-    splits: undefined,
-    pause: undefined,
-    resume: undefined,
-    span: new Uint8Array(),
-    checkpoint: false,
-    passedActors: [],
-  };
+  return { epoch: undefined, mutation: undefined, span: new Uint8Array(), checkpoint: false, passedActors: [] };
 }
 
 export const Barrier = {
@@ -1873,23 +1833,23 @@ export const Barrier = {
     if (message.epoch !== undefined) {
       Epoch.encode(message.epoch, writer.uint32(10).fork()).ldelim();
     }
-    if (message.add !== undefined) {
-      AddMutation.encode(message.add, writer.uint32(26).fork()).ldelim();
+    if (message.mutation?.$case === "add") {
+      AddMutation.encode(message.mutation.add, writer.uint32(26).fork()).ldelim();
     }
-    if (message.stop !== undefined) {
-      StopMutation.encode(message.stop, writer.uint32(34).fork()).ldelim();
+    if (message.mutation?.$case === "stop") {
+      StopMutation.encode(message.mutation.stop, writer.uint32(34).fork()).ldelim();
     }
-    if (message.update !== undefined) {
-      UpdateMutation.encode(message.update, writer.uint32(42).fork()).ldelim();
+    if (message.mutation?.$case === "update") {
+      UpdateMutation.encode(message.mutation.update, writer.uint32(42).fork()).ldelim();
     }
-    if (message.splits !== undefined) {
-      SourceChangeSplitMutation.encode(message.splits, writer.uint32(50).fork()).ldelim();
+    if (message.mutation?.$case === "splits") {
+      SourceChangeSplitMutation.encode(message.mutation.splits, writer.uint32(50).fork()).ldelim();
     }
-    if (message.pause !== undefined) {
-      PauseMutation.encode(message.pause, writer.uint32(58).fork()).ldelim();
+    if (message.mutation?.$case === "pause") {
+      PauseMutation.encode(message.mutation.pause, writer.uint32(58).fork()).ldelim();
     }
-    if (message.resume !== undefined) {
-      ResumeMutation.encode(message.resume, writer.uint32(66).fork()).ldelim();
+    if (message.mutation?.$case === "resume") {
+      ResumeMutation.encode(message.mutation.resume, writer.uint32(66).fork()).ldelim();
     }
     if (message.span.length !== 0) {
       writer.uint32(18).bytes(message.span);
@@ -1916,22 +1876,22 @@ export const Barrier = {
           message.epoch = Epoch.decode(reader, reader.uint32());
           break;
         case 3:
-          message.add = AddMutation.decode(reader, reader.uint32());
+          message.mutation = { $case: "add", add: AddMutation.decode(reader, reader.uint32()) };
           break;
         case 4:
-          message.stop = StopMutation.decode(reader, reader.uint32());
+          message.mutation = { $case: "stop", stop: StopMutation.decode(reader, reader.uint32()) };
           break;
         case 5:
-          message.update = UpdateMutation.decode(reader, reader.uint32());
+          message.mutation = { $case: "update", update: UpdateMutation.decode(reader, reader.uint32()) };
           break;
         case 6:
-          message.splits = SourceChangeSplitMutation.decode(reader, reader.uint32());
+          message.mutation = { $case: "splits", splits: SourceChangeSplitMutation.decode(reader, reader.uint32()) };
           break;
         case 7:
-          message.pause = PauseMutation.decode(reader, reader.uint32());
+          message.mutation = { $case: "pause", pause: PauseMutation.decode(reader, reader.uint32()) };
           break;
         case 8:
-          message.resume = ResumeMutation.decode(reader, reader.uint32());
+          message.mutation = { $case: "resume", resume: ResumeMutation.decode(reader, reader.uint32()) };
           break;
         case 2:
           message.span = reader.bytes();
@@ -1960,12 +1920,19 @@ export const Barrier = {
   fromJSON(object: any): Barrier {
     return {
       epoch: isSet(object.epoch) ? Epoch.fromJSON(object.epoch) : undefined,
-      add: isSet(object.add) ? AddMutation.fromJSON(object.add) : undefined,
-      stop: isSet(object.stop) ? StopMutation.fromJSON(object.stop) : undefined,
-      update: isSet(object.update) ? UpdateMutation.fromJSON(object.update) : undefined,
-      splits: isSet(object.splits) ? SourceChangeSplitMutation.fromJSON(object.splits) : undefined,
-      pause: isSet(object.pause) ? PauseMutation.fromJSON(object.pause) : undefined,
-      resume: isSet(object.resume) ? ResumeMutation.fromJSON(object.resume) : undefined,
+      mutation: isSet(object.add)
+        ? { $case: "add", add: AddMutation.fromJSON(object.add) }
+        : isSet(object.stop)
+        ? { $case: "stop", stop: StopMutation.fromJSON(object.stop) }
+        : isSet(object.update)
+        ? { $case: "update", update: UpdateMutation.fromJSON(object.update) }
+        : isSet(object.splits)
+        ? { $case: "splits", splits: SourceChangeSplitMutation.fromJSON(object.splits) }
+        : isSet(object.pause)
+        ? { $case: "pause", pause: PauseMutation.fromJSON(object.pause) }
+        : isSet(object.resume)
+        ? { $case: "resume", resume: ResumeMutation.fromJSON(object.resume) }
+        : undefined,
       span: isSet(object.span) ? bytesFromBase64(object.span) : new Uint8Array(),
       checkpoint: isSet(object.checkpoint) ? Boolean(object.checkpoint) : false,
       passedActors: Array.isArray(object?.passedActors) ? object.passedActors.map((e: any) => Number(e)) : [],
@@ -1975,13 +1942,18 @@ export const Barrier = {
   toJSON(message: Barrier): unknown {
     const obj: any = {};
     message.epoch !== undefined && (obj.epoch = message.epoch ? Epoch.toJSON(message.epoch) : undefined);
-    message.add !== undefined && (obj.add = message.add ? AddMutation.toJSON(message.add) : undefined);
-    message.stop !== undefined && (obj.stop = message.stop ? StopMutation.toJSON(message.stop) : undefined);
-    message.update !== undefined && (obj.update = message.update ? UpdateMutation.toJSON(message.update) : undefined);
-    message.splits !== undefined &&
-      (obj.splits = message.splits ? SourceChangeSplitMutation.toJSON(message.splits) : undefined);
-    message.pause !== undefined && (obj.pause = message.pause ? PauseMutation.toJSON(message.pause) : undefined);
-    message.resume !== undefined && (obj.resume = message.resume ? ResumeMutation.toJSON(message.resume) : undefined);
+    message.mutation?.$case === "add" &&
+      (obj.add = message.mutation?.add ? AddMutation.toJSON(message.mutation?.add) : undefined);
+    message.mutation?.$case === "stop" &&
+      (obj.stop = message.mutation?.stop ? StopMutation.toJSON(message.mutation?.stop) : undefined);
+    message.mutation?.$case === "update" &&
+      (obj.update = message.mutation?.update ? UpdateMutation.toJSON(message.mutation?.update) : undefined);
+    message.mutation?.$case === "splits" &&
+      (obj.splits = message.mutation?.splits ? SourceChangeSplitMutation.toJSON(message.mutation?.splits) : undefined);
+    message.mutation?.$case === "pause" &&
+      (obj.pause = message.mutation?.pause ? PauseMutation.toJSON(message.mutation?.pause) : undefined);
+    message.mutation?.$case === "resume" &&
+      (obj.resume = message.mutation?.resume ? ResumeMutation.toJSON(message.mutation?.resume) : undefined);
     message.span !== undefined &&
       (obj.span = base64FromBytes(message.span !== undefined ? message.span : new Uint8Array()));
     message.checkpoint !== undefined && (obj.checkpoint = message.checkpoint);
@@ -1996,22 +1968,30 @@ export const Barrier = {
   fromPartial<I extends Exact<DeepPartial<Barrier>, I>>(object: I): Barrier {
     const message = createBaseBarrier();
     message.epoch = (object.epoch !== undefined && object.epoch !== null) ? Epoch.fromPartial(object.epoch) : undefined;
-    message.add = (object.add !== undefined && object.add !== null) ? AddMutation.fromPartial(object.add) : undefined;
-    message.stop = (object.stop !== undefined && object.stop !== null)
-      ? StopMutation.fromPartial(object.stop)
-      : undefined;
-    message.update = (object.update !== undefined && object.update !== null)
-      ? UpdateMutation.fromPartial(object.update)
-      : undefined;
-    message.splits = (object.splits !== undefined && object.splits !== null)
-      ? SourceChangeSplitMutation.fromPartial(object.splits)
-      : undefined;
-    message.pause = (object.pause !== undefined && object.pause !== null)
-      ? PauseMutation.fromPartial(object.pause)
-      : undefined;
-    message.resume = (object.resume !== undefined && object.resume !== null)
-      ? ResumeMutation.fromPartial(object.resume)
-      : undefined;
+    if (object.mutation?.$case === "add" && object.mutation?.add !== undefined && object.mutation?.add !== null) {
+      message.mutation = { $case: "add", add: AddMutation.fromPartial(object.mutation.add) };
+    }
+    if (object.mutation?.$case === "stop" && object.mutation?.stop !== undefined && object.mutation?.stop !== null) {
+      message.mutation = { $case: "stop", stop: StopMutation.fromPartial(object.mutation.stop) };
+    }
+    if (
+      object.mutation?.$case === "update" && object.mutation?.update !== undefined && object.mutation?.update !== null
+    ) {
+      message.mutation = { $case: "update", update: UpdateMutation.fromPartial(object.mutation.update) };
+    }
+    if (
+      object.mutation?.$case === "splits" && object.mutation?.splits !== undefined && object.mutation?.splits !== null
+    ) {
+      message.mutation = { $case: "splits", splits: SourceChangeSplitMutation.fromPartial(object.mutation.splits) };
+    }
+    if (object.mutation?.$case === "pause" && object.mutation?.pause !== undefined && object.mutation?.pause !== null) {
+      message.mutation = { $case: "pause", pause: PauseMutation.fromPartial(object.mutation.pause) };
+    }
+    if (
+      object.mutation?.$case === "resume" && object.mutation?.resume !== undefined && object.mutation?.resume !== null
+    ) {
+      message.mutation = { $case: "resume", resume: ResumeMutation.fromPartial(object.mutation.resume) };
+    }
     message.span = object.span ?? new Uint8Array();
     message.checkpoint = object.checkpoint ?? false;
     message.passedActors = object.passedActors?.map((e) => e) || [];
@@ -2020,16 +2000,16 @@ export const Barrier = {
 };
 
 function createBaseStreamMessage(): StreamMessage {
-  return { streamChunk: undefined, barrier: undefined };
+  return { streamMessage: undefined };
 }
 
 export const StreamMessage = {
   encode(message: StreamMessage, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.streamChunk !== undefined) {
-      StreamChunk.encode(message.streamChunk, writer.uint32(10).fork()).ldelim();
+    if (message.streamMessage?.$case === "streamChunk") {
+      StreamChunk.encode(message.streamMessage.streamChunk, writer.uint32(10).fork()).ldelim();
     }
-    if (message.barrier !== undefined) {
-      Barrier.encode(message.barrier, writer.uint32(18).fork()).ldelim();
+    if (message.streamMessage?.$case === "barrier") {
+      Barrier.encode(message.streamMessage.barrier, writer.uint32(18).fork()).ldelim();
     }
     return writer;
   },
@@ -2042,10 +2022,10 @@ export const StreamMessage = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          message.streamChunk = StreamChunk.decode(reader, reader.uint32());
+          message.streamMessage = { $case: "streamChunk", streamChunk: StreamChunk.decode(reader, reader.uint32()) };
           break;
         case 2:
-          message.barrier = Barrier.decode(reader, reader.uint32());
+          message.streamMessage = { $case: "barrier", barrier: Barrier.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -2057,27 +2037,43 @@ export const StreamMessage = {
 
   fromJSON(object: any): StreamMessage {
     return {
-      streamChunk: isSet(object.streamChunk) ? StreamChunk.fromJSON(object.streamChunk) : undefined,
-      barrier: isSet(object.barrier) ? Barrier.fromJSON(object.barrier) : undefined,
+      streamMessage: isSet(object.streamChunk)
+        ? { $case: "streamChunk", streamChunk: StreamChunk.fromJSON(object.streamChunk) }
+        : isSet(object.barrier)
+        ? { $case: "barrier", barrier: Barrier.fromJSON(object.barrier) }
+        : undefined,
     };
   },
 
   toJSON(message: StreamMessage): unknown {
     const obj: any = {};
-    message.streamChunk !== undefined &&
-      (obj.streamChunk = message.streamChunk ? StreamChunk.toJSON(message.streamChunk) : undefined);
-    message.barrier !== undefined && (obj.barrier = message.barrier ? Barrier.toJSON(message.barrier) : undefined);
+    message.streamMessage?.$case === "streamChunk" && (obj.streamChunk = message.streamMessage?.streamChunk
+      ? StreamChunk.toJSON(message.streamMessage?.streamChunk)
+      : undefined);
+    message.streamMessage?.$case === "barrier" &&
+      (obj.barrier = message.streamMessage?.barrier ? Barrier.toJSON(message.streamMessage?.barrier) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<StreamMessage>, I>>(object: I): StreamMessage {
     const message = createBaseStreamMessage();
-    message.streamChunk = (object.streamChunk !== undefined && object.streamChunk !== null)
-      ? StreamChunk.fromPartial(object.streamChunk)
-      : undefined;
-    message.barrier = (object.barrier !== undefined && object.barrier !== null)
-      ? Barrier.fromPartial(object.barrier)
-      : undefined;
+    if (
+      object.streamMessage?.$case === "streamChunk" &&
+      object.streamMessage?.streamChunk !== undefined &&
+      object.streamMessage?.streamChunk !== null
+    ) {
+      message.streamMessage = {
+        $case: "streamChunk",
+        streamChunk: StreamChunk.fromPartial(object.streamMessage.streamChunk),
+      };
+    }
+    if (
+      object.streamMessage?.$case === "barrier" &&
+      object.streamMessage?.barrier !== undefined &&
+      object.streamMessage?.barrier !== null
+    ) {
+      message.streamMessage = { $case: "barrier", barrier: Barrier.fromPartial(object.streamMessage.barrier) };
+    }
     return message;
   },
 };
@@ -4184,8 +4180,7 @@ function createBaseLookupNode(): LookupNode {
     streamKey: [],
     useCurrentEpoch: false,
     columnMapping: [],
-    tableId: undefined,
-    indexId: undefined,
+    arrangementTableId: undefined,
     arrangementTableInfo: undefined,
     arrangementTable: undefined,
   };
@@ -4211,11 +4206,11 @@ export const LookupNode = {
       writer.int32(v);
     }
     writer.ldelim();
-    if (message.tableId !== undefined) {
-      writer.uint32(40).uint32(message.tableId);
+    if (message.arrangementTableId?.$case === "tableId") {
+      writer.uint32(40).uint32(message.arrangementTableId.tableId);
     }
-    if (message.indexId !== undefined) {
-      writer.uint32(48).uint32(message.indexId);
+    if (message.arrangementTableId?.$case === "indexId") {
+      writer.uint32(48).uint32(message.arrangementTableId.indexId);
     }
     if (message.arrangementTableInfo !== undefined) {
       ArrangementInfo.encode(message.arrangementTableInfo, writer.uint32(58).fork()).ldelim();
@@ -4267,10 +4262,10 @@ export const LookupNode = {
           }
           break;
         case 5:
-          message.tableId = reader.uint32();
+          message.arrangementTableId = { $case: "tableId", tableId: reader.uint32() };
           break;
         case 6:
-          message.indexId = reader.uint32();
+          message.arrangementTableId = { $case: "indexId", indexId: reader.uint32() };
           break;
         case 7:
           message.arrangementTableInfo = ArrangementInfo.decode(reader, reader.uint32());
@@ -4292,8 +4287,11 @@ export const LookupNode = {
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
       useCurrentEpoch: isSet(object.useCurrentEpoch) ? Boolean(object.useCurrentEpoch) : false,
       columnMapping: Array.isArray(object?.columnMapping) ? object.columnMapping.map((e: any) => Number(e)) : [],
-      tableId: isSet(object.tableId) ? Number(object.tableId) : undefined,
-      indexId: isSet(object.indexId) ? Number(object.indexId) : undefined,
+      arrangementTableId: isSet(object.tableId)
+        ? { $case: "tableId", tableId: Number(object.tableId) }
+        : isSet(object.indexId)
+        ? { $case: "indexId", indexId: Number(object.indexId) }
+        : undefined,
       arrangementTableInfo: isSet(object.arrangementTableInfo)
         ? ArrangementInfo.fromJSON(object.arrangementTableInfo)
         : undefined,
@@ -4319,8 +4317,8 @@ export const LookupNode = {
     } else {
       obj.columnMapping = [];
     }
-    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
-    message.indexId !== undefined && (obj.indexId = Math.round(message.indexId));
+    message.arrangementTableId?.$case === "tableId" && (obj.tableId = Math.round(message.arrangementTableId?.tableId));
+    message.arrangementTableId?.$case === "indexId" && (obj.indexId = Math.round(message.arrangementTableId?.indexId));
     message.arrangementTableInfo !== undefined && (obj.arrangementTableInfo = message.arrangementTableInfo
       ? ArrangementInfo.toJSON(message.arrangementTableInfo)
       : undefined);
@@ -4335,8 +4333,20 @@ export const LookupNode = {
     message.streamKey = object.streamKey?.map((e) => e) || [];
     message.useCurrentEpoch = object.useCurrentEpoch ?? false;
     message.columnMapping = object.columnMapping?.map((e) => e) || [];
-    message.tableId = object.tableId ?? undefined;
-    message.indexId = object.indexId ?? undefined;
+    if (
+      object.arrangementTableId?.$case === "tableId" &&
+      object.arrangementTableId?.tableId !== undefined &&
+      object.arrangementTableId?.tableId !== null
+    ) {
+      message.arrangementTableId = { $case: "tableId", tableId: object.arrangementTableId.tableId };
+    }
+    if (
+      object.arrangementTableId?.$case === "indexId" &&
+      object.arrangementTableId?.indexId !== undefined &&
+      object.arrangementTableId?.indexId !== null
+    ) {
+      message.arrangementTableId = { $case: "indexId", indexId: object.arrangementTableId.indexId };
+    }
     message.arrangementTableInfo = (object.arrangementTableInfo !== undefined && object.arrangementTableInfo !== null)
       ? ArrangementInfo.fromPartial(object.arrangementTableInfo)
       : undefined;
@@ -4619,117 +4629,85 @@ export const ProjectSetNode = {
 };
 
 function createBaseStreamNode(): StreamNode {
-  return {
-    source: undefined,
-    project: undefined,
-    filter: undefined,
-    materialize: undefined,
-    localSimpleAgg: undefined,
-    globalSimpleAgg: undefined,
-    hashAgg: undefined,
-    appendOnlyTopN: undefined,
-    hashJoin: undefined,
-    topN: undefined,
-    hopWindow: undefined,
-    merge: undefined,
-    exchange: undefined,
-    chain: undefined,
-    batchPlan: undefined,
-    lookup: undefined,
-    arrange: undefined,
-    lookupUnion: undefined,
-    union: undefined,
-    deltaIndexJoin: undefined,
-    sink: undefined,
-    expand: undefined,
-    dynamicFilter: undefined,
-    projectSet: undefined,
-    groupTopN: undefined,
-    operatorId: 0,
-    input: [],
-    streamKey: [],
-    appendOnly: false,
-    identity: "",
-    fields: [],
-  };
+  return { nodeBody: undefined, operatorId: 0, input: [], streamKey: [], appendOnly: false, identity: "", fields: [] };
 }
 
 export const StreamNode = {
   encode(message: StreamNode, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.source !== undefined) {
-      SourceNode.encode(message.source, writer.uint32(802).fork()).ldelim();
+    if (message.nodeBody?.$case === "source") {
+      SourceNode.encode(message.nodeBody.source, writer.uint32(802).fork()).ldelim();
     }
-    if (message.project !== undefined) {
-      ProjectNode.encode(message.project, writer.uint32(810).fork()).ldelim();
+    if (message.nodeBody?.$case === "project") {
+      ProjectNode.encode(message.nodeBody.project, writer.uint32(810).fork()).ldelim();
     }
-    if (message.filter !== undefined) {
-      FilterNode.encode(message.filter, writer.uint32(818).fork()).ldelim();
+    if (message.nodeBody?.$case === "filter") {
+      FilterNode.encode(message.nodeBody.filter, writer.uint32(818).fork()).ldelim();
     }
-    if (message.materialize !== undefined) {
-      MaterializeNode.encode(message.materialize, writer.uint32(826).fork()).ldelim();
+    if (message.nodeBody?.$case === "materialize") {
+      MaterializeNode.encode(message.nodeBody.materialize, writer.uint32(826).fork()).ldelim();
     }
-    if (message.localSimpleAgg !== undefined) {
-      SimpleAggNode.encode(message.localSimpleAgg, writer.uint32(834).fork()).ldelim();
+    if (message.nodeBody?.$case === "localSimpleAgg") {
+      SimpleAggNode.encode(message.nodeBody.localSimpleAgg, writer.uint32(834).fork()).ldelim();
     }
-    if (message.globalSimpleAgg !== undefined) {
-      SimpleAggNode.encode(message.globalSimpleAgg, writer.uint32(842).fork()).ldelim();
+    if (message.nodeBody?.$case === "globalSimpleAgg") {
+      SimpleAggNode.encode(message.nodeBody.globalSimpleAgg, writer.uint32(842).fork()).ldelim();
     }
-    if (message.hashAgg !== undefined) {
-      HashAggNode.encode(message.hashAgg, writer.uint32(850).fork()).ldelim();
+    if (message.nodeBody?.$case === "hashAgg") {
+      HashAggNode.encode(message.nodeBody.hashAgg, writer.uint32(850).fork()).ldelim();
     }
-    if (message.appendOnlyTopN !== undefined) {
-      AppendOnlyTopNNode.encode(message.appendOnlyTopN, writer.uint32(858).fork()).ldelim();
+    if (message.nodeBody?.$case === "appendOnlyTopN") {
+      AppendOnlyTopNNode.encode(message.nodeBody.appendOnlyTopN, writer.uint32(858).fork()).ldelim();
     }
-    if (message.hashJoin !== undefined) {
-      HashJoinNode.encode(message.hashJoin, writer.uint32(866).fork()).ldelim();
+    if (message.nodeBody?.$case === "hashJoin") {
+      HashJoinNode.encode(message.nodeBody.hashJoin, writer.uint32(866).fork()).ldelim();
     }
-    if (message.topN !== undefined) {
-      TopNNode.encode(message.topN, writer.uint32(874).fork()).ldelim();
+    if (message.nodeBody?.$case === "topN") {
+      TopNNode.encode(message.nodeBody.topN, writer.uint32(874).fork()).ldelim();
     }
-    if (message.hopWindow !== undefined) {
-      HopWindowNode.encode(message.hopWindow, writer.uint32(882).fork()).ldelim();
+    if (message.nodeBody?.$case === "hopWindow") {
+      HopWindowNode.encode(message.nodeBody.hopWindow, writer.uint32(882).fork()).ldelim();
     }
-    if (message.merge !== undefined) {
-      MergeNode.encode(message.merge, writer.uint32(890).fork()).ldelim();
+    if (message.nodeBody?.$case === "merge") {
+      MergeNode.encode(message.nodeBody.merge, writer.uint32(890).fork()).ldelim();
     }
-    if (message.exchange !== undefined) {
-      ExchangeNode.encode(message.exchange, writer.uint32(898).fork()).ldelim();
+    if (message.nodeBody?.$case === "exchange") {
+      ExchangeNode.encode(message.nodeBody.exchange, writer.uint32(898).fork()).ldelim();
     }
-    if (message.chain !== undefined) {
-      ChainNode.encode(message.chain, writer.uint32(906).fork()).ldelim();
+    if (message.nodeBody?.$case === "chain") {
+      ChainNode.encode(message.nodeBody.chain, writer.uint32(906).fork()).ldelim();
     }
-    if (message.batchPlan !== undefined) {
-      BatchPlanNode.encode(message.batchPlan, writer.uint32(914).fork()).ldelim();
+    if (message.nodeBody?.$case === "batchPlan") {
+      BatchPlanNode.encode(message.nodeBody.batchPlan, writer.uint32(914).fork()).ldelim();
     }
-    if (message.lookup !== undefined) {
-      LookupNode.encode(message.lookup, writer.uint32(922).fork()).ldelim();
+    if (message.nodeBody?.$case === "lookup") {
+      LookupNode.encode(message.nodeBody.lookup, writer.uint32(922).fork()).ldelim();
     }
-    if (message.arrange !== undefined) {
-      ArrangeNode.encode(message.arrange, writer.uint32(930).fork()).ldelim();
+    if (message.nodeBody?.$case === "arrange") {
+      ArrangeNode.encode(message.nodeBody.arrange, writer.uint32(930).fork()).ldelim();
     }
-    if (message.lookupUnion !== undefined) {
-      LookupUnionNode.encode(message.lookupUnion, writer.uint32(938).fork()).ldelim();
+    if (message.nodeBody?.$case === "lookupUnion") {
+      LookupUnionNode.encode(message.nodeBody.lookupUnion, writer.uint32(938).fork()).ldelim();
     }
-    if (message.union !== undefined) {
-      UnionNode.encode(message.union, writer.uint32(946).fork()).ldelim();
+    if (message.nodeBody?.$case === "union") {
+      UnionNode.encode(message.nodeBody.union, writer.uint32(946).fork()).ldelim();
     }
-    if (message.deltaIndexJoin !== undefined) {
-      DeltaIndexJoinNode.encode(message.deltaIndexJoin, writer.uint32(954).fork()).ldelim();
+    if (message.nodeBody?.$case === "deltaIndexJoin") {
+      DeltaIndexJoinNode.encode(message.nodeBody.deltaIndexJoin, writer.uint32(954).fork()).ldelim();
     }
-    if (message.sink !== undefined) {
-      SinkNode.encode(message.sink, writer.uint32(962).fork()).ldelim();
+    if (message.nodeBody?.$case === "sink") {
+      SinkNode.encode(message.nodeBody.sink, writer.uint32(962).fork()).ldelim();
     }
-    if (message.expand !== undefined) {
-      ExpandNode.encode(message.expand, writer.uint32(970).fork()).ldelim();
+    if (message.nodeBody?.$case === "expand") {
+      ExpandNode.encode(message.nodeBody.expand, writer.uint32(970).fork()).ldelim();
     }
-    if (message.dynamicFilter !== undefined) {
-      DynamicFilterNode.encode(message.dynamicFilter, writer.uint32(978).fork()).ldelim();
+    if (message.nodeBody?.$case === "dynamicFilter") {
+      DynamicFilterNode.encode(message.nodeBody.dynamicFilter, writer.uint32(978).fork()).ldelim();
     }
-    if (message.projectSet !== undefined) {
-      ProjectSetNode.encode(message.projectSet, writer.uint32(986).fork()).ldelim();
+    if (message.nodeBody?.$case === "projectSet") {
+      ProjectSetNode.encode(message.nodeBody.projectSet, writer.uint32(986).fork()).ldelim();
     }
-    if (message.groupTopN !== undefined) {
-      GroupTopNNode.encode(message.groupTopN, writer.uint32(994).fork()).ldelim();
+    if (message.nodeBody?.$case === "groupTopN") {
+      GroupTopNNode.encode(message.nodeBody.groupTopN, writer.uint32(994).fork()).ldelim();
     }
     if (message.operatorId !== 0) {
       writer.uint32(8).uint64(message.operatorId);
@@ -4762,79 +4740,91 @@ export const StreamNode = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 100:
-          message.source = SourceNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "source", source: SourceNode.decode(reader, reader.uint32()) };
           break;
         case 101:
-          message.project = ProjectNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "project", project: ProjectNode.decode(reader, reader.uint32()) };
           break;
         case 102:
-          message.filter = FilterNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "filter", filter: FilterNode.decode(reader, reader.uint32()) };
           break;
         case 103:
-          message.materialize = MaterializeNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "materialize", materialize: MaterializeNode.decode(reader, reader.uint32()) };
           break;
         case 104:
-          message.localSimpleAgg = SimpleAggNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "localSimpleAgg", localSimpleAgg: SimpleAggNode.decode(reader, reader.uint32()) };
           break;
         case 105:
-          message.globalSimpleAgg = SimpleAggNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "globalSimpleAgg",
+            globalSimpleAgg: SimpleAggNode.decode(reader, reader.uint32()),
+          };
           break;
         case 106:
-          message.hashAgg = HashAggNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "hashAgg", hashAgg: HashAggNode.decode(reader, reader.uint32()) };
           break;
         case 107:
-          message.appendOnlyTopN = AppendOnlyTopNNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "appendOnlyTopN",
+            appendOnlyTopN: AppendOnlyTopNNode.decode(reader, reader.uint32()),
+          };
           break;
         case 108:
-          message.hashJoin = HashJoinNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "hashJoin", hashJoin: HashJoinNode.decode(reader, reader.uint32()) };
           break;
         case 109:
-          message.topN = TopNNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "topN", topN: TopNNode.decode(reader, reader.uint32()) };
           break;
         case 110:
-          message.hopWindow = HopWindowNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "hopWindow", hopWindow: HopWindowNode.decode(reader, reader.uint32()) };
           break;
         case 111:
-          message.merge = MergeNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "merge", merge: MergeNode.decode(reader, reader.uint32()) };
           break;
         case 112:
-          message.exchange = ExchangeNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "exchange", exchange: ExchangeNode.decode(reader, reader.uint32()) };
           break;
         case 113:
-          message.chain = ChainNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "chain", chain: ChainNode.decode(reader, reader.uint32()) };
           break;
         case 114:
-          message.batchPlan = BatchPlanNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "batchPlan", batchPlan: BatchPlanNode.decode(reader, reader.uint32()) };
           break;
         case 115:
-          message.lookup = LookupNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "lookup", lookup: LookupNode.decode(reader, reader.uint32()) };
           break;
         case 116:
-          message.arrange = ArrangeNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "arrange", arrange: ArrangeNode.decode(reader, reader.uint32()) };
           break;
         case 117:
-          message.lookupUnion = LookupUnionNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "lookupUnion", lookupUnion: LookupUnionNode.decode(reader, reader.uint32()) };
           break;
         case 118:
-          message.union = UnionNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "union", union: UnionNode.decode(reader, reader.uint32()) };
           break;
         case 119:
-          message.deltaIndexJoin = DeltaIndexJoinNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "deltaIndexJoin",
+            deltaIndexJoin: DeltaIndexJoinNode.decode(reader, reader.uint32()),
+          };
           break;
         case 120:
-          message.sink = SinkNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "sink", sink: SinkNode.decode(reader, reader.uint32()) };
           break;
         case 121:
-          message.expand = ExpandNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "expand", expand: ExpandNode.decode(reader, reader.uint32()) };
           break;
         case 122:
-          message.dynamicFilter = DynamicFilterNode.decode(reader, reader.uint32());
+          message.nodeBody = {
+            $case: "dynamicFilter",
+            dynamicFilter: DynamicFilterNode.decode(reader, reader.uint32()),
+          };
           break;
         case 123:
-          message.projectSet = ProjectSetNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "projectSet", projectSet: ProjectSetNode.decode(reader, reader.uint32()) };
           break;
         case 124:
-          message.groupTopN = GroupTopNNode.decode(reader, reader.uint32());
+          message.nodeBody = { $case: "groupTopN", groupTopN: GroupTopNNode.decode(reader, reader.uint32()) };
           break;
         case 1:
           message.operatorId = longToNumber(reader.uint64() as Long);
@@ -4871,31 +4861,57 @@ export const StreamNode = {
 
   fromJSON(object: any): StreamNode {
     return {
-      source: isSet(object.source) ? SourceNode.fromJSON(object.source) : undefined,
-      project: isSet(object.project) ? ProjectNode.fromJSON(object.project) : undefined,
-      filter: isSet(object.filter) ? FilterNode.fromJSON(object.filter) : undefined,
-      materialize: isSet(object.materialize) ? MaterializeNode.fromJSON(object.materialize) : undefined,
-      localSimpleAgg: isSet(object.localSimpleAgg) ? SimpleAggNode.fromJSON(object.localSimpleAgg) : undefined,
-      globalSimpleAgg: isSet(object.globalSimpleAgg) ? SimpleAggNode.fromJSON(object.globalSimpleAgg) : undefined,
-      hashAgg: isSet(object.hashAgg) ? HashAggNode.fromJSON(object.hashAgg) : undefined,
-      appendOnlyTopN: isSet(object.appendOnlyTopN) ? AppendOnlyTopNNode.fromJSON(object.appendOnlyTopN) : undefined,
-      hashJoin: isSet(object.hashJoin) ? HashJoinNode.fromJSON(object.hashJoin) : undefined,
-      topN: isSet(object.topN) ? TopNNode.fromJSON(object.topN) : undefined,
-      hopWindow: isSet(object.hopWindow) ? HopWindowNode.fromJSON(object.hopWindow) : undefined,
-      merge: isSet(object.merge) ? MergeNode.fromJSON(object.merge) : undefined,
-      exchange: isSet(object.exchange) ? ExchangeNode.fromJSON(object.exchange) : undefined,
-      chain: isSet(object.chain) ? ChainNode.fromJSON(object.chain) : undefined,
-      batchPlan: isSet(object.batchPlan) ? BatchPlanNode.fromJSON(object.batchPlan) : undefined,
-      lookup: isSet(object.lookup) ? LookupNode.fromJSON(object.lookup) : undefined,
-      arrange: isSet(object.arrange) ? ArrangeNode.fromJSON(object.arrange) : undefined,
-      lookupUnion: isSet(object.lookupUnion) ? LookupUnionNode.fromJSON(object.lookupUnion) : undefined,
-      union: isSet(object.union) ? UnionNode.fromJSON(object.union) : undefined,
-      deltaIndexJoin: isSet(object.deltaIndexJoin) ? DeltaIndexJoinNode.fromJSON(object.deltaIndexJoin) : undefined,
-      sink: isSet(object.sink) ? SinkNode.fromJSON(object.sink) : undefined,
-      expand: isSet(object.expand) ? ExpandNode.fromJSON(object.expand) : undefined,
-      dynamicFilter: isSet(object.dynamicFilter) ? DynamicFilterNode.fromJSON(object.dynamicFilter) : undefined,
-      projectSet: isSet(object.projectSet) ? ProjectSetNode.fromJSON(object.projectSet) : undefined,
-      groupTopN: isSet(object.groupTopN) ? GroupTopNNode.fromJSON(object.groupTopN) : undefined,
+      nodeBody: isSet(object.source)
+        ? { $case: "source", source: SourceNode.fromJSON(object.source) }
+        : isSet(object.project)
+        ? { $case: "project", project: ProjectNode.fromJSON(object.project) }
+        : isSet(object.filter)
+        ? { $case: "filter", filter: FilterNode.fromJSON(object.filter) }
+        : isSet(object.materialize)
+        ? { $case: "materialize", materialize: MaterializeNode.fromJSON(object.materialize) }
+        : isSet(object.localSimpleAgg)
+        ? { $case: "localSimpleAgg", localSimpleAgg: SimpleAggNode.fromJSON(object.localSimpleAgg) }
+        : isSet(object.globalSimpleAgg)
+        ? { $case: "globalSimpleAgg", globalSimpleAgg: SimpleAggNode.fromJSON(object.globalSimpleAgg) }
+        : isSet(object.hashAgg)
+        ? { $case: "hashAgg", hashAgg: HashAggNode.fromJSON(object.hashAgg) }
+        : isSet(object.appendOnlyTopN)
+        ? { $case: "appendOnlyTopN", appendOnlyTopN: AppendOnlyTopNNode.fromJSON(object.appendOnlyTopN) }
+        : isSet(object.hashJoin)
+        ? { $case: "hashJoin", hashJoin: HashJoinNode.fromJSON(object.hashJoin) }
+        : isSet(object.topN)
+        ? { $case: "topN", topN: TopNNode.fromJSON(object.topN) }
+        : isSet(object.hopWindow)
+        ? { $case: "hopWindow", hopWindow: HopWindowNode.fromJSON(object.hopWindow) }
+        : isSet(object.merge)
+        ? { $case: "merge", merge: MergeNode.fromJSON(object.merge) }
+        : isSet(object.exchange)
+        ? { $case: "exchange", exchange: ExchangeNode.fromJSON(object.exchange) }
+        : isSet(object.chain)
+        ? { $case: "chain", chain: ChainNode.fromJSON(object.chain) }
+        : isSet(object.batchPlan)
+        ? { $case: "batchPlan", batchPlan: BatchPlanNode.fromJSON(object.batchPlan) }
+        : isSet(object.lookup)
+        ? { $case: "lookup", lookup: LookupNode.fromJSON(object.lookup) }
+        : isSet(object.arrange)
+        ? { $case: "arrange", arrange: ArrangeNode.fromJSON(object.arrange) }
+        : isSet(object.lookupUnion)
+        ? { $case: "lookupUnion", lookupUnion: LookupUnionNode.fromJSON(object.lookupUnion) }
+        : isSet(object.union)
+        ? { $case: "union", union: UnionNode.fromJSON(object.union) }
+        : isSet(object.deltaIndexJoin)
+        ? { $case: "deltaIndexJoin", deltaIndexJoin: DeltaIndexJoinNode.fromJSON(object.deltaIndexJoin) }
+        : isSet(object.sink)
+        ? { $case: "sink", sink: SinkNode.fromJSON(object.sink) }
+        : isSet(object.expand)
+        ? { $case: "expand", expand: ExpandNode.fromJSON(object.expand) }
+        : isSet(object.dynamicFilter)
+        ? { $case: "dynamicFilter", dynamicFilter: DynamicFilterNode.fromJSON(object.dynamicFilter) }
+        : isSet(object.projectSet)
+        ? { $case: "projectSet", projectSet: ProjectSetNode.fromJSON(object.projectSet) }
+        : isSet(object.groupTopN)
+        ? { $case: "groupTopN", groupTopN: GroupTopNNode.fromJSON(object.groupTopN) }
+        : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input) ? object.input.map((e: any) => StreamNode.fromJSON(e)) : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
@@ -4907,44 +4923,63 @@ export const StreamNode = {
 
   toJSON(message: StreamNode): unknown {
     const obj: any = {};
-    message.source !== undefined && (obj.source = message.source ? SourceNode.toJSON(message.source) : undefined);
-    message.project !== undefined && (obj.project = message.project ? ProjectNode.toJSON(message.project) : undefined);
-    message.filter !== undefined && (obj.filter = message.filter ? FilterNode.toJSON(message.filter) : undefined);
-    message.materialize !== undefined &&
-      (obj.materialize = message.materialize ? MaterializeNode.toJSON(message.materialize) : undefined);
-    message.localSimpleAgg !== undefined &&
-      (obj.localSimpleAgg = message.localSimpleAgg ? SimpleAggNode.toJSON(message.localSimpleAgg) : undefined);
-    message.globalSimpleAgg !== undefined &&
-      (obj.globalSimpleAgg = message.globalSimpleAgg ? SimpleAggNode.toJSON(message.globalSimpleAgg) : undefined);
-    message.hashAgg !== undefined && (obj.hashAgg = message.hashAgg ? HashAggNode.toJSON(message.hashAgg) : undefined);
-    message.appendOnlyTopN !== undefined &&
-      (obj.appendOnlyTopN = message.appendOnlyTopN ? AppendOnlyTopNNode.toJSON(message.appendOnlyTopN) : undefined);
-    message.hashJoin !== undefined &&
-      (obj.hashJoin = message.hashJoin ? HashJoinNode.toJSON(message.hashJoin) : undefined);
-    message.topN !== undefined && (obj.topN = message.topN ? TopNNode.toJSON(message.topN) : undefined);
-    message.hopWindow !== undefined &&
-      (obj.hopWindow = message.hopWindow ? HopWindowNode.toJSON(message.hopWindow) : undefined);
-    message.merge !== undefined && (obj.merge = message.merge ? MergeNode.toJSON(message.merge) : undefined);
-    message.exchange !== undefined &&
-      (obj.exchange = message.exchange ? ExchangeNode.toJSON(message.exchange) : undefined);
-    message.chain !== undefined && (obj.chain = message.chain ? ChainNode.toJSON(message.chain) : undefined);
-    message.batchPlan !== undefined &&
-      (obj.batchPlan = message.batchPlan ? BatchPlanNode.toJSON(message.batchPlan) : undefined);
-    message.lookup !== undefined && (obj.lookup = message.lookup ? LookupNode.toJSON(message.lookup) : undefined);
-    message.arrange !== undefined && (obj.arrange = message.arrange ? ArrangeNode.toJSON(message.arrange) : undefined);
-    message.lookupUnion !== undefined &&
-      (obj.lookupUnion = message.lookupUnion ? LookupUnionNode.toJSON(message.lookupUnion) : undefined);
-    message.union !== undefined && (obj.union = message.union ? UnionNode.toJSON(message.union) : undefined);
-    message.deltaIndexJoin !== undefined &&
-      (obj.deltaIndexJoin = message.deltaIndexJoin ? DeltaIndexJoinNode.toJSON(message.deltaIndexJoin) : undefined);
-    message.sink !== undefined && (obj.sink = message.sink ? SinkNode.toJSON(message.sink) : undefined);
-    message.expand !== undefined && (obj.expand = message.expand ? ExpandNode.toJSON(message.expand) : undefined);
-    message.dynamicFilter !== undefined &&
-      (obj.dynamicFilter = message.dynamicFilter ? DynamicFilterNode.toJSON(message.dynamicFilter) : undefined);
-    message.projectSet !== undefined &&
-      (obj.projectSet = message.projectSet ? ProjectSetNode.toJSON(message.projectSet) : undefined);
-    message.groupTopN !== undefined &&
-      (obj.groupTopN = message.groupTopN ? GroupTopNNode.toJSON(message.groupTopN) : undefined);
+    message.nodeBody?.$case === "source" &&
+      (obj.source = message.nodeBody?.source ? SourceNode.toJSON(message.nodeBody?.source) : undefined);
+    message.nodeBody?.$case === "project" &&
+      (obj.project = message.nodeBody?.project ? ProjectNode.toJSON(message.nodeBody?.project) : undefined);
+    message.nodeBody?.$case === "filter" &&
+      (obj.filter = message.nodeBody?.filter ? FilterNode.toJSON(message.nodeBody?.filter) : undefined);
+    message.nodeBody?.$case === "materialize" && (obj.materialize = message.nodeBody?.materialize
+      ? MaterializeNode.toJSON(message.nodeBody?.materialize)
+      : undefined);
+    message.nodeBody?.$case === "localSimpleAgg" && (obj.localSimpleAgg = message.nodeBody?.localSimpleAgg
+      ? SimpleAggNode.toJSON(message.nodeBody?.localSimpleAgg)
+      : undefined);
+    message.nodeBody?.$case === "globalSimpleAgg" && (obj.globalSimpleAgg = message.nodeBody?.globalSimpleAgg
+      ? SimpleAggNode.toJSON(message.nodeBody?.globalSimpleAgg)
+      : undefined);
+    message.nodeBody?.$case === "hashAgg" &&
+      (obj.hashAgg = message.nodeBody?.hashAgg ? HashAggNode.toJSON(message.nodeBody?.hashAgg) : undefined);
+    message.nodeBody?.$case === "appendOnlyTopN" && (obj.appendOnlyTopN = message.nodeBody?.appendOnlyTopN
+      ? AppendOnlyTopNNode.toJSON(message.nodeBody?.appendOnlyTopN)
+      : undefined);
+    message.nodeBody?.$case === "hashJoin" &&
+      (obj.hashJoin = message.nodeBody?.hashJoin ? HashJoinNode.toJSON(message.nodeBody?.hashJoin) : undefined);
+    message.nodeBody?.$case === "topN" &&
+      (obj.topN = message.nodeBody?.topN ? TopNNode.toJSON(message.nodeBody?.topN) : undefined);
+    message.nodeBody?.$case === "hopWindow" &&
+      (obj.hopWindow = message.nodeBody?.hopWindow ? HopWindowNode.toJSON(message.nodeBody?.hopWindow) : undefined);
+    message.nodeBody?.$case === "merge" &&
+      (obj.merge = message.nodeBody?.merge ? MergeNode.toJSON(message.nodeBody?.merge) : undefined);
+    message.nodeBody?.$case === "exchange" &&
+      (obj.exchange = message.nodeBody?.exchange ? ExchangeNode.toJSON(message.nodeBody?.exchange) : undefined);
+    message.nodeBody?.$case === "chain" &&
+      (obj.chain = message.nodeBody?.chain ? ChainNode.toJSON(message.nodeBody?.chain) : undefined);
+    message.nodeBody?.$case === "batchPlan" &&
+      (obj.batchPlan = message.nodeBody?.batchPlan ? BatchPlanNode.toJSON(message.nodeBody?.batchPlan) : undefined);
+    message.nodeBody?.$case === "lookup" &&
+      (obj.lookup = message.nodeBody?.lookup ? LookupNode.toJSON(message.nodeBody?.lookup) : undefined);
+    message.nodeBody?.$case === "arrange" &&
+      (obj.arrange = message.nodeBody?.arrange ? ArrangeNode.toJSON(message.nodeBody?.arrange) : undefined);
+    message.nodeBody?.$case === "lookupUnion" && (obj.lookupUnion = message.nodeBody?.lookupUnion
+      ? LookupUnionNode.toJSON(message.nodeBody?.lookupUnion)
+      : undefined);
+    message.nodeBody?.$case === "union" &&
+      (obj.union = message.nodeBody?.union ? UnionNode.toJSON(message.nodeBody?.union) : undefined);
+    message.nodeBody?.$case === "deltaIndexJoin" && (obj.deltaIndexJoin = message.nodeBody?.deltaIndexJoin
+      ? DeltaIndexJoinNode.toJSON(message.nodeBody?.deltaIndexJoin)
+      : undefined);
+    message.nodeBody?.$case === "sink" &&
+      (obj.sink = message.nodeBody?.sink ? SinkNode.toJSON(message.nodeBody?.sink) : undefined);
+    message.nodeBody?.$case === "expand" &&
+      (obj.expand = message.nodeBody?.expand ? ExpandNode.toJSON(message.nodeBody?.expand) : undefined);
+    message.nodeBody?.$case === "dynamicFilter" && (obj.dynamicFilter = message.nodeBody?.dynamicFilter
+      ? DynamicFilterNode.toJSON(message.nodeBody?.dynamicFilter)
+      : undefined);
+    message.nodeBody?.$case === "projectSet" &&
+      (obj.projectSet = message.nodeBody?.projectSet ? ProjectSetNode.toJSON(message.nodeBody?.projectSet) : undefined);
+    message.nodeBody?.$case === "groupTopN" &&
+      (obj.groupTopN = message.nodeBody?.groupTopN ? GroupTopNNode.toJSON(message.nodeBody?.groupTopN) : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) => e ? StreamNode.toJSON(e) : undefined);
@@ -4968,77 +5003,174 @@ export const StreamNode = {
 
   fromPartial<I extends Exact<DeepPartial<StreamNode>, I>>(object: I): StreamNode {
     const message = createBaseStreamNode();
-    message.source = (object.source !== undefined && object.source !== null)
-      ? SourceNode.fromPartial(object.source)
-      : undefined;
-    message.project = (object.project !== undefined && object.project !== null)
-      ? ProjectNode.fromPartial(object.project)
-      : undefined;
-    message.filter = (object.filter !== undefined && object.filter !== null)
-      ? FilterNode.fromPartial(object.filter)
-      : undefined;
-    message.materialize = (object.materialize !== undefined && object.materialize !== null)
-      ? MaterializeNode.fromPartial(object.materialize)
-      : undefined;
-    message.localSimpleAgg = (object.localSimpleAgg !== undefined && object.localSimpleAgg !== null)
-      ? SimpleAggNode.fromPartial(object.localSimpleAgg)
-      : undefined;
-    message.globalSimpleAgg = (object.globalSimpleAgg !== undefined && object.globalSimpleAgg !== null)
-      ? SimpleAggNode.fromPartial(object.globalSimpleAgg)
-      : undefined;
-    message.hashAgg = (object.hashAgg !== undefined && object.hashAgg !== null)
-      ? HashAggNode.fromPartial(object.hashAgg)
-      : undefined;
-    message.appendOnlyTopN = (object.appendOnlyTopN !== undefined && object.appendOnlyTopN !== null)
-      ? AppendOnlyTopNNode.fromPartial(object.appendOnlyTopN)
-      : undefined;
-    message.hashJoin = (object.hashJoin !== undefined && object.hashJoin !== null)
-      ? HashJoinNode.fromPartial(object.hashJoin)
-      : undefined;
-    message.topN = (object.topN !== undefined && object.topN !== null) ? TopNNode.fromPartial(object.topN) : undefined;
-    message.hopWindow = (object.hopWindow !== undefined && object.hopWindow !== null)
-      ? HopWindowNode.fromPartial(object.hopWindow)
-      : undefined;
-    message.merge = (object.merge !== undefined && object.merge !== null)
-      ? MergeNode.fromPartial(object.merge)
-      : undefined;
-    message.exchange = (object.exchange !== undefined && object.exchange !== null)
-      ? ExchangeNode.fromPartial(object.exchange)
-      : undefined;
-    message.chain = (object.chain !== undefined && object.chain !== null)
-      ? ChainNode.fromPartial(object.chain)
-      : undefined;
-    message.batchPlan = (object.batchPlan !== undefined && object.batchPlan !== null)
-      ? BatchPlanNode.fromPartial(object.batchPlan)
-      : undefined;
-    message.lookup = (object.lookup !== undefined && object.lookup !== null)
-      ? LookupNode.fromPartial(object.lookup)
-      : undefined;
-    message.arrange = (object.arrange !== undefined && object.arrange !== null)
-      ? ArrangeNode.fromPartial(object.arrange)
-      : undefined;
-    message.lookupUnion = (object.lookupUnion !== undefined && object.lookupUnion !== null)
-      ? LookupUnionNode.fromPartial(object.lookupUnion)
-      : undefined;
-    message.union = (object.union !== undefined && object.union !== null)
-      ? UnionNode.fromPartial(object.union)
-      : undefined;
-    message.deltaIndexJoin = (object.deltaIndexJoin !== undefined && object.deltaIndexJoin !== null)
-      ? DeltaIndexJoinNode.fromPartial(object.deltaIndexJoin)
-      : undefined;
-    message.sink = (object.sink !== undefined && object.sink !== null) ? SinkNode.fromPartial(object.sink) : undefined;
-    message.expand = (object.expand !== undefined && object.expand !== null)
-      ? ExpandNode.fromPartial(object.expand)
-      : undefined;
-    message.dynamicFilter = (object.dynamicFilter !== undefined && object.dynamicFilter !== null)
-      ? DynamicFilterNode.fromPartial(object.dynamicFilter)
-      : undefined;
-    message.projectSet = (object.projectSet !== undefined && object.projectSet !== null)
-      ? ProjectSetNode.fromPartial(object.projectSet)
-      : undefined;
-    message.groupTopN = (object.groupTopN !== undefined && object.groupTopN !== null)
-      ? GroupTopNNode.fromPartial(object.groupTopN)
-      : undefined;
+    if (
+      object.nodeBody?.$case === "source" && object.nodeBody?.source !== undefined && object.nodeBody?.source !== null
+    ) {
+      message.nodeBody = { $case: "source", source: SourceNode.fromPartial(object.nodeBody.source) };
+    }
+    if (
+      object.nodeBody?.$case === "project" &&
+      object.nodeBody?.project !== undefined &&
+      object.nodeBody?.project !== null
+    ) {
+      message.nodeBody = { $case: "project", project: ProjectNode.fromPartial(object.nodeBody.project) };
+    }
+    if (
+      object.nodeBody?.$case === "filter" && object.nodeBody?.filter !== undefined && object.nodeBody?.filter !== null
+    ) {
+      message.nodeBody = { $case: "filter", filter: FilterNode.fromPartial(object.nodeBody.filter) };
+    }
+    if (
+      object.nodeBody?.$case === "materialize" &&
+      object.nodeBody?.materialize !== undefined &&
+      object.nodeBody?.materialize !== null
+    ) {
+      message.nodeBody = {
+        $case: "materialize",
+        materialize: MaterializeNode.fromPartial(object.nodeBody.materialize),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "localSimpleAgg" &&
+      object.nodeBody?.localSimpleAgg !== undefined &&
+      object.nodeBody?.localSimpleAgg !== null
+    ) {
+      message.nodeBody = {
+        $case: "localSimpleAgg",
+        localSimpleAgg: SimpleAggNode.fromPartial(object.nodeBody.localSimpleAgg),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "globalSimpleAgg" &&
+      object.nodeBody?.globalSimpleAgg !== undefined &&
+      object.nodeBody?.globalSimpleAgg !== null
+    ) {
+      message.nodeBody = {
+        $case: "globalSimpleAgg",
+        globalSimpleAgg: SimpleAggNode.fromPartial(object.nodeBody.globalSimpleAgg),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "hashAgg" &&
+      object.nodeBody?.hashAgg !== undefined &&
+      object.nodeBody?.hashAgg !== null
+    ) {
+      message.nodeBody = { $case: "hashAgg", hashAgg: HashAggNode.fromPartial(object.nodeBody.hashAgg) };
+    }
+    if (
+      object.nodeBody?.$case === "appendOnlyTopN" &&
+      object.nodeBody?.appendOnlyTopN !== undefined &&
+      object.nodeBody?.appendOnlyTopN !== null
+    ) {
+      message.nodeBody = {
+        $case: "appendOnlyTopN",
+        appendOnlyTopN: AppendOnlyTopNNode.fromPartial(object.nodeBody.appendOnlyTopN),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "hashJoin" &&
+      object.nodeBody?.hashJoin !== undefined &&
+      object.nodeBody?.hashJoin !== null
+    ) {
+      message.nodeBody = { $case: "hashJoin", hashJoin: HashJoinNode.fromPartial(object.nodeBody.hashJoin) };
+    }
+    if (object.nodeBody?.$case === "topN" && object.nodeBody?.topN !== undefined && object.nodeBody?.topN !== null) {
+      message.nodeBody = { $case: "topN", topN: TopNNode.fromPartial(object.nodeBody.topN) };
+    }
+    if (
+      object.nodeBody?.$case === "hopWindow" &&
+      object.nodeBody?.hopWindow !== undefined &&
+      object.nodeBody?.hopWindow !== null
+    ) {
+      message.nodeBody = { $case: "hopWindow", hopWindow: HopWindowNode.fromPartial(object.nodeBody.hopWindow) };
+    }
+    if (object.nodeBody?.$case === "merge" && object.nodeBody?.merge !== undefined && object.nodeBody?.merge !== null) {
+      message.nodeBody = { $case: "merge", merge: MergeNode.fromPartial(object.nodeBody.merge) };
+    }
+    if (
+      object.nodeBody?.$case === "exchange" &&
+      object.nodeBody?.exchange !== undefined &&
+      object.nodeBody?.exchange !== null
+    ) {
+      message.nodeBody = { $case: "exchange", exchange: ExchangeNode.fromPartial(object.nodeBody.exchange) };
+    }
+    if (object.nodeBody?.$case === "chain" && object.nodeBody?.chain !== undefined && object.nodeBody?.chain !== null) {
+      message.nodeBody = { $case: "chain", chain: ChainNode.fromPartial(object.nodeBody.chain) };
+    }
+    if (
+      object.nodeBody?.$case === "batchPlan" &&
+      object.nodeBody?.batchPlan !== undefined &&
+      object.nodeBody?.batchPlan !== null
+    ) {
+      message.nodeBody = { $case: "batchPlan", batchPlan: BatchPlanNode.fromPartial(object.nodeBody.batchPlan) };
+    }
+    if (
+      object.nodeBody?.$case === "lookup" && object.nodeBody?.lookup !== undefined && object.nodeBody?.lookup !== null
+    ) {
+      message.nodeBody = { $case: "lookup", lookup: LookupNode.fromPartial(object.nodeBody.lookup) };
+    }
+    if (
+      object.nodeBody?.$case === "arrange" &&
+      object.nodeBody?.arrange !== undefined &&
+      object.nodeBody?.arrange !== null
+    ) {
+      message.nodeBody = { $case: "arrange", arrange: ArrangeNode.fromPartial(object.nodeBody.arrange) };
+    }
+    if (
+      object.nodeBody?.$case === "lookupUnion" &&
+      object.nodeBody?.lookupUnion !== undefined &&
+      object.nodeBody?.lookupUnion !== null
+    ) {
+      message.nodeBody = {
+        $case: "lookupUnion",
+        lookupUnion: LookupUnionNode.fromPartial(object.nodeBody.lookupUnion),
+      };
+    }
+    if (object.nodeBody?.$case === "union" && object.nodeBody?.union !== undefined && object.nodeBody?.union !== null) {
+      message.nodeBody = { $case: "union", union: UnionNode.fromPartial(object.nodeBody.union) };
+    }
+    if (
+      object.nodeBody?.$case === "deltaIndexJoin" &&
+      object.nodeBody?.deltaIndexJoin !== undefined &&
+      object.nodeBody?.deltaIndexJoin !== null
+    ) {
+      message.nodeBody = {
+        $case: "deltaIndexJoin",
+        deltaIndexJoin: DeltaIndexJoinNode.fromPartial(object.nodeBody.deltaIndexJoin),
+      };
+    }
+    if (object.nodeBody?.$case === "sink" && object.nodeBody?.sink !== undefined && object.nodeBody?.sink !== null) {
+      message.nodeBody = { $case: "sink", sink: SinkNode.fromPartial(object.nodeBody.sink) };
+    }
+    if (
+      object.nodeBody?.$case === "expand" && object.nodeBody?.expand !== undefined && object.nodeBody?.expand !== null
+    ) {
+      message.nodeBody = { $case: "expand", expand: ExpandNode.fromPartial(object.nodeBody.expand) };
+    }
+    if (
+      object.nodeBody?.$case === "dynamicFilter" &&
+      object.nodeBody?.dynamicFilter !== undefined &&
+      object.nodeBody?.dynamicFilter !== null
+    ) {
+      message.nodeBody = {
+        $case: "dynamicFilter",
+        dynamicFilter: DynamicFilterNode.fromPartial(object.nodeBody.dynamicFilter),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "projectSet" &&
+      object.nodeBody?.projectSet !== undefined &&
+      object.nodeBody?.projectSet !== null
+    ) {
+      message.nodeBody = { $case: "projectSet", projectSet: ProjectSetNode.fromPartial(object.nodeBody.projectSet) };
+    }
+    if (
+      object.nodeBody?.$case === "groupTopN" &&
+      object.nodeBody?.groupTopN !== undefined &&
+      object.nodeBody?.groupTopN !== null
+    ) {
+      message.nodeBody = { $case: "groupTopN", groupTopN: GroupTopNNode.fromPartial(object.nodeBody.groupTopN) };
+    }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
@@ -5805,6 +5937,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 

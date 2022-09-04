@@ -148,8 +148,10 @@ export interface PinVersionRequest {
 
 export interface PinVersionResponse {
   status: Status | undefined;
-  versionDeltas: PinVersionResponse_HummockVersionDeltas | undefined;
-  pinnedVersion: HummockVersion | undefined;
+  payload?: { $case: "versionDeltas"; versionDeltas: PinVersionResponse_HummockVersionDeltas } | {
+    $case: "pinnedVersion";
+    pinnedVersion: HummockVersion;
+  };
 }
 
 export interface PinVersionResponse_HummockVersionDeltas {
@@ -389,10 +391,10 @@ export interface ValidationTask_SstIdToWorkerIdEntry {
 }
 
 export interface SubscribeCompactTasksResponse {
-  compactTask: CompactTask | undefined;
-  vacuumTask: VacuumTask | undefined;
-  fullScanTask: FullScanTask | undefined;
-  validationTask: ValidationTask | undefined;
+  task?: { $case: "compactTask"; compactTask: CompactTask } | { $case: "vacuumTask"; vacuumTask: VacuumTask } | {
+    $case: "fullScanTask";
+    fullScanTask: FullScanTask;
+  } | { $case: "validationTask"; validationTask: ValidationTask };
 }
 
 /** Delete SSTs in object store */
@@ -1626,7 +1628,7 @@ export const PinVersionRequest = {
 };
 
 function createBasePinVersionResponse(): PinVersionResponse {
-  return { status: undefined, versionDeltas: undefined, pinnedVersion: undefined };
+  return { status: undefined, payload: undefined };
 }
 
 export const PinVersionResponse = {
@@ -1634,11 +1636,11 @@ export const PinVersionResponse = {
     if (message.status !== undefined) {
       Status.encode(message.status, writer.uint32(10).fork()).ldelim();
     }
-    if (message.versionDeltas !== undefined) {
-      PinVersionResponse_HummockVersionDeltas.encode(message.versionDeltas, writer.uint32(18).fork()).ldelim();
+    if (message.payload?.$case === "versionDeltas") {
+      PinVersionResponse_HummockVersionDeltas.encode(message.payload.versionDeltas, writer.uint32(18).fork()).ldelim();
     }
-    if (message.pinnedVersion !== undefined) {
-      HummockVersion.encode(message.pinnedVersion, writer.uint32(26).fork()).ldelim();
+    if (message.payload?.$case === "pinnedVersion") {
+      HummockVersion.encode(message.payload.pinnedVersion, writer.uint32(26).fork()).ldelim();
     }
     return writer;
   },
@@ -1654,10 +1656,13 @@ export const PinVersionResponse = {
           message.status = Status.decode(reader, reader.uint32());
           break;
         case 2:
-          message.versionDeltas = PinVersionResponse_HummockVersionDeltas.decode(reader, reader.uint32());
+          message.payload = {
+            $case: "versionDeltas",
+            versionDeltas: PinVersionResponse_HummockVersionDeltas.decode(reader, reader.uint32()),
+          };
           break;
         case 3:
-          message.pinnedVersion = HummockVersion.decode(reader, reader.uint32());
+          message.payload = { $case: "pinnedVersion", pinnedVersion: HummockVersion.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -1670,21 +1675,26 @@ export const PinVersionResponse = {
   fromJSON(object: any): PinVersionResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
-      versionDeltas: isSet(object.versionDeltas)
-        ? PinVersionResponse_HummockVersionDeltas.fromJSON(object.versionDeltas)
+      payload: isSet(object.versionDeltas)
+        ? {
+          $case: "versionDeltas",
+          versionDeltas: PinVersionResponse_HummockVersionDeltas.fromJSON(object.versionDeltas),
+        }
+        : isSet(object.pinnedVersion)
+        ? { $case: "pinnedVersion", pinnedVersion: HummockVersion.fromJSON(object.pinnedVersion) }
         : undefined,
-      pinnedVersion: isSet(object.pinnedVersion) ? HummockVersion.fromJSON(object.pinnedVersion) : undefined,
     };
   },
 
   toJSON(message: PinVersionResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
-    message.versionDeltas !== undefined && (obj.versionDeltas = message.versionDeltas
-      ? PinVersionResponse_HummockVersionDeltas.toJSON(message.versionDeltas)
+    message.payload?.$case === "versionDeltas" && (obj.versionDeltas = message.payload?.versionDeltas
+      ? PinVersionResponse_HummockVersionDeltas.toJSON(message.payload?.versionDeltas)
       : undefined);
-    message.pinnedVersion !== undefined &&
-      (obj.pinnedVersion = message.pinnedVersion ? HummockVersion.toJSON(message.pinnedVersion) : undefined);
+    message.payload?.$case === "pinnedVersion" && (obj.pinnedVersion = message.payload?.pinnedVersion
+      ? HummockVersion.toJSON(message.payload?.pinnedVersion)
+      : undefined);
     return obj;
   },
 
@@ -1693,12 +1703,26 @@ export const PinVersionResponse = {
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
-    message.versionDeltas = (object.versionDeltas !== undefined && object.versionDeltas !== null)
-      ? PinVersionResponse_HummockVersionDeltas.fromPartial(object.versionDeltas)
-      : undefined;
-    message.pinnedVersion = (object.pinnedVersion !== undefined && object.pinnedVersion !== null)
-      ? HummockVersion.fromPartial(object.pinnedVersion)
-      : undefined;
+    if (
+      object.payload?.$case === "versionDeltas" &&
+      object.payload?.versionDeltas !== undefined &&
+      object.payload?.versionDeltas !== null
+    ) {
+      message.payload = {
+        $case: "versionDeltas",
+        versionDeltas: PinVersionResponse_HummockVersionDeltas.fromPartial(object.payload.versionDeltas),
+      };
+    }
+    if (
+      object.payload?.$case === "pinnedVersion" &&
+      object.payload?.pinnedVersion !== undefined &&
+      object.payload?.pinnedVersion !== null
+    ) {
+      message.payload = {
+        $case: "pinnedVersion",
+        pinnedVersion: HummockVersion.fromPartial(object.payload.pinnedVersion),
+      };
+    }
     return message;
   },
 };
@@ -3926,22 +3950,22 @@ export const ValidationTask_SstIdToWorkerIdEntry = {
 };
 
 function createBaseSubscribeCompactTasksResponse(): SubscribeCompactTasksResponse {
-  return { compactTask: undefined, vacuumTask: undefined, fullScanTask: undefined, validationTask: undefined };
+  return { task: undefined };
 }
 
 export const SubscribeCompactTasksResponse = {
   encode(message: SubscribeCompactTasksResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.compactTask !== undefined) {
-      CompactTask.encode(message.compactTask, writer.uint32(10).fork()).ldelim();
+    if (message.task?.$case === "compactTask") {
+      CompactTask.encode(message.task.compactTask, writer.uint32(10).fork()).ldelim();
     }
-    if (message.vacuumTask !== undefined) {
-      VacuumTask.encode(message.vacuumTask, writer.uint32(18).fork()).ldelim();
+    if (message.task?.$case === "vacuumTask") {
+      VacuumTask.encode(message.task.vacuumTask, writer.uint32(18).fork()).ldelim();
     }
-    if (message.fullScanTask !== undefined) {
-      FullScanTask.encode(message.fullScanTask, writer.uint32(26).fork()).ldelim();
+    if (message.task?.$case === "fullScanTask") {
+      FullScanTask.encode(message.task.fullScanTask, writer.uint32(26).fork()).ldelim();
     }
-    if (message.validationTask !== undefined) {
-      ValidationTask.encode(message.validationTask, writer.uint32(34).fork()).ldelim();
+    if (message.task?.$case === "validationTask") {
+      ValidationTask.encode(message.task.validationTask, writer.uint32(34).fork()).ldelim();
     }
     return writer;
   },
@@ -3954,16 +3978,16 @@ export const SubscribeCompactTasksResponse = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1:
-          message.compactTask = CompactTask.decode(reader, reader.uint32());
+          message.task = { $case: "compactTask", compactTask: CompactTask.decode(reader, reader.uint32()) };
           break;
         case 2:
-          message.vacuumTask = VacuumTask.decode(reader, reader.uint32());
+          message.task = { $case: "vacuumTask", vacuumTask: VacuumTask.decode(reader, reader.uint32()) };
           break;
         case 3:
-          message.fullScanTask = FullScanTask.decode(reader, reader.uint32());
+          message.task = { $case: "fullScanTask", fullScanTask: FullScanTask.decode(reader, reader.uint32()) };
           break;
         case 4:
-          message.validationTask = ValidationTask.decode(reader, reader.uint32());
+          message.task = { $case: "validationTask", validationTask: ValidationTask.decode(reader, reader.uint32()) };
           break;
         default:
           reader.skipType(tag & 7);
@@ -3975,23 +3999,29 @@ export const SubscribeCompactTasksResponse = {
 
   fromJSON(object: any): SubscribeCompactTasksResponse {
     return {
-      compactTask: isSet(object.compactTask) ? CompactTask.fromJSON(object.compactTask) : undefined,
-      vacuumTask: isSet(object.vacuumTask) ? VacuumTask.fromJSON(object.vacuumTask) : undefined,
-      fullScanTask: isSet(object.fullScanTask) ? FullScanTask.fromJSON(object.fullScanTask) : undefined,
-      validationTask: isSet(object.validationTask) ? ValidationTask.fromJSON(object.validationTask) : undefined,
+      task: isSet(object.compactTask)
+        ? { $case: "compactTask", compactTask: CompactTask.fromJSON(object.compactTask) }
+        : isSet(object.vacuumTask)
+        ? { $case: "vacuumTask", vacuumTask: VacuumTask.fromJSON(object.vacuumTask) }
+        : isSet(object.fullScanTask)
+        ? { $case: "fullScanTask", fullScanTask: FullScanTask.fromJSON(object.fullScanTask) }
+        : isSet(object.validationTask)
+        ? { $case: "validationTask", validationTask: ValidationTask.fromJSON(object.validationTask) }
+        : undefined,
     };
   },
 
   toJSON(message: SubscribeCompactTasksResponse): unknown {
     const obj: any = {};
-    message.compactTask !== undefined &&
-      (obj.compactTask = message.compactTask ? CompactTask.toJSON(message.compactTask) : undefined);
-    message.vacuumTask !== undefined &&
-      (obj.vacuumTask = message.vacuumTask ? VacuumTask.toJSON(message.vacuumTask) : undefined);
-    message.fullScanTask !== undefined &&
-      (obj.fullScanTask = message.fullScanTask ? FullScanTask.toJSON(message.fullScanTask) : undefined);
-    message.validationTask !== undefined &&
-      (obj.validationTask = message.validationTask ? ValidationTask.toJSON(message.validationTask) : undefined);
+    message.task?.$case === "compactTask" &&
+      (obj.compactTask = message.task?.compactTask ? CompactTask.toJSON(message.task?.compactTask) : undefined);
+    message.task?.$case === "vacuumTask" &&
+      (obj.vacuumTask = message.task?.vacuumTask ? VacuumTask.toJSON(message.task?.vacuumTask) : undefined);
+    message.task?.$case === "fullScanTask" &&
+      (obj.fullScanTask = message.task?.fullScanTask ? FullScanTask.toJSON(message.task?.fullScanTask) : undefined);
+    message.task?.$case === "validationTask" && (obj.validationTask = message.task?.validationTask
+      ? ValidationTask.toJSON(message.task?.validationTask)
+      : undefined);
     return obj;
   },
 
@@ -3999,18 +4029,35 @@ export const SubscribeCompactTasksResponse = {
     object: I,
   ): SubscribeCompactTasksResponse {
     const message = createBaseSubscribeCompactTasksResponse();
-    message.compactTask = (object.compactTask !== undefined && object.compactTask !== null)
-      ? CompactTask.fromPartial(object.compactTask)
-      : undefined;
-    message.vacuumTask = (object.vacuumTask !== undefined && object.vacuumTask !== null)
-      ? VacuumTask.fromPartial(object.vacuumTask)
-      : undefined;
-    message.fullScanTask = (object.fullScanTask !== undefined && object.fullScanTask !== null)
-      ? FullScanTask.fromPartial(object.fullScanTask)
-      : undefined;
-    message.validationTask = (object.validationTask !== undefined && object.validationTask !== null)
-      ? ValidationTask.fromPartial(object.validationTask)
-      : undefined;
+    if (
+      object.task?.$case === "compactTask" &&
+      object.task?.compactTask !== undefined &&
+      object.task?.compactTask !== null
+    ) {
+      message.task = { $case: "compactTask", compactTask: CompactTask.fromPartial(object.task.compactTask) };
+    }
+    if (
+      object.task?.$case === "vacuumTask" && object.task?.vacuumTask !== undefined && object.task?.vacuumTask !== null
+    ) {
+      message.task = { $case: "vacuumTask", vacuumTask: VacuumTask.fromPartial(object.task.vacuumTask) };
+    }
+    if (
+      object.task?.$case === "fullScanTask" &&
+      object.task?.fullScanTask !== undefined &&
+      object.task?.fullScanTask !== null
+    ) {
+      message.task = { $case: "fullScanTask", fullScanTask: FullScanTask.fromPartial(object.task.fullScanTask) };
+    }
+    if (
+      object.task?.$case === "validationTask" &&
+      object.task?.validationTask !== undefined &&
+      object.task?.validationTask !== null
+    ) {
+      message.task = {
+        $case: "validationTask",
+        validationTask: ValidationTask.fromPartial(object.task.validationTask),
+      };
+    }
     return message;
   },
 };
@@ -4910,6 +4957,7 @@ type Builtin = Date | Function | Uint8Array | string | number | boolean | undefi
 
 export type DeepPartial<T> = T extends Builtin ? T
   : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends { $case: string } ? { [K in keyof Omit<T, "$case">]?: DeepPartial<T[K]> } & { $case: T["$case"] }
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 
