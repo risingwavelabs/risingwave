@@ -486,7 +486,7 @@ fn parse_escaped_single_quote_string_predicate() {
 fn parse_number() {
     let expr = verified_expr("1.0");
 
-    assert_eq!(expr, Expr::Value(Value::Number("1.0".into(), false)));
+    assert_eq!(expr, Expr::Value(Value::Number("1.0".into())));
 }
 
 #[test]
@@ -1952,7 +1952,7 @@ fn parse_aggregate_with_filter() {
                 left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier(Ident::new("a"))),
                     op: BinaryOperator::Gt,
-                    right: Box::new(Expr::Value(Value::Number("0".to_string(), false)))
+                    right: Box::new(Expr::Value(Value::Number("0".to_string())))
                 }))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(

@@ -278,7 +278,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         if !self.is_mview && self.rng.gen_bool(0.2) {
             Some(Expr::Value(Value::Number(
                 self.rng.gen_range(0..=100).to_string(),
-                false,
             )))
         } else {
             None

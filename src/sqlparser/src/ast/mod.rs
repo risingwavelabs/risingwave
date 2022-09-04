@@ -1971,13 +1971,13 @@ mod tests {
     fn test_array_index_display() {
         let array_index = Expr::ArrayIndex {
             obj: Box::new(Expr::Identifier(Ident::new("v1"))),
-            index: Box::new(Expr::Value(Value::Number("1".into(), false))),
+            index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));
 
         let array_index2 = Expr::ArrayIndex {
             obj: Box::new(array_index),
-            index: Box::new(Expr::Value(Value::Number("1".into(), false))),
+            index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1][1]", format!("{}", array_index2));
     }

@@ -190,7 +190,7 @@ impl Binder {
                 true => *index,
                 false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.value)).into()),
             }
-            Expr::Value(Value::Number(number, _)) => match number.parse::<usize>() {
+            Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(

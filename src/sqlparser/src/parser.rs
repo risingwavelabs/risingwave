@@ -436,7 +436,7 @@ impl Parser {
                     UnaryOperator::Minus
                 };
                 let mut sub_expr = self.parse_subexpr(Self::PLUS_MINUS_PREC)?;
-                if let Expr::Value(Value::Number(ref mut s, _)) = sub_expr {
+                if let Expr::Value(Value::Number(ref mut s)) = sub_expr {
                     if tok == Token::Minus {
                         *s = format!("-{}", s);
                     }
@@ -465,7 +465,7 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Self::PLUS_MINUS_PREC)?),
                 })
             }
-            Token::Number(_, _)
+            Token::Number(_)
             | Token::SingleQuotedString(_)
             | Token::NationalStringLiteral(_)
             | Token::HexStringLiteral(_) => {
@@ -1973,7 +1973,7 @@ impl Parser {
                 },
                 _ => self.expected("a concrete value", Token::Word(w)),
             },
-            Token::Number(ref n, l) => Ok(Value::Number(n.clone(), l)),
+            Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
@@ -1983,7 +1983,7 @@ impl Parser {
 
     pub fn parse_number_value(&mut self) -> Result<Value, ParserError> {
         match self.parse_value()? {
-            v @ Value::Number(_, _) => Ok(v),
+            v @ Value::Number(_) => Ok(v),
             _ => {
                 self.prev_token();
                 self.expected("literal number", self.peek_token())
@@ -1994,7 +1994,7 @@ impl Parser {
     /// Parse an unsigned literal integer/long
     pub fn parse_literal_uint(&mut self) -> Result<u64, ParserError> {
         match self.next_token() {
-            Token::Number(s, _) => s.parse::<u64>().map_err(|e| {
+            Token::Number(s) => s.parse::<u64>().map_err(|e| {
                 ParserError::ParserError(format!("Could not parse '{}' as u64: {}", s, e))
             }),
             unexpected => self.expected("literal int", unexpected),
@@ -2020,7 +2020,7 @@ impl Parser {
                 Ok(Expr::Value(Value::SingleQuotedString(value)))
             }
             Token::SingleQuotedString(s) => Ok(Expr::Value(Value::SingleQuotedString(s))),
-            Token::Number(s, _) => Ok(Expr::Value(Value::Number(s, false))),
+            Token::Number(s) => Ok(Expr::Value(Value::Number(s))),
             unexpected => self.expected("literal string, number or function", unexpected),
         }
     }
@@ -3469,7 +3469,7 @@ mod tests {
         run_parser_method(min_bigint, |parser| {
             assert_eq!(
                 parser.parse_expr().unwrap(),
-                Expr::Value(Value::Number("-9223372036854775808".to_string(), false))
+                Expr::Value(Value::Number("-9223372036854775808".to_string()))
             )
         });
     }
