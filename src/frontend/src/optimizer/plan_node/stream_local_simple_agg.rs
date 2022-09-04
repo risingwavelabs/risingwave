@@ -22,7 +22,9 @@ use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::RequiredDist;
 
 /// Streaming local simple agg.
-/// Should only be used for stateless agg, including sum, count and append-only min/max.
+///
+/// Should only be used for stateless agg, including `sum`, `count` and *append-only* `min`/`max`.
+///
 /// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
 #[derive(Debug, Clone)]

@@ -123,7 +123,11 @@ impl std::fmt::Debug for WindowFunction {
             let mut delim = "";
             if !self.partition_by.is_empty() {
                 delim = " ";
-                write!(f, "PARTITION BY {:?}", self.partition_by.iter().format(", "))?;
+                write!(
+                    f,
+                    "PARTITION BY {:?}",
+                    self.partition_by.iter().format(", ")
+                )?;
             }
             if !self.order_by.sort_exprs.is_empty() {
                 write!(

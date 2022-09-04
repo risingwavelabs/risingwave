@@ -288,13 +288,19 @@ impl PlanRoot {
         plan = self.optimize_by_rules(
             plan,
             "Convert Window Aggregation".to_string(),
-            vec![WindowAggToTopNRule::create()],
+            vec![
+                WindowAggToTopNRule::create(),
+                ProjectMergeRule::create(),
+                ProjectEliminateRule::create(),
+            ],
             ApplyOrder::TopDown,
         );
         if has_logical_window_agg(plan.clone()) {
-            return Err(
-                ErrorCode::InternalError("WindowAgg can not be transformed.".into()).into(),
-            );
+            return Err(ErrorCode::InternalError(format!(
+                "WindowAgg can not be transformed. Plan:\n{}",
+                plan.explain_to_string().unwrap()
+            ))
+            .into());
         }
 
         Ok(plan)

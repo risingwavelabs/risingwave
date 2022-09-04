@@ -29,6 +29,7 @@ pub struct StreamGroupTopN {
 
 impl StreamGroupTopN {
     pub fn new(logical: LogicalTopN, group_key: Vec<usize>) -> Self {
+        assert!(!group_key.is_empty());
         let input = logical.input();
         let dist = match input.distribution() {
             Distribution::HashShard(_) => Distribution::HashShard(group_key.clone()),

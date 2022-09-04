@@ -265,20 +265,19 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 }
             }
             if !that.order_by_fields.is_empty() {
-                let clause_text = that
-                    .order_by_fields
-                    .iter()
-                    .map(|e| {
-                        format!(
+                write!(
+                    f,
+                    " order_by({})",
+                    that.order_by_fields.iter().format_with(", ", |e, f| {
+                        f(&format_args!(
                             "{:?}",
                             PlanAggOrderByFieldDisplay {
                                 plan_agg_order_by_field: e,
                                 input_schema: self.input_schema,
                             }
-                        )
+                        ))
                     })
-                    .join(", ");
-                write!(f, " order_by({})", clause_text)?;
+                )?;
             }
             write!(f, ")")?;
         }

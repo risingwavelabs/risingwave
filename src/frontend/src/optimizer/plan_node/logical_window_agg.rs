@@ -15,20 +15,20 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::logical_agg::PlanAggOrderByField;
+use super::logical_agg::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
-    ColPrunable, LogicalFilter, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
-    ToStream,
+    ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, InputRef, WindowFunction, WindowFunctionType};
+use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct PlanWindowFunction {
     pub function_type: WindowFunctionType,
     pub return_type: DataType,
@@ -38,25 +38,55 @@ pub struct PlanWindowFunction {
     pub order_by: Vec<PlanAggOrderByField>,
 }
 
-impl std::fmt::Debug for PlanWindowFunction {
+struct PlanWindowFunctionDisplay<'a> {
+    pub window_function: &'a PlanWindowFunction,
+    pub input_schema: &'a Schema,
+}
+
+impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let window_function = self.window_function;
         if f.alternate() {
             f.debug_struct("WindowFunction")
-                .field("function_type", &self.function_type)
-                .field("return_type", &self.return_type)
-                .field("partition_by", &self.partition_by)
-                .field("order_by", &self.order_by)
+                .field("function_type", &window_function.function_type)
+                .field("return_type", &window_function.return_type)
+                .field("partition_by", &window_function.partition_by)
+                .field("order_by", &window_function.order_by)
                 .finish()
         } else {
-            write!(f, "{}() OVER(", self.function_type.name())?;
+            write!(f, "{}() OVER(", window_function.function_type.name())?;
 
             let mut delim = "";
-            if !self.partition_by.is_empty() {
+            if !window_function.partition_by.is_empty() {
                 delim = " ";
-                write!(f, "PARTITION BY {}", self.partition_by.iter().format(", "))?;
+                write!(
+                    f,
+                    "PARTITION BY {}",
+                    window_function
+                        .partition_by
+                        .iter()
+                        .format_with(", ", |input_ref, f| {
+                            f(&InputRefDisplay {
+                                input_ref,
+                                input_schema: self.input_schema,
+                            })
+                        })
+                )?;
             }
-            if !self.order_by.is_empty() {
-                write!(f, "{delim}ORDER BY {:?}", self.order_by.iter().format(", "))?;
+            if !window_function.order_by.is_empty() {
+                write!(
+                    f,
+                    "{delim}ORDER BY {}",
+                    window_function.order_by.iter().format_with(", ", |e, f| {
+                        f(&format_args!(
+                            "{:?}",
+                            PlanAggOrderByFieldDisplay {
+                                plan_agg_order_by_field: e,
+                                input_schema: self.input_schema,
+                            }
+                        ))
+                    })
+                )?;
             }
             f.write_str(")")?;
 
@@ -114,6 +144,13 @@ impl LogicalWindowAgg {
                     expr.return_type().clone(),
                 )
                 .into();
+            }
+            if expr.has_window_function() {
+                return Err(ErrorCode::NotImplemented(
+                    format!("window function in expression: {:?}", expr),
+                    None.into(),
+                )
+                .into());
             }
         }
         for f in &window_funcs {
@@ -207,18 +244,22 @@ impl_plan_tree_node_for_unary! { LogicalWindowAgg }
 
 impl fmt::Display for LogicalWindowAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalWindowAgg {{ window_function: {:?} }}",
-            self.window_function
-        )
+        let mut builder = f.debug_struct("LogicalWindowAgg");
+        builder.field(
+            "window_function",
+            &PlanWindowFunctionDisplay {
+                window_function: &self.window_function,
+                input_schema: self.input.schema(),
+            },
+        );
+        builder.finish()
     }
 }
 
 impl ColPrunable for LogicalWindowAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let _ = required_cols;
-        self.clone().into()
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
@@ -230,16 +271,16 @@ impl PredicatePushdown for LogicalWindowAgg {
 
 impl ToBatch for LogicalWindowAgg {
     fn to_batch(&self) -> Result<PlanRef> {
-        todo!();
+        Err(ErrorCode::NotImplemented("WindowAgg to batch".to_string(), 4847.into()).into())
     }
 }
 
 impl ToStream for LogicalWindowAgg {
     fn to_stream(&self) -> Result<PlanRef> {
-        todo!()
+        Err(ErrorCode::NotImplemented("WindowAgg to stream".to_string(), 4847.into()).into())
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
-        todo!()
+        Err(ErrorCode::NotImplemented("WindowAgg to stream".to_string(), 4847.into()).into())
     }
 }

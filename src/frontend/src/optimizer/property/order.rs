@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
@@ -113,7 +113,15 @@ impl FieldOrderDisplay<'_> {
         write!(
             f,
             "{} {}",
-            FieldDisplay(self.input_schema.fields.get(that.index).unwrap()),
+            FieldDisplay(
+                self.input_schema
+                    .fields
+                    .get(that.index)
+                    .unwrap_or(&Field::with_name(
+                        risingwave_common::types::DataType::Boolean,
+                        "???"
+                    ))
+            ),
             that.direct
         )
     }

@@ -17,8 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::{self, InternalError};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::OrderType;
 
 use super::utils::TableCatalogBuilder;
@@ -41,6 +40,7 @@ pub struct LogicalTopN {
     limit: usize,
     offset: usize,
     order: Order,
+    group_key: Vec<usize>,
 }
 
 impl LogicalTopN {
@@ -56,10 +56,22 @@ impl LogicalTopN {
             limit,
             offset,
             order,
+            group_key: vec![],
         }
     }
 
-    /// the function will check if the cond is bool expression
+    pub fn with_group(
+        input: PlanRef,
+        limit: usize,
+        offset: usize,
+        order: Order,
+        group_key: Vec<usize>,
+    ) -> Self {
+        let mut topn = Self::new(input, limit, offset, order);
+        topn.group_key = group_key;
+        topn
+    }
+
     pub fn create(input: PlanRef, limit: usize, offset: usize, order: Order) -> PlanRef {
         Self::new(input, limit, offset, order).into()
     }
@@ -98,11 +110,14 @@ impl LogicalTopN {
         );
         builder
             .field("limit", &format_args!("{}", self.limit()))
-            .field("offset", &format_args!("{}", self.offset()))
-            .finish()
+            .field("offset", &format_args!("{}", self.offset()));
+        if !self.group_key.is_empty() {
+            builder.field("group_key", &self.group_key);
+        }
+        builder.finish()
     }
 
-    // `group_key` only be set when inferring group topN's state table catalog.
+    /// Infers the state table catalog for [`StreamTopN`] and [`StreamGroupTopN`].
     pub fn infer_internal_table_catalog(&self, group_key: Option<&[usize]>) -> TableCatalog {
         let schema = &self.base.schema;
         let pk_indices = &self.base.logical_pk;
@@ -227,7 +242,13 @@ impl PlanTreeNodeUnary for LogicalTopN {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.limit, self.offset, self.order.clone())
+        Self::with_group(
+            input,
+            self.limit,
+            self.offset,
+            self.order.clone(),
+            self.group_key.clone(),
+        )
     }
 
     #[must_use]
@@ -237,13 +258,17 @@ impl PlanTreeNodeUnary for LogicalTopN {
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         (
-            Self::new(
+            Self::with_group(
                 input,
                 self.limit,
                 self.offset,
                 input_col_change
                     .rewrite_required_order(&self.order)
                     .unwrap(),
+                self.group_key
+                    .iter()
+                    .map(|idx| input_col_change.map(*idx))
+                    .collect(),
             ),
             input_col_change,
         )
@@ -267,10 +292,18 @@ impl ColPrunable for LogicalTopN {
                 .for_each(|fo| order_required_cols.insert(fo.index));
             order_required_cols
         };
+        let group_required_cols = {
+            let mut group_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
+            self.group_key
+                .iter()
+                .for_each(|idx| group_required_cols.insert(*idx));
+            group_required_cols
+        };
 
         let input_required_cols = {
             let mut tmp = order_required_cols;
             tmp.union_with(&input_required_bitset);
+            tmp.union_with(&group_required_cols);
             tmp.ones().collect_vec()
         };
         let mapping = ColIndexMapping::with_remaining_columns(
@@ -316,6 +349,14 @@ impl PredicatePushdown for LogicalTopN {
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
+        if !self.group_key.is_empty() {
+            return Err(ErrorCode::NotImplemented(
+                "Group TopN in batch mode".to_string(),
+                4847.into(),
+            )
+            .into());
+        }
+
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(BatchTopN::new(new_logical).into())
@@ -325,12 +366,19 @@ impl ToBatch for LogicalTopN {
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> Result<PlanRef> {
         if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
-            return Err(RwError::from(InternalError(
-                "Doesn't support OFFSET without LIMIT".to_string(),
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                "OFFSET without LIMI in streaming mode".to_string(),
             )));
         }
-        let stream_top_n = self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?;
-        Ok(stream_top_n)
+        Ok(if !self.group_key.is_empty() {
+            let input = self.input().to_stream()?;
+            // FIXME: use proper distribution.
+            let input = RequiredDist::single().enforce_if_not_satisfies(input, &Order::any())?;
+            let logical = self.clone_with_input(input);
+            StreamGroupTopN::new(logical, self.group_key.clone()).into()
+        } else {
+            self.gen_dist_stream_top_n_plan(self.input.to_stream()?)?
+        })
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {

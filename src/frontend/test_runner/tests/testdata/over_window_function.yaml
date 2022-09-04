@@ -19,7 +19,7 @@
     select row_number() over(PARTITION BY x ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [ROW_NUMBER] }
-      LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
+      LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
         LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -29,11 +29,23 @@
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int);
+    select row_number() over(ORDER BY x), row_number() over(ORDER BY x) from t;
+  planner_error: |-
+    Feature is not yet implemented: Multiple window functions
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t(x int);
+    select 1+row_number() over(ORDER BY x) from t;
+  planner_error: |-
+    Feature is not yet implemented: window function in expression: (1:Int32 + ROW_NUMBER() OVER(ORDER BY $0))
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t(x int);
     select * from t order by (row_number() over(PARTITION BY x ORDER BY x));
   logical_plan: |
     LogicalProject { exprs: [t.x] }
       LogicalProject { exprs: [t.x, ROW_NUMBER] }
-        LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
+        LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
           LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -61,17 +73,36 @@
     LogicalProject { exprs: [t.x, ROW_NUMBER] }
       LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
         LogicalProject { exprs: [t.x, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
             LogicalScan { table: t, columns: [t.x, t._row_id] }
+  optimizer_error: |
+    internal error: WindowAgg can not be transformed. Plan:
+    LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
+      LogicalProject { exprs: [t.x, ROW_NUMBER] }
+        LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+          LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     /* TopN without rank output */
-    create table t(x int);
-    select x from
-      (select *, row_number() over(PARTITION BY x ORDER BY x) rank from t)
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank<3;
   logical_plan: |
-    LogicalProject { exprs: [t.x] }
+    LogicalProject { exprs: [t.x, t.y] }
       LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
-        LogicalProject { exprs: [t.x, ROW_NUMBER] }
-          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
-            LogicalScan { table: t, columns: [t.x, t._row_id] }
+        LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+            LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t.x, t.y] }
+      LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+        LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+  stream_plan: |
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
+      StreamProject { exprs: [t.x, t.y, t._row_id] }
+        StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
+          StreamExchange { dist: Single }
+            StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], distribution: UpstreamHashShard(t._row_id) }
+  batch_error: |-
+    Feature is not yet implemented: Group TopN in batch mode
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
