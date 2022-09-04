@@ -49,63 +49,6 @@ fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
 }
 
 #[tokio::test]
-async fn test_hummock_pin_unpin() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-    let version_id = FIRST_VERSION_ID;
-    let epoch = INVALID_EPOCH;
-
-    assert!(HummockPinnedVersion::list(env.meta_store())
-        .await
-        .unwrap()
-        .is_empty());
-    for _ in 0..2 {
-        let hummock_version = match hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap()
-        {
-            Payload::VersionDeltas(_) => {
-                unreachable!("should get full version")
-            }
-            Payload::PinnedVersion(version) => version,
-        };
-        let levels = hummock_version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
-        assert_eq!(version_id, hummock_version.id);
-        assert_eq!(6, levels.levels.len());
-        assert_eq!(0, levels.levels[0].table_infos.len());
-
-        let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
-        assert_eq!(pin_versions_sum(&pinned_versions), 1);
-        assert_eq!(pinned_versions[0].context_id, context_id);
-    }
-
-    // unpin one context will delete the whole version info of the context
-    for _ in 0..3 {
-        hummock_manager.unpin_version(context_id).await.unwrap();
-    }
-
-    assert!(HummockPinnedSnapshot::list(env.meta_store())
-        .await
-        .unwrap()
-        .is_empty());
-    for _ in 0..2 {
-        let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
-        assert_eq!(pin_result.committed_epoch, epoch);
-        let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
-        assert_eq!(pin_snapshots_epoch(&pinned_snapshots), vec![epoch]);
-        assert_eq!(pinned_snapshots[0].context_id, context_id);
-    }
-    // unpin nonexistent target will not return error
-    hummock_manager.unpin_snapshot(context_id).await.unwrap();
-    assert!(HummockPinnedSnapshot::list(env.meta_store())
-        .await
-        .unwrap()
-        .is_empty());
-}
-
-#[tokio::test]
 async fn test_unpin_snapshot_before() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
@@ -333,8 +276,6 @@ async fn test_hummock_transaction() {
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
-        hummock_manager.unpin_version(context_id).await.unwrap();
-
         // Commit epoch1
         commit_from_meta_node(
             hummock_manager.borrow(),
@@ -361,8 +302,6 @@ async fn test_hummock_transaction() {
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
         );
-
-        hummock_manager.unpin_version(context_id).await.unwrap();
     }
 
     // Add and commit tables in epoch2.
@@ -395,7 +334,6 @@ async fn test_hummock_transaction() {
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
         );
-        hummock_manager.unpin_version(context_id).await.unwrap();
 
         // Commit epoch2
         commit_from_meta_node(
@@ -424,7 +362,6 @@ async fn test_hummock_transaction() {
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
         );
-        hummock_manager.unpin_version(context_id).await.unwrap();
     }
 }
 
@@ -643,12 +580,6 @@ async fn test_hummock_manager_basic() {
         HummockVersionId::MAX
     );
     for _ in 0..2 {
-        hummock_manager.unpin_version(context_id_1).await.unwrap();
-        assert_eq!(
-            hummock_manager.get_min_pinned_version_id().await,
-            HummockVersionId::MAX
-        );
-
         // should pin latest because u64::MAX
         let version = match hummock_manager
             .pin_version(context_id_1, HummockVersionId::MAX)
@@ -689,65 +620,6 @@ async fn test_hummock_manager_basic() {
             FIRST_VERSION_ID + 1
         );
     }
-
-    // ssts_to_delete is always empty because no compaction is ever invoked.
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (0, 0)
-    );
-    assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        1
-    );
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (1, 0)
-    );
-
-    hummock_manager.unpin_version(context_id_1).await.unwrap();
-    assert_eq!(
-        hummock_manager.get_min_pinned_version_id().await,
-        FIRST_VERSION_ID + 2
-    );
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (0, 0)
-    );
-    assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        1
-    );
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
-    assert_eq!(
-        hummock_manager
-            .delete_version_deltas(usize::MAX)
-            .await
-            .unwrap(),
-        (1, 0)
-    );
-
-    hummock_manager.unpin_version(context_id_2).await.unwrap();
-    assert_eq!(
-        hummock_manager.get_min_pinned_version_id().await,
-        HummockVersionId::MAX
-    );
-
-    assert_eq!(
-        hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        0
-    );
 }
 
 #[tokio::test]

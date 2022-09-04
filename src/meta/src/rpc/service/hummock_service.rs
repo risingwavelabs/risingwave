@@ -68,30 +68,6 @@ where
 {
     type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
 
-    async fn pin_version(
-        &self,
-        request: Request<PinVersionRequest>,
-    ) -> Result<Response<PinVersionResponse>, Status> {
-        let req = request.into_inner();
-        let payload = self
-            .hummock_manager
-            .pin_version(req.context_id, req.last_pinned)
-            .await?;
-        Ok(Response::new(PinVersionResponse {
-            status: None,
-            payload: Some(payload),
-        }))
-    }
-
-    async fn unpin_version(
-        &self,
-        request: Request<UnpinVersionRequest>,
-    ) -> Result<Response<UnpinVersionResponse>, Status> {
-        let req = request.into_inner();
-        self.hummock_manager.unpin_version(req.context_id).await?;
-        Ok(Response::new(UnpinVersionResponse { status: None }))
-    }
-
     async fn unpin_version_before(
         &self,
         request: Request<UnpinVersionBeforeRequest>,

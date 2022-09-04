@@ -377,8 +377,6 @@ message TriggerFullGCResponse {
 }
 
 service HummockManagerService {
-  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
-  rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);

@@ -490,26 +490,6 @@ where
         Ok(())
     }
 
-    /// Remove this context from context pin info.
-    #[named]
-    pub async fn unpin_version(&self, context_id: HummockContextId) -> Result<()> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let _timer = start_measure_real_process_timer!(self);
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
-        let release_version = pinned_versions.remove(context_id);
-        if release_version.is_some() {
-            commit_multi_var!(self, Some(context_id), pinned_versions)?;
-        }
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-
-        Ok(())
-    }
-
     /// Make sure `max_committed_epoch` is pinned and return it.
     #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
