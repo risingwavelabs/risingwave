@@ -84,12 +84,13 @@ where
         let creating_tables = catalog_guard.database.list_creating_tables();
         let users = catalog_guard.user.list_users();
 
-        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-        let context_id = cluster_guard
+        let context_id = self
+            .cluster_manager
+            .get_cluster_core_guard()
+            .await
             .get_worker_by_host(host_address.clone())
             .unwrap()
             .worker_id();
-        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
         let fragment_ids: HashSet<u32> = HashSet::from_iter(tables.iter().map(|t| t.fragment_id));
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
