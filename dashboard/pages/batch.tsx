@@ -14,17 +14,12 @@
  * limitations under the License.
  *
  */
-module.exports = () => {
-  const rewrites = () => {
-    return [
-      {
-        source: "/api/:path*",
-        destination: "http://localhost:3000/:path*",
-      },
-    ];
-  };
-  return {
-    rewrites,
-    trailingSlash: true
-  };
-};
+
+import { Box, Text } from "@chakra-ui/react";
+import Title from "../components/Title";
+
+export default function Batch() {
+    return (
+        <Box p={3}><Title>Batch</Title></Box>
+    );
+}

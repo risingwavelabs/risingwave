@@ -14,14 +14,12 @@
  * limitations under the License.
  *
  */
-import api from "./api";
 
-export async function getClusterInfoFrontend(){
-  const res = await api.get("/api/clusters/1");
-  return res;
-}
+import { Box, Text } from "@chakra-ui/react";
+import Title from "../components/Title";
 
-export async function getClusterInfoComputeNode(){
-  const res = await api.get("/api/clusters/2");
-  return res;
+export default function Streaming() {
+    return (
+        <Box p={3}><Title>Streaming</Title></Box>
+    );
 }

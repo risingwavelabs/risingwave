@@ -14,17 +14,20 @@
  * limitations under the License.
  *
  */
-module.exports = () => {
-  const rewrites = () => {
-    return [
-      {
-        source: "/api/:path*",
-        destination: "http://localhost:3000/:path*",
-      },
-    ];
-  };
-  return {
-    rewrites,
-    trailingSlash: true
-  };
-};
+
+
+class Api {
+  async get(url: string) {
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      return data;
+    } catch (e) {
+      console.error(e);
+      throw Error("Failed to fetch " + url);
+    }
+  }
+}
+
+
+export default new Api();

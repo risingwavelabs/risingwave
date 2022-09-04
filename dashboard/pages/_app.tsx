@@ -20,8 +20,9 @@ import 'bootstrap-icons/font/bootstrap-icons.css'
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import type { AppProps } from 'next/app'
-import { ChakraProvider } from '@chakra-ui/react'
+import { ChakraProvider, Spinner } from '@chakra-ui/react'
 import Layout from '../components/Layout';
+import SpinnerOverlay from '../components/SpinnerOverlay';
 
 // The entry point of the website. It is used to define some global variables.
 function App({ Component, pageProps }: AppProps) {
@@ -36,7 +37,10 @@ function App({ Component, pageProps }: AppProps) {
   }, [])
 
   return <ChakraProvider>
-    <Layout><Component {...pageProps} /></Layout>
+    <Layout>
+      <Component {...pageProps} />
+      {isLoading && <SpinnerOverlay />}
+    </Layout>
   </ChakraProvider>
 }
 

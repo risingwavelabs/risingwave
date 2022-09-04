@@ -14,6 +14,12 @@
  * limitations under the License.
  *
  */
-export default {
-  baseUrl: "http://127.0.0.1:5691"
+
+import { Box, Text } from "@chakra-ui/react";
+import Title from "../components/Title";
+
+export default function Settings() {
+    return (
+        <Box p={3}><Title>Settings</Title></Box>
+    );
 }

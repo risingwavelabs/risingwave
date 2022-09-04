@@ -14,29 +14,15 @@
  * limitations under the License.
  *
  */
-import config from "../../config";
+import { WorkerNode } from "../../proto/gen/common";
+import api from "./api";
 
-
-
-class Api {
-
-  constructor() {
-    this.baseUrl = config.baseUrl.charAt(config.baseUrl.length - 1) === "/"
-      ? config.baseUrl.slice(0, config.baseUrl.length)
-      : config.baseUrl;
-  }
-
-  async get(url) {
-    try {
-      const res = await fetch(this.baseUrl + url);
-      const data = await res.json();
-      return data;
-    } catch (e) {
-      console.error(e);
-      throw Error("Failed to fetch " + url);
-    }
-  }
+export async function getClusterInfoFrontend() {
+  const res = (await api.get("/api/clusters/1")).map(WorkerNode.fromJSON);
+  return res;
 }
 
-
-export default new Api();
+export async function getClusterInfoComputeNode() {
+  const res = (await api.get("/api/clusters/2")).map(WorkerNode.fromJSON);
+  return res;
+}
