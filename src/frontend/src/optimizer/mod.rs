@@ -32,6 +32,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize};
+use self::plan_visitor::has_logical_window_agg;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
@@ -283,6 +284,18 @@ impl PlanRoot {
             ],
             ApplyOrder::BottomUp,
         );
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Convert Window Aggregation".to_string(),
+            vec![WindowAggToTopNRule::create()],
+            ApplyOrder::TopDown,
+        );
+        if has_logical_window_agg(plan.clone()) {
+            return Err(
+                ErrorCode::InternalError("WindowAgg can not be transformed.".into()).into(),
+            );
+        }
 
         Ok(plan)
     }

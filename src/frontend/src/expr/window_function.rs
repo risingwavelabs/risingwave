@@ -14,6 +14,7 @@
 
 use std::str::FromStr;
 
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 
@@ -44,10 +45,19 @@ pub enum WindowFunctionType {
 impl WindowFunctionType {
     pub fn name(&self) -> &str {
         match self {
-            WindowFunctionType::RowNumber => "row_number",
-            WindowFunctionType::Rank => "rank",
-            WindowFunctionType::DenseRank => "dense_rank",
+            WindowFunctionType::RowNumber => "ROW_NUMBER",
+            WindowFunctionType::Rank => "RANK",
+            WindowFunctionType::DenseRank => "DENSE_RANK",
         }
+    }
+
+    pub fn is_rank_function(&self) -> bool {
+        matches!(
+            self,
+            WindowFunctionType::RowNumber
+                | WindowFunctionType::Rank
+                | WindowFunctionType::DenseRank
+        )
     }
 }
 
@@ -108,31 +118,19 @@ impl std::fmt::Debug for WindowFunction {
                 .field("order_by", &self.order_by)
                 .finish()
         } else {
-            let func_name = format!("{:?}", self.function_type);
-            let mut builder = f.debug_tuple(&func_name);
-            self.args.iter().for_each(|child| {
-                builder.field(child);
-            });
-            builder.finish()?;
-
-            f.write_str("OVER(")?;
+            write!(f, "{}() OVER(", self.function_type.name())?;
 
             let mut delim = "";
             if !self.partition_by.is_empty() {
                 delim = " ";
-                let mut builder = f.debug_tuple("PARTITION BY");
-                self.partition_by.iter().for_each(|child| {
-                    builder.field(child);
-                });
-                builder.finish()?;
+                write!(f, "PARTITION BY {:?}", self.partition_by.iter().format(", "))?;
             }
             if !self.order_by.sort_exprs.is_empty() {
-                f.write_str(delim)?;
-                let mut builder = f.debug_tuple("ORDER BY");
-                self.order_by.sort_exprs.iter().for_each(|child| {
-                    builder.field(child);
-                });
-                builder.finish()?;
+                write!(
+                    f,
+                    "{delim}ORDER BY {:?}",
+                    self.order_by.sort_exprs.iter().format(", ")
+                )?;
             }
             f.write_str(")")?;
 

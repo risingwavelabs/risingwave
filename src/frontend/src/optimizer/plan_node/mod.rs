@@ -241,6 +241,7 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod logical_window_agg;
 mod stream_delta_join;
 mod stream_dynamic_filter;
 mod stream_exchange;
@@ -304,6 +305,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use logical_window_agg::{LogicalWindowAgg, PlanWindowFunction};
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dynamic_filter::StreamDynamicFilter;
 pub use stream_exchange::StreamExchange;
@@ -362,6 +364,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
+            , { Logical, WindowAgg }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -433,6 +436,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
+            , { Logical, WindowAgg }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }

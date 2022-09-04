@@ -374,9 +374,15 @@
       WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
     )
     WHERE rownum <= 1;
-  planner_error: |-
-    Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+  logical_plan: |
+    LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
+      LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
+        LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $12 DESC NULLS FIRST, $15 ASC NULLS LAST) }
+            LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+              LogicalJoin { type: Inner, on: true, output: all }
+                LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction._row_id] }
+                LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q10
   before:
   - create_tables
@@ -595,9 +601,12 @@
     FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY bidder, auction ORDER BY date_time DESC) AS rank_number
           FROM bid)
     WHERE rank_number <= 1;
-  planner_error: |-
-    Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+  logical_plan: |
+    LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
+      LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
+        LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $1, $0 ORDER BY $5 DESC NULLS FIRST) }
+            LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q19
   before:
   - create_tables
@@ -605,9 +614,12 @@
     SELECT * FROM
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
-  planner_error: |-
-    Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+  logical_plan: |
+    LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
+      LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
+        LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $2 DESC NULLS FIRST) }
+            LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q20
   before:
   - create_tables

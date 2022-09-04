@@ -8,19 +8,19 @@
 - sql: |
     create table t(x int);
     select row_number(x) over() from t;
-  binder_error: 'Bind error: the length of args of row_number function should be 0'
+  binder_error: 'Bind error: the length of args of ROW_NUMBER function should be 0'
 - sql: |
     create table t(x int);
     select row_number() over() from t;
-  planner_error: |-
-    Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+  planner_error: 'Invalid input syntax: window rank function without order by: ROW_NUMBER()
+    OVER()'
 - sql: |
     create table t(x int);
     select row_number() over(PARTITION BY x ORDER BY x) from t;
-  planner_error: |-
-    Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+  logical_plan: |
+    LogicalProject { exprs: [ROW_NUMBER] }
+      LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
+        LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
     select row_number() over(PARTITION BY x ORDER BY x ROWS BETWEEN 10 PRECEDING AND CURRENT ROW) from t;
@@ -29,10 +29,12 @@
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int);
-    select * from t order by (row_number() over());
-  planner_error: |-
-    Feature is not yet implemented: plan LogicalWindowAgg
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4847
+    select * from t order by (row_number() over(PARTITION BY x ORDER BY x));
+  logical_plan: |
+    LogicalProject { exprs: [t.x] }
+      LogicalProject { exprs: [t.x, ROW_NUMBER] }
+        LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
+          LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
     select x from t group by (row_number(x) over());
@@ -49,3 +51,27 @@
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
   binder_error: 'Invalid input syntax: window functions are not allowed in FILTER'
+- sql: |
+    /* TopN with rank output */
+    create table t(x int);
+    select * from
+      (select *, row_number() over(PARTITION BY x ORDER BY x) rank from t)
+    where rank<3;
+  logical_plan: |
+    LogicalProject { exprs: [t.x, ROW_NUMBER] }
+      LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
+        LogicalProject { exprs: [t.x, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
+            LogicalScan { table: t, columns: [t.x, t._row_id] }
+- sql: |
+    /* TopN without rank output */
+    create table t(x int);
+    select x from
+      (select *, row_number() over(PARTITION BY x ORDER BY x) rank from t)
+    where rank<3;
+  logical_plan: |
+    LogicalProject { exprs: [t.x] }
+      LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
+        LogicalProject { exprs: [t.x, ROW_NUMBER] }
+          LogicalWindowAgg { window_function: ROW_NUMBER() OVER(PARTITION BY $0 ORDER BY $0 ASC NULLS LAST) }
+            LogicalScan { table: t, columns: [t.x, t._row_id] }

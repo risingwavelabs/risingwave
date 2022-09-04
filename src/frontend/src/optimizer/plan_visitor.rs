@@ -82,4 +82,4 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {LogicalApply, BatchExchange}
+impl_has_variant! {LogicalApply, LogicalWindowAgg, BatchExchange}

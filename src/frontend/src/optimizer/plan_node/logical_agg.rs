@@ -43,7 +43,9 @@ use crate::optimizer::property::{
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, Substitute};
 
-/// See also [`crate::expr::OrderByExpr`]
+/// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
+/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
+///
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
 #[derive(Clone)]
 pub struct PlanAggOrderByField {
@@ -111,7 +113,8 @@ impl PlanAggOrderByField {
     }
 }
 
-/// Aggregation Call
+/// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
+/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 #[derive(Clone)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
@@ -121,16 +124,19 @@ pub struct PlanAggCall {
     pub return_type: DataType,
 
     /// Column indexes of input columns.
-    /// It's vary-length by design:
-    /// can be 0-len (`RowCount`), 1-len (`Max`, `Min`), 2-len (`StringAgg`).
+    ///
+    /// Its length can be:
+    /// - 0 (`RowCount`)
+    /// - 1 (`Max`, `Min`)
+    /// - 2 (`StringAgg`).
+    ///
     /// Usually, we mark the first column as the aggregated column.
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
     pub order_by_fields: Vec<PlanAggOrderByField>,
     /// Selective aggregation: only the input rows for which
-    /// the filter_clause evaluates to true will be fed to aggregate function.
-    /// Other rows are discarded.
+    /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
 }
 

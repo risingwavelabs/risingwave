@@ -54,13 +54,15 @@ pub use translate_apply::*;
 mod merge_multijoin;
 pub use merge_multijoin::*;
 mod apply_join;
-mod distinct_agg;
-mod index_selection;
-mod push_calculation_of_join;
 pub use apply_join::*;
+mod distinct_agg;
 pub use distinct_agg::*;
+mod index_selection;
 pub use index_selection::*;
+mod push_calculation_of_join;
 pub use push_calculation_of_join::*;
+mod window_agg_to_topn;
+pub use window_agg_to_topn::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -83,6 +85,7 @@ macro_rules! for_all_rules {
             ,{TranslateApplyRule}
             ,{PushCalculationOfJoinRule}
             ,{IndexSelectionRule}
+            ,{WindowAggToTopNRule}
         }
     };
 }
