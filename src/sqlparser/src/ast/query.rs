@@ -43,22 +43,6 @@ pub struct Query {
     pub fetch: Option<Fetch>,
 }
 
-impl Query {
-    pub fn get_limit_value(&self) -> Option<usize> {
-        match self.limit {
-            Some(ref limit) => limit.parse().ok(),
-            _ => None,
-        }
-    }
-
-    pub fn get_offset_value(&self) -> Option<usize> {
-        match self.offset {
-            Some(ref offset) => offset.parse().ok(),
-            _ => None,
-        }
-    }
-}
-
 impl fmt::Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref with) = self.with {
@@ -510,16 +494,14 @@ impl fmt::Display for OrderByExpr {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Fetch {
     pub with_ties: bool,
-    pub percent: bool,
-    pub quantity: Option<Expr>,
+    pub quantity: Option<String>,
 }
 
 impl fmt::Display for Fetch {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let extension = if self.with_ties { "WITH TIES" } else { "ONLY" };
         if let Some(ref quantity) = self.quantity {
-            let percent = if self.percent { " PERCENT" } else { "" };
-            write!(f, "FETCH FIRST {}{} ROWS {}", quantity, percent, extension)
+            write!(f, "FETCH FIRST {} ROWS {}", quantity, extension)
         } else {
             write!(f, "FETCH FIRST ROWS {}", extension)
         }

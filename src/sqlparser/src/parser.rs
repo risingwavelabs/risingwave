@@ -2451,6 +2451,9 @@ impl Parser {
             };
 
             let fetch = if self.parse_keyword(Keyword::FETCH) {
+                if limit.is_some() {
+                    return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
+                }
                 Some(self.parse_fetch()?)
             } else {
                 None
@@ -3241,23 +3244,22 @@ impl Parser {
     /// Parse an OFFSET clause
     pub fn parse_offset(&mut self) -> Result<String, ParserError> {
         let value = self.parse_number_value()?;
-        _ = self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS]);
+        _ = self.parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS]);
         Ok(value)
     }
 
     /// Parse a FETCH clause
     pub fn parse_fetch(&mut self) -> Result<Fetch, ParserError> {
         self.expect_one_of_keywords(&[Keyword::FIRST, Keyword::NEXT])?;
-        let (quantity, percent) = if self
+        let quantity = if self
             .parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])
             .is_some()
         {
-            (None, false)
+            None
         } else {
-            let quantity = Expr::Value(self.parse_value()?);
-            let percent = self.parse_keyword(Keyword::PERCENT);
+            let quantity = self.parse_number_value()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
-            (Some(quantity), percent)
+            Some(quantity)
         };
         let with_ties = if self.parse_keyword(Keyword::ONLY) {
             false
@@ -3268,7 +3270,6 @@ impl Parser {
         };
         Ok(Fetch {
             with_ties,
-            percent,
             quantity,
         })
     }

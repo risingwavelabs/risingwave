@@ -22,3 +22,30 @@
         LogicalLimit { limit: 5, offset: 0 }
           LogicalProject { exprs: [t.v] }
             LogicalScan { table: t, columns: [t.v, t._row_id] }
+- sql: |
+    create table t (v int);
+    select * from t fetch first 4 rows only;
+  logical_plan: |
+    LogicalLimit { limit: 4, offset: 0 }
+      LogicalProject { exprs: [t.v] }
+        LogicalScan { table: t, columns: [t.v, t._row_id] }
+- sql: |
+    create table t (v int);
+    select * from t offset 3 fetch first 4 rows only;
+  logical_plan: |
+    LogicalLimit { limit: 4, offset: 3 }
+      LogicalProject { exprs: [t.v] }
+        LogicalScan { table: t, columns: [t.v, t._row_id] }
+- sql: |
+    create table t (v int);
+    select * from t fetch next rows only;
+  logical_plan: |
+    LogicalLimit { limit: 1, offset: 0 }
+      LogicalProject { exprs: [t.v] }
+        LogicalScan { table: t, columns: [t.v, t._row_id] }
+- sql: |
+    create table t (v int);
+    select * from t fetch next rows with ties;
+  binder_error: |-
+    Feature is not yet implemented: WITH TIES is not supported
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

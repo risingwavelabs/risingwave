@@ -3187,8 +3187,8 @@ fn parse_offset() {
 fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
-        percent: false,
-        quantity: Some(Expr::Value(number("2"))),
+
+        quantity: Some("2".to_string()),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3199,7 +3199,6 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: false,
-            percent: false,
             quantity: None,
         })
     );
@@ -3214,17 +3213,7 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            percent: false,
-            quantity: Some(Expr::Value(number("2"))),
-        })
-    );
-    let ast = verified_query("SELECT foo FROM bar FETCH FIRST 50 PERCENT ROWS ONLY");
-    assert_eq!(
-        ast.fetch,
-        Some(Fetch {
-            with_ties: false,
-            percent: true,
-            quantity: Some(Expr::Value(number("50"))),
+            quantity: Some("2".to_string()),
         })
     );
     let ast = verified_query(

@@ -57,3 +57,6 @@
 
 - input: SELECT id FROM customer WHERE NOT salary = ''
   formatted_sql: SELECT id FROM customer WHERE NOT (salary = '')
+
+- input: SELECT * FROM t LIMIT 1 FETCH FIRST ROWS ONLY
+  error_msg: 'sql parser error: Cannot specify both LIMIT and FETCH'
