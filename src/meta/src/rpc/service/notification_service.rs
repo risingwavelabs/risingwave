@@ -99,7 +99,7 @@ where
             .collect_vec();
         let hummock_snapshot = Some(self.hummock_manager.get_last_epoch().unwrap());
 
-        self.hummock_manager.pin_version(context_id, 0).await?;
+        self.hummock_manager.pin_version(context_id).await?;
         let hummock_manager_guard = self.hummock_manager.get_read_guard().await;
 
         let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;

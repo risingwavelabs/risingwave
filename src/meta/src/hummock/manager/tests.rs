@@ -209,11 +209,7 @@ async fn test_hummock_table() {
     .await
     .unwrap();
 
-    let pinned_version = match hummock_manager
-        .pin_version(context_id, u64::MAX)
-        .await
-        .unwrap()
-    {
+    let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
         Payload::VersionDeltas(_) => {
             unreachable!("should get full version")
         }
@@ -263,11 +259,7 @@ async fn test_hummock_transaction() {
         )
         .await;
         // Get tables before committing epoch1. No tables should be returned.
-        let pinned_version = match hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap()
-        {
+        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
             Payload::VersionDeltas(_) => {
                 unreachable!("should get full version")
             }
@@ -287,11 +279,7 @@ async fn test_hummock_transaction() {
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
-        let pinned_version = match hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap()
-        {
+        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
             Payload::VersionDeltas(_) => {
                 unreachable!("should get full version")
             }
@@ -319,11 +307,7 @@ async fn test_hummock_transaction() {
         .await;
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
-        let pinned_version = match hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap()
-        {
+        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
             Payload::VersionDeltas(_) => {
                 unreachable!("should get full version")
             }
@@ -347,11 +331,7 @@ async fn test_hummock_transaction() {
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let pinned_version = match hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap()
-        {
+        let pinned_version = match hummock_manager.pin_version(context_id).await.unwrap() {
             Payload::VersionDeltas(_) => {
                 unreachable!("should get full version")
             }
@@ -389,14 +369,8 @@ async fn test_release_context_resource() {
         pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         0
     );
-    hummock_manager
-        .pin_version(context_id_1, u64::MAX)
-        .await
-        .unwrap();
-    hummock_manager
-        .pin_version(context_id_2, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_version(context_id_1).await.unwrap();
+    hummock_manager.pin_version(context_id_2).await.unwrap();
     hummock_manager.pin_snapshot(context_id_1).await.unwrap();
     hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
@@ -476,21 +450,15 @@ async fn test_context_id_invalidation() {
 
     // Invalid context id is rejected.
     let error = hummock_manager
-        .pin_version(invalid_context_id, u64::MAX)
+        .pin_version(invalid_context_id)
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidContext(_)));
 
     // Valid context id is accepted.
-    hummock_manager
-        .pin_version(context_id, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_version(context_id).await.unwrap();
     // Pin multiple times is OK.
-    hummock_manager
-        .pin_version(context_id, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_version(context_id).await.unwrap();
 
     // Remove the node from cluster will invalidate context id by clearing
     // the invalidated pinned versions.
@@ -581,11 +549,7 @@ async fn test_hummock_manager_basic() {
     );
     for _ in 0..2 {
         // should pin latest because u64::MAX
-        let version = match hummock_manager
-            .pin_version(context_id_1, HummockVersionId::MAX)
-            .await
-            .unwrap()
-        {
+        let version = match hummock_manager.pin_version(context_id_1).await.unwrap() {
             Payload::VersionDeltas(_) => {
                 unreachable!("should get full version")
             }
@@ -603,11 +567,7 @@ async fn test_hummock_manager_basic() {
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
-        let version = match hummock_manager
-            .pin_version(context_id_2, INVALID_EPOCH)
-            .await
-            .unwrap()
-        {
+        let version = match hummock_manager.pin_version(context_id_2).await.unwrap() {
             Payload::VersionDeltas(_) => {
                 unreachable!("should get full version")
             }

@@ -139,7 +139,7 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
-use risingwave_pb::hummock::pin_version_response::{HummockVersionDeltas, Payload};
+use risingwave_pb::hummock::pin_version_response::Payload;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -411,7 +411,6 @@ where
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-        last_pinned: HummockVersionId,
     ) -> Result<pin_version_response::Payload> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -427,21 +426,7 @@ where
 
         let version_id = versioning.current_version.id;
 
-        let ret = {
-            if last_pinned <= version_id
-                && versioning.hummock_version_deltas.contains_key(&last_pinned)
-            {
-                Payload::VersionDeltas(HummockVersionDeltas {
-                    delta: versioning
-                        .hummock_version_deltas
-                        .range((Excluded(last_pinned), Included(version_id)))
-                        .map(|(_, delta)| delta.clone())
-                        .collect_vec(),
-                })
-            } else {
-                Payload::PinnedVersion(versioning.current_version.clone())
-            }
-        };
+        let ret = Payload::PinnedVersion(versioning.current_version.clone());
 
         if context_pinned_version.min_pinned_id == 0 {
             context_pinned_version.min_pinned_id = version_id;
