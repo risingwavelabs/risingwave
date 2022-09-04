@@ -2454,7 +2454,13 @@ impl Parser {
                 if limit.is_some() {
                     return parser_err!("Cannot specify both LIMIT and FETCH".to_string());
                 }
-                Some(self.parse_fetch()?)
+                let fetch = self.parse_fetch()?;
+                if fetch.with_ties && order_by.is_empty() {
+                    return parser_err!(
+                        "WITH TIES cannot be specified without ORDER BY clause".to_string()
+                    );
+                }
+                Some(fetch)
             } else {
                 None
             };

@@ -3260,12 +3260,12 @@ fn parse_fetch_variations() {
         "SELECT foo FROM bar FETCH FIRST 10 ROWS ONLY",
     );
     one_statement_parses_to(
-        "SELECT foo FROM bar FETCH NEXT 10 ROWS WITH TIES",
-        "SELECT foo FROM bar FETCH FIRST 10 ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH NEXT 10 ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH FIRST 10 ROWS WITH TIES",
     );
     one_statement_parses_to(
-        "SELECT foo FROM bar FETCH NEXT ROWS WITH TIES",
-        "SELECT foo FROM bar FETCH FIRST ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH NEXT ROWS WITH TIES",
+        "SELECT foo FROM bar ORDER BY baz FETCH FIRST ROWS WITH TIES",
     );
     one_statement_parses_to(
         "SELECT foo FROM bar FETCH FIRST ROWS ONLY",
