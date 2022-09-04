@@ -80,7 +80,7 @@ impl ManualCompactionPicker {
 
         Some(CompactionInput {
             input_levels,
-            target_level: self.target_level,
+            target_level: 0,
             target_sub_level_id: sub_level_id,
         })
     }
