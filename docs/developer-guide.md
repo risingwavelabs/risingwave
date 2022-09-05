@@ -157,6 +157,13 @@ Now you can run `./risedev d` to start a new dev cluster. The new dev cluster wi
 
 You may also add multiple compute nodes in the cluster. The `ci-3cn-1fe` config is an example.
 
+### Configure system variables
+
+You can configure or override system variables in `src/config/risingwave.toml`.
+Not all the variables are explicitly set in this file.
+You can check `src/common/src/config.rs` to see all the configurable variables. 
+If additional variables are needed, edit `src/config/risingwave.toml` to include them [in the corresponding section].
+
 ### Start the playground with RiseDev
 
 If you do not need to start a full cluster to develop, you can issue `./risedev p` to start the playground, where the metadata node, compute nodes and frontend nodes are running in the same process. Logs are printed to stdout instead of separate log files.
