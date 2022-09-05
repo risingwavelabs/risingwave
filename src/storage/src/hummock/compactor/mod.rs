@@ -413,7 +413,7 @@ impl Compactor {
                             for (&task_id, progress) in task_progress.lock().unwrap().iter() {
                                 progress_list.push(CompactTaskProgress {
                                     task_id,
-                                    num_blocks_completed: progress.num_blocks_completed,
+                                    num_ssts_sealed: progress.num_ssts_sealed,
                                     num_ssts_uploaded: progress.num_ssts_uploaded,
                                 });
                             }

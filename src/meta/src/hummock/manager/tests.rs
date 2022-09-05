@@ -562,7 +562,7 @@ async fn test_context_id_invalidation() {
 
     // Notification of local subscribers and resultant deletion of worker node from
     // the Hummock manager needs time to complete. This test can run for a maximum of 10 seconds.
-    // (in practice, this usually suceeds on first try)
+    // (in practice, this usually succeeds on first try)
     let mut success = false;
     for _ in 0..40 {
         if hummock_manager

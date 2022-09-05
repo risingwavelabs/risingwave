@@ -600,13 +600,13 @@ impl<W: SstableWriter> SstableWriter for TrackedProgressUploadWriter<W> {
     type Output = W::Output;
 
     fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
-        self.writer.write_block(block, meta)?;
-        self.task_progress_tracker.inc_blocks_completed();
-        Ok(())
+        self.writer.write_block(block, meta)
     }
 
     fn finish(self: Box<Self>, size_footer: u32) -> HummockResult<Self::Output> {
-        W::finish(Box::new(self.writer), size_footer)
+        let output = W::finish(Box::new(self.writer), size_footer);
+        self.task_progress_tracker.inc_ssts_sealed();
+        output
     }
 
     fn data_len(&self) -> usize {

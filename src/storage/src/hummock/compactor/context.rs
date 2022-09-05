@@ -55,7 +55,7 @@ pub struct Context {
 
 #[derive(Default, Clone)]
 pub struct TaskProgress {
-    pub num_blocks_completed: u32,
+    pub num_ssts_sealed: u32,
     pub num_ssts_uploaded: u32,
 }
 
@@ -74,10 +74,10 @@ impl TaskProgressTracker {
         }
     }
 
-    pub fn inc_blocks_completed(&self) {
+    pub fn inc_ssts_sealed(&self) {
         let mut guard = self.map.lock().unwrap();
         let progress = guard.entry(self.task_id).or_insert_with(Default::default);
-        progress.num_blocks_completed += 1;
+        progress.num_ssts_sealed += 1;
     }
 
     pub fn inc_ssts_uploaded(&self) {
