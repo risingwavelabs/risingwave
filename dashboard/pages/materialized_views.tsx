@@ -54,7 +54,7 @@ export default function MaterializeViews() {
       }
     }
     doFetch()
-    return () => { }
+    return () => {}
   }, [])
 
   return (
@@ -116,7 +116,10 @@ export default function MaterializeViews() {
                   <Td overflowWrap="normal">
                     {mv.columns
                       .filter((col) => !col.isHidden)
-                      .map((col) => `${col.columnDesc?.name} (${col.columnDesc?.columnType?.typeName})`)
+                      .map(
+                        (col) =>
+                          `${col.columnDesc?.name} (${col.columnDesc?.columnType?.typeName})`
+                      )
                       .join(", ")}
                   </Td>
                 </Tr>

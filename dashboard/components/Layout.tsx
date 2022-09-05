@@ -9,7 +9,7 @@ import {
   IconServer,
 } from "../components/utils/icons"
 
-const NAVBAR_WIDTH = "300px"
+export const NAVBAR_WIDTH = "300px"
 
 function NavButton({
   href,
@@ -76,7 +76,11 @@ function Layout({ children }: { children: React.ReactNode }) {
           <NavButton href="/settings/">Settings</NavButton>
         </VStack>
       </Box>
-      <Box ml={NAVBAR_WIDTH} width={`calc(100vw - ${NAVBAR_WIDTH})`} height="full">
+      <Box
+        ml={NAVBAR_WIDTH}
+        width={`calc(100vw - ${NAVBAR_WIDTH})`}
+        height="full"
+      >
         {children}
       </Box>
     </Fragment>

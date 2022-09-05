@@ -1,9 +1,10 @@
 import { Flex, Spinner } from "@chakra-ui/react"
+import { NAVBAR_WIDTH } from "./Layout"
 
 function SpinnerOverlay() {
   return (
     <Flex
-      w="calc(100vw - 320px)"
+      w={`calc(100vw - ${NAVBAR_WIDTH})`}
       alignItems="center"
       justifyContent="center"
       position="fixed"

@@ -28,3 +28,7 @@ app.get("/clusters/1", (req, res, next) => {
 app.get("/clusters/2", (req, res, next) => {
   res.json(require("./mock/cluster_2.json"))
 })
+
+app.get("/sources/", (req, res, next) => {
+  res.json(require("./mock/sources.json"))
+})

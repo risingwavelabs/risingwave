@@ -15,9 +15,17 @@
  *
  */
 
-import { Box, Flex, FormControl, FormLabel, Select, Text, useToast, VStack } from "@chakra-ui/react"
+import {
+  Box,
+  Flex,
+  FormControl,
+  FormLabel,
+  Select,
+  Text,
+  useToast,
+  VStack,
+} from "@chakra-ui/react"
 import { useEffect, useState } from "react"
-import NoData from "../components/NoData"
 import Title from "../components/Title"
 import { Table } from "../proto/gen/catalog"
 import { ActorLocation } from "../proto/gen/meta"
@@ -45,7 +53,7 @@ export default function Streaming() {
       }
     }
     doFetch()
-    return () => { }
+    return () => {}
   }, [])
 
   return (
@@ -56,11 +64,13 @@ export default function Streaming() {
           <FormControl>
             <FormLabel>Materialized View</FormLabel>
             <Select>
-              {
-                mvList
-                  .filter(mv => !mv.name.startsWith("__"))
-                  .map(mv => <option value={mv.name} key={mv.name}>({mv.id}) {mv.name}</option>)
-              }
+              {mvList
+                .filter((mv) => !mv.name.startsWith("__"))
+                .map((mv) => (
+                  <option value={mv.name} key={mv.name}>
+                    ({mv.id}) {mv.name}
+                  </option>
+                ))}
             </Select>
           </FormControl>
           <Box>
