@@ -674,32 +674,34 @@ where
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
 
             checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
-            self.inject_barrier_and_collect(command_ctx, barrier_complete_tx.clone())
+            self.inject_barrier(command_ctx, barrier_complete_tx.clone())
                 .await;
         }
     }
 
-    /// Inject a barrier to all CNs and try to collect it
-    async fn inject_barrier_and_collect(
+    /// Inject a barrier to all CNs and spawn a task to collect it
+    async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext<S>>,
         barrier_complete_tx: UnboundedSender<(u64, MetaResult<Vec<BarrierCompleteResponse>>)>,
     ) {
         let prev_epoch = command_context.prev_epoch.0;
-        let result = self.inject_barrier(command_context.clone()).await;
+        let result = self.inject_barrier_inner(command_context.clone()).await;
         match result {
-            Ok(node_need_collect) => Self::collect_barrier_async(
-                node_need_collect,
-                self.env.stream_client_pool_ref(),
-                command_context,
-                barrier_complete_tx,
-            ),
+            Ok(node_need_collect) => {
+                let _ = tokio::spawn(Self::collect_barrier(
+                    node_need_collect,
+                    self.env.stream_client_pool_ref(),
+                    command_context,
+                    barrier_complete_tx,
+                ));
+            }
             Err(e) => barrier_complete_tx.send((prev_epoch, Err(e))).unwrap(),
         }
     }
 
     /// Send inject-barrier-rpc to stream service and wait for its response before returns.
-    async fn inject_barrier(
+    async fn inject_barrier_inner(
         &self,
         command_context: Arc<CommandContext<S>>,
     ) -> MetaResult<HashMap<WorkerId, bool>> {
@@ -754,8 +756,8 @@ where
         Ok(node_need_collect)
     }
 
-    /// Spawn a tokio task to send barrier-complete-rpc and wait for responses from all CNs
-    fn collect_barrier_async(
+    /// Send barrier-complete-rpc and wait for responses from all CNs
+    async fn collect_barrier(
         node_need_collect: HashMap<WorkerId, bool>,
         client_pool_ref: StreamClientPoolRef,
         command_context: Arc<CommandContext<S>>,
@@ -763,37 +765,35 @@ where
     ) {
         let prev_epoch = command_context.prev_epoch.0;
         let info = command_context.info.clone();
-        tokio::spawn(async move {
-            let client_pool = client_pool_ref.deref();
-            let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-                if !*node_need_collect.get(node_id).unwrap() {
-                    // No need to send or collect barrier for this node.
-                    None
-                } else {
-                    let request_id = Uuid::new_v4().to_string();
-                    async move {
-                        let client = client_pool.get(node).await?;
-                        let request = BarrierCompleteRequest {
-                            request_id,
-                            prev_epoch,
-                        };
-                        tracing::trace!(
-                            target: "events::meta::barrier::barrier_complete",
-                            "barrier complete request: {:?}", request
-                        );
+        let client_pool = client_pool_ref.deref();
+        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+            if !*node_need_collect.get(node_id).unwrap() {
+                // No need to send or collect barrier for this node.
+                None
+            } else {
+                let request_id = Uuid::new_v4().to_string();
+                async move {
+                    let client = client_pool.get(node).await?;
+                    let request = BarrierCompleteRequest {
+                        request_id,
+                        prev_epoch,
+                    };
+                    tracing::trace!(
+                        target: "events::meta::barrier::barrier_complete",
+                        "barrier complete request: {:?}", request
+                    );
 
-                        // This RPC returns only if this worker node has collected this barrier.
-                        client.barrier_complete(request).await
-                    }
-                    .into()
+                    // This RPC returns only if this worker node has collected this barrier.
+                    client.barrier_complete(request).await
                 }
-            });
-
-            let result = try_join_all(collect_futures).await;
-            barrier_complete_tx
-                .send((prev_epoch, result.map_err(Into::into)))
-                .unwrap();
+                .into()
+            }
         });
+
+        let result = try_join_all(collect_futures).await;
+        barrier_complete_tx
+            .send((prev_epoch, result.map_err(Into::into)))
+            .unwrap();
     }
 
     /// Changes the state is `Complete`, and try commit all epoch that state is `Complete` in

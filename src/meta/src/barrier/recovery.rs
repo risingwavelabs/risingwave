@@ -123,7 +123,7 @@ where
 
             let (barrier_complete_tx, mut barrier_complete_rx) =
                 tokio::sync::mpsc::unbounded_channel();
-            self.inject_barrier_and_collect(command_ctx.clone(), barrier_complete_tx)
+            self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
                 .await;
             match barrier_complete_rx.recv().await.unwrap() {
                 (_, Ok(response)) => {
