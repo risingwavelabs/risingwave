@@ -19,20 +19,20 @@ pub struct RiseDevDocSltOpts {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum DocSltType {
+enum DocSltBlockType {
     Setup,
     General,
     Teardown,
 }
 
-struct DocSlt {
-    typ: DocSltType,
+struct DocSltBlock {
+    typ: DocSltBlockType,
     content: String,
 }
 
-fn extract_docslt(markdown: &str) -> Vec<DocSlt> {
+fn extract_docslt_blocks(markdown: &str) -> Vec<DocSltBlock> {
     let parser = pulldown_cmark::Parser::new(markdown);
-    let mut docslts = Vec::new();
+    let mut docslt_blocks = Vec::new();
     let mut curr_docslt_typ = None;
     let mut curr_docslt = String::new();
     for event in parser {
@@ -41,9 +41,9 @@ fn extract_docslt(markdown: &str) -> Vec<DocSlt> {
                 pulldown_cmark::CodeBlockKind::Fenced(lang),
             )) => {
                 curr_docslt_typ = Some(match &*lang {
-                    "slt" => DocSltType::General,
-                    "slt-setup" => DocSltType::Setup,
-                    "slt-teardown" => DocSltType::Teardown,
+                    "slt" => DocSltBlockType::General,
+                    "slt-setup" => DocSltBlockType::Setup,
+                    "slt-teardown" => DocSltBlockType::Teardown,
                     _ => continue,
                 });
                 curr_docslt.clear();
@@ -58,7 +58,7 @@ fn extract_docslt(markdown: &str) -> Vec<DocSlt> {
                 pulldown_cmark::CodeBlockKind::Fenced(_),
             )) => {
                 if let Some(typ) = curr_docslt_typ.take() {
-                    docslts.push(DocSlt {
+                    docslt_blocks.push(DocSltBlock {
                         typ,
                         content: curr_docslt.trim().to_string(),
                     });
@@ -67,7 +67,7 @@ fn extract_docslt(markdown: &str) -> Vec<DocSlt> {
             _ => {}
         }
     }
-    docslts
+    docslt_blocks
 }
 
 fn generate_slt_for_package(package_name: &str) -> Result<()> {
@@ -100,14 +100,14 @@ fn generate_slt_for_package(package_name: &str) -> Result<()> {
         .as_object()
         .ok_or_else(|| anyhow!("failed to access `index` field as object"))?;
 
-    // docslts in each file
-    let mut docslt_map: HashMap<String, Vec<DocSlt>> = HashMap::new();
+    // docslt blocks in each file
+    let mut docslt_map: HashMap<String, Vec<DocSltBlock>> = HashMap::new();
 
     for item in index.values() {
         let docs = item["docs"].as_str().unwrap_or("");
         if docs.contains("```slt") {
-            let docslts = extract_docslt(docs);
-            if docslts.is_empty() {
+            let docslt_blocks = extract_docslt_blocks(docs);
+            if docslt_blocks.is_empty() {
                 continue;
             }
             // TODO: tmp
@@ -117,16 +117,16 @@ fn generate_slt_for_package(package_name: &str) -> Result<()> {
             // let name = item["name"].as_str().unwrap_or("");
             let filename = item["span"]["filename"]
                 .as_str()
-                .ok_or_else(|| anyhow!("docslts are expected to be in files"))?;
+                .ok_or_else(|| anyhow!("docslt blocks are expected to be in files"))?;
             docslt_map
                 .entry(filename.to_string())
                 .or_default()
-                .extend(docslts);
+                .extend(docslt_blocks);
         }
     }
 
-    for docslts in docslt_map.values_mut() {
-        docslts.sort_by_key(|docslt| docslt.typ);
+    for docslt_blocks in docslt_map.values_mut() {
+        docslt_blocks.sort_by_key(|block| block.typ);
     }
 
     let slt_dir = format!("e2e_test/generated/docslt/{}", package_name);
